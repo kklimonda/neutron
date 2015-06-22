@@ -61,8 +61,8 @@ Build-Depends-Indep:
  testrepository ( >= 0.0.18)
 XS-Python-Version: >= 2.6
 Standards-Version: 3.9.6
-Vcs-Browser: http://bazaar.launchpad.net/~ubuntu-server-dev/neutron/kilo/files
-Vcs-Bzr: https://code.launchpad.net/~ubuntu-server-dev/neutron/kilo
+Vcs-Browser: https://git.launchpad.net/~ubuntu-server-dev/ubuntu/+source/neutron
+Vcs-Git: git://git.launchpad.net/~ubuntu-server-dev/ubuntu/+source/neutron
 XS-Testsuite: autopkgtest
 
 Package: neutron-server
