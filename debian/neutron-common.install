@@ -11,6 +11,7 @@ etc/policy.json etc/neutron
 etc/rootwrap.conf etc/neutron
 usr/bin/neutron-db-manage usr/bin
 usr/bin/neutron-debug usr/bin
+usr/bin/neutron-ipset-cleanup usr/bin
 usr/bin/neutron-keepalived-state-change usr/bin
 usr/bin/neutron-netns-cleanup usr/bin
 usr/bin/neutron-ovs-cleanup usr/bin
