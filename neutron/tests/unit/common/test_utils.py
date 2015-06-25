@@ -24,6 +24,8 @@ from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
 from neutron.tests import base
 
+from oslo_log import log as logging
+
 
 class TestParseMappings(base.BaseTestCase):
     def parse(self, mapping_list, unique_values=True):
@@ -118,15 +120,15 @@ class TestParseTunnelRangesMixin(object):
 
 class TestGreTunnelRangeVerifyValid(TestParseTunnelRangesMixin,
                                     base.BaseTestCase):
-    TUN_MIN = constants.MIN_GRE_ID
-    TUN_MAX = constants.MAX_GRE_ID
+    TUN_MIN = p_const.MIN_GRE_ID
+    TUN_MAX = p_const.MAX_GRE_ID
     TYPE = p_const.TYPE_GRE
 
 
 class TestVxlanTunnelRangeVerifyValid(TestParseTunnelRangesMixin,
                                       base.BaseTestCase):
-    TUN_MIN = constants.MIN_VXLAN_VNI
-    TUN_MAX = constants.MAX_VXLAN_VNI
+    TUN_MIN = p_const.MIN_VXLAN_VNI
+    TUN_MAX = p_const.MAX_VXLAN_VNI
     TYPE = p_const.TYPE_VXLAN
 
 
@@ -416,7 +418,7 @@ class TestCachingDecorator(base.BaseTestCase):
         self.func_name = '%(module)s._CachingDecorator.func' % {
             'module': self.__module__
         }
-        self.not_cached = self.decor.func.func.im_self._not_cached
+        self.not_cached = self.decor.func.func.__self__._not_cached
 
     def test_cache_miss(self):
         expected_key = (self.func_name, 1, 2, ('foo', 'bar'))
@@ -632,3 +634,32 @@ class TestIpVersionFromInt(base.BaseTestCase):
         self.assertRaises(ValueError,
                           utils.ip_version_from_int,
                           8)
+
+
+class TestDelayedStringRenderer(base.BaseTestCase):
+    def test_call_deferred_until_str(self):
+        my_func = mock.MagicMock(return_value='Brie cheese!')
+        delayed = utils.DelayedStringRenderer(my_func, 1, 2, key_arg=44)
+        self.assertFalse(my_func.called)
+        string = "Type: %s" % delayed
+        my_func.assert_called_once_with(1, 2, key_arg=44)
+        self.assertEqual("Type: Brie cheese!", string)
+
+    def test_not_called_with_low_log_level(self):
+        LOG = logging.getLogger(__name__)
+        # make sure we return logging to previous level
+        current_log_level = LOG.logger.getEffectiveLevel()
+        self.addCleanup(LOG.logger.setLevel, current_log_level)
+
+        my_func = mock.MagicMock()
+        delayed = utils.DelayedStringRenderer(my_func)
+
+        # set to warning so we shouldn't be logging debug messages
+        LOG.logger.setLevel(logging.logging.WARNING)
+        LOG.debug("Hello %s", delayed)
+        self.assertFalse(my_func.called)
+
+        # but it should be called with the debug level
+        LOG.logger.setLevel(logging.logging.DEBUG)
+        LOG.debug("Hello %s", delayed)
+        self.assertTrue(my_func.called)

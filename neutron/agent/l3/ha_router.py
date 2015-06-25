@@ -92,9 +92,9 @@ class HaRouter(router.RouterInfo):
         self.keepalived_manager = keepalived.KeepalivedManager(
             self.router['id'],
             keepalived.KeepalivedConf(),
+            process_monitor,
             conf_path=self.agent_conf.ha_confs_path,
-            namespace=self.ns_name,
-            process_monitor=process_monitor)
+            namespace=self.ns_name)
 
         config = self.keepalived_manager.config
 
@@ -179,47 +179,43 @@ class HaRouter(router.RouterInfo):
         new_routes = self.router['routes']
 
         instance = self._get_keepalived_instance()
-
-        # Filter out all of the old routes while keeping only the default route
-        default_gw = (n_consts.IPv6_ANY, n_consts.IPv4_ANY)
-        instance.virtual_routes = [route for route in instance.virtual_routes
-                                   if route.destination in default_gw]
-        for route in new_routes:
-            instance.virtual_routes.append(keepalived.KeepalivedVirtualRoute(
-                route['destination'],
-                route['nexthop']))
-
+        instance.virtual_routes.extra_routes = [
+            keepalived.KeepalivedVirtualRoute(
+                route['destination'], route['nexthop'])
+            for route in new_routes]
         self.routes = new_routes
 
     def _add_default_gw_virtual_route(self, ex_gw_port, interface_name):
-        subnets = ex_gw_port.get('subnets', [])
-        for subnet in subnets:
-            gw_ip = subnet['gateway_ip']
-            if gw_ip:
+        default_gw_rts = []
+        gateway_ips, enable_ra_on_gw = self._get_external_gw_ips(ex_gw_port)
+        for gw_ip in gateway_ips:
                 # TODO(Carl) This is repeated everywhere.  A method would
                 # be nice.
                 default_gw = (n_consts.IPv4_ANY if
                               netaddr.IPAddress(gw_ip).version == 4 else
                               n_consts.IPv6_ANY)
                 instance = self._get_keepalived_instance()
-                instance.virtual_routes = (
-                    [route for route in instance.virtual_routes
-                     if route.destination != default_gw])
-                instance.virtual_routes.append(
-                    keepalived.KeepalivedVirtualRoute(
-                        default_gw, gw_ip, interface_name))
+                default_gw_rts.append(keepalived.KeepalivedVirtualRoute(
+                    default_gw, gw_ip, interface_name))
+        instance.virtual_routes.gateway_routes = default_gw_rts
+
+        if enable_ra_on_gw:
+            self.driver.configure_ipv6_ra(self.ns_name, interface_name)
 
     def _should_delete_ipv6_lladdr(self, ipv6_lladdr):
         """Only the master should have any IP addresses configured.
         Let keepalived manage IPv6 link local addresses, the same way we let
-        it manage IPv4 addresses. In order to do that, we must delete
-        the address first as it is autoconfigured by the kernel.
+        it manage IPv4 addresses. If the router is not in the master state,
+        we must delete the address first as it is autoconfigured by the kernel.
         """
         manager = self.keepalived_manager
         if manager.get_process().active:
-            conf = manager.get_conf_on_disk()
-            managed_by_keepalived = conf and ipv6_lladdr in conf
-            if managed_by_keepalived:
+            if self.ha_state != 'master':
+                conf = manager.get_conf_on_disk()
+                managed_by_keepalived = conf and ipv6_lladdr in conf
+                if managed_by_keepalived:
+                    return False
+            else:
                 return False
         return True
 
@@ -252,17 +248,22 @@ class HaRouter(router.RouterInfo):
     def remove_floating_ip(self, device, ip_cidr):
         self._remove_vip(ip_cidr)
 
+    def internal_network_updated(self, interface_name, ip_cidrs):
+        self._clear_vips(interface_name)
+        self._disable_ipv6_addressing_on_interface(interface_name)
+        for ip_cidr in ip_cidrs:
+            self._add_vip(ip_cidr, interface_name)
+
     def internal_network_added(self, port):
         port_id = port['id']
         interface_name = self.get_internal_device_name(port_id)
 
-        if not ip_lib.device_exists(interface_name, namespace=self.ns_name):
-            self.driver.plug(port['network_id'],
-                             port_id,
-                             interface_name,
-                             port['mac_address'],
-                             namespace=self.ns_name,
-                             prefix=router.INTERNAL_DEV_PREFIX)
+        self.driver.plug(port['network_id'],
+                         port_id,
+                         interface_name,
+                         port['mac_address'],
+                         namespace=self.ns_name,
+                         prefix=router.INTERNAL_DEV_PREFIX)
 
         self._disable_ipv6_addressing_on_interface(interface_name)
         for ip_cidr in common_utils.fixed_ip_cidrs(port['fixed_ips']):
@@ -353,3 +354,8 @@ class HaRouter(router.RouterInfo):
 
         if self.ha_port:
             self.enable_keepalived()
+
+    def enable_radvd(self, internal_ports=None):
+        if (self.keepalived_manager.get_process().active and
+                self.ha_state == 'master'):
+            super(HaRouter, self).enable_radvd(internal_ports)
