@@ -301,16 +301,6 @@ Description: Neutron is a virtual network service for Openstack - VMware plugin
  .
  This package provides the VMware NSX plugin
 
-Package: neutron-plugin-nicira
-Depends: neutron-plugin-vmware,
-         ${misc:Depends},
-Architecture: all
-Breaks: quantum-plugin-nicira ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: quantum-plugin-nicira ( << 1:2013.2~b2-0ubuntu1~ ),
-Section: oldlibs
-Description: transitional dummy package
- This is a transitional dummy package. It can safely be removed.
-
 Package: neutron-l3-agent
 Architecture: all
 Depends: conntrack,
@@ -433,29 +423,6 @@ Description: Neutron is a virtual network service for Openstack - Python library
  .
  This package provides the Python library.
 
-Package: neutron-plugin-openvswitch
-Architecture: all
-Section: oldlibs
-Priority: extra
-Depends: neutron-plugin-ml2,
-         ${misc:Depends},
-         ${python:Depends},
-         ${shlibs:Depends},
-Breaks: quantum-plugin-openvswitch ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: quantum-plugin-openvswitch ( << 1:2013.2~b2-0ubuntu1~ ),
-Description: Neutron is a virtual network service for Openstack - Open vSwitch plugin
- Neutron is a virtual network service for Openstack, and a part of
- Netstack. Just like OpenStack Nova provides an API to dynamically
- request and configure virtual servers, Neutron provides an API to
- dynamically request and configure virtual networks. These networks
- connect "interfaces" from other OpenStack services (e.g., virtual NICs
- from Nova VMs). The Neutron API supports extensions to provide
- advanced network capabilities (e.g., QoS, ACLs, network monitoring,
- etc.)
- .
- This package is a transitional package to migrate openvswitch plugin
- users to the Modular Layer 2 (ml2) plugin.
-
 Package: neutron-plugin-ml2
 Architecture: all
 Provides: neutron-plugin,
@@ -495,29 +462,6 @@ Description: Neutron is a virtual network service for Openstack - Open vSwitch p
  etc.)
  .
  This package provides the Open vSwitch plugin agent.
-
-Package: neutron-plugin-linuxbridge
-Architecture: all
-Section: oldlibs
-Priority: extra
-Depends: neutron-plugin-ml2,
-         ${misc:Depends},
-         ${python:Depends},
-         ${shlibs:Depends},
-Breaks: quantum-plugin-linuxbridge ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: quantum-plugin-linuxbridge ( << 1:2013.2~b2-0ubuntu1~ ),
-Description: Neutron is a virtual network service for Openstack - linuxbridge plugin
- Neutron is a virtual network service for Openstack, and a part of
- Netstack. Just like OpenStack Nova provides an API to dynamically
- request and configure virtual servers, Neutron provides an API to
- dynamically request and configure virtual networks. These networks
- connect "interfaces" from other OpenStack services (e.g., virtual NICs
- from Nova VMs). The Neutron API supports extensions to provide
- advanced network capabilities (e.g., QoS, ACLs, network monitoring,
- etc.)
- .
- This package is a transitional package to migrate linuxbridge plugin
- users to the Modular Layer 2 (ml2) plugin.
 
 Package: neutron-plugin-linuxbridge-agent
 Architecture: all
@@ -621,13 +565,6 @@ Description: Neutron is a virtual network service for Openstack - metering agent
  etc.)
  .
  This package provides the metering agent.
-
-Package: neutron-plugin-metering-agent
-Architecture: all
-Depends: neutron-metering-agent,
-         ${misc:Depends},
-Description: transitional dummy package
- This is a transitional dummy package. It can safely be removed.
 
 Package: neutron-plugin-ibm
 Architecture: all
