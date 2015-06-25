@@ -2,6 +2,7 @@ neutron (2:7.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
 
   * New milestone for OpenStack Liberty:
     - d/control: Align (build-)depends with upstream.
+    - d/p/*: Refresh.
   * d/control: Drop old transitional packages which are no longer required.
 
  -- James Page <james.page@ubuntu.com>  Thu, 25 Jun 2015 12:20:24 +0100
