@@ -144,26 +144,28 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
             subnet_ids.add(int_subnet)
         return subnet_ids
 
-    def check_ports_active_on_host_and_subnet(self, context, host,
-                                         port_id, subnet_id):
+    def check_ports_on_host_and_subnet(self, context, host,
+                                       port_id, subnet_id):
         """Check if there is any dvr serviceable port on the subnet_id."""
         filter_sub = {'fixed_ips': {'subnet_id': [subnet_id]}}
         ports = self._core_plugin.get_ports(context, filters=filter_sub)
         for port in ports:
             if (n_utils.is_dvr_serviced(port['device_owner'])
-                and port['status'] == 'ACTIVE'
                 and port['binding:host_id'] == host
                 and port['id'] != port_id):
-                LOG.debug('DVR: Active port exists for subnet %(subnet_id)s '
-                          'on host %(host)s', {'subnet_id': subnet_id,
-                                       'host': host})
+                LOG.debug('DVR: %(port_status)s port exists for subnet '
+                          '%(subnet_id)s on host %(host)s',
+                          {'port_status': port['status'],
+                           'subnet_id': subnet_id, 'host': host})
                 return True
         return False
 
     def dvr_deletens_if_no_port(self, context, port_id):
         """Delete the DVR namespace if no dvr serviced port exists."""
-        router_ids = self.get_dvr_routers_by_portid(context, port_id)
-        port_host = ml2_db.get_port_binding_host(context.session, port_id)
+        admin_context = context.elevated()
+        router_ids = self.get_dvr_routers_by_portid(admin_context, port_id)
+        port_host = ml2_db.get_port_binding_host(admin_context.session,
+                                                 port_id)
         if not router_ids:
             LOG.debug('No namespaces available for this DVR port %(port)s '
                       'on host %(host)s', {'port': port_id,
@@ -171,13 +173,14 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
             return []
         removed_router_info = []
         for router_id in router_ids:
-            subnet_ids = self.get_subnet_ids_on_router(context, router_id)
+            subnet_ids = self.get_subnet_ids_on_router(admin_context,
+                                                       router_id)
             port_exists_on_subnet = False
             for subnet in subnet_ids:
-                if self.check_ports_active_on_host_and_subnet(context,
-                                                              port_host,
-                                                              port_id,
-                                                              subnet):
+                if self.check_ports_on_host_and_subnet(admin_context,
+                                                       port_host,
+                                                       port_id,
+                                                       subnet):
                     port_exists_on_subnet = True
                     break
 
@@ -187,7 +190,7 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
                           'device_owner':
                           [q_const.DEVICE_OWNER_DVR_INTERFACE]}
             int_ports = self._core_plugin.get_ports(
-                context, filters=filter_rtr)
+                admin_context, filters=filter_rtr)
             for prt in int_ports:
                 dvr_binding = (ml2_db.
                                get_dvr_port_binding_by_host(context.session,
@@ -321,8 +324,8 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
             return self.get_ha_sync_data_for_host(context, host,
                                                   router_ids=router_ids,
                                                   active=True)
-        return self.get_dvr_sync_data(context, host, agent,
-                                      router_ids=router_ids, active=True)
+        return self._get_dvr_sync_data(context, host, agent,
+                                       router_ids=router_ids, active=True)
 
 
 def _notify_l3_agent_new_port(resource, event, trigger, **kwargs):

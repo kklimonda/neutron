@@ -6,6 +6,7 @@ neutron-debug = neutron.debug.shell:main
 neutron-dhcp-agent = neutron.cmd.eventlet.agents.dhcp:main
 neutron-hyperv-agent = neutron.cmd.eventlet.plugins.hyperv_neutron_agent:main
 neutron-ibm-agent = neutron.plugins.ibm.agent.sdnve_neutron_agent:main
+neutron-ipset-cleanup = neutron.cmd.ipset_cleanup:main
 neutron-keepalived-state-change = neutron.cmd.keepalived_state_change:main
 neutron-l3-agent = neutron.cmd.eventlet.agents.l3:main
 neutron-linuxbridge-agent = neutron.plugins.linuxbridge.agent.linuxbridge_neutron_agent:main
@@ -41,6 +42,10 @@ nuage = neutron.plugins.nuage.plugin:NuagePlugin
 oneconvergence = neutron.plugins.oneconvergence.plugin:OneConvergencePluginV2
 plumgrid = neutron.plugins.plumgrid.plumgrid_plugin.plumgrid_plugin:NeutronPluginPLUMgridV2
 vmware = neutron.plugins.vmware.plugin:NsxMhPlugin
+
+[neutron.ipam_drivers]
+fake = neutron.tests.unit.ipam.fake_driver:FakeDriver
+internal = neutron.ipam.drivers.neutrondb_ipam.driver:NeutronDbPool
 
 [neutron.ml2.extension_drivers]
 cisco_n1kv_ext = neutron.plugins.ml2.drivers.cisco.n1kv.n1kv_ext_driver:CiscoN1kvExtensionDriver
@@ -89,7 +94,7 @@ memory = neutron.openstack.common.cache._backends.memory:MemoryBackend
 [neutron.service_plugins]
 bigswitch_l3 = neutron.plugins.bigswitch.l3_router_plugin:L3RestProxy
 brocade_mlx_l3 = neutron.services.l3_router.brocade.mlx.l3_router_plugin:BrocadeRouterPlugin
-brocade_vyatta_l3 = neutron.services.l3_router.brocade.vyatta.vrouter_neutron_plugin.VyattaVRouterPlugin
+brocade_vyatta_l3 = neutron.services.l3_router.brocade.vyatta.vrouter_neutron_plugin:VyattaVRouterPlugin
 dummy = neutron.tests.unit.dummy_plugin:DummyServicePlugin
 firewall = neutron_fwaas.services.firewall.fwaas_plugin:FirewallPlugin
 fsl_firewall = neutron_fwaas.services.firewall.freescale.fwaas_plugin:FirewallPlugin
