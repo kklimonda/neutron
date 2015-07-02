@@ -1,3 +1,10 @@
+neutron (2:7.0.0~b1-0ubuntu3) wily; urgency=medium
+
+  * d/neutron-pluging-linuxbridge-agent.init.in: Ensure that the right
+    binary is used for neutron-plugin-linuxbridge-agent (LP: #1453188).
+
+ -- James Page <james.page@ubuntu.com>  Thu, 02 Jul 2015 16:37:32 +0100
+
 neutron (2:7.0.0~b1-0ubuntu2) wily; urgency=medium
 
   * d/p/remove-ensure_dirs-double-patch.patch: Cherry pick fix from upstream
