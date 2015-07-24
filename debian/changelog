@@ -1,3 +1,9 @@
+neutron (2:7.0.0~b1-0ubuntu4) wily; urgency=medium
+
+  * No change rebuild with SQLAlchemy 1.0.6.
+
+ -- James Page <james.page@ubuntu.com>  Fri, 24 Jul 2015 10:02:15 +0100
+
 neutron (2:7.0.0~b1-0ubuntu3) wily; urgency=medium
 
   * d/neutron-pluging-linuxbridge-agent.init.in: Ensure that the right
