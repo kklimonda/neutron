@@ -2,6 +2,7 @@ neutron (2:7.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * New upstream milestone for OpenStack Liberty.
+  * d/control: Align (build-)depends with upstream.
 
   [ James Page ]
   * d/source/options: Ignore any changes to egg-info folder
