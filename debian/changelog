@@ -1,9 +1,13 @@
-neutron (2:7.0.0~b1-0ubuntu5) UNRELEASED; urgency=medium
+neutron (2:7.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
 
+  [ Corey Bryant ]
+  * New upstream milestone for OpenStack Liberty.
+
+  [ James Page ]
   * d/source/options: Ignore any changes to egg-info folder
     (LP: #1324856).
 
- -- James Page <james.page@ubuntu.com>  Fri, 24 Jul 2015 13:00:06 +0100
+ -- Corey Bryant <corey.bryant@canonical.com>  Wed, 19 Aug 2015 12:08:39 -0400
 
 neutron (2:7.0.0~b1-0ubuntu4) wily; urgency=medium
 
