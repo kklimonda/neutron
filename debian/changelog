@@ -1,3 +1,9 @@
+neutron (2:7.0.0~b3-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream milestone for OpenStack Liberty.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Tue, 08 Sep 2015 15:59:31 -0400
+
 neutron (2:7.0.0~b2-0ubuntu2) wily; urgency=medium
 
   * d/neutron-plugin-cisco.install: Remove neutron-cisco-apic-service-agent
