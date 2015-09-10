@@ -8,6 +8,8 @@ neutron (2:7.0.0~b3-0ubuntu2) UNRELEASED; urgency=medium
       neutron-plugin-vmware, neutron-plugin-ibm(-agent).
     - d/tests/nec-plugin, d/tests/plumgrid-plugin,
       d/tests/vmware-plugin: Removed.
+  * d/neutron-common.install: Install neutron-pd-notify and rootwrap
+    dibbler.filters.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Thu, 10 Sep 2015 09:36:47 -0400
 
