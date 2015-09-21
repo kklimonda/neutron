@@ -1,3 +1,11 @@
+neutron (2:7.0.0~b3-0ubuntu3) wily; urgency=medium
+
+  * d/p/iproute2-compat.patch: Cherry pick inflight fix for iproute2 >= v4
+    compatibility (LP: #1497309).
+  * d/p/*: Refresh.
+
+ -- James Page <james.page@ubuntu.com>  Mon, 21 Sep 2015 09:29:10 +0100
+
 neutron (2:7.0.0~b3-0ubuntu2) wily; urgency=medium
 
   * Plugin decomposition. Upstream has removed NEC, plumgrid, NSX, and

@@ -9,7 +9,7 @@
  # Example: core_plugin = ml2
  
  # (StrOpt) Neutron IPAM (IP address management) driver to be loaded from the
-@@ -670,7 +670,7 @@
+@@ -689,7 +689,7 @@
  # Use "sudo neutron-rootwrap /etc/neutron/rootwrap.conf" to use the real
  # root filter facility.
  # Change to "sudo" to skip the filtering and just run the command directly
@@ -18,7 +18,7 @@
  
  # Set to true to add comments to generated iptables rules that describe
  # each rule's purpose. (System must support the iptables comments module.)
-@@ -718,6 +718,7 @@ admin_password = %SERVICE_PASSWORD%
+@@ -737,6 +737,7 @@ admin_password = %SERVICE_PASSWORD%
  # be set in the corresponding core plugin '.ini' file. However, it is suggested
  # to put the [database] section and its connection attribute in this
  # configuration file.
