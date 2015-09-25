@@ -25,7 +25,6 @@ override_dh_installinit:
 override_dh_auto_clean:
 	dh_auto_clean
 	rm -f debian/*.upstart debian/*.init debian/*.service
-	rm -rf .eggs
 
 get-orig-source:
 	uscan --verbose --force-download --rename --destdir=../build-area

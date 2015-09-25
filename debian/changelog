@@ -2,6 +2,7 @@ neutron (2:7.0.0~rc1-0ubuntu1) UNRELEASED; urgency=medium
 
   * d/watch: Update to cope with upstream rc versioning.
   * New upstream release candidate for OpenStack Liberty.
+  * d/rules: Drop removal of .eggs directory in override_dh_auto_clean.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Fri, 25 Sep 2015 17:14:07 -0400
 
