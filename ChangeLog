@@ -1,19 +1,184 @@
 CHANGES
 =======
 
+7.0.0.0rc1
+----------
+
+* Don't write DHCP opts for SLAAC entries
+* Cleanup of Translations
+* Fix quota usage tracker for security group rules
+* Update default branch in .gitreview to stable/liberty
+* Eliminate autoaddress check for DNS integration
+* Only get host data for floating ips on DVR routers
+* Add neutron subproject & stable branch gerrit review links
+* Link dashboards into generated documentation
+* Add neutron/master review link to dashboard/index.html
+* Create dashboard page with gate jobs statistics
+* ml2: don't consider drivers with no bind_port for qos supported rule types
+* Adds configurable agent type
+* Imported Translations from Zanata
+* Updated from global requirements
+* Relax service module check on service providers
+* Get rid of ConfigParser code in ProviderConfiguration
+* Rename check pipeline dashboards
+* tests: don't validate respawn as part of ovsdb monitor functional test
+* ovsdb monitor: get rid of custom _read_stdout/_read_stderr methods
+* Change ignore-errors to ignore_errors
+* delete_port: ensure quota usage is marked as dirty
+* Fix hostname roaming for ml2 tunnel endpoints
+* Fix adding tap failure if bridge mapping is not provided
+* Remove an invalid comment
+* Fixes SNAT port not found for internal port
+* Update _TestModelMigration
+* Use pecan controllers for routing
+* Imported Translations from Zanata
+* Add skeleton to 'Effective Neutron' devref
+* Introduce kill_signal parameter to AsynProcess.stop()
+* Remove early yields in _iter_hosts in dhcp agent
+* Optimize if statement in dvr_local_router.py
+* Re-adds VIF_TYPE_VHOST_USER to portbindings extension
+* Introduce a separate RPC server
+* Fix log statement to log correct variable first_ip
+* Remove pecan branch reference from .gitreview file
+* ipam: Prevent none from being passed to delete
+* Remove restriction of adding constraints to expand
+* Delete unused file tests/unit/database_stubs.py
+* No network devices on network attached qos policies
+* Revert "Revert "Pecan WSGI: prevent plugins from opening AMQP connections""
+* Use tempest-lib's token_client
+* Revert "Pecan WSGI: prevent plugins from opening AMQP connections"
+* Add constraint target to tox.ini
+* Fix establishing UDP connection
+* ovsdb: Fix a few docstring
+* Remove requirements.txt for the ofagent mechanism driver
+* Always return iterables in L3 get_candidates
+* Remove plural param to QUOTAS.count
+* Return version info on version controller
+* Log exception.msg before exception.message
+* Fix pecan policy enforcement for GET requests
+* Add missing resource discriminator in update resp
+* Fix missing check for admin/adv_service
+* Clarify and add a TODO in the controller
+* Set expected HTTP codes for create and delete
+* Add basic bulk support to collection controller
+* Prevent full sync in dhcp_agent when possible
+* Remove duplicated API server
+* Add QoS fullstack test
+* QoS agent extension and driver refactoring
+* Add IPv6 Address Resolution protection
+* Revert "AsyncProcess: try to kill tender"
+* Remove out-of-tree vendor AGENT_TYPE_* constant
+* func: Don't use private method of AsyncProcess
+* Remove unused ovs_lib method reset_bridge
+* Fix TypeError caused by delete_agent_gateway_port()
+* sub_project_guidelines: Add richer documentation
+* Fix typo: Large Ops, not Large Opts
+* Fix query in get_l3_agent_with_min_routers
+* Do not specify host for l2population topics
+* Add utility function for checking trusted port
+* Fix typo in error message in NetcatTester
+* docstring fix
+* AsyncProcess: try to kill tender
+* Enable servicing lbaasV2 vip by DVR
+* Switch scheduler drivers to load based schedulers
+* Fix BadRequest error on add_router_interface for DVR
+* Fix missing value types for log message
+* Tweak test_keepalived_respawns test logic
+* Reservations: Don't count usage if resource is unlimited
+* Restore reservations in API controller
+* ovs: don't use ARP responder for IPv6 addresses
+* Install sriov-agent.ini on 'setup.py install'
+* Configure gw_iface for RAs only in Master HA Router
+* Remove useless log from periodic_sync_routers_task
+* Replace is_this_snat_host validation with internal function
+* Add l2pop support to full stack tests
+* Add tunneling support to full stack tests
+* Remove an unused DVR function
+* Handle ObjectDeletedError when deleting network ports/subnets
+* OVSAgentTestFramework: Remove _bind_ports
+* Descheduling DVR routers when ports are unbound from VM
+* Updated from global requirements
+* Reduce the chance of random check/gate test failures
+* Allow passing arbitrary ip route parameters to add/delete_route
+* Make ip address optional to add_route and delete_route
+* Add list routes
+* Fix dvr update for subnet attach multi subnets
+* Make ip rule comparison more robust
+* Remove hack for discovery novaclients extension
+* Check ICMP codes in range [0,255]
+* Remove address scopes from supported extensions
+* Add test to check that correct functions is used in expand/contract
+* SR-IOV: devstack support for SR-IOV agent
+* Fix test_external_tables_not_changed
+* Delete gateway conntrack state when remove external gateway
+* Updated from global requirements
+* Add non-model index names to autogen exclude filters
+* Implement expand/contract autogenerate extension
+* Cleanup the fip agent gateway port delete routines
+* Add RPC command and delete if last FIP on Agent
+* Delete FIP agent gateway port with external gw port
+* Remove ebtables_driver/manager dead code
+* Stop device_owner from being set to 'network:*'
+* Add oslo rootwrap daemon logging during functional tests
+* ovs agent resync may miss port remove event
+* tests: disable process monitor before managers
+* Retry metadata request on connection refused error
+* Add ability to use custom config in DHCP-agent
+* Improve DB operations for quota reservation
+* Qos SR-IOV: Refactor extension delete to get mac and pci slot
+* Adds support to provide the csum option for the OVS tunnels
+* Delete the useless variable agent_host
+* Handle process disappearing before we ask for its PPID
+* Allow only GET on Root controller
+* OVS agent: handle deleted ports on each rpc_loop iteration
+* Final decomposition of Cisco plugin
+* Remove Cisco Meta and N1KV monolithic plugins
+* Workaround test stream corruption issue
+* Fix RBAC filter query for negative case
+* Updated from global requirements
+* Fixed functional test that validates graceful ovs agent restart
+* _bind_devices query only existing ports
+* Stop logging deadlock tracebacks
+* Don't log exceptions in GW update on router create
+* Remove an unnecessary extension check for rbac
+* OVS agent: flush firewall rules for all deleted ports at once
+* Enable most unit tests for py34 job
+* Changed filter field to router_id
+* Fix a wrong condition for the _purge_metering_info function
+* Don't log deadlock or retry exceptions in L3 DB
+* Make sure service providers can be loaded correctly
+* sriov: update port state even if ip link fails
+* Retain logs for functional test cases
+
 7.0.0.0b3
 ---------
 
+* Don't setup ARP protection on OVS for network ports
+* Don't setup ARP protection on LB for network ports
+* Add support for PluginWorker and Process creation notification
+* Implement external physical bridge mapping in linuxbridge
+* Avoid DB errors when deleting network's ports and subnets
+* Better message on allowed address pairs error
 * Add info to debug test_keepalived_respawns gate failure
 * Enable to update external network subnet's gateway-ip
 * Make Neutron service flavor save service_type
 * Add tenant_id to flavor service profiles attributes
+* Remove implicit registration of *-aas service providers
+* Rename 'newapi' to 'pecan_wsgi'
 * Catch errors on 'port not found' while deleting subnet
+* Process user iptables rules before INVALID
+* OVS-agent: Introduce Ryu based OpenFlow implementation
+* Deprecate external_network_bridge option in L3 agent
 * Do not track active reservations
 * Deprecate --service option for neutron-db-manage
+* Add constraint target to tox.ini
 * DHCP agent: allow using gateway IPs instead of uniquely allocated
+* Resolve issue where router can't be removed from L3-agent in dvr mode
+* OVS agent add functional tests of OVS status
+* check_changed_vlans doesn't need registered_ports as param
 * [rpc] pull: removed a hack to avoid object backport triggered
 * Enable py34 tests for pluggable ipam backend
+* test_migrations: Remove unnecessary midonetclient mocks
 * Updated from global requirements
 * Fix import path in neutron-sanity-check for ml2_sriov opts
 * Decentralize the managemement of service providers
@@ -22,12 +187,17 @@ CHANGES
 * Correct neutron-ns-metadata-proxy command when watch_log is False
 * Split SR-IOV configuration file into driver and agent pieces
 * Python 3: use a hash to sort dictionaries
+* Implement TODO for version listing
+* Fix hooks for dealing with member actions
+* Fixed filters for functional tests
 * Fix usage of netaddr '.broadcast'
 * Add lieutenants contact for networking-calico
 * Adding networking-calico to sub_projects document
+* Fix locale problem in execute()
 * Remove duplicated codes in two test cases
 * Fixes wrong neutron Hyper-V Agent name in constants
 * Updated from global requirements
+* Improve python code for missing suggestion
 * Fix misnomer on network attribute
 * Refactor IpRouteCommand to allow using it without a device
 * Revert "Add support for unaddressed port"
@@ -56,6 +226,8 @@ CHANGES
 * Update template for ModelMigrationSync test
 * Fix py34 No sql_connection parameter is established error
 * Switch to using os-testr's copy of subunit2html
+* Add a functional test to validate dvr snat namespace
+* Add snat ports cache to dvr router
 * DHCP agent: add 'bridged' property to interface driver
 * SR-IOV: deprecate agent_required option
 * SimpleInterfaceMonitor handle case when ofport is an empty set
@@ -173,6 +345,7 @@ CHANGES
 * l3: not use L2 plugin _get_subnet unnecessarily
 * l3_db: not use L2 plugin _get_port unnecessarily
 * Break down _bind_port_if_needed in ML2
+* Pecan WSGI: prevent plugins from opening AMQP connections
 * Remove 'action' argument from _handle_fip_nat_rules()
 * Remove vmware plugin from neutron (etc part)
 * Setup reference service providers for API test runs
@@ -299,8 +472,21 @@ CHANGES
 * objects: consolidate single transaction checks into test_base
 * objects.qos.policy: provide rules field, not type specific
 * Unite qos_rules and qos_*_rules tables
+* Switch controller to actually call the plugins
+* Add extensions listing to the controller
+* Add placeholder for notifier hook
+* Add hook for policy enforcement
+* Add quota enforcement hook
+* Add ownership validation hook
+* Add attribute population hook
+* Add resource/plugin identification hook
+* Add hook to create a context from the headers
+* Add hook to translate exceptions into HTTP codes
+* Add startup hook after pecan init for plugins
+* Add keystone middleware wrapper to pecan app
 * Fix accessing shared policies, add assoc tests
 * qos: forbid creating rules when there is no access to policy
+* Initial pecan structure
 * Remove unnecessary executable permission
 * NSX: Rename default_interface_name option
 * Arista Drivers decomposition part II
@@ -715,6 +901,7 @@ CHANGES
 * OVSNeutronAgent pass the config as parameter
 * Refactor _update_subnet_allocation_pools
 * Stop sending gratuitous arp when ip version is 6
+* Set .gitreview defaultbranch to feature/pecan
 * Fix Enum usage in 589f9237ca0e_cisco_n1kv_ml2_driver_tables
 * Imported Translations from Transifex
 * power grab
@@ -980,6 +1167,7 @@ CHANGES
 * Refactor socket ssl wrapping
 * Don't resync on DHCP agent setup failure
 * Replace BaseIPVethTestCase by FakeMachine
+* Return exception when attempting to add duplicate VIP
 * Imported Translations from Transifex
 * Allow plugin to specify router_id
 * Neutron to Drop Router Advts from VM ports
