@@ -5,6 +5,7 @@ neutron (2:7.0.0~rc1-0ubuntu1) UNRELEASED; urgency=medium
   * d/rules: Drop removal of .eggs directory in override_dh_auto_clean.
   * d/control: Bump minimum pbr version to 1.8.
   * d/control: Align (build-)depends with upstream.
+  * d/neutron-common.install: Add neutron-dev-server and neutron-rpc-server.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Fri, 25 Sep 2015 17:14:07 -0400
 
