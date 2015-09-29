@@ -1,4 +1,4 @@
-neutron (2:7.0.0~rc1-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:7.0.0~rc1-0ubuntu1) wily; urgency=medium
 
   * d/watch: Update to cope with upstream rc versioning.
   * New upstream release candidate for OpenStack Liberty.
