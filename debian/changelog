@@ -1,3 +1,13 @@
+neutron (2:7.0.0~rc1-0ubuntu4) UNRELEASED; urgency=medium
+
+  * Drop hard requirement on python-ryu for this cycle as it supports
+    a new alternative agent implementation for Open vSwitch and is not
+    the default, avoiding inclusion of ryu in main for Wily.
+    - d/control: Drop (Build-)Depends on ryu, add Suggests.
+    - d/p/drop-ryu-dep.patch: Patch out hard requirement on ryu.
+
+ -- James Page <james.page@ubuntu.com>  Fri, 02 Oct 2015 17:38:04 +0100
+
 neutron (2:7.0.0~rc1-0ubuntu3) wily; urgency=medium
 
   * d/p/binary-metadata.patch: Cherry pick fix from upstream to resolve

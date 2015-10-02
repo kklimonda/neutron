@@ -3,3 +3,4 @@ skip-iptest.patch
 iproute2-compat.patch
 i386-fwmark.patch
 binary-metadata.patch
+drop-ryu-dep.patch
