@@ -1,3 +1,10 @@
+neutron (2:7.0.0~rc1-0ubuntu3) wily; urgency=medium
+
+  * d/p/binary-metadata.patch: Cherry pick fix from upstream to resolve
+    errors when accessing binary encoded metadata (LP: #1501772).
+
+ -- James Page <james.page@ubuntu.com>  Fri, 02 Oct 2015 10:54:24 +0100
+
 neutron (2:7.0.0~rc1-0ubuntu2) wily; urgency=medium
 
   * d/p/i386-fwmark.patch: Ensure int and long types are converted
