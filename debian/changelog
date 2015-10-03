@@ -1,3 +1,9 @@
+neutron (2:7.0.0~rc1-0ubuntu5) UNRELEASED; urgency=medium
+
+  * d/neutron-common.install: Install ebtables filters (LP: #1502363).
+
+ -- James Page <james.page@ubuntu.com>  Sat, 03 Oct 2015 17:58:54 +0100
+
 neutron (2:7.0.0~rc1-0ubuntu4) wily; urgency=medium
 
   * Drop hard requirement on python-ryu for this cycle as it supports

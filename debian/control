@@ -329,7 +329,7 @@ Depends: alembic (>= 0.8.0),
          python-webob (>= 1.2.3),
          ${misc:Depends},
          ${python:Depends},
-Suggests: python-ryu (>= 3.23.2)
+Suggests: python-ryu (>= 3.23.2),
 Provides: ${python:Provides},
 XB-Python-Version: ${python:Versions}
 Breaks: python-quantum ( << 1:2013.2~b2-0ubuntu1~ ),
