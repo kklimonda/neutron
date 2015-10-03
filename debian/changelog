@@ -1,6 +1,8 @@
 neutron (2:7.0.0~rc1-0ubuntu5) UNRELEASED; urgency=medium
 
   * d/neutron-common.install: Install ebtables filters (LP: #1502363).
+  * d/neutron-plugin-openvswitch-agent.{init.in,upstart.in}: Add agent
+    specific configuration file to daemon arguments (LP: #1502364).
 
  -- James Page <james.page@ubuntu.com>  Sat, 03 Oct 2015 17:58:54 +0100
 
