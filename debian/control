@@ -389,6 +389,7 @@ Description: Neutron is a virtual network service for Openstack - Open vSwitch p
 Package: neutron-plugin-linuxbridge-agent
 Architecture: all
 Depends: bridge-utils,
+         ebtables,
          neutron-plugin-ml2 (= ${source:Version}),
          ${misc:Depends},
          ${python:Depends},
