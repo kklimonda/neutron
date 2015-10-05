@@ -1,4 +1,4 @@
-neutron (2:7.0.0~rc1-0ubuntu5) UNRELEASED; urgency=medium
+neutron (2:7.0.0~rc1-0ubuntu5) wily; urgency=medium
 
   * d/neutron-common.install: Install ebtables filters (LP: #1502363).
   * d/neutron-plugin-openvswitch-agent.{init.in,upstart.in}: Add agent
@@ -11,7 +11,7 @@ neutron (2:7.0.0~rc1-0ubuntu5) UNRELEASED; urgency=medium
     from sriov-agent -> neutron-plugin-ml2, add agent specific
     configuration file to daemon arguments.
 
- -- James Page <james.page@ubuntu.com>  Sat, 03 Oct 2015 17:58:54 +0100
+ -- James Page <james.page@ubuntu.com>  Mon, 05 Oct 2015 08:54:20 +0100
 
 neutron (2:7.0.0~rc1-0ubuntu4) wily; urgency=medium
 
