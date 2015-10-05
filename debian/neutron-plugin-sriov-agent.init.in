@@ -19,4 +19,4 @@ NAME=${PROJECT_NAME}-plugin-sriov-agent
 DAEMON=/usr/bin/neutron-sriov-nic-agent
 # --config-file=/etc/neutron/neutron.conf will be happened 
 # to DAEMON_ARGS later by openstack-pkg-tools
-DAEMON_ARGS="--config-file=/etc/neutron/plugins/ml2/ml2_conf_sriov.ini"
+DAEMON_ARGS="--config-file=/etc/neutron/plugins/ml2/ml2_conf_sriov.ini --config-file=/etc/neutron/plugins/ml2/sriov_agent.ini"

@@ -492,7 +492,7 @@ Description: Neutron is a virtual network service for Openstack - metering agent
 
 Package: neutron-plugin-sriov-agent
 Architecture: all
-Depends: neutron-common (= ${source:Version}),
+Depends: neutron-plugin-ml2 (= ${source:Version}),
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},

@@ -7,6 +7,9 @@ neutron (2:7.0.0~rc1-0ubuntu5) UNRELEASED; urgency=medium
     configuration file to daemon arguments (LP: #1502362).
   * d/control: Add dependency on ebtables for linuxbridge agent
     (LP: #1502362).
+  * d/control,neutron-plugin-sriov-agent.init.in: Add missing dependency
+    from sriov-agent -> neutron-plugin-ml2, add agent specific
+    configuration file to daemon arguments.
 
  -- James Page <james.page@ubuntu.com>  Sat, 03 Oct 2015 17:58:54 +0100
 
