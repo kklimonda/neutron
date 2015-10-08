@@ -19,7 +19,7 @@ Closes-Bug: 1497309
 
 --- a/neutron/agent/linux/ip_lib.py
 +++ b/neutron/agent/linux/ip_lib.py
-@@ -207,7 +207,7 @@ class IPWrapper(SubProcessBase):
+@@ -208,7 +208,7 @@
      @classmethod
      def get_namespaces(cls):
          output = cls._execute([], 'netns', ('list',))
@@ -28,7 +28,7 @@ Closes-Bug: 1497309
  
  
  class IPDevice(SubProcessBase):
-@@ -735,8 +735,8 @@ class IpNetnsCommand(IpCommandBase):
+@@ -819,8 +819,8 @@
          output = self._parent._execute(
              ['o'], 'netns', ['list'],
              run_as_root=cfg.CONF.AGENT.use_helper_for_ns_read)
@@ -41,7 +41,7 @@ Closes-Bug: 1497309
  
 --- a/neutron/tests/unit/agent/linux/test_ip_lib.py
 +++ b/neutron/tests/unit/agent/linux/test_ip_lib.py
-@@ -27,6 +27,11 @@ NETNS_SAMPLE = [
+@@ -27,6 +27,11 @@
      'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
      'cccccccc-cccc-cccc-cccc-cccccccccccc']
  
@@ -53,7 +53,7 @@ Closes-Bug: 1497309
  LINK_SAMPLE = [
      '1: lo: <LOOPBACK,UP,LOWER_UP> mtu 16436 qdisc noqueue state UNKNOWN \\'
      'link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0',
-@@ -274,6 +279,16 @@ class TestIpWrapper(base.BaseTestCase):
+@@ -274,6 +279,16 @@
          retval = ip_lib.IPWrapper.get_namespaces()
          self.assertEqual(retval,
                           ['12345678-1234-5678-abcd-1234567890ab',

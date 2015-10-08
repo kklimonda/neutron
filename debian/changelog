@@ -3,6 +3,7 @@ neutron (2:7.0.0~rc2-0ubuntu1) UNRELEASED; urgency=medium
   * New upstream release candidate for OpenStack Liberty.
   * d/p/fix-neutron-configuration.patch: Rebased.
   * d/p/skip-iptest.patch: Rebased.
+  * d/p/iproute2-compat.patch: Rebased.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Thu, 08 Oct 2015 09:42:36 -0400
 
