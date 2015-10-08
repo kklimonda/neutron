@@ -478,7 +478,6 @@ neutron/ipam/drivers/neutrondb_ipam/__init__.py
 neutron/ipam/drivers/neutrondb_ipam/db_api.py
 neutron/ipam/drivers/neutrondb_ipam/db_models.py
 neutron/ipam/drivers/neutrondb_ipam/driver.py
-neutron/locale/neutron-log-critical.pot
 neutron/locale/neutron-log-error.pot
 neutron/locale/neutron-log-info.pot
 neutron/locale/neutron-log-warning.pot
