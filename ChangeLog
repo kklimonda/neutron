@@ -1,6 +1,25 @@
 CHANGES
 =======
 
+7.0.0.0rc2
+----------
+
+* DHCP: protect against case when device name is None
+* Execute ipset command using check_exit_code
+* The option force_metadata=True breaks the dhcp agent
+* Do not log an error when deleting a linuxbridge does not exist
+* Tag the alembic migration revisions for Liberty
+* /common/utils.py py34 incompatibility
+* Just call set-manager if connecting fails
+* Fixes 'ovs-agent cannot start on Windows because root_helper opt is not found'
+* Use format to convert ints to strings
+* Fixes 'ovs-agent fails to start on Windows beacause of SIGHUP'
+* usage_audit: Fix usage_audit to work with ML2
+* Pecan: Fix quota enforcement
+* metadata: don't crash proxy on non-unicode user data
+* Imported Translations from Zanata
+* Check idl.run() return value before blocking
+
 7.0.0.0rc1
 ----------
 
