@@ -1,6 +1,11 @@
 CHANGES
 =======
 
+7.0.0.0rc3
+----------
+
+* Mock oslo policy HTTPCheck instead of urllib
+
 7.0.0.0rc2
 ----------
 
