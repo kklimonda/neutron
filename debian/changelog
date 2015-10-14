@@ -1,3 +1,9 @@
+neutron (2:7.0.0~rc3-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream release candidate for OpenStack Liberty.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Wed, 14 Oct 2015 09:58:47 -0400
+
 neutron (2:7.0.0~rc2-0ubuntu2) wily; urgency=medium
 
   * d/control: Drop neutron-plugin-metaplugin and neutron-plugin-cisco
