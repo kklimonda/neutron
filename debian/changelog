@@ -1,3 +1,9 @@
+neutron (2:7.0.0-0ubuntu2) UNRELEASED; urgency=medium
+
+  * d/tests/neutron-agents: Give daemon 5 seconds to start to prevent race.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Mon, 30 Nov 2015 13:19:04 -0500
+
 neutron (2:7.0.0-0ubuntu1) wily; urgency=medium
 
   * New upstream release for OpenStack Liberty.
