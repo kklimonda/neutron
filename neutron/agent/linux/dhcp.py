@@ -23,6 +23,7 @@ import time
 import netaddr
 from oslo_config import cfg
 from oslo_log import log as logging
+import oslo_messaging
 from oslo_utils import uuidutils
 import six
 
@@ -756,10 +757,10 @@ class Dnsmasq(DhcpLocalProcess):
             subnet_to_interface_ip = self._make_subnet_interface_ip_map()
         isolated_subnets = self.get_isolated_subnets(self.network)
         for i, subnet in enumerate(self.network.subnets):
+            addr_mode = getattr(subnet, 'ipv6_address_mode', None)
             if (not subnet.enable_dhcp or
                 (subnet.ip_version == 6 and
-                 getattr(subnet, 'ipv6_address_mode', None)
-                 in [None, constants.IPV6_SLAAC])):
+                 addr_mode == constants.IPV6_SLAAC)):
                 continue
             if subnet.dns_nameservers:
                 options.append(
@@ -1092,9 +1093,16 @@ class DeviceManager(object):
         for port in network.ports:
             port_device_id = getattr(port, 'device_id', None)
             if port_device_id == constants.DEVICE_ID_RESERVED_DHCP_PORT:
-                port = self.plugin.update_dhcp_port(
-                    port.id, {'port': {'network_id': network.id,
-                                       'device_id': device_id}})
+                try:
+                    port = self.plugin.update_dhcp_port(
+                        port.id, {'port': {'network_id': network.id,
+                                           'device_id': device_id}})
+                except oslo_messaging.RemoteError as e:
+                    if e.exc_type == exceptions.DhcpPortInUse:
+                        LOG.info(_LI("Skipping DHCP port %s as it is "
+                                     "already in use"), port.id)
+                        continue
+                    raise
                 if port:
                     return port
 
@@ -1165,6 +1173,16 @@ class DeviceManager(object):
         else:
             network.ports.append(port)
 
+    def _cleanup_stale_devices(self, network, dhcp_port):
+        LOG.debug("Cleaning stale devices for network %s", network.id)
+        dev_name = self.driver.get_device_name(dhcp_port)
+        ns_ip = ip_lib.IPWrapper(namespace=network.namespace)
+        for d in ns_ip.get_devices(exclude_loopback=True):
+            # delete all devices except current active DHCP port device
+            if d.name != dev_name:
+                LOG.debug("Found stale device %s, deleting", d.name)
+                self.driver.unplug(d.name, namespace=network.namespace)
+
     def setup(self, network):
         """Create and initialize a device for network's DHCP on this host."""
         port = self.setup_dhcp_port(network)
@@ -1215,6 +1233,12 @@ class DeviceManager(object):
 
         if self.conf.use_namespaces:
             self._set_default_route(network, interface_name)
+            try:
+                self._cleanup_stale_devices(network, port)
+            except Exception:
+                # catch everything as we don't want to fail because of
+                # cleanup step
+                LOG.error(_LE("Exception during stale dhcp device cleanup"))
 
         return interface_name
 

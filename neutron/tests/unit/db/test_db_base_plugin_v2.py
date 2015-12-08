@@ -23,6 +23,7 @@ from oslo_config import cfg
 from oslo_utils import importutils
 import six
 from sqlalchemy import orm
+import testtools
 from testtools import matchers
 import webob.exc
 
@@ -3414,6 +3415,7 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                                  ipv6_ra_mode=constants.IPV6_SLAAC,
                                  ipv6_address_mode=constants.IPV6_SLAAC)
 
+    @testtools.skipIf(tools.is_bsd(), 'bug/1484837')
     def test_create_subnet_ipv6_pd_gw_values(self):
         cidr = constants.PROVISIONAL_IPV6_PD_PREFIX
         # Gateway is last IP in IPv6 DHCPv6 Stateless subnet
@@ -3540,6 +3542,7 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                                  cidr=cidr, ip_version=6,
                                  allocation_pools=allocation_pools)
 
+    @testtools.skipIf(tools.is_bsd(), 'bug/1484837')
     def test_create_subnet_with_v6_pd_allocation_pool(self):
         gateway_ip = '::1'
         cidr = constants.PROVISIONAL_IPV6_PD_PREFIX
@@ -4306,36 +4309,6 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                 res = req.get_response(self.api)
                 self.assertEqual(res.status_int,
                                  webob.exc.HTTPConflict.code)
-
-    def _test_subnet_update_enable_dhcp_no_ip_available_returns_409(
-            self, allocation_pools, cidr):
-        ip_version = netaddr.IPNetwork(cidr).version
-        with self.network() as network:
-            with self.subnet(network=network,
-                             allocation_pools=allocation_pools,
-                             enable_dhcp=False,
-                             cidr=cidr,
-                             ip_version=ip_version) as subnet:
-                id = subnet['subnet']['network_id']
-                self._create_port(self.fmt, id)
-                data = {'subnet': {'enable_dhcp': True}}
-                req = self.new_update_request('subnets', data,
-                                              subnet['subnet']['id'])
-                res = req.get_response(self.api)
-                self.assertEqual(res.status_int,
-                                 webob.exc.HTTPConflict.code)
-
-    def test_subnet_update_enable_dhcp_no_ip_available_returns_409_ipv4(self):
-        allocation_pools = [{'start': '10.0.0.2', 'end': '10.0.0.2'}]
-        cidr = '10.0.0.0/30'
-        self._test_subnet_update_enable_dhcp_no_ip_available_returns_409(
-                allocation_pools, cidr)
-
-    def test_subnet_update_enable_dhcp_no_ip_available_returns_409_ipv6(self):
-        allocation_pools = [{'start': '2001:db8::2', 'end': '2001:db8::2'}]
-        cidr = '2001:db8::/126'
-        self._test_subnet_update_enable_dhcp_no_ip_available_returns_409(
-                allocation_pools, cidr)
 
     def test_show_subnet(self):
         with self.network() as network:

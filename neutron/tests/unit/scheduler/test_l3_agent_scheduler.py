@@ -1143,6 +1143,23 @@ class L3DvrSchedulerTestCase(testlib_api.SqlTestCase):
             self.assertEqual(sub_ids.pop(),
                             dvr_port.get('fixed_ips').pop(0).get('subnet_id'))
 
+    def test_get_subnet_ids_on_router_no_subnet(self):
+        dvr_port = {
+                'id': 'dvr_port1',
+                'device_id': 'r1',
+                'device_owner': 'network:router_interface_distributed',
+                'fixed_ips': []
+        }
+        r1 = {
+              'id': 'r1',
+              'distributed': True,
+        }
+        with mock.patch.object(db_v2.NeutronDbPluginV2, 'get_ports',
+                               return_value=[dvr_port]):
+            sub_ids = self.dut.get_subnet_ids_on_router(self.adminContext,
+                                                        r1['id'])
+            self.assertEqual(len(sub_ids), 0)
+
     def _test_check_ports_on_host_and_subnet_base(self, port_status):
         dvr_port = {
                 'id': 'fake_id',
@@ -1523,18 +1540,15 @@ class L3DvrSchedulerTestCase(testlib_api.SqlTestCase):
         binding = l3_dvrscheduler_db.CentralizedSnatL3AgentBinding(
             router_id=router_id, l3_agent_id='foo_l3_agent_id',
             l3_agent=agents_db.Agent())
-        with mock.patch.object(query.Query, 'one') as mock_query,\
-                mock.patch.object(self.adminContext.session,
-                                  'delete') as mock_session,\
+        with mock.patch.object(query.Query, 'first') as mock_first,\
                 mock.patch.object(query.Query, 'delete') as mock_delete,\
                 mock.patch.object(
                     self.dut,
                     'get_subnet_ids_on_router') as mock_get_subnets:
-            mock_query.return_value = binding
+            mock_first.return_value = binding
             mock_get_subnets.return_value = ['foo_subnet_id']
             self.dut.unbind_snat_servicenode(self.adminContext, router_id)
             mock_get_subnets.assert_called_with(self.adminContext, router_id)
-            self.assertTrue(mock_session.call_count)
             self.assertTrue(mock_delete.call_count)
         core_plugin.assert_called_once_with()
         l3_notifier.assert_called_once_with()

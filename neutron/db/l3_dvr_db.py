@@ -80,8 +80,10 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
             router_res.get('distributed') is False):
             LOG.info(_LI("Centralizing distributed router %s "
                          "is not supported"), router_db['id'])
-            raise n_exc.NotSupported(msg=_("Migration from distributed router "
-                                           "to centralized"))
+            raise n_exc.BadRequest(
+                resource='router',
+                msg=_("Migration from distributed router to centralized is "
+                      "not supported"))
         elif (not router_db.extra_attributes.distributed and
               router_res.get('distributed')):
             # router should be disabled in order for upgrade
@@ -658,12 +660,12 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
 
         # TODO(markmcclain): This is suboptimal but was left to reduce
         # changeset size since it is late in cycle
-        ports = (
+        ports = [
             rp.port.id for rp in
             router.attached_ports.filter_by(
                     port_type=l3_const.DEVICE_OWNER_ROUTER_SNAT)
             if rp.port
-        )
+        ]
 
         c_snat_ports = self._core_plugin.get_ports(
             context,

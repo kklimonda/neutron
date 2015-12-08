@@ -72,10 +72,6 @@ class ServiceUnavailable(NeutronException):
     message = _("The service is unavailable")
 
 
-class NotSupported(NeutronException):
-    message = _('Not supported: %(msg)s')
-
-
 class AdminRequired(NotAuthorized):
     message = _("User does not have admin privileges: %(reason)s")
 
@@ -165,6 +161,16 @@ class SubnetInUse(InUse):
         super(SubnetInUse, self).__init__(**kwargs)
 
 
+class SubnetPoolInUse(InUse):
+    message = _("Unable to complete operation on subnet pool "
+                "%(subnet_pool_id)s. %(reason)s.")
+
+    def __init__(self, **kwargs):
+        if 'reason' not in kwargs:
+            kwargs['reason'] = _("Two or more concurrent subnets allocated.")
+        super(SubnetPoolInUse, self).__init__(**kwargs)
+
+
 class PortInUse(InUse):
     message = _("Unable to complete operation on port %(port_id)s "
                 "for network %(net_id)s. Port already has an attached "
@@ -174,6 +180,10 @@ class PortInUse(InUse):
 class ServicePortInUse(InUse):
     message = _("Port %(port_id)s cannot be deleted directly via the "
                 "port API: %(reason)s")
+
+
+class DhcpPortInUse(InUse):
+    message = _("Port %(port_id)s is already acquired by another DHCP agent")
 
 
 class PortBound(InUse):

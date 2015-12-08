@@ -14,6 +14,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import uuid
+
 from tempest_lib import exceptions as lib_exc
 import testtools
 
@@ -301,6 +303,19 @@ class RBACSharedNetworksTest(base.BaseAdminNetworkTest):
              for p in self.client2.list_rbac_policies()['rbac_policies']])
 
     @test.attr(type='smoke')
+    @test.idempotent_id('bf5052b8-b11e-407c-8e43-113447404d3e')
+    def test_filter_fields(self):
+        net = self.create_network()
+        self.client.create_rbac_policy(
+            object_type='network', object_id=net['id'],
+            action='access_as_shared', target_tenant=self.client2.tenant_id)
+        field_args = (('id',), ('id', 'action'), ('object_type', 'object_id'),
+                      ('tenant_id', 'target_tenant'))
+        for fields in field_args:
+            res = self.client.list_rbac_policies(fields=fields)
+            self.assertEqual(set(fields), set(res['rbac_policies'][0].keys()))
+
+    @test.attr(type='smoke')
     @test.idempotent_id('86c3529b-1231-40de-803c-afffffff5fff')
     def test_policy_show(self):
         res = self._make_admin_net_and_subnet_shared_to_tenant_id(
@@ -317,6 +332,25 @@ class RBACSharedNetworksTest(base.BaseAdminNetworkTest):
             p2, self.admin_client.show_rbac_policy(p2['id'])['rbac_policy'])
 
     @test.attr(type='smoke')
+    @test.idempotent_id('e7bcb1ea-4877-4266-87bb-76f68b421f31')
+    def test_filter_policies(self):
+        net = self.create_network()
+        pol1 = self.client.create_rbac_policy(
+            object_type='network', object_id=net['id'],
+            action='access_as_shared',
+            target_tenant=self.client2.tenant_id)['rbac_policy']
+        pol2 = self.client.create_rbac_policy(
+            object_type='network', object_id=net['id'],
+            action='access_as_shared',
+            target_tenant=self.client.tenant_id)['rbac_policy']
+        res1 = self.client.list_rbac_policies(id=pol1['id'])['rbac_policies']
+        res2 = self.client.list_rbac_policies(id=pol2['id'])['rbac_policies']
+        self.assertEqual(1, len(res1))
+        self.assertEqual(1, len(res2))
+        self.assertEqual(pol1['id'], res1[0]['id'])
+        self.assertEqual(pol2['id'], res2[0]['id'])
+
+    @test.attr(type='smoke')
     @test.idempotent_id('86c3529b-1231-40de-803c-afffffff6fff')
     def test_regular_client_blocked_from_sharing_anothers_network(self):
         net = self._make_admin_net_and_subnet_shared_to_tenant_id(
@@ -325,6 +359,25 @@ class RBACSharedNetworksTest(base.BaseAdminNetworkTest):
             self.client.create_rbac_policy(
                 object_type='network', object_id=net['id'],
                 action='access_as_shared', target_tenant=self.client.tenant_id)
+
+    @test.attr(type='smoke')
+    @test.idempotent_id('c5f8f785-ce8d-4430-af7e-a236205862fb')
+    def test_rbac_policy_quota(self):
+        if not test.is_extension_enabled('quotas', 'network'):
+            msg = "quotas extension not enabled."
+            raise self.skipException(msg)
+        quota = self.client.show_quotas(self.client.tenant_id)['quota']
+        max_policies = quota['rbac_policy']
+        self.assertGreater(max_policies, 0)
+        net = self.client.create_network(
+            name=data_utils.rand_name('test-network-'))['network']
+        self.addCleanup(self.client.delete_network, net['id'])
+        with testtools.ExpectedException(lib_exc.Conflict):
+            for i in range(0, max_policies + 1):
+                self.admin_client.create_rbac_policy(
+                    object_type='network', object_id=net['id'],
+                    action='access_as_shared',
+                    target_tenant=str(uuid.uuid4()).replace('-', ''))
 
     @test.attr(type='smoke')
     @test.idempotent_id('86c3529b-1231-40de-803c-afffffff7fff')

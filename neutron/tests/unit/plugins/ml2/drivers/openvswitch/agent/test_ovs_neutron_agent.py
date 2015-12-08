@@ -152,7 +152,7 @@ class TestOvsNeutronAgent(object):
         self.agent.sg_agent = mock.Mock()
 
     def _mock_port_bound(self, ofport=None, new_local_vlan=None,
-                         old_local_vlan=None):
+                         old_local_vlan=None, db_get_val=None):
         port = mock.Mock()
         port.ofport = ofport
         net_uuid = 'my-net-uuid'
@@ -163,37 +163,18 @@ class TestOvsNeutronAgent(object):
                 self.mod_agent.LocalVLANMapping(
                     old_local_vlan, None, None, None))
         with mock.patch.object(self.agent, 'int_br', autospec=True) as int_br:
-            int_br.db_get_val.return_value = {}
+            int_br.db_get_val.return_value = db_get_val
             int_br.set_db_attribute.return_value = True
             self.agent.port_bound(port, net_uuid, 'local', None, None,
                                   fixed_ips, "compute:None", False)
-        vlan_mapping = {'net_uuid': net_uuid,
-                        'network_type': 'local',
-                        'physical_network': None,
-                        'segmentation_id': None}
-        int_br.set_db_attribute.assert_called_once_with(
-            "Port", mock.ANY, "other_config", vlan_mapping)
-
-    def _test_restore_local_vlan_maps(self, tag):
-        port = mock.Mock()
-        port.port_name = 'fake_port'
-        local_vlan_map = {'net_uuid': 'fake_network_id',
-                          'network_type': 'vlan',
-                          'physical_network': 'fake_network',
-                          'segmentation_id': 1}
-        with mock.patch.object(self.agent, 'int_br') as int_br, \
-            mock.patch.object(self.agent, 'provision_local_vlan') as \
-                provision_local_vlan:
-            int_br.get_vif_ports.return_value = [port]
-            int_br.get_ports_attributes.return_value = [{
-                'name': port.port_name, 'other_config': local_vlan_map,
-                'tag': tag
-            }]
-            self.agent._restore_local_vlan_map()
-            if tag:
-                self.assertTrue(provision_local_vlan.called)
-            else:
-                self.assertFalse(provision_local_vlan.called)
+        if db_get_val is None:
+            self.assertEqual(0, int_br.set_db_attribute.call_count)
+        else:
+            vlan_mapping = {'net_uuid': net_uuid,
+                            'network_type': 'local',
+                            'physical_network': None}
+            int_br.set_db_attribute.assert_called_once_with(
+                "Port", mock.ANY, "other_config", vlan_mapping)
 
     def test_datapath_type_system(self):
         # verify kernel datapath is default
@@ -258,11 +239,38 @@ class TestOvsNeutronAgent(object):
             self.assertEqual(expected,
                              self.agent.agent_state['agent_type'])
 
+    def _test_restore_local_vlan_maps(self, tag, segmentation_id='1'):
+        port = mock.Mock()
+        port.port_name = 'fake_port'
+        net_uuid = 'fake_network_id'
+        local_vlan_map = {'net_uuid': net_uuid,
+                          'network_type': 'vlan',
+                          'physical_network': 'fake_network'}
+        if segmentation_id is not None:
+            local_vlan_map['segmentation_id'] = segmentation_id
+        with mock.patch.object(self.agent, 'int_br') as int_br:
+            int_br.get_vif_ports.return_value = [port]
+            int_br.get_ports_attributes.return_value = [{
+                'name': port.port_name, 'other_config': local_vlan_map,
+                'tag': tag
+            }]
+            self.agent._restore_local_vlan_map()
+            expected_hints = {}
+            if tag:
+                expected_hints[net_uuid] = tag
+            self.assertEqual(expected_hints, self.agent._local_vlan_hints)
+
     def test_restore_local_vlan_map_with_device_has_tag(self):
         self._test_restore_local_vlan_maps(2)
 
     def test_restore_local_vlan_map_with_device_no_tag(self):
         self._test_restore_local_vlan_maps([])
+
+    def test_restore_local_vlan_map_no_segmentation_id(self):
+        self._test_restore_local_vlan_maps(2, segmentation_id=None)
+
+    def test_restore_local_vlan_map_segmentation_id_compat(self):
+        self._test_restore_local_vlan_maps(2, segmentation_id='None')
 
     def test_check_agent_configurations_for_dvr_raises(self):
         self.agent.enable_distributed_routing = True
@@ -284,13 +292,17 @@ class TestOvsNeutronAgent(object):
         self.assertIsNone(self.agent._check_agent_configurations())
 
     def test_port_bound_deletes_flows_for_valid_ofport(self):
-        self._mock_port_bound(ofport=1, new_local_vlan=1)
+        self._mock_port_bound(ofport=1, new_local_vlan=1, db_get_val={})
 
     def test_port_bound_ignores_flows_for_invalid_ofport(self):
-        self._mock_port_bound(ofport=-1, new_local_vlan=1)
+        self._mock_port_bound(ofport=-1, new_local_vlan=1, db_get_val={})
 
     def test_port_bound_does_not_rewire_if_already_bound(self):
-        self._mock_port_bound(ofport=-1, new_local_vlan=1, old_local_vlan=1)
+        self._mock_port_bound(
+            ofport=-1, new_local_vlan=1, old_local_vlan=1, db_get_val={})
+
+    def test_port_bound_not_found(self):
+        self._mock_port_bound(ofport=1, new_local_vlan=1, db_get_val=None)
 
     def _test_port_dead(self, cur_tag=None):
         port = mock.Mock()
@@ -410,6 +422,7 @@ class TestOvsNeutronAgent(object):
         devices_up = ['tap1']
         devices_down = ['tap2']
         self.agent.local_vlan_map["net1"] = mock.Mock()
+        self.agent.local_vlan_map["net1"].vlan = "1"
         ovs_db_list = [{'name': 'tap1', 'tag': []},
                        {'name': 'tap2', 'tag': []}]
         vif_port1 = mock.Mock()
@@ -436,6 +449,10 @@ class TestOvsNeutronAgent(object):
             update_devices.assert_called_once_with(mock.ANY, devices_up,
                                                    devices_down,
                                                    mock.ANY, mock.ANY)
+            set_db_attribute_calls = \
+                [mock.call.set_db_attribute("Port", "tap1", "tag", "1"),
+                 mock.call.set_db_attribute("Port", "tap2", "tag", "1")]
+            int_br.assert_has_calls(set_db_attribute_calls, any_order=True)
 
     def _test_arp_spoofing(self, enable_prevent_arp_spoofing):
         self.agent.prevent_arp_spoofing = enable_prevent_arp_spoofing
@@ -685,6 +702,32 @@ class TestOvsNeutronAgent(object):
                 set(['eth1', 'tap1']), False)
             setup_port_filters.assert_called_once_with(
                 set(), port_info.get('updated', set()))
+
+    def test_process_network_ports_call_order(self):
+        port_info = {'current': set(['tap0', 'tap1']),
+                     'updated': set(['tap1']),
+                     'removed': set([]),
+                     'added': set(['eth1'])}
+        with mock.patch.object(self.agent, "treat_devices_added_or_updated",
+                return_value=([], ['tap1'], ['eth1'])) \
+                as treat_devices_added_or_updated, \
+                mock.patch.object(self.agent, "_bind_devices") \
+                as _bind_devices, \
+                mock.patch.object(self.agent.sg_agent, "setup_port_filters") \
+                as setup_port_filters:
+            parent = mock.MagicMock()
+            parent.attach_mock(treat_devices_added_or_updated,
+                               'treat_devices_added_or_updated')
+            parent.attach_mock(_bind_devices, '_bind_devices')
+            parent.attach_mock(setup_port_filters, 'setup_port_filters')
+            self.assertFalse(self.agent.process_network_ports(port_info,
+                                                              False))
+            expected_calls = [
+                mock.call.treat_devices_added_or_updated(
+                    set(['tap1', 'eth1']), False),
+                mock.call._bind_devices(['tap1']),
+                mock.call.setup_port_filters(set([]), set(['tap1']))]
+            parent.assert_has_calls(expected_calls, any_order=False)
 
     def test_report_state(self):
         with mock.patch.object(self.agent.state_rpc,
@@ -1379,6 +1422,31 @@ class TestOvsNeutronAgent(object):
         self._test_ovs_status(constants.OVS_NORMAL,
                               constants.OVS_RESTARTED)
 
+    def test_rpc_loop_fail_to_process_network_ports_keep_flows(self):
+        with mock.patch.object(async_process.AsyncProcess, "_spawn"),\
+                mock.patch.object(async_process.AsyncProcess, "start"),\
+                mock.patch.object(async_process.AsyncProcess, "stop"),\
+                mock.patch.object(
+                    self.mod_agent.OVSNeutronAgent,
+                    'process_network_ports') as process_network_ports,\
+                mock.patch.object(self.mod_agent.OVSNeutronAgent,
+                                  'check_ovs_status') as check_ovs_status,\
+                mock.patch.object(time, 'sleep'),\
+                mock.patch.object(
+                    self.mod_agent.OVSNeutronAgent,
+                    'update_stale_ofport_rules') as update_stale, \
+                mock.patch.object(self.mod_agent.OVSNeutronAgent,
+                                  'cleanup_stale_flows') as cleanup,\
+                mock.patch.object(
+                    self.mod_agent.OVSNeutronAgent,
+                    '_check_and_handle_signal') as check_and_handle_signal:
+            process_network_ports.return_value = True
+            check_ovs_status.return_value = constants.OVS_NORMAL
+            check_and_handle_signal.side_effect = [True, False]
+            self.agent.daemon_loop()
+            self.assertTrue(update_stale.called)
+            self.assertFalse(cleanup.called)
+
     def test_set_rpc_timeout(self):
         self.agent._handle_sigterm(None, None)
         for rpc_client in (self.agent.plugin_rpc.client,
@@ -1415,7 +1483,7 @@ class TestOvsNeutronAgent(object):
         self.agent.setup_arp_spoofing_protection(int_br, vif, fake_details)
         self.assertEqual(
             [mock.call(port=vif.ofport)],
-            int_br.delete_arp_spoofing_protection.mock_calls)
+            int_br.delete_arp_spoofing_allow_rules.mock_calls)
         self.assertEqual(
             [mock.call(ip_addresses=set(), port=vif.ofport)],
             int_br.install_arp_spoofing_protection.mock_calls)
@@ -1429,7 +1497,7 @@ class TestOvsNeutronAgent(object):
         self.agent.setup_arp_spoofing_protection(br, vif, fake_details)
         self.assertEqual(
             [mock.call(port=vif.ofport)],
-            br.delete_arp_spoofing_protection.mock_calls)
+            br.delete_arp_spoofing_allow_rules.mock_calls)
         self.assertTrue(br.install_icmpv6_na_spoofing_protection.called)
 
     def test_arp_spoofing_fixed_and_allowed_addresses(self):
@@ -1535,7 +1603,7 @@ class TestOvsNeutronAgent(object):
 
 class TestOvsNeutronAgentOFCtl(TestOvsNeutronAgent,
                                ovs_test_base.OVSOFCtlTestBase):
-    def test_cleanup_stale_flows_iter_0(self):
+    def test_cleanup_stale_flows(self):
         with mock.patch.object(self.agent.int_br, 'agent_uuid_stamp',
                                new=1234),\
             mock.patch.object(self.agent.int_br,
@@ -1548,6 +1616,7 @@ class TestOvsNeutronAgentOFCtl(TestOvsNeutronAgent,
                 'cookie=0x2345, duration=50.125s, table=2, priority=0',
                 'cookie=0x4d2, duration=52.112s, table=3, actions=drop',
             ]
+            self.agent.iter_num = 3
             self.agent.cleanup_stale_flows()
             expected = [
                 mock.call(cookie='0x4321/-1', table='2'),
@@ -1558,7 +1627,7 @@ class TestOvsNeutronAgentOFCtl(TestOvsNeutronAgent,
 
 class TestOvsNeutronAgentRyu(TestOvsNeutronAgent,
                              ovs_test_base.OVSRyuTestBase):
-    def test_cleanup_stale_flows_iter_0(self):
+    def test_cleanup_stale_flows(self):
         uint64_max = (1 << 64) - 1
         with mock.patch.object(self.agent.int_br, 'agent_uuid_stamp',
                                new=1234),\
@@ -1573,6 +1642,7 @@ class TestOvsNeutronAgentRyu(TestOvsNeutronAgent,
                 mock.Mock(cookie=9029, table_id=2),
                 mock.Mock(cookie=1234, table_id=3),
             ]
+            self.agent.iter_num = 3
             self.agent.cleanup_stale_flows()
             expected = [mock.call(cookie=17185,
                                   cookie_mask=uint64_max),

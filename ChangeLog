@@ -1,6 +1,88 @@
 CHANGES
 =======
 
+7.0.1
+-----
+
+* Fix default RBAC policy quota
+* Skip bindings with agent_id=None
+* Correct unwatch_log to support python <= 2.7.5
+* Add the missing arg of RetryRequest exception in _lock_subnetpool
+* Fix get_subnet_ids_on_router in dvr scheduler
+* Avoid race condition for reserved DHCP ports
+* force releasenotes warnings to be treated as errors
+* Delete HA network when last HA router is deleted
+* Add UnionModel support to filter query generator
+* Don't drop ARP table jump during OVS rewiring
+* Fix incomprehensible releasenotes
+* tox: pass TEMPEST_CONFIG_DIR envvar into api target environment
+* Updated from global requirements
+* IPAM: fix 'enable-dhcp' with internal driver
+* Fix use of fields argument in get_rbac_policies
+* Allow to specify branch for creating new migration
+* Datapath on L2pop only for agents with tunneling-ip
+* Don't add default route to HA router if there is no gateway ip
+* Fix dvr_local_router.floating_ip_added_dist failure after agent restart
+* Add transaction for setting agent_id in L3HARouterAgentPortBinding
+* Updated from global requirements
+* Fix releasenotes/../unreleased.rst
+* Cleanup dhcp namespace upon dhcp setup
+* Adding a function prefix before parenthesis
+* Validate ethertype for icmp protocols
+* sriov: add extensions option to configuration file
+* Remove TEMPEST_CONFIG_DIR in the api tox env
+* Add "unreleased" release notes page
+* Add reno for release notes management
+* More graceful ovs-agent restart
+* Don't remove ip addresses if not master
+* Add call to pluggable IPAM from ml2 delete_subnet
+* configure_for_func_testing.sh: Fix arguments for get_packages
+* Add Liberty release notes as reno yaml files
+* Optimize delete_csnat_router_interface_ports db query
+* Fix iptables modules references in rule generation
+* Fix incorrect passing port dict in pluggable IPAM
+* Add first reno-based release note
+* Change function call order in ovs_neutron_agent
+* Log end of router updates for PD and delete branches
+* Optimize get_bridge_for_tap_device
+* Use string formatting instead of string replace
+* Fix usage of mutable object as default value
+* test_db_base_plugin_v2: Skip a few tests on some platforms
+* Added postcommit hooks in ovsvapp mech_driver
+* Don't update metadata_proxy if metadata is not enabled
+* Better tolerate deleted OVS ports in OVS agent
+* Imported Translations from Zanata
+* Remove excessive fallback iptables ACCEPT rules
+* Updated from global requirements
+* Move retries out of ML2 plugin
+* Fix DVR downgrade exception / error code
+* Set security group provider rule for icmpv6 RA in DVR
+* Fix _restore_local_vlan_map race
+* ovs_neutron_agent: display loaded extensions
+* Deepcopy port dict in dhcp rpc handler
+* Properly handle segmentation_id in OVS agent
+* Fix l2pop regression
+* Set ip_nonlocal_bind in namespace if it exists
+* Remove SUPPORTED_AGENT_TYPES for l2pop
+* Fix AttributeError on port_bound for missing ports
+* Updated from global requirements
+* The exception type is wrong and makes the except block not work
+* Imported Translations from Zanata
+* Add -constraints sections for base CI jobs
+* Updated from global requirements
+* Kill conntrackd state on HA routers FIP disassociation
+* Handle empty bridge case in OVSBridge.get_ports_attributes
+* Fix the bug of "Spelling error of a word"
+* QoS SR-IOV: allow to reset vf rate when VF is assigend to VM
+* Fix rule generation for single and all host rules
+* Correct MAC representation to match iptables output
+* Fix inconsistency in DHCPv6 hosts and options generation
+* Always send status update for processed floating ips
+* L3 agent: use run_immediately parameter to sync after start
+* Change router unbinding logic to be consistent with data model
+* Fix iptables comments for bare jump rules
+* Switch to post-versioning
+
 7.0.0
 -----
 
