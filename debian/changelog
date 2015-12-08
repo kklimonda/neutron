@@ -1,6 +1,10 @@
-neutron (2:7.0.0-0ubuntu2) UNRELEASED; urgency=medium
+neutron (2:7.0.1-0ubuntu0.15.10.1) UNRELEASED; urgency=medium
 
+  [ Corey Bryant ]
   * d/tests/neutron-agents: Give daemon 5 seconds to start to prevent race.
+
+  [ James Page ]
+  * New upstream point release (LP: #xxxxxxx).
 
  -- Corey Bryant <corey.bryant@canonical.com>  Mon, 30 Nov 2015 13:19:04 -0500
 
