@@ -177,6 +177,23 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             l3_agent.L3NATAgent(HOSTNAME, self.conf)
             self.ensure_dir.assert_called_once_with('/etc/ha/')
 
+    def test_enqueue_state_change_router_not_found(self):
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        non_existent_router = 42
+
+        # Make sure the exceptional code path has coverage
+        agent.enqueue_state_change(non_existent_router, 'master')
+
+    def test_enqueue_state_change_metadata_disable(self):
+        self.conf.set_override('enable_metadata_proxy', False)
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        router = mock.Mock()
+        router_info = mock.MagicMock()
+        agent.router_info[router.id] = router_info
+        agent._update_metadata_proxy = mock.Mock()
+        agent.enqueue_state_change(router.id, 'master')
+        self.assertFalse(agent._update_metadata_proxy.call_count)
+
     def test_periodic_sync_routers_task_raise_exception(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         self.plugin_api.get_routers.side_effect = ValueError
@@ -184,14 +201,6 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
                           agent.periodic_sync_routers_task,
                           agent.context)
         self.assertTrue(agent.fullsync)
-
-    def test_l3_initial_full_sync_done(self):
-        with mock.patch.object(l3_agent.L3NATAgent,
-                               'periodic_sync_routers_task') as router_sync:
-            with mock.patch.object(eventlet, 'spawn_n'):
-                agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
-                agent.after_start()
-                router_sync.assert_called_once_with(agent.context)
 
     def test_l3_initial_report_state_done(self):
         with mock.patch.object(l3_agent.L3NATAgentWithStateReport,
@@ -1430,24 +1439,52 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
 
     def test_process_router_floatingip_nochange(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        router = l3_test_common.prepare_router_data(num_internal_ports=1)
+        fip1 = {'id': _uuid(), 'floating_ip_address': '8.8.8.8',
+                'fixed_ip_address': '7.7.7.7', 'status': 'ACTIVE',
+                'port_id': router[l3_constants.INTERFACE_KEY][0]['id']}
+        fip2 = copy.copy(fip1)
+        fip2.update({'id': _uuid(), 'status': 'DOWN',
+                     'floating_ip_address': '9.9.9.9'})
+        router[l3_constants.FLOATINGIP_KEY] = [fip1, fip2]
+
+        ri = legacy_router.LegacyRouter(router['id'], router,
+                                        **self.ri_kwargs)
+        ri.external_gateway_added = mock.Mock()
         with mock.patch.object(
             agent.plugin_rpc, 'update_floatingip_statuses'
-        ) as mock_update_fip_status:
-            router = l3_test_common.prepare_router_data(num_internal_ports=1)
-            fip1 = {'id': _uuid(), 'floating_ip_address': '8.8.8.8',
-                    'fixed_ip_address': '7.7.7.7', 'status': 'ACTIVE',
-                    'port_id': router[l3_constants.INTERFACE_KEY][0]['id']}
-            fip2 = copy.copy(fip1)
-            fip2.update({'id': _uuid(), 'status': 'DOWN'})
-            router[l3_constants.FLOATINGIP_KEY] = [fip1, fip2]
-
-            ri = legacy_router.LegacyRouter(router['id'], router,
-                                            **self.ri_kwargs)
-            ri.external_gateway_added = mock.Mock()
+        ) as mock_update_fip_status,\
+                mock.patch.object(ri, 'get_router_cidrs') as mock_get_cidrs:
+            mock_get_cidrs.return_value = set(
+                [fip1['floating_ip_address'] + '/32'])
             ri.process(agent)
-            # make sure only the one that went from DOWN->ACTIVE was sent
+            # make sure only the one that wasn't in existing cidrs was sent
             mock_update_fip_status.assert_called_once_with(
                 mock.ANY, ri.router_id, {fip2['id']: 'ACTIVE'})
+
+    def test_process_router_floatingip_status_update_if_processed(self):
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        router = l3_test_common.prepare_router_data(num_internal_ports=1)
+        fip1 = {'id': _uuid(), 'floating_ip_address': '8.8.8.8',
+                'fixed_ip_address': '7.7.7.7', 'status': 'ACTIVE',
+                'port_id': router[l3_constants.INTERFACE_KEY][0]['id']}
+        fip2 = copy.copy(fip1)
+        fip2.update({'id': _uuid(), 'status': 'DOWN', })
+        router[l3_constants.FLOATINGIP_KEY] = [fip1, fip2]
+
+        ri = legacy_router.LegacyRouter(router['id'], router,
+                                        **self.ri_kwargs)
+        ri.external_gateway_added = mock.Mock()
+        with mock.patch.object(
+            agent.plugin_rpc, 'update_floatingip_statuses'
+        ) as mock_update_fip_status,\
+                mock.patch.object(ri, 'get_router_cidrs') as mock_get_cidrs:
+            mock_get_cidrs.return_value = set()
+            ri.process(agent)
+            # make sure both was sent since not existed in existing cidrs
+            mock_update_fip_status.assert_called_once_with(
+                mock.ANY, ri.router_id, {fip1['id']: 'ACTIVE',
+                                         fip2['id']: 'ACTIVE'})
 
     def test_process_router_floatingip_disabled(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)

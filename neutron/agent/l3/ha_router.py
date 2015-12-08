@@ -186,13 +186,16 @@ class HaRouter(router.RouterInfo):
         self.routes = new_routes
 
     def _add_default_gw_virtual_route(self, ex_gw_port, interface_name):
-        default_gw_rts = []
         gateway_ips = self._get_external_gw_ips(ex_gw_port)
+        if not gateway_ips:
+            return
+
+        default_gw_rts = []
+        instance = self._get_keepalived_instance()
         for gw_ip in gateway_ips:
                 # TODO(Carl) This is repeated everywhere.  A method would
                 # be nice.
                 default_gw = n_consts.IP_ANY[netaddr.IPAddress(gw_ip).version]
-                instance = self._get_keepalived_instance()
                 default_gw_rts.append(keepalived.KeepalivedVirtualRoute(
                     default_gw, gw_ip, interface_name))
         instance.virtual_routes.gateway_routes = default_gw_rts
@@ -252,6 +255,8 @@ class HaRouter(router.RouterInfo):
 
     def remove_floating_ip(self, device, ip_cidr):
         self._remove_vip(ip_cidr)
+        if self.ha_state == 'master' and device.addr.list():
+            super(HaRouter, self).remove_floating_ip(device, ip_cidr)
 
     def internal_network_updated(self, interface_name, ip_cidrs):
         self._clear_vips(interface_name)
@@ -355,8 +360,15 @@ class HaRouter(router.RouterInfo):
     def external_gateway_removed(self, ex_gw_port, interface_name):
         self._clear_vips(interface_name)
 
-        super(HaRouter, self).external_gateway_removed(ex_gw_port,
-                                                       interface_name)
+        if self.ha_state == 'master':
+            super(HaRouter, self).external_gateway_removed(ex_gw_port,
+                                                           interface_name)
+        else:
+            # We are not the master node, so no need to delete ip addresses.
+            self.driver.unplug(interface_name,
+                               bridge=self.agent_conf.external_network_bridge,
+                               namespace=self.ns_name,
+                               prefix=router.EXTERNAL_DEV_PREFIX)
 
     def delete(self, agent):
         super(HaRouter, self).delete(agent)

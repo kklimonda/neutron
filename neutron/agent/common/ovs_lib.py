@@ -343,6 +343,8 @@ class OVSBridge(BaseOVS):
                              check_error=True, log_errors=True,
                              if_exists=False):
         port_names = ports or self.get_port_name_list()
+        if not port_names:
+            return []
         return (self.ovsdb.db_list(table, port_names, columns=columns,
                                    if_exists=if_exists).
                 execute(check_error=check_error, log_errors=log_errors))
@@ -434,7 +436,8 @@ class OVSBridge(BaseOVS):
 
     def get_vifs_by_ids(self, port_ids):
         interface_info = self.get_ports_attributes(
-            "Interface", columns=["name", "external_ids", "ofport"])
+            "Interface", columns=["name", "external_ids", "ofport"],
+            if_exists=True)
         by_id = {x['external_ids'].get('iface-id'): x for x in interface_info}
         result = {}
         for port_id in port_ids:
