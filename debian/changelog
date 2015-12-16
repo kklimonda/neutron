@@ -5,6 +5,11 @@ neutron (2:8.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
   * d/control: Align (build-)depends with upstream.
   * d/p/iproute2-compat.patch: Dropped. Fixed upstream.
   * d/p/drop-ryu-dep.patch: Rebased.
+  * Drop bigswitch plugin as it's moved out of tree:
+    - d/control: Drop neutron-plugin-bigswitch(-agent).
+    - d/neutron-plugin-bigswitch-agent.init.in: File removed.
+    - d/neutron-plugin-bigswitch.install: File removed.
+    - d/tests/bigswitch-plugin: File removed.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Wed, 16 Dec 2015 12:25:25 -0500
 
