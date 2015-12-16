@@ -3,6 +3,7 @@ neutron (2:8.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
   * d/tests/neutron-agents: Give daemon 5 seconds to start to prevent race.
   * New upstream milestone for OpenStack Mitaka.
   * d/control: Align (build-)depends with upstream.
+  * d/p/iproute2-compat.patch: Dropped. Fixed upstream.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Wed, 16 Dec 2015 12:25:25 -0500
 
