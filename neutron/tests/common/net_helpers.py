@@ -327,7 +327,7 @@ class NetcatTester(object):
             address=self.address)
         if self.protocol == self.UDP:
             # Create an ASSURED entry in conntrack table for UDP packets,
-            # that requires 3-way communcation
+            # that requires 3-way communication
             # 1st transmission creates UNREPLIED
             # 2nd transmission removes UNREPLIED
             # 3rd transmission creates ASSURED
@@ -419,13 +419,14 @@ class VethFixture(fixtures.Fixture):
     def destroy(self):
         for port in self.ports:
             ip_wrapper = ip_lib.IPWrapper(port.namespace)
-            try:
-                ip_wrapper.del_veth(port.name)
-                break
-            except RuntimeError:
-                # NOTE(cbrandily): It seems a veth is automagically deleted
-                # when a namespace owning a veth endpoint is deleted.
-                pass
+            if ip_wrapper.netns.exists(port.namespace):
+                try:
+                    ip_wrapper.del_veth(port.name)
+                    break
+                except RuntimeError:
+                    # NOTE(cbrandily): It seems a veth is automagically deleted
+                    # when a namespace owning a veth endpoint is deleted.
+                    pass
 
     @staticmethod
     def get_peer_name(name):

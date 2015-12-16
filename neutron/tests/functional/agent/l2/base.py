@@ -105,15 +105,14 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
             tunnel_types = [p_const.TYPE_VXLAN]
         else:
             tunnel_types = None
-        local_ip = '192.168.10.1'
-        bridge_mappings = {'physnet': self.br_int}
+        bridge_mappings = ['physnet:%s' % self.br_int]
+        self.config.set_override('tunnel_types', tunnel_types, "AGENT")
+        self.config.set_override('polling_interval', 1, "AGENT")
+        self.config.set_override('prevent_arp_spoofing', False, "AGENT")
+        self.config.set_override('local_ip', '192.168.10.1', "OVS")
+        self.config.set_override('bridge_mappings', bridge_mappings, "OVS")
         agent = ovs_agent.OVSNeutronAgent(self._bridge_classes(),
-                                          self.br_int, self.br_tun,
-                                          local_ip, bridge_mappings,
-                                          polling_interval=1,
-                                          tunnel_types=tunnel_types,
-                                          prevent_arp_spoofing=False,
-                                          conf=self.config)
+                                          self.config)
         self.addCleanup(self.ovs.delete_bridge, self.br_int)
         if tunnel_types:
             self.addCleanup(self.ovs.delete_bridge, self.br_tun)
@@ -210,9 +209,10 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
 
     def _expected_plugin_rpc_call(self, call, expected_devices, is_up=True):
         """Helper to check expected rpc call are received
+
         :param call: The call to check
-        :param expected_devices The device for which call is expected
-        :param is_up True if expected_devices are devices that are set up,
+        :param expected_devices: The device for which call is expected
+        :param is_up: True if expected_devices are devices that are set up,
                False if expected_devices are devices that are set down
         """
         if is_up:

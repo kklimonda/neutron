@@ -43,7 +43,7 @@ HOST_5 = HOST + '_5'
 
 
 NOTIFIER = 'neutron.plugins.ml2.rpc.AgentNotifierApi'
-DEVICE_OWNER_COMPUTE = 'compute:None'
+DEVICE_OWNER_COMPUTE = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
 
 
 class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
@@ -808,7 +808,7 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
 
     def test_get_tunnels(self):
         tunnels = self._test_get_tunnels('20.0.0.1')
-        self.assertTrue('20.0.0.1' in tunnels)
+        self.assertIn('20.0.0.1', tunnels)
 
     def test_get_tunnels_no_ip(self):
         tunnels = self._test_get_tunnels(None)
@@ -887,7 +887,7 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
 
     def test_update_port_precommit_mac_address_changed_raises(self):
         port = {'status': u'ACTIVE',
-                'device_owner': u'compute:None',
+                'device_owner': DEVICE_OWNER_COMPUTE,
                 'mac_address': u'12:34:56:78:4b:0e',
                 'id': u'1'}
 

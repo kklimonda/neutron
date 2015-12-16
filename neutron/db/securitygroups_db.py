@@ -43,7 +43,8 @@ IP_PROTOCOL_MAP = {constants.PROTO_NAME_TCP: constants.PROTO_NUM_TCP,
                    constants.PROTO_NAME_ICMP_V6: constants.PROTO_NUM_ICMP_V6}
 
 
-class SecurityGroup(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
+class SecurityGroup(model_base.HasStandardAttributes, model_base.BASEV2,
+                    models_v2.HasId, models_v2.HasTenant):
     """Represents a v2 neutron security group."""
 
     name = sa.Column(sa.String(255))
@@ -84,8 +85,8 @@ class SecurityGroupPortBinding(model_base.BASEV2):
                             lazy='joined', cascade='delete'))
 
 
-class SecurityGroupRule(model_base.BASEV2, models_v2.HasId,
-                        models_v2.HasTenant):
+class SecurityGroupRule(model_base.HasStandardAttributes, model_base.BASEV2,
+                        models_v2.HasId, models_v2.HasTenant):
     """Represents a v2 neutron security group rule."""
 
     security_group_id = sa.Column(sa.String(36),
@@ -636,7 +637,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
             **kwargs)
 
     def _extend_port_dict_security_group(self, port_res, port_db):
-        # Security group bindings will be retrieved from the sqlalchemy
+        # Security group bindings will be retrieved from the SQLAlchemy
         # model. As they're loaded eagerly with ports because of the
         # joined load they will not cause an extra query.
         security_group_ids = [sec_group_mapping['security_group_id'] for

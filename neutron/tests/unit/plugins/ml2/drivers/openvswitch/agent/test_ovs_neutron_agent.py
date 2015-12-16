@@ -50,6 +50,8 @@ TEST_PORT_ID3 = 'port-id-3'
 TEST_NETWORK_ID1 = 'net-id-1'
 TEST_NETWORK_ID2 = 'net-id-2'
 
+DEVICE_OWNER_COMPUTE = n_const.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
+
 
 class FakeVif(object):
     ofport = 99
@@ -65,50 +67,37 @@ class MockFixedIntervalLoopingCall(object):
         self.f()
 
 
-class CreateAgentConfigMap(ovs_test_base.OVSAgentConfigTestBase):
+class ValidateTunnelTypes(ovs_test_base.OVSAgentConfigTestBase):
 
-    def test_create_agent_config_map_succeeds(self):
-        self.assertTrue(self.mod_agent.create_agent_config_map(cfg.CONF))
+    def test_validate_tunnel_types_succeeds(self):
+        cfg.CONF.set_override('local_ip', '10.10.10.10', group='OVS')
+        cfg.CONF.set_override('tunnel_types', [p_const.TYPE_GRE],
+                              group='AGENT')
+        # ValueError will not raise
+        self.mod_agent.validate_tunnel_types(cfg.CONF.AGENT.tunnel_types,
+                                             cfg.CONF.OVS.local_ip)
 
-    def test_create_agent_config_map_fails_for_invalid_tunnel_config(self):
+    def test_validate_tunnel_types_fails_for_invalid_tunnel_config(self):
         # An ip address is required for tunneling but there is no default,
         # verify this for both gre and vxlan tunnels.
+        cfg.CONF.set_override('local_ip', None, group='OVS')
         cfg.CONF.set_override('tunnel_types', [p_const.TYPE_GRE],
                               group='AGENT')
         with testtools.ExpectedException(ValueError):
-            self.mod_agent.create_agent_config_map(cfg.CONF)
+            self.mod_agent.validate_tunnel_types(cfg.CONF.AGENT.tunnel_types,
+                                                 cfg.CONF.OVS.local_ip)
         cfg.CONF.set_override('tunnel_types', [p_const.TYPE_VXLAN],
                               group='AGENT')
         with testtools.ExpectedException(ValueError):
-            self.mod_agent.create_agent_config_map(cfg.CONF)
+            self.mod_agent.validate_tunnel_types(cfg.CONF.AGENT.tunnel_types,
+                                                 cfg.CONF.OVS.local_ip)
 
-    def test_create_agent_config_map_fails_no_local_ip(self):
-        # An ip address is required for tunneling but there is no default
-        cfg.CONF.set_override('tunnel_types', [p_const.TYPE_VXLAN],
-                              group='AGENT')
-        with testtools.ExpectedException(ValueError):
-            self.mod_agent.create_agent_config_map(cfg.CONF)
-
-    def test_create_agent_config_map_fails_for_invalid_tunnel_type(self):
+    def test_validate_tunnel_types_fails_for_invalid_tunnel_type(self):
+        cfg.CONF.set_override('local_ip', '10.10.10.10', group='OVS')
         cfg.CONF.set_override('tunnel_types', ['foobar'], group='AGENT')
         with testtools.ExpectedException(ValueError):
-            self.mod_agent.create_agent_config_map(cfg.CONF)
-
-    def test_create_agent_config_map_multiple_tunnel_types(self):
-        cfg.CONF.set_override('local_ip', '10.10.10.10', group='OVS')
-        cfg.CONF.set_override('tunnel_types', [p_const.TYPE_GRE,
-                              p_const.TYPE_VXLAN], group='AGENT')
-        cfgmap = self.mod_agent.create_agent_config_map(cfg.CONF)
-        self.assertEqual(cfgmap['tunnel_types'],
-                         [p_const.TYPE_GRE, p_const.TYPE_VXLAN])
-
-    def test_create_agent_config_map_enable_distributed_routing(self):
-        self.addCleanup(cfg.CONF.reset)
-        # Verify setting only enable_tunneling will default tunnel_type to GRE
-        cfg.CONF.set_override('enable_distributed_routing', True,
-                              group='AGENT')
-        cfgmap = self.mod_agent.create_agent_config_map(cfg.CONF)
-        self.assertEqual(cfgmap['enable_distributed_routing'], True)
+            self.mod_agent.validate_tunnel_types(cfg.CONF.AGENT.tunnel_types,
+                                                 cfg.CONF.OVS.local_ip)
 
 
 class TestOvsNeutronAgent(object):
@@ -124,11 +113,13 @@ class TestOvsNeutronAgent(object):
                              group='SECURITYGROUP')
         cfg.CONF.set_default('quitting_rpc_timeout', 10, 'AGENT')
         cfg.CONF.set_default('prevent_arp_spoofing', False, 'AGENT')
-        kwargs = self.mod_agent.create_agent_config_map(cfg.CONF)
         mock.patch(
             'neutron.agent.common.ovs_lib.OVSBridge.get_ports_attributes',
             return_value=[]).start()
 
+        mock.patch('neutron.agent.common.ovs_lib.BaseOVS.config',
+                   new_callable=mock.PropertyMock,
+                   return_value={}).start()
         with mock.patch.object(self.mod_agent.OVSNeutronAgent,
                                'setup_integration_br'),\
                 mock.patch.object(self.mod_agent.OVSNeutronAgent,
@@ -144,10 +135,7 @@ class TestOvsNeutronAgent(object):
                     'neutron.agent.common.ovs_lib.OVSBridge.' 'get_vif_ports',
                     return_value=[]):
             self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
-                                                        **kwargs)
-            # set back to true because initial report state will succeed due
-            # to mocked out RPC calls
-            self.agent.use_call = True
+                                                        cfg.CONF)
             self.agent.tun_br = self.br_tun_cls(br_name='br-tun')
         self.agent.sg_agent = mock.Mock()
 
@@ -165,16 +153,19 @@ class TestOvsNeutronAgent(object):
         with mock.patch.object(self.agent, 'int_br', autospec=True) as int_br:
             int_br.db_get_val.return_value = db_get_val
             int_br.set_db_attribute.return_value = True
-            self.agent.port_bound(port, net_uuid, 'local', None, None,
-                                  fixed_ips, "compute:None", False)
+            needs_binding = self.agent.port_bound(
+                port, net_uuid, 'local', None, None,
+                fixed_ips, DEVICE_OWNER_COMPUTE, False)
         if db_get_val is None:
             self.assertEqual(0, int_br.set_db_attribute.call_count)
+            self.assertFalse(needs_binding)
         else:
             vlan_mapping = {'net_uuid': net_uuid,
                             'network_type': 'local',
                             'physical_network': None}
             int_br.set_db_attribute.assert_called_once_with(
                 "Port", mock.ANY, "other_config", vlan_mapping)
+            self.assertTrue(needs_binding)
 
     def test_datapath_type_system(self):
         # verify kernel datapath is default
@@ -196,15 +187,17 @@ class TestOvsNeutronAgent(object):
                        new=MockFixedIntervalLoopingCall), \
             mock.patch(
                 'neutron.agent.common.ovs_lib.OVSBridge.' 'get_vif_ports',
-                return_value=[]):
+                return_value=[]), \
+            mock.patch('neutron.agent.common.ovs_lib.BaseOVS.config',
+                       new_callable=mock.PropertyMock,
+                       return_value={'datapath_types': ['netdev']}):
             # validate setting non default datapath
             expected = constants.OVS_DATAPATH_NETDEV
             cfg.CONF.set_override('datapath_type',
                                   expected,
                                   group='OVS')
-            kwargs = self.mod_agent.create_agent_config_map(cfg.CONF)
             self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
-                **kwargs)
+                                                        cfg.CONF)
             self.assertEqual(expected, self.agent.int_br.datapath_type)
 
     def test_agent_type_ovs(self):
@@ -233,9 +226,8 @@ class TestOvsNeutronAgent(object):
             cfg.CONF.set_override('agent_type',
                                   expected,
                                   group='AGENT')
-            kwargs = self.mod_agent.create_agent_config_map(cfg.CONF)
             self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
-                **kwargs)
+                                                        cfg.CONF)
             self.assertEqual(expected,
                              self.agent.agent_state['agent_type'])
 
@@ -599,7 +591,7 @@ class TestOvsNeutronAgent(object):
                              'network_type': 'baz',
                              'fixed_ips': [{'subnet_id': 'my-subnet-uuid',
                                             'ip_address': '1.1.1.1'}],
-                             'device_owner': 'compute:None',
+                             'device_owner': DEVICE_OWNER_COMPUTE,
                              'port_security_enabled': True
                              }
 
@@ -737,14 +729,13 @@ class TestOvsNeutronAgent(object):
             report_st.assert_called_with(self.agent.context,
                                          self.agent.agent_state, True)
             self.assertNotIn("start_flag", self.agent.agent_state)
-            self.assertFalse(self.agent.use_call)
             self.assertEqual(
                 self.agent.agent_state["configurations"]["devices"],
                 self.agent.int_br_device_count
             )
             self.agent._report_state()
             report_st.assert_called_with(self.agent.context,
-                                         self.agent.agent_state, False)
+                                         self.agent.agent_state, True)
 
     def test_report_state_fail(self):
         with mock.patch.object(self.agent.state_rpc,
@@ -756,6 +747,13 @@ class TestOvsNeutronAgent(object):
             self.agent._report_state()
             report_st.assert_called_with(self.agent.context,
                                          self.agent.agent_state, True)
+
+    def test_report_state_revived(self):
+        with mock.patch.object(self.agent.state_rpc,
+                               "report_state") as report_st:
+            report_st.return_value = n_const.AGENT_REVIVED
+            self.agent._report_state()
+            self.assertTrue(self.agent.fullsync)
 
     def test_port_update(self):
         port = {"id": TEST_PORT_ID1,
@@ -845,7 +843,7 @@ class TestOvsNeutronAgent(object):
             self.assertFalse(int_br.drop_port.called)
 
     def test_setup_physical_bridges(self):
-        with mock.patch.object(ip_lib, "device_exists") as devex_fn,\
+        with mock.patch.object(ip_lib.IPDevice, "exists") as devex_fn,\
                 mock.patch.object(sys, "exit"),\
                 mock.patch.object(utils, "execute"),\
                 mock.patch.object(self.agent, 'br_phys_cls') as phys_br_cls,\
@@ -889,7 +887,7 @@ class TestOvsNeutronAgent(object):
 
     def test_setup_physical_bridges_using_veth_interconnection(self):
         self.agent.use_veth_interconnection = True
-        with mock.patch.object(ip_lib, "device_exists") as devex_fn,\
+        with mock.patch.object(ip_lib.IPDevice, "exists") as devex_fn,\
                 mock.patch.object(sys, "exit"),\
                 mock.patch.object(utils, "execute") as utilsexec_fn,\
                 mock.patch.object(self.agent, 'br_phys_cls') as phys_br_cls,\
@@ -963,17 +961,6 @@ class TestOvsNeutronAgent(object):
                              "int_ofport")
             self.assertEqual(self.agent.phys_ofports["physnet1"],
                              "phy_ofport")
-
-    def test_get_peer_name(self):
-        bridge1 = "A_REALLY_LONG_BRIDGE_NAME1"
-        bridge2 = "A_REALLY_LONG_BRIDGE_NAME2"
-        self.agent.use_veth_interconnection = True
-        self.assertEqual(len(self.agent.get_peer_name('int-', bridge1)),
-                         n_const.DEVICE_NAME_MAX_LEN)
-        self.assertEqual(len(self.agent.get_peer_name('int-', bridge2)),
-                         n_const.DEVICE_NAME_MAX_LEN)
-        self.assertNotEqual(self.agent.get_peer_name('int-', bridge1),
-                            self.agent.get_peer_name('int-', bridge2))
 
     def test_setup_tunnel_br(self):
         self.tun_br = mock.Mock()
@@ -1464,7 +1451,8 @@ class TestOvsNeutronAgent(object):
     def test_arp_spoofing_network_port(self):
         int_br = mock.create_autospec(self.agent.int_br)
         self.agent.setup_arp_spoofing_protection(
-            int_br, FakeVif(), {'device_owner': 'network:router_interface'})
+            int_br, FakeVif(),
+            {'device_owner': n_const.DEVICE_OWNER_ROUTER_INTF})
         self.assertTrue(int_br.delete_arp_spoofing_protection.called)
         self.assertFalse(int_br.install_arp_spoofing_protection.called)
 
@@ -1664,7 +1652,9 @@ class AncillaryBridgesTest(object):
                              'neutron.agent.firewall.NoopFirewallDriver',
                              group='SECURITYGROUP')
         cfg.CONF.set_override('report_interval', 0, 'AGENT')
-        self.kwargs = self.mod_agent.create_agent_config_map(cfg.CONF)
+        mock.patch('neutron.agent.common.ovs_lib.BaseOVS.config',
+                   new_callable=mock.PropertyMock,
+                   return_value={}).start()
 
     def _test_ancillary_bridges(self, bridges, ancillary):
         device_ids = ancillary[:]
@@ -1695,7 +1685,7 @@ class AncillaryBridgesTest(object):
                     'neutron.agent.common.ovs_lib.OVSBridge.' 'get_vif_ports',
                     return_value=[]):
             self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
-                                                        **self.kwargs)
+                                                        cfg.CONF)
             self.assertEqual(len(ancillary), len(self.agent.ancillary_brs))
             if ancillary:
                 bridges = [br.br_name for br in self.agent.ancillary_brs]
@@ -1732,7 +1722,7 @@ class AncillaryBridgesTest(object):
                            'get_vif_port_set',
                            return_value=vif_port_set):
             self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
-                                                        **self.kwargs)
+                                                        cfg.CONF)
             return self.agent.scan_ancillary_ports(registered_ports, sync)
 
     def test_scan_ancillary_ports_returns_cur_only_for_unchanged_ports(self):
@@ -1780,8 +1770,10 @@ class TestOvsDvrNeutronAgent(object):
         cfg.CONF.set_default('firewall_driver',
                              'neutron.agent.firewall.NoopFirewallDriver',
                              group='SECURITYGROUP')
-        kwargs = self.mod_agent.create_agent_config_map(cfg.CONF)
 
+        mock.patch('neutron.agent.common.ovs_lib.BaseOVS.config',
+                   new_callable=mock.PropertyMock,
+                   return_value={}).start()
         with mock.patch.object(self.mod_agent.OVSNeutronAgent,
                                'setup_integration_br'),\
                 mock.patch.object(self.mod_agent.OVSNeutronAgent,
@@ -1802,10 +1794,7 @@ class TestOvsDvrNeutronAgent(object):
                     'neutron.agent.common.ovs_lib.OVSBridge.' 'get_vif_ports',
                     return_value=[]):
             self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
-                                                        **kwargs)
-            # set back to true because initial report state will succeed due
-            # to mocked out RPC calls
-            self.agent.use_call = True
+                                                        cfg.CONF)
             self.agent.tun_br = self.br_tun_cls(br_name='br-tun')
         self.agent.sg_agent = mock.Mock()
 
@@ -2051,13 +2040,13 @@ class TestOvsDvrNeutronAgent(object):
 
     def test_port_bound_for_dvr_with_compute_ports(self):
         self._test_port_bound_for_dvr_on_vlan_network(
-            device_owner="compute:None")
+            device_owner=DEVICE_OWNER_COMPUTE)
         self._test_port_bound_for_dvr_on_vlan_network(
-            device_owner="compute:None", ip_version=6)
+            device_owner=DEVICE_OWNER_COMPUTE, ip_version=6)
         self._test_port_bound_for_dvr_on_vxlan_network(
-            device_owner="compute:None")
+            device_owner=DEVICE_OWNER_COMPUTE)
         self._test_port_bound_for_dvr_on_vxlan_network(
-            device_owner="compute:None", ip_version=6)
+            device_owner=DEVICE_OWNER_COMPUTE, ip_version=6)
 
     def test_port_bound_for_dvr_with_lbaas_vip_ports(self):
         self._test_port_bound_for_dvr_on_vlan_network(
@@ -2345,9 +2334,9 @@ class TestOvsDvrNeutronAgent(object):
 
     def test_treat_devices_removed_for_dvr_with_compute_ports(self):
         self._test_treat_devices_removed_for_dvr(
-            device_owner="compute:None")
+            device_owner=DEVICE_OWNER_COMPUTE)
         self._test_treat_devices_removed_for_dvr(
-            device_owner="compute:None", ip_version=6)
+            device_owner=DEVICE_OWNER_COMPUTE, ip_version=6)
 
     def test_treat_devices_removed_for_dvr_with_lbaas_vip_ports(self):
         self._test_treat_devices_removed_for_dvr(

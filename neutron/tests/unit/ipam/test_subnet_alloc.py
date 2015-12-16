@@ -45,7 +45,7 @@ class TestSubnetAllocation(testlib_api.SqlTestCase):
                             max_prefixlen=attributes.ATTR_NOT_SPECIFIED,
                             default_prefixlen=attributes.ATTR_NOT_SPECIFIED,
                             default_quota=attributes.ATTR_NOT_SPECIFIED,
-                            shared=False):
+                            shared=False, is_default=False):
         subnetpool = {'subnetpool': {'name': name,
                                      'tenant_id': self._tenant_id,
                                      'prefixes': prefix_list,
@@ -53,6 +53,7 @@ class TestSubnetAllocation(testlib_api.SqlTestCase):
                                      'max_prefixlen': max_prefixlen,
                                      'default_prefixlen': default_prefixlen,
                                      'shared': shared,
+                                     'is_default': is_default,
                                      'default_quota': default_quota}}
         return plugin.create_subnetpool(ctx, subnetpool)
 

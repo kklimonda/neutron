@@ -69,7 +69,7 @@ config.cfg.CONF.import_opt('network_vlan_ranges',
 
 PLUGIN_NAME = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 
-DEVICE_OWNER_COMPUTE = 'compute:None'
+DEVICE_OWNER_COMPUTE = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
 HOST = 'fake_host'
 
 
@@ -319,7 +319,9 @@ class TestMl2NetworksV2(test_plugin.TestNetworksV2,
         ) as f:
             data = {'network': {'tenant_id': 'sometenant', 'name': 'dummy',
                                 'admin_state_up': True, 'shared': False}}
-            self.new_create_request('networks', data).get_response(self.api)
+            req = self.new_create_request('networks', data)
+            res = req.get_response(self.api)
+            self.assertEqual(500, res.status_int)
             self.assertEqual(db_api.MAX_RETRIES + 1, f.call_count)
 
 
@@ -641,7 +643,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
             self.assertTrue(notify.call_counts)
 
     def test_check_if_compute_port_serviced_by_dvr(self):
-        self.assertTrue(utils.is_dvr_serviced('compute:None'))
+        self.assertTrue(utils.is_dvr_serviced(DEVICE_OWNER_COMPUTE))
 
     def test_check_if_lbaas_vip_port_serviced_by_dvr(self):
         self.assertTrue(utils.is_dvr_serviced(
@@ -793,10 +795,10 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
                                                         port['port']['id'])
 
     def test_delete_last_vm_port(self):
-        self._test_delete_dvr_serviced_port(device_owner='compute:None')
+        self._test_delete_dvr_serviced_port(device_owner=DEVICE_OWNER_COMPUTE)
 
     def test_delete_last_vm_port_with_floatingip(self):
-        self._test_delete_dvr_serviced_port(device_owner='compute:None',
+        self._test_delete_dvr_serviced_port(device_owner=DEVICE_OWNER_COMPUTE,
                                             floating_ip=True)
 
     def test_delete_lbaas_vip_port(self):
@@ -1599,7 +1601,7 @@ class TestFaultyMechansimDriver(Ml2PluginV2FaultyDriverTestCase):
                             network['network']['tenant_id'],
                             'name': 'port1',
                             'device_owner':
-                            'network:router_interface_distributed',
+                            constants.DEVICE_OWNER_DVR_INTERFACE,
                             'admin_state_up': 1,
                             'fixed_ips':
                             [{'subnet_id': subnet_id}]}}
@@ -1665,6 +1667,7 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
         plugin._get_host_port_if_changed = mock.Mock(
             return_value=new_host_port)
         plugin._check_mac_update_allowed = mock.Mock(return_value=True)
+        plugin._extend_availability_zone = mock.Mock()
 
         self.notify.side_effect = (
             lambda r, e, t, **kwargs: self._ensure_transaction_is_closed())
@@ -1755,7 +1758,7 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
             admin_state_up=True,
             status='ACTIVE',
             device_id='vm_id',
-            device_owner='compute:None')
+            device_owner=DEVICE_OWNER_COMPUTE)
 
         binding = mock.Mock()
         binding.port_id = port_id

@@ -27,15 +27,14 @@ import oslo_messaging
 from oslo_utils import uuidutils
 import six
 
-from neutron.agent.common import utils as common_utils
+from neutron.agent.common import utils as agent_common_utils
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
-from neutron.agent.linux import utils
 from neutron.common import constants
 from neutron.common import exceptions
 from neutron.common import ipv6_utils
-from neutron.common import utils as commonutils
+from neutron.common import utils as common_utils
 from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.i18n import _LI, _LW, _LE
 
@@ -97,14 +96,17 @@ class DictModel(dict):
     def __delattr__(self, name):
         del self[name]
 
+    def __str__(self):
+        pairs = ['%s=%s' % (k, v) for k, v in self.items()]
+        return ', '.join(sorted(pairs))
+
 
 class NetModel(DictModel):
 
-    def __init__(self, use_namespaces, d):
+    def __init__(self, d):
         super(NetModel, self).__init__(d)
 
-        self._ns_name = (use_namespaces and
-                         "%s%s" % (NS_PREFIX, self.id) or None)
+        self._ns_name = "%s%s" % (NS_PREFIX, self.id)
 
     @property
     def namespace(self):
@@ -175,7 +177,7 @@ class DhcpLocalProcess(DhcpBase):
                                                version, plugin)
         self.confs_dir = self.get_confs_dir(conf)
         self.network_conf_dir = os.path.join(self.confs_dir, network.id)
-        commonutils.ensure_dir(self.network_conf_dir)
+        common_utils.ensure_dir(self.network_conf_dir)
 
     @staticmethod
     def get_confs_dir(conf):
@@ -200,7 +202,7 @@ class DhcpLocalProcess(DhcpBase):
         if self.active:
             self.restart()
         elif self._enable_dhcp():
-            commonutils.ensure_dir(self.network_conf_dir)
+            common_utils.ensure_dir(self.network_conf_dir)
             interface_name = self.device_manager.setup(self.network)
             self.interface_name = interface_name
             self.spawn_process()
@@ -229,13 +231,12 @@ class DhcpLocalProcess(DhcpBase):
             LOG.warning(_LW('Failed trying to delete interface: %s'),
                         self.interface_name)
 
-        if self.conf.dhcp_delete_namespaces and self.network.namespace:
-            ns_ip = ip_lib.IPWrapper(namespace=self.network.namespace)
-            try:
-                ns_ip.netns.delete(self.network.namespace)
-            except RuntimeError:
-                LOG.warning(_LW('Failed trying to delete namespace: %s'),
-                            self.network.namespace)
+        ns_ip = ip_lib.IPWrapper(namespace=self.network.namespace)
+        try:
+            ns_ip.netns.delete(self.network.namespace)
+        except RuntimeError:
+            LOG.warning(_LW('Failed trying to delete namespace: %s'),
+                        self.network.namespace)
 
     def _get_value_from_conf_file(self, kind, converter=None):
         """A helper function to read a value from one of the state files."""
@@ -261,7 +262,7 @@ class DhcpLocalProcess(DhcpBase):
     @interface_name.setter
     def interface_name(self, value):
         interface_file_path = self.get_conf_file_name('interface')
-        utils.replace_file(interface_file_path, value)
+        common_utils.replace_file(interface_file_path, value)
 
     @property
     def active(self):
@@ -578,7 +579,7 @@ class Dnsmasq(DhcpLocalProcess):
             # Even with an infinite lease, a client may choose to renew a
             # previous lease on reboot or interface bounce so we should have
             # an entry for it.
-            # Dnsmasq timestamp format for an infinite lease is  is 0.
+            # Dnsmasq timestamp format for an infinite lease is 0.
             timestamp = 0
         else:
             timestamp = int(time.time()) + self.conf.dhcp_lease_duration
@@ -597,7 +598,7 @@ class Dnsmasq(DhcpLocalProcess):
             buf.write('%s %s %s * *\n' %
                       (timestamp, port.mac_address, ip_address))
         contents = buf.getvalue()
-        utils.replace_file(filename, contents)
+        common_utils.replace_file(filename, contents)
         LOG.debug('Done building initial lease file %s with contents:\n%s',
                   filename, contents)
         return filename
@@ -667,7 +668,7 @@ class Dnsmasq(DhcpLocalProcess):
                 buf.write('%s,%s,%s\n' %
                           (port.mac_address, name, ip_address))
 
-        utils.replace_file(filename, buf.getvalue())
+        common_utils.replace_file(filename, buf.getvalue())
         LOG.debug('Done building host file %s with contents:\n%s', filename,
                   buf.getvalue())
         return filename
@@ -738,7 +739,7 @@ class Dnsmasq(DhcpLocalProcess):
             if alloc:
                 buf.write('%s\t%s %s\n' % (alloc.ip_address, fqdn, hostname))
         addn_hosts = self.get_conf_file_name('addn_hosts')
-        utils.replace_file(addn_hosts, buf.getvalue())
+        common_utils.replace_file(addn_hosts, buf.getvalue())
         return addn_hosts
 
     def _output_opts_file(self):
@@ -747,7 +748,7 @@ class Dnsmasq(DhcpLocalProcess):
         options += self._generate_opts_per_port(subnet_index_map)
 
         name = self.get_conf_file_name('opts')
-        utils.replace_file(name, '\n'.join(options))
+        common_utils.replace_file(name, '\n'.join(options))
         return name
 
     def _generate_opts_per_subnet(self):
@@ -968,7 +969,7 @@ class Dnsmasq(DhcpLocalProcess):
                    for s in network.subnets):
                 return True
 
-        if not conf.use_namespaces or not conf.enable_isolated_metadata:
+        if not conf.enable_isolated_metadata:
             return False
 
         isolated_subnets = cls.get_isolated_subnets(network)
@@ -980,7 +981,7 @@ class DeviceManager(object):
     def __init__(self, conf, plugin):
         self.conf = conf
         self.plugin = plugin
-        self.driver = common_utils.load_interface_driver(conf)
+        self.driver = agent_common_utils.load_interface_driver(conf)
 
     def get_interface_name(self, network, port):
         """Return interface(device) name for use by the DHCP process."""
@@ -990,7 +991,8 @@ class DeviceManager(object):
         """Return a unique DHCP device ID for this host on the network."""
         # There could be more than one dhcp server per network, so create
         # a device id that combines host and network ids
-        return commonutils.get_dhcp_agent_device_id(network.id, self.conf.host)
+        return common_utils.get_dhcp_agent_device_id(network.id,
+                                                     self.conf.host)
 
     def _set_default_route(self, network, device_name):
         """Sets the default gateway for this dhcp namespace.
@@ -1218,34 +1220,25 @@ class DeviceManager(object):
                     net = netaddr.IPNetwork(subnet.cidr)
                     ip_cidrs.append('%s/%s' % (gateway, net.prefixlen))
 
-        if (self.conf.enable_isolated_metadata and
-            self.conf.use_namespaces):
+        if self.conf.enable_isolated_metadata:
             ip_cidrs.append(METADATA_DEFAULT_CIDR)
 
         self.driver.init_l3(interface_name, ip_cidrs,
                             namespace=network.namespace)
 
-        # ensure that the dhcp interface is first in the list
-        if network.namespace is None:
-            device = ip_lib.IPDevice(interface_name)
-            device.route.pullup_route(interface_name,
-                                      ip_version=constants.IP_VERSION_4)
-
-        if self.conf.use_namespaces:
-            self._set_default_route(network, interface_name)
-            try:
-                self._cleanup_stale_devices(network, port)
-            except Exception:
-                # catch everything as we don't want to fail because of
-                # cleanup step
-                LOG.error(_LE("Exception during stale dhcp device cleanup"))
+        self._set_default_route(network, interface_name)
+        try:
+            self._cleanup_stale_devices(network, port)
+        except Exception:
+            # catch everything as we don't want to fail because of
+            # cleanup step
+            LOG.error(_LE("Exception during stale dhcp device cleanup"))
 
         return interface_name
 
     def update(self, network, device_name):
         """Update device settings for the network's DHCP on this host."""
-        if self.conf.use_namespaces:
-            self._set_default_route(network, device_name)
+        self._set_default_route(network, device_name)
 
     def destroy(self, network, device_name):
         """Destroy the device used for the network's DHCP on this host."""
