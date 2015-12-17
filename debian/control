@@ -367,43 +367,6 @@ Description: Neutron is a virtual network service for Openstack - IBM agent
  .
  This package provides the Mellanox SR-IOV agent.
 
-Package: neutron-plugin-oneconvergence
-Architecture: all
-Provides: neutron-plugin,
-Depends: neutron-common (= ${source:Version}),
-         ${misc:Depends},
-         ${python:Depends},
-         ${shlibs:Depends},
-Description: Neutron is a virtual network service for Openstack - One Convergence plugin
- Neutron is a virtual network service for Openstack, and a part of
- Netstack. Just like OpenStack Nova provides an API to dynamically
- request and configure virtual servers, Neutron provides an API to
- dynamically request and configure virtual networks. These networks
- connect "interfaces" from other OpenStack services (e.g., virtual NICs
- from Nova VMs). The Neutron API supports extensions to provide
- advanced network capabilities (e.g., QoS, ACLs, network monitoring,
- etc.)
- .
- This package provides the One Convergence plugin.
-
-Package: neutron-plugin-oneconvergence-agent
-Architecture: all
-Depends: neutron-plugin-oneconvergence (= ${source:Version}),
-         ${misc:Depends},
-         ${python:Depends},
-         ${shlibs:Depends},
-Description: Neutron is a virtual network service for Openstack - One Convergence agent
- Neutron is a virtual network service for Openstack, and a part of
- Netstack. Just like OpenStack Nova provides an API to dynamically
- request and configure virtual servers, Neutron provides an API to
- dynamically request and configure virtual networks. These networks
- connect "interfaces" from other OpenStack services (e.g., virtual NICs
- from Nova VMs). The Neutron API supports extensions to provide
- advanced network capabilities (e.g., QoS, ACLs, network monitoring,
- etc.)
- .
- This package provides the One Convergence agent.
-
 Package: neutron-plugin-nuage
 Architecture: all
 Provides: neutron-plugin,
