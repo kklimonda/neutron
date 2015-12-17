@@ -10,6 +10,9 @@ neutron (2:8.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
     - d/neutron-plugin-bigswitch-agent.init.in: File removed.
     - d/neutron-plugin-bigswitch.install: File removed.
     - d/tests/bigswitch-plugin: File removed.
+  * Drop OVSvApp agent binary as driver has moved out of tree.
+    - d/neutron-plugin-openvswitch-agent.install: Don't install
+      usr/bin/neutron-ovsvapp-agent.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Wed, 16 Dec 2015 12:25:25 -0500
 
