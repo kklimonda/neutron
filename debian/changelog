@@ -17,6 +17,10 @@ neutron (2:8.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
     - d/control: Drop neutron-plugin-midonet binary package.
     - d/neutron-plugin-midonet.install: File removed.
     - d/tests/midonet-plugin: File removed.
+  * Drop Mellanox ML2 mechanism driver as it has moved out of tree:
+    - d/control: Drop neutron-plugin-mlnx(-agent) binary packages.
+    - d/neutron-plugin-mlnx-agent.init.in: File removed.
+    - d/neutron-plugin-mlnx(-agent).install: Files removed.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Wed, 16 Dec 2015 12:25:25 -0500
 

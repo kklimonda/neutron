@@ -329,47 +329,6 @@ Description: Neutron is a virtual network service for Openstack - linuxbridge pl
  .
  This package provides the linuxbridge plugin agent.
 
-Package: neutron-plugin-mlnx
-Architecture: all
-Provides: neutron-plugin,
-Depends: neutron-common (= ${source:Version}),
-         ${misc:Depends},
-         ${python:Depends},
-         ${shlibs:Depends},
-Breaks: neutron-plugin-mlnx-agent ( << 1:2014.1~b3-0ubuntu2~ ),
-Replaces: neutron-plugin-mlnx-agent ( << 1:2014.1~b3-0ubuntu2~ ),
-Description: Neutron is a virtual network service for Openstack - Mellanox plugin
- Neutron is a virtual network service for Openstack, and a part of
- Netstack. Just like OpenStack Nova provides an API to dynamically
- request and configure virtual servers, Neutron provides an API to
- dynamically request and configure virtual networks. These networks
- connect "interfaces" from other OpenStack services (e.g., virtual NICs
- from Nova VMs). The Neutron API supports extensions to provide
- advanced network capabilities (e.g., QoS, ACLs, network monitoring,
- etc.)
- .
- This package provides the Mellanox plugin.
-
-Package: neutron-plugin-mlnx-agent
-Architecture: all
-Provides: neutron-plugin,
-Depends: neutron-common (= ${source:Version}),
-         neutron-plugin-mlnx,
-         ${misc:Depends},
-         ${python:Depends},
-         ${shlibs:Depends},
-Description: Neutron is a virtual network service for Openstack - Mellanox plugin agent
- Neutron is a virtual network service for Openstack, and a part of
- Netstack. Just like OpenStack Nova provides an API to dynamically
- request and configure virtual servers, Neutron provides an API to
- dynamically request and configure virtual networks. These networks
- connect "interfaces" from other OpenStack services (e.g., virtual NICs
- from Nova VMs). The Neutron API supports extensions to provide
- advanced network capabilities (e.g., QoS, ACLs, network monitoring,
- etc.)
- .
- This package provides the Mellanox plugin agent.
-
 Package: neutron-metering-agent
 Architecture: all
 Depends: neutron-common (= ${source:Version}),
