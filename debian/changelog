@@ -27,6 +27,18 @@ neutron (2:8.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
   * Drop OpenContrail plugin as it has moved out of tree:
     - d/control: Drop neutron-plugin-opencontrail binary package.
     - d/neutron-plugin-opencontrail.install: File removed.
+  * Add neutron-linuxbridge-cleanup support:
+    - d/neutron-common.install: Install neutron-linuxbridge-cleanup.
+    - d/neutron-plugin-linuxbridge-agent.neutron-linuxbridge-cleanup.init.in:
+      Add init script template.
+    - d/neutron-plugin-linuxbridge-agent.neutron-linuxbridge-cleanup.service.in:
+      Add init script template.
+    - d/neutron-plugin-linuxbridge-agent.neutron-linuxbridge-cleanup.upstart.in:
+      Add upstart job.
+    - d/neutron-plugin-linuxbridge-agent.service.in: Add init script template.
+    - d/neutron-plugin-linuxbridge-agent.init.in: Add
+      neutron-linuxbridge-cleanup to Should-Start.
+    - d/rules: Install and enable neutron-linuxbridge-cleanup init script.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Wed, 16 Dec 2015 12:25:25 -0500
 

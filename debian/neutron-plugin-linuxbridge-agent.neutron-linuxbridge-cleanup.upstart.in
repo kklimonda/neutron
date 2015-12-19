@@ -1,0 +1,13 @@
+# vim:set ft=upstart ts=2 et:
+description "Neutron Linux bridge cleanup"
+author "Corey Bryant <corey.bryant@canonical.com>"
+
+start on started neutron-plugin-linuxbridge-agent
+stop on runlevel [!2345]
+
+pre-start script
+  [ ! -x /usr/bin/neutron-linuxbridge-cleanup ] && exit 0 
+  start-stop-daemon --start --chuid neutron --exec /usr/bin/neutron-linuxbridge-cleanup -- \
+    --log-file /var/log/neutron/linuxbridge-cleanup.log \
+    --config-file /etc/neutron/neutron.conf --verbose
+end script
