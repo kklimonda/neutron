@@ -1,4 +1,4 @@
-neutron (2:7.0.1-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:7.0.1-0ubuntu1) wily; urgency=medium
 
   [ Corey Bryant ]
   * d/tests/neutron-agents: Give daemon 5 seconds to start to prevent race.
@@ -6,7 +6,7 @@ neutron (2:7.0.1-0ubuntu1) UNRELEASED; urgency=medium
   [ James Page ]
   * New upstream point release (LP: #1530913).
 
- -- Corey Bryant <corey.bryant@canonical.com>  Mon, 30 Nov 2015 13:19:04 -0500
+ -- James Page <james.page@ubuntu.com>  Thu, 07 Jan 2016 12:03:11 +0000
 
 neutron (2:7.0.0-0ubuntu1) wily; urgency=medium
 
