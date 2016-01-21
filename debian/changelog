@@ -1,6 +1,7 @@
 neutron (2:8.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
 
   * New upstream milestone for OpenStack Mitaka.
+  * d/control: Align (build-)depends with upstream.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Thu, 21 Jan 2016 16:21:10 -0500
 
