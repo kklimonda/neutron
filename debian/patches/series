@@ -1,4 +1,3 @@
-fix-db-migration.patch
 fix-neutron-configuration.patch
 skip-iptest.patch
 drop-ryu-dep.patch
