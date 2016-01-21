@@ -6,6 +6,7 @@ neutron (2:8.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
   * d/rules: Generate config files with generate_config_file_samples.sh.
   * d/rules, d/p/series: Apply fix-neutron-configuration.patch during
     override_dh_install.
+  * d/p/drop-ryu-dep.patch: Rebased.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Thu, 21 Jan 2016 16:21:10 -0500
 
