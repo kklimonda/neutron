@@ -2,6 +2,8 @@ neutron (2:8.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
 
   * New upstream milestone for OpenStack Mitaka.
   * d/control: Align (build-)depends with upstream.
+  * d/control: Set min version of python-debtcollector to 1.2.0 to fix failing
+    tests.
   * d/p/fix-db-migration.patch: Dropped. Fixed upstream.
   * d/rules: Generate config files with generate_config_file_samples.sh.
   * d/rules: Set PYTHONPATH when generating config files to pick up neutron
