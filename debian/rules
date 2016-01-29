@@ -39,9 +39,6 @@ get-orig-source:
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
-	# Unpatch neutron configuration to fixup tests which conflict
-	# with a core_plugin being set.
-	patch -p1 -R < debian/patches/fix-neutron-configuration.patch
 	rm -rf .testrepository
 	testr init && \
     set -e && \
@@ -50,6 +47,4 @@ override_dh_auto_test:
 	cat $$TEMP_REZ | subunit-filter -s --no-passthrough | subunit-stats; \
 	rm -f $$TEMP_REZ ; \
 	testr slowest; \
-	# Patch configuration file after testing
-	patch -p1 < debian/patches/fix-neutron-configuration.patch
 endif

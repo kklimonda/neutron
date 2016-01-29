@@ -8,6 +8,8 @@ neutron (2:8.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
     entry points. Also drop .sample config file extensions.
   * d/rules, d/p/series: Apply fix-neutron-configuration.patch during
     override_dh_install.
+  * d/rules: Drop unpatch of neutron configuration when running tests as
+    configs are generated after tests are run.
   * d/p/drop-ryu-dep.patch: Rebased.
   * d/p/doc-conf-git.patch: Drop git commands that fail sphinx-build.
 
