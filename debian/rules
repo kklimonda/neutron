@@ -46,5 +46,5 @@ override_dh_auto_test:
     testr run --subunit neutron.tests.unit | tee $$TEMP_REZ | subunit2pyunit; \
 	cat $$TEMP_REZ | subunit-filter -s --no-passthrough | subunit-stats; \
 	rm -f $$TEMP_REZ ; \
-	testr slowest; \
+	testr slowest;
 endif
