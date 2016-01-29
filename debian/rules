@@ -9,7 +9,8 @@ include /usr/share/openstack-pkg-tools/pkgos.make
 	dh $@  --with python2,systemd
 
 override_dh_install:
-	$(CURDIR)/tools/generate_config_file_samples.sh
+	PYTHONPATH=$(CURDIR) $(CURDIR)/tools/generate_config_file_samples.sh
+	rename 's/\.sample$//' etc/*.sample
 	patch -p1 < debian/patches/fix-neutron-configuration.patch
 	dh_install --fail-missing -X/usr/etc -X/usr/bin/neutron-vpn-agent \
 		-X/usr/bin/neutron-lbaas-agent -X/usr/bin/neutron-hyperv-agent
