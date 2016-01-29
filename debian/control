@@ -121,27 +121,6 @@ Description: Neutron is a virtual network service for Openstack - common
  .
  This package provides the common files.
 
-Package: neutron-plugin-brocade
-Architecture: all
-Provides: neutron-plugin,
-Depends: neutron-common (= ${source:Version}),
-         ${misc:Depends},
-         ${python:Depends},
-         ${shlibs:Depends},
-Breaks: quantum-plugin-brocade ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: quantum-plugin-brocade ( << 1:2013.2~b2-0ubuntu1~ ),
-Description: Neutron is a virtual network service for Openstack - Brocade plugin
- Neutron is a virtual network service for Openstack, and a part of
- Netstack. Just like OpenStack Nova provides an API to dynamically
- request and configure virtual servers, Neutron provides an API to
- dynamically request and configure virtual networks. These networks
- connect "interfaces" from other OpenStack services (e.g., virtual NICs
- from Nova VMs). The Neutron API supports extensions to provide
- advanced network capabilities (e.g., QoS, ACLs, network monitoring,
- etc.)
- .
- This package provides the Brocade plugin.
-
 Package: neutron-l3-agent
 Architecture: all
 Depends: conntrack,
