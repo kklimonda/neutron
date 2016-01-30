@@ -1,6 +1,6 @@
 #!/bin/sh
 ### BEGIN INIT INFO
-# Provides:          neutron-plugin-openvswitch-agent
+# Provides:          neutron-openvswitch-agent
 # Required-Start:    $network $local_fs $remote_fs $syslog
 # Required-Stop:     $remote_fs openvswitch-switch
 # Should-Start:      mysql postgresql rabbitmq-server keystone neutron-ovs-cleanup
@@ -15,6 +15,6 @@
 
 DESC="Openstack Neutron Open vSwitch Plugin Agent"
 PROJECT_NAME=neutron
-NAME=${PROJECT_NAME}-plugin-openvswitch-agent
+NAME=${PROJECT_NAME}-openvswitch-agent
 DAEMON=/usr/bin/neutron-openvswitch-agent
 DAEMON_ARGS="--config-file=/etc/neutron/plugins/ml2/ml2_conf.ini --config-file=/etc/neutron/plugins/ml2/openvswitch_agent.ini"

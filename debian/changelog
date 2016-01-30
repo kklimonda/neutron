@@ -22,6 +22,9 @@ neutron (2:8.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
   * d/neutron-common.install: Drop install of usr/bin/neutron-dev-server as
     pecan server is launched via a config option now instead.
   * d/p/ensure-tunnels-fully-reset.patch: Cherry-picked from upstream master.
+  * d/control, d/rules, d/neutron-(plugin-)openvswitch-agent*: Rename
+    neutron-plugin-openvswitch-agent to neutron-openvswitch-agent
+    (LP: #1321257).
 
  -- Corey Bryant <corey.bryant@canonical.com>  Thu, 21 Jan 2016 16:21:10 -0500
 

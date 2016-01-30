@@ -270,15 +270,15 @@ Description: Neutron is a virtual network service for Openstack - ML2 plugin
  .
  This package provides the Modular Layer 2 plugin.
 
-Package: neutron-plugin-openvswitch-agent
+Package: neutron-openvswitch-agent
 Architecture: all
 Depends: neutron-plugin-ml2 (= ${source:Version}),
          openvswitch-switch,
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},
-Breaks: quantum-plugin-openvswitch-agent ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: quantum-plugin-openvswitch-agent ( << 1:2013.2~b2-0ubuntu1~ ),
+Breaks: neutron-plugin-openvswitch-agent ( << 2:8.0.0~b2-0ubuntu1~ ),
+Replaces: neutron-plugin-openvswitch-agent ( << 2:8.0.0~b2-0ubuntu1~ ),
 Description: Neutron is a virtual network service for Openstack - Open vSwitch plugin agent
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically

@@ -10,7 +10,7 @@ WorkingDirectory=/var/lib/neutron
 PermissionsStartOnly=true
 ExecStartPre=/bin/mkdir -p /var/lock/neutron /var/log/neutron /var/lib/neutron
 ExecStartPre=/bin/chown neutron:neutron /var/lock/neutron /var/log/neutron /var/lib/neutron
-ExecStart=/etc/init.d/neutron-plugin-openvswitch-agent systemd-start
+ExecStart=/etc/init.d/neutron-openvswitch-agent systemd-start
 Restart=on-failure
 LimitNOFILE=65535
 
