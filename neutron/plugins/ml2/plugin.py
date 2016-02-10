@@ -26,7 +26,6 @@ from oslo_utils import uuidutils
 from sqlalchemy import exc as sql_exc
 from sqlalchemy.orm import exc as sa_exc
 
-from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
 from neutron.api.rpc.handlers import dhcp_rpc
@@ -61,12 +60,12 @@ from neutron.db import securitygroups_db
 from neutron.db import securitygroups_rpc_base as sg_db_rpc
 from neutron.db import vlantransparent_db
 from neutron.extensions import allowedaddresspairs as addr_pair
-from neutron.extensions import availability_zone as az_ext
 from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.extensions import portbindings
 from neutron.extensions import portsecurity as psec
 from neutron.extensions import providernet as provider
 from neutron.extensions import vlantransparent
+from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
 from neutron.plugins.common import constants as service_constants
 from neutron.plugins.ml2.common import exceptions as ml2_exc
@@ -74,7 +73,6 @@ from neutron.plugins.ml2 import config  # noqa
 from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import driver_context
-from neutron.plugins.ml2.extensions import qos as qos_ext
 from neutron.plugins.ml2 import managers
 from neutron.plugins.ml2 import models
 from neutron.plugins.ml2 import rpc
@@ -86,16 +84,11 @@ LOG = log.getLogger(__name__)
 MAX_BIND_TRIES = 10
 
 
-SERVICE_PLUGINS_REQUIRED_DRIVERS = {
-    'qos': [qos_ext.QOS_EXT_DRIVER_ALIAS]
-}
-
-
 class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 dvr_mac_db.DVRDbMixin,
                 external_net_db.External_net_db_mixin,
                 sg_db_rpc.SecurityGroupServerRpcMixin,
-                agentschedulers_db.AZDhcpAgentSchedulerDbMixin,
+                agentschedulers_db.DhcpAgentSchedulerDbMixin,
                 addr_pair_db.AllowedAddressPairsMixin,
                 vlantransparent_db.Vlantransparent_db_mixin,
                 extradhcpopt_db.ExtraDhcpOptMixin,
@@ -125,9 +118,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                     "multi-provider", "allowed-address-pairs",
                                     "extra_dhcp_opt", "subnet_allocation",
                                     "net-mtu", "vlan-transparent",
-                                    "address-scope", "dns-integration",
-                                    "availability_zone",
-                                    "network_availability_zone"]
+                                    "dns-integration"]
 
     @property
     def supported_extension_aliases(self):
@@ -157,8 +148,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.mechanism_manager.initialize()
         self._setup_dhcp()
         self._start_rpc_notifiers()
-        self.add_agent_status_check(self.agent_health_check)
-        self._verify_service_plugins_requirements()
         LOG.info(_LI("Modular L2 Plugin initialization complete"))
 
     def _setup_rpc(self):
@@ -180,17 +169,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         )
         self.start_periodic_dhcp_agent_status_check()
 
-    def _verify_service_plugins_requirements(self):
-        for service_plugin in cfg.CONF.service_plugins:
-            extension_drivers = SERVICE_PLUGINS_REQUIRED_DRIVERS.get(
-                service_plugin, []
-            )
-            for extension_driver in extension_drivers:
-                if extension_driver not in self.extension_manager.names():
-                    raise ml2_exc.ExtensionDriverNotFound(
-                        driver=extension_driver, service_plugin=service_plugin
-                    )
-
     @property
     def supported_qos_rule_types(self):
         return self.mechanism_manager.supported_qos_rule_types
@@ -208,20 +186,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         """Start the RPC loop to let the plugin communicate with agents."""
         self._setup_rpc()
         self.topic = topics.PLUGIN
-        self.conn = n_rpc.create_connection()
+        self.conn = n_rpc.create_connection(new=True)
         self.conn.create_consumer(self.topic, self.endpoints, fanout=False)
-        # process state reports despite dedicated rpc workers
-        self.conn.create_consumer(topics.REPORTS,
-                                  [agents_db.AgentExtRpcCallback()],
-                                  fanout=False)
         return self.conn.consume_in_threads()
-
-    def start_rpc_state_reports_listener(self):
-        self.conn_reports = n_rpc.create_connection(new=True)
-        self.conn_reports.create_consumer(topics.REPORTS,
-                                          [agents_db.AgentExtRpcCallback()],
-                                          fanout=False)
-        return self.conn_reports.consume_in_threads()
 
     def _filter_nets_provider(self, context, networks, filters):
         return [network
@@ -634,7 +601,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
     def _create_network_db(self, context, network):
         net_data = network[attributes.NETWORK]
-        tenant_id = net_data['tenant_id']
+        tenant_id = self._get_tenant_id_for_create(context, net_data)
         session = context.session
         with session.begin(subtransactions=True):
             self._ensure_default_security_group(context, tenant_id)
@@ -654,22 +621,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 res = super(Ml2Plugin, self).update_network(context,
                     result['id'], {'network': {api.MTU: net_data[api.MTU]}})
                 result[api.MTU] = res.get(api.MTU, 0)
-
-            if az_ext.AZ_HINTS in net_data:
-                self.validate_availability_zones(context, 'network',
-                                                 net_data[az_ext.AZ_HINTS])
-                az_hints = az_ext.convert_az_list_to_string(
-                                                net_data[az_ext.AZ_HINTS])
-                res = super(Ml2Plugin, self).update_network(context,
-                    result['id'], {'network': {az_ext.AZ_HINTS: az_hints}})
-                result[az_ext.AZ_HINTS] = res[az_ext.AZ_HINTS]
-
-            # Update the transparent vlan if configured
-            if utils.is_extension_supported(self, 'vlan-transparent'):
-                vlt = vlantransparent.get_vlan_transparent(net_data)
-                super(Ml2Plugin, self).update_network(context,
-                    result['id'], {'network': {'vlan_transparent': vlt}})
-                result['vlan_transparent'] = vlt
 
         return result, mech_context
 
@@ -1039,8 +990,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             attrs['status'] = const.PORT_STATUS_DOWN
 
         session = context.session
-        with db_api.exc_to_retry(os_db_exception.DBDuplicateEntry),\
-                session.begin(subtransactions=True):
+        with session.begin(subtransactions=True):
             dhcp_opts = attrs.get(edo_ext.EXTRADHCPOPTS, [])
             result = super(Ml2Plugin, self).create_port(context, port)
             self.extension_manager.process_create_port(context, attrs, result)
@@ -1168,8 +1118,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         session = context.session
         bound_mech_contexts = []
 
-        with db_api.exc_to_retry(os_db_exception.DBDuplicateEntry),\
-                session.begin(subtransactions=True):
+        with session.begin(subtransactions=True):
             port_db, binding = db.get_locked_port_and_binding(session, id)
             if not port_db:
                 raise exc.PortNotFound(port_id=id)
@@ -1267,7 +1216,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         if original_port['admin_state_up'] != updated_port['admin_state_up']:
             need_port_update_notify = True
         # NOTE: In the case of DVR ports, the port-binding is done after
-        # router scheduling when sync_routers is called and so this call
+        # router scheduling when sync_routers is callede and so this call
         # below may not be required for DVR routed interfaces. But still
         # since we don't have the mech_context for the DVR router interfaces
         # at certain times, we just pass the port-context and return it, so

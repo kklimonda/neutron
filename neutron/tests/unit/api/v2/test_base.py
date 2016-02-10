@@ -146,8 +146,7 @@ class APIv2TestCase(APIv2TestBase):
         fields.extend(policy_attrs)
         return fields
 
-    def _get_collection_kwargs(self, skipargs=None, **kwargs):
-        skipargs = skipargs or []
+    def _get_collection_kwargs(self, skipargs=[], **kwargs):
         args_list = ['filters', 'fields', 'sorts', 'limit', 'marker',
                      'page_reverse']
         args_dict = dict(
@@ -665,7 +664,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         res = self.api.get(_get_path('networks'),
                            params=params).json
 
-        self.assertEqual([], res['networks'])
+        self.assertEqual(res['networks'], [])
 
         previous_links = []
         if 'networks_links' in res:
@@ -728,7 +727,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                   'page_reverse': ['True']}
         res = self.api.get(_get_path('networks'),
                            params=params).json
-        self.assertEqual([], res['networks'])
+        self.assertEqual(res['networks'], [])
 
         next_links = []
         if 'networks_links' in res:
@@ -791,7 +790,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         self.assertIn('network', res)
         net = res['network']
         self.assertEqual(net['id'], net_id)
-        self.assertTrue(net['admin_state_up'])
+        self.assertEqual(net['admin_state_up'], True)
         self.assertEqual(net['status'], "ACTIVE")
 
     def test_create_no_keystone_env(self):
@@ -1391,7 +1390,7 @@ class QuotaTest(APIv2TestBase):
         super(QuotaTest, self).setUp()
         # Use mock to let the API use a different QuotaEngine instance for
         # unit test in this class. This will ensure resource are registered
-        # again and instantiated with neutron.quota.resource.CountableResource
+        # again and instanciated with neutron.quota.resource.CountableResource
         replacement_registry = resource_registry.ResourceRegistry()
         registry_patcher = mock.patch('neutron.quota.resource_registry.'
                                       'ResourceRegistry.get_instance')

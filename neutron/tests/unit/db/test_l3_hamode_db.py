@@ -12,8 +12,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import datetime
 import mock
 from oslo_config import cfg
+from oslo_utils import timeutils
 from oslo_utils import uuidutils
 import sqlalchemy as sa
 from sqlalchemy import orm
@@ -59,19 +61,23 @@ class L3HATestFramework(testlib_api.SqlTestCase):
         cfg.CONF.set_override('allow_overlapping_ips', True)
 
         self.plugin = FakeL3PluginWithAgents()
-        self.plugin.router_scheduler = l3_agent_scheduler.ChanceScheduler()
         self.agent1 = helpers.register_l3_agent()
         self.agent2 = helpers.register_l3_agent(
             'host_2', constants.L3_AGENT_MODE_DVR_SNAT)
+
+    def _bring_down_agent(self, agent_id):
+        update = {
+            'agent': {
+                'heartbeat_timestamp':
+                timeutils.utcnow() - datetime.timedelta(hours=1)}}
+        self.plugin.update_agent(self.admin_ctx, agent_id, update)
 
     def _create_router(self, ha=True, tenant_id='tenant1', distributed=None,
                        ctx=None):
         if ctx is None:
             ctx = self.admin_ctx
         ctx.tenant_id = tenant_id
-        router = {'name': 'router1',
-                  'admin_state_up': True,
-                  'tenant_id': tenant_id}
+        router = {'name': 'router1', 'admin_state_up': True}
         if ha is not None:
             router['ha'] = ha
         if distributed is not None:
@@ -92,12 +98,14 @@ class L3HATestFramework(testlib_api.SqlTestCase):
             data['distributed'] = distributed
         if admin_state is not None:
             data['admin_state_up'] = admin_state
-        return self.plugin._update_router_db(ctx, router_id, data)
+        return self.plugin._update_router_db(ctx, router_id,
+                                             data, None)
 
     def _bind_router(self, router_id):
         with self.admin_ctx.session.begin(subtransactions=True):
+            scheduler = l3_agent_scheduler.ChanceScheduler()
             agents_db = self.plugin.get_agents_db(self.admin_ctx)
-            self.plugin.router_scheduler._bind_ha_router_to_agents(
+            scheduler._bind_ha_router_to_agents(
                 self.plugin,
                 self.admin_ctx,
                 router_id,
@@ -287,30 +295,11 @@ class L3HATestCase(L3HATestFramework):
         self.assertEqual(0, len(bound_agents))
         self.assertEqual(2, mock_manager.call_count)
 
-    def test_get_ha_sync_data_for_host_with_non_dvr_agent(self):
-        with mock.patch.object(self.plugin,
-                               '_get_dvr_sync_data') as mock_get_sync:
-            self.plugin.supported_extension_aliases = ['dvr', 'l3-ha']
-            self.plugin.get_ha_sync_data_for_host(self.admin_ctx,
-                                                  self.agent1['host'],
-                                                  self.agent1)
-            self.assertFalse(mock_get_sync.called)
-
-    def test_get_ha_sync_data_for_host_with_dvr_agent(self):
-        with mock.patch.object(self.plugin,
-                               '_get_dvr_sync_data') as mock_get_sync:
-            self.plugin.supported_extension_aliases = ['dvr', 'l3-ha']
-            self.plugin.get_ha_sync_data_for_host(self.admin_ctx,
-                                                  self.agent2['host'],
-                                                  self.agent2)
-            self.assertTrue(mock_get_sync.called)
-
     def test_l3_agent_routers_query_interface(self):
         router = self._create_router()
         self._bind_router(router['id'])
         routers = self.plugin.get_ha_sync_data_for_host(self.admin_ctx,
-                                                        self.agent1['host'],
-                                                        self.agent1)
+                                                        self.agent1['host'])
         self.assertEqual(1, len(routers))
         router = routers[0]
 
@@ -337,10 +326,8 @@ class L3HATestCase(L3HATestFramework):
             ha_network1['network_id'], ha_network2['network_id'])
 
     def _deployed_router_change_ha_flag(self, to_ha):
-        router1 = self._create_router(ha=not to_ha)
-        self._bind_router(router1['id'])
-        routers = self.plugin.get_ha_sync_data_for_host(
-            self.admin_ctx, self.agent1['host'], self.agent1)
+        self._create_router(ha=not to_ha)
+        routers = self.plugin.get_ha_sync_data_for_host(self.admin_ctx)
         router = routers[0]
         interface = router.get(constants.HA_INTERFACE_KEY)
         if to_ha:
@@ -349,9 +336,7 @@ class L3HATestCase(L3HATestFramework):
             self.assertIsNotNone(interface)
 
         self._migrate_router(router['id'], to_ha)
-        self.plugin.schedule_router(self.admin_ctx, router1['id'])
-        routers = self.plugin.get_ha_sync_data_for_host(
-            self.admin_ctx, self.agent1['host'], self.agent1)
+        routers = self.plugin.get_ha_sync_data_for_host(self.admin_ctx)
         router = routers[0]
         interface = router.get(constants.HA_INTERFACE_KEY)
         if to_ha:
@@ -376,12 +361,9 @@ class L3HATestCase(L3HATestFramework):
         self.assertTrue(self.notif_m.called)
 
     def test_unique_vr_id_between_routers(self):
-        router1 = self._create_router()
-        router2 = self._create_router()
-        self._bind_router(router1['id'])
-        self._bind_router(router2['id'])
-        routers = self.plugin.get_ha_sync_data_for_host(
-            self.admin_ctx, self.agent1['host'], self.agent1)
+        self._create_router()
+        self._create_router()
+        routers = self.plugin.get_ha_sync_data_for_host(self.admin_ctx)
         self.assertEqual(2, len(routers))
         self.assertNotEqual(routers[0]['ha_vr_id'], routers[1]['ha_vr_id'])
 
@@ -391,12 +373,9 @@ class L3HATestCase(L3HATestFramework):
 
     @mock.patch('neutron.db.l3_hamode_db.VR_ID_RANGE', new=set(range(1, 2)))
     def test_vr_id_unique_range_per_tenant(self):
-        router1 = self._create_router()
-        router2 = self._create_router(tenant_id=_uuid())
-        self._bind_router(router1['id'])
-        self._bind_router(router2['id'])
-        routers = self.plugin.get_ha_sync_data_for_host(
-            self.admin_ctx, self.agent1['host'], self.agent1)
+        self._create_router()
+        self._create_router(tenant_id=_uuid())
+        routers = self.plugin.get_ha_sync_data_for_host(self.admin_ctx)
         self.assertEqual(2, len(routers))
         self.assertEqual(routers[0]['ha_vr_id'], routers[1]['ha_vr_id'])
 
@@ -444,22 +423,14 @@ class L3HATestCase(L3HATestFramework):
         self.assertEqual(allocs_before, allocs_after)
 
     def test_one_ha_router_one_not(self):
-        router1 = self._create_router(ha=False)
-        router2 = self._create_router()
-        self._bind_router(router1['id'])
-        self._bind_router(router2['id'])
-        routers = self.plugin.get_ha_sync_data_for_host(
-            self.admin_ctx, self.agent1['host'], self.agent1)
+        self._create_router(ha=False)
+        self._create_router()
+        routers = self.plugin.get_ha_sync_data_for_host(self.admin_ctx)
 
         ha0 = routers[0]['ha']
         ha1 = routers[1]['ha']
 
         self.assertNotEqual(ha0, ha1)
-
-    def test_add_ha_port_subtransactions_blocked(self):
-        with self.admin_ctx.session.begin():
-            self.assertRaises(RuntimeError, self.plugin.add_ha_port,
-                              self.admin_ctx, 'id', 'id', 'id')
 
     def test_add_ha_port_binding_failure_rolls_back_port(self):
         router = self._create_router()
@@ -554,8 +525,8 @@ class L3HATestCase(L3HATestFramework):
         router2 = self._create_router()
         self._bind_router(router2['id'])
 
-        routers = self.plugin.get_ha_sync_data_for_host(
-            self.admin_ctx, self.agent1['host'], self.agent1)
+        routers = self.plugin.get_ha_sync_data_for_host(self.admin_ctx,
+                                                        self.agent1['host'])
         for router in routers:
             self.assertEqual('standby', router[constants.HA_ROUTER_STATE_KEY])
 
@@ -564,8 +535,8 @@ class L3HATestCase(L3HATestFramework):
         self.plugin.update_routers_states(
             self.admin_ctx, states, self.agent1['host'])
 
-        routers = self.plugin.get_ha_sync_data_for_host(
-            self.admin_ctx, self.agent1['host'], self.agent1)
+        routers = self.plugin.get_ha_sync_data_for_host(self.admin_ctx,
+                                                        self.agent1['host'])
         for router in routers:
             self.assertEqual(states[router['id']],
                              router[constants.HA_ROUTER_STATE_KEY])
@@ -581,8 +552,8 @@ class L3HATestCase(L3HATestFramework):
         self.plugin._set_router_states(
             self.admin_ctx, bindings, {router1['id']: 'active',
                                        router2['id']: 'active'})
-        routers = self.plugin.get_ha_sync_data_for_host(
-            self.admin_ctx, self.agent1['host'], self.agent1)
+        routers = self.plugin.get_ha_sync_data_for_host(self.admin_ctx,
+                                                        self.agent1['host'])
         self.assertEqual('active', routers[0][constants.HA_ROUTER_STATE_KEY])
 
     def test_exclude_dvr_agents_for_ha_candidates(self):
@@ -601,7 +572,8 @@ class L3HATestCase(L3HATestFramework):
 
     def test_get_number_of_agents_for_scheduling_not_enough_agents(self):
         cfg.CONF.set_override('min_l3_agents_per_router', 3)
-        helpers.kill_agent(helpers.register_l3_agent(host='l3host_3')['id'])
+        agent_to_bring_down = helpers.register_l3_agent(host='l3host_3')
+        self._bring_down_agent(agent_to_bring_down['id'])
         self.assertRaises(l3_ext_ha_mode.HANotEnoughAvailableAgents,
                           self.plugin.get_number_of_agents_for_scheduling,
                           self.admin_ctx)

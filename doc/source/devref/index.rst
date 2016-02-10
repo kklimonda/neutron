@@ -43,6 +43,8 @@ Programming HowTos and Tutorials
     development.environment
     contribute
     neutron_api
+    sub_projects
+    sub_project_guidelines
     client_command_extensions
     alembic_migrations
 
@@ -54,26 +56,19 @@ Neutron Internals
 
    services_and_agents
    api_layer
-   ml2_ext_manager
    quota
    api_extensions
    plugin-api
    db_layer
-   policy
    rpc_api
    rpc_callbacks
    layer3
    l2_agents
-   ovs_vhostuser
    quality_of_service
    advanced_services
    oslo-incubator
    callbacks
    dns_order
-   upgrade
-   i18n
-   instrumentation
-   address_scopes
 
 Testing
 -------

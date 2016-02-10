@@ -12,26 +12,65 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import os.path
 import tempfile
 
 import fixtures
+import six
 
 from neutron.common import constants
-from neutron.plugins.ml2.extensions import qos as qos_ext
 from neutron.tests import base
-from neutron.tests.common import config_fixtures
 from neutron.tests.common import helpers as c_helpers
 from neutron.tests.common import net_helpers
 
 
-def _generate_port():
-    """Get a free TCP port from the Operating System and return it.
+class ConfigDict(base.AttributeDict):
+    def update(self, other):
+        self.convert_to_attr_dict(other)
+        super(ConfigDict, self).update(other)
 
-    This might fail if some other process occupies this port after this
-    function finished but before the neutron-server process started.
+    def convert_to_attr_dict(self, other):
+        """Convert nested dicts to AttributeDict.
+
+        :param other: dictionary to be directly modified.
+        """
+        for key, value in six.iteritems(other):
+            if isinstance(value, dict):
+                if not isinstance(value, base.AttributeDict):
+                    other[key] = base.AttributeDict(value)
+                self.convert_to_attr_dict(value)
+
+
+class ConfigFileFixture(fixtures.Fixture):
+    """A fixture that knows how to translate configurations to files.
+
+    :param base_filename: the filename to use on disk.
+    :param config: a ConfigDict instance.
+    :param temp_dir: an existing temporary directory to use for storage.
     """
-    return str(net_helpers.get_free_namespace_port(
-        constants.PROTO_NAME_TCP))
+
+    def __init__(self, base_filename, config, temp_dir):
+        super(ConfigFileFixture, self).__init__()
+        self.base_filename = base_filename
+        self.config = config
+        self.temp_dir = temp_dir
+
+    def _setUp(self):
+        config_parser = self.dict_to_config_parser(self.config)
+        # Need to randomly generate a unique folder to put the file in
+        self.filename = os.path.join(self.temp_dir, self.base_filename)
+        with open(self.filename, 'w') as f:
+            config_parser.write(f)
+            f.flush()
+
+    def dict_to_config_parser(self, config_dict):
+        config_parser = six.moves.configparser.SafeConfigParser()
+        for section, section_dict in six.iteritems(config_dict):
+            if section != 'DEFAULT':
+                config_parser.add_section(section)
+            for option, value in six.iteritems(section_dict):
+                config_parser.set(section, option, value)
+        return config_parser
 
 
 class ConfigFixture(fixtures.Fixture):
@@ -44,14 +83,14 @@ class ConfigFixture(fixtures.Fixture):
     """
     def __init__(self, env_desc, host_desc, temp_dir, base_filename):
         super(ConfigFixture, self).__init__()
-        self.config = config_fixtures.ConfigDict()
+        self.config = ConfigDict()
         self.env_desc = env_desc
         self.host_desc = host_desc
         self.temp_dir = temp_dir
         self.base_filename = base_filename
 
     def _setUp(self):
-        cfg_fixture = config_fixtures.ConfigFileFixture(
+        cfg_fixture = ConfigFileFixture(
             self.base_filename, self.config, self.temp_dir)
         self.useFixture(cfg_fixture)
         self.filename = cfg_fixture.filename
@@ -73,7 +112,7 @@ class NeutronConfigFixture(ConfigFixture):
                 'host': self._generate_host(),
                 'state_path': self._generate_state_path(self.temp_dir),
                 'lock_path': '$state_path/lock',
-                'bind_port': _generate_port(),
+                'bind_port': self._generate_port(),
                 'api_paste_config': self._generate_api_paste(),
                 'policy_file': self._generate_policy_json(),
                 'core_plugin': 'neutron.plugins.ml2.plugin.Ml2Plugin',
@@ -100,6 +139,15 @@ class NeutronConfigFixture(ConfigFixture):
         # Assume that temp_dir will be removed by the caller
         self.state_path = tempfile.mkdtemp(prefix='state_path', dir=temp_dir)
         return self.state_path
+
+    def _generate_port(self):
+        """Get a free TCP port from the Operating System and return it.
+
+        This might fail if some other process occupies this port after this
+        function finished but before the neutron-server process started.
+        """
+        return str(net_helpers.get_free_namespace_port(
+            constants.PROTO_NAME_TCP))
 
     def _generate_api_paste(self):
         return c_helpers.find_sample_file('api-paste.ini')
@@ -135,8 +183,7 @@ class ML2ConfigFixture(ConfigFixture):
         })
 
         if env_desc.qos:
-            self.config['ml2']['extension_drivers'] =\
-                    qos_ext.QOS_EXT_DRIVER_ALIAS
+            self.config['ml2']['extension_drivers'] = 'qos'
 
 
 class OVSConfigFixture(ConfigFixture):
@@ -149,9 +196,9 @@ class OVSConfigFixture(ConfigFixture):
         self.tunneling_enabled = self.env_desc.tunneling_enabled
         self.config.update({
             'ovs': {
+                'enable_tunneling': str(self.tunneling_enabled),
                 'local_ip': local_ip,
                 'integration_bridge': self._generate_integration_bridge(),
-                'of_interface': host_desc.of_interface,
             },
             'securitygroup': {
                 'firewall_driver': ('neutron.agent.linux.iptables_firewall.'
@@ -161,10 +208,6 @@ class OVSConfigFixture(ConfigFixture):
                 'l2_population': str(self.env_desc.l2_pop),
             }
         })
-
-        if self.config['ovs']['of_interface'] == 'native':
-            self.config['ovs'].update({
-                'of_listen_port': _generate_port()})
 
         if self.tunneling_enabled:
             self.config['agent'].update({

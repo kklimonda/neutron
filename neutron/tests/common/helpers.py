@@ -16,8 +16,6 @@ import datetime
 import os
 
 from oslo_utils import timeutils
-import six
-import testtools
 
 import neutron
 from neutron.common import constants
@@ -27,7 +25,6 @@ from neutron.db import agents_db
 from neutron.db import common_db_mixin
 
 HOST = 'localhost'
-DEFAULT_AZ = 'nova'
 
 
 def find_file(filename, path):
@@ -50,19 +47,18 @@ class FakePlugin(common_db_mixin.CommonDbMixin,
 
 
 def _get_l3_agent_dict(host, agent_mode, internal_only=True,
-                       ext_net_id='', ext_bridge='', router_id=None,
-                       az=DEFAULT_AZ):
+                       ext_net_id='', ext_bridge='', router_id=None):
     return {
         'agent_type': constants.AGENT_TYPE_L3,
         'binary': 'neutron-l3-agent',
         'host': host,
         'topic': topics.L3_AGENT,
-        'availability_zone': az,
         'configurations': {'agent_mode': agent_mode,
                            'handle_internal_only_routers': internal_only,
                            'external_network_bridge': ext_bridge,
                            'gateway_external_network_id': ext_net_id,
-                           'router_id': router_id}}
+                           'router_id': router_id,
+                           'use_namespaces': router_id is None}}
 
 
 def _register_agent(agent):
@@ -75,28 +71,28 @@ def _register_agent(agent):
 
 def register_l3_agent(host=HOST, agent_mode=constants.L3_AGENT_MODE_LEGACY,
                       internal_only=True, ext_net_id='', ext_bridge='',
-                      router_id=None, az=DEFAULT_AZ):
+                      router_id=None):
     agent = _get_l3_agent_dict(host, agent_mode, internal_only, ext_net_id,
-                               ext_bridge, router_id, az)
+                               ext_bridge, router_id)
     return _register_agent(agent)
 
 
-def _get_dhcp_agent_dict(host, networks=0, az=DEFAULT_AZ):
+def _get_dhcp_agent_dict(host, networks=0):
     agent = {
         'binary': 'neutron-dhcp-agent',
         'host': host,
         'topic': topics.DHCP_AGENT,
         'agent_type': constants.AGENT_TYPE_DHCP,
-        'availability_zone': az,
         'configurations': {'dhcp_driver': 'dhcp_driver',
+                           'use_namespaces': True,
                            'networks': networks}}
     return agent
 
 
 def register_dhcp_agent(host=HOST, networks=0, admin_state_up=True,
-                        alive=True, az=DEFAULT_AZ):
+                        alive=True):
     agent = _register_agent(
-        _get_dhcp_agent_dict(host, networks, az=az))
+        _get_dhcp_agent_dict(host, networks))
 
     if not admin_state_up:
         set_agent_admin_state(agent['id'])
@@ -153,11 +149,3 @@ def register_ovs_agent(host=HOST, agent_type=constants.AGENT_TYPE_OVS,
                                 tunneling_ip, interface_mappings,
                                 l2pop_network_types)
     return _register_agent(agent)
-
-
-def requires_py2(testcase):
-    return testtools.skipUnless(six.PY2, "requires python 2.x")(testcase)
-
-
-def requires_py3(testcase):
-    return testtools.skipUnless(six.PY3, "requires python 3.x")(testcase)

@@ -35,22 +35,11 @@ NONEXISTENT_PEER = 'nonexistent-peer'
 TUNNEL_NETWORK_TYPES = [p_const.TYPE_GRE, p_const.TYPE_VXLAN,
                         p_const.TYPE_GENEVE]
 
-### OpenFlow table IDs
-
-## Integration bridge (int_br)
-
-LOCAL_SWITCHING = 0
 
 # Various tables for DVR use of integration bridge flows
+LOCAL_SWITCHING = 0
 DVR_TO_SRC_MAC = 1
 DVR_TO_SRC_MAC_VLAN = 2
-
-CANARY_TABLE = 23
-
-# Table for ARP poison/spoofing prevention rules
-ARP_SPOOF_TABLE = 24
-
-## Tunnel bridge (tun_br)
 
 # Various tables for tunneling flows
 DVR_PROCESS = 1
@@ -65,14 +54,17 @@ UCAST_TO_TUN = 20
 ARP_RESPONDER = 21
 FLOOD_TO_TUN = 22
 
-## Physical Bridges (phys_brs)
-
 # Various tables for DVR use of physical bridge flows
 DVR_PROCESS_VLAN = 1
 LOCAL_VLAN_TRANSLATION = 2
 DVR_NOT_LEARN_VLAN = 3
 
-### end of OpenFlow table IDs
+# Tables for integration bridge
+# Table 0 is used for forwarding.
+CANARY_TABLE = 23
+
+# Table for ARP poison/spoofing prevention rules
+ARP_SPOOF_TABLE = 24
 
 # type for ARP reply in ARP header
 ARP_REPLY = '0x2'
@@ -108,9 +100,5 @@ EXTENSION_DRIVER_TYPE = 'ovs'
 # ovs datapath types
 OVS_DATAPATH_SYSTEM = 'system'
 OVS_DATAPATH_NETDEV = 'netdev'
-OVS_DPDK_VHOST_USER = 'dpdkvhostuser'
-
-# default ovs vhost-user socket location
-VHOST_USER_SOCKET_DIR = '/var/run/openvswitch'
 
 MAX_DEVICE_RETRIES = 5

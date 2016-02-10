@@ -19,13 +19,13 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 from sqlalchemy import and_
 
-from neutron._i18n import _, _LE
 from neutron.api.v2 import attributes
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.db import ipam_backend_mixin
 from neutron.db import models_v2
+from neutron.i18n import _LE
 from neutron.ipam import driver
 from neutron.ipam import exceptions as ipam_exc
 from neutron.ipam import requests as ipam_req
@@ -164,7 +164,7 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
         except Exception:
             with excutils.save_and_reraise_exception():
                 if ips:
-                    LOG.debug("An exception occurred during port creation. "
+                    LOG.debug("An exception occurred during port creation."
                               "Reverting IP allocation")
                     ipam_driver = driver.Pool.get_instance(None, context)
                     self._ipam_deallocate_ips(context, ipam_driver,
@@ -263,7 +263,7 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                         not is_auto_addr_subnet):
                     fixed_ip_list.append({'subnet_id': subnet['id']})
 
-        self._validate_max_ips_per_port(fixed_ip_list, device_owner)
+        self._validate_max_ips_per_port(fixed_ip_list)
         return fixed_ip_list
 
     def _update_ips_for_port(self, context, port,
@@ -363,7 +363,7 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
             with excutils.save_and_reraise_exception():
                 if "allocation_pools" in s and old_pools:
                     LOG.error(
-                        _LE("An exception occurred during subnet update. "
+                        _LE("An exception occurred during subnet update."
                             "Reverting allocation pool changes"))
                     s['allocation_pools'] = old_pools
                     self._ipam_update_allocation_pools(context, ipam_driver, s)
@@ -446,7 +446,7 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
             # IPAM part rolled back in exception handling
             # and subnet part is rolled back by transaction rollback.
             with excutils.save_and_reraise_exception():
-                LOG.debug("An exception occurred during subnet creation. "
+                LOG.debug("An exception occurred during subnet creation."
                           "Reverting subnet allocation.")
                 self.delete_subnet(context, subnet_request.subnet_id)
         return subnet, ipam_subnet

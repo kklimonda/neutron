@@ -19,6 +19,10 @@ import functools
 import jsonschema
 import six
 
+from oslo_log import log as logging
+
+LOG = logging.getLogger(__name__)
+
 
 def _check_for_expected_result(name, schema):
     expected_result = None

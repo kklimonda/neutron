@@ -16,10 +16,8 @@ import os
 
 import mock
 from oslo_config import cfg
-from oslo_config import fixture as fixture_config
 from oslo_utils import uuidutils
 
-from neutron._i18n import _
 from neutron.agent.l3 import keepalived_state_change
 from neutron.tests.functional import base
 
@@ -27,8 +25,7 @@ from neutron.tests.functional import base
 class TestKeepalivedStateChange(base.BaseSudoTestCase):
     def setUp(self):
         super(TestKeepalivedStateChange, self).setUp()
-        self.conf_fixture = self.useFixture(fixture_config.Config())
-        self.conf_fixture.register_opt(
+        cfg.CONF.register_opt(
             cfg.StrOpt('metadata_proxy_socket',
                        default='$state_path/metadata_proxy',
                        help=_('Location of Metadata Proxy UNIX domain '

@@ -21,13 +21,11 @@ from oslo_utils import excutils
 import sqlalchemy as sa
 from sqlalchemy import orm
 
-from neutron._i18n import _, _LI
 from neutron.api.v2 import attributes
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils as n_utils
 from neutron.db import agents_db
-from neutron.db.availability_zone import router as router_az_db
 from neutron.db import l3_attrs_db
 from neutron.db import l3_db
 from neutron.db import l3_dvr_db
@@ -36,6 +34,7 @@ from neutron.db import models_v2
 from neutron.extensions import l3_ext_ha_mode as l3_ha
 from neutron.extensions import portbindings
 from neutron.extensions import providernet
+from neutron.i18n import _LI
 from neutron.plugins.common import utils as p_utils
 
 
@@ -51,14 +50,12 @@ L3_HA_OPTS = [
                 help=_('Enable HA mode for virtual routers.')),
     cfg.IntOpt('max_l3_agents_per_router',
                default=3,
-               help=_("Maximum number of L3 agents which a HA router will be "
-                      "scheduled on. If it is set to 0 then the router will "
-                      "be scheduled on every agent.")),
+               help=_('Maximum number of agents on which a router will be '
+                      'scheduled.')),
     cfg.IntOpt('min_l3_agents_per_router',
                default=constants.MINIMUM_AGENTS_FOR_HA,
-               help=_("Minimum number of L3 agents which a HA router will be "
-                      "scheduled on. If it is set to 0 then the router will "
-                      "be scheduled on every agent.")),
+               help=_('Minimum number of agents on which a router will be '
+                      'scheduled.')),
     cfg.StrOpt('l3_ha_net_cidr',
                default='169.254.192.0/18',
                help=_('Subnet used for the l3 HA admin network.')),
@@ -115,8 +112,8 @@ class L3HARouterNetwork(model_base.BASEV2):
 
     __tablename__ = 'ha_router_networks'
 
-    tenant_id = sa.Column(sa.String(attributes.TENANT_ID_MAX_LEN),
-                          primary_key=True, nullable=False)
+    tenant_id = sa.Column(sa.String(255), primary_key=True,
+                          nullable=False)
     network_id = sa.Column(sa.String(36),
                            sa.ForeignKey('networks.id', ondelete="CASCADE"),
                            nullable=False, primary_key=True)
@@ -137,13 +134,11 @@ class L3HARouterVRIdAllocation(model_base.BASEV2):
     vr_id = sa.Column(sa.Integer(), nullable=False, primary_key=True)
 
 
-class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
-                         router_az_db.RouterAvailabilityZoneMixin):
+class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin):
     """Mixin class to add high availability capability to routers."""
 
     extra_attributes = (
-        l3_dvr_db.L3_NAT_with_dvr_db_mixin.extra_attributes +
-        router_az_db.RouterAvailabilityZoneMixin.extra_attributes + [
+        l3_dvr_db.L3_NAT_with_dvr_db_mixin.extra_attributes + [
             {'name': 'ha', 'default': cfg.CONF.l3_ha},
             {'name': 'ha_vr_id', 'default': 0}])
 
@@ -319,15 +314,6 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
         return portbinding
 
     def add_ha_port(self, context, router_id, network_id, tenant_id):
-        # NOTE(kevinbenton): we have to block any ongoing transactions because
-        # our exception handling will try to delete the port using the normal
-        # core plugin API. If this function is called inside of a transaction
-        # the exception will mangle the state, cause the delete call to fail,
-        # and end up relying on the DB rollback to remove the port instead of
-        # proper delete_port call.
-        if context.session.is_active:
-            raise RuntimeError(_('add_ha_port cannot be called inside of a '
-                                 'transaction.'))
         args = {'tenant_id': '',
                 'network_id': network_id,
                 'admin_state_up': True,
@@ -421,7 +407,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             router_dict['ha_vr_id'] = router_db.extra_attributes.ha_vr_id
         return router_dict
 
-    def _update_router_db(self, context, router_id, data):
+    def _update_router_db(self, context, router_id, data, gw_info):
         router_db = self._get_router(context, router_id)
 
         original_distributed_state = router_db.extra_attributes.distributed
@@ -437,7 +423,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
 
         with context.session.begin(subtransactions=True):
             router_db = super(L3_HA_NAT_db_mixin, self)._update_router_db(
-                context, router_id, data)
+                context, router_id, data, gw_info)
 
             ha_not_changed = (requested_ha_state is None or
                               requested_ha_state == original_ha_state)
@@ -459,8 +445,6 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
 
         # The HA attribute has changed. First unbind the router from agents
         # to force a proper re-scheduling to agents.
-        # TODO(jschwarz): This will have to be more selective to get HA + DVR
-        # working (Only unbind from dvr_snat nodes).
         self._unbind_ha_router(context, router_id)
 
         if requested_ha_state:
@@ -588,14 +572,14 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
 
         return list(routers_dict.values())
 
-    def get_ha_sync_data_for_host(self, context, host, agent,
-                                  router_ids=None, active=None):
-        agent_mode = self._get_agent_mode(agent)
-        dvr_agent_mode = (agent_mode in [constants.L3_AGENT_MODE_DVR_SNAT,
-                                         constants.L3_AGENT_MODE_DVR])
-        if (dvr_agent_mode and n_utils.is_extension_supported(
-                self, constants.L3_DISTRIBUTED_EXT_ALIAS)):
+    def get_ha_sync_data_for_host(self, context, host=None, router_ids=None,
+                                  active=None):
+        if n_utils.is_extension_supported(self,
+                                          constants.L3_DISTRIBUTED_EXT_ALIAS):
             # DVR has to be handled differently
+            agent = self._get_agent_by_type_and_host(context,
+                                                     constants.AGENT_TYPE_L3,
+                                                     host)
             sync_data = self._get_dvr_sync_data(context, host, agent,
                                                 router_ids, active)
         else:

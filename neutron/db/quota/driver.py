@@ -18,7 +18,6 @@ from oslo_log import log
 
 from neutron.common import exceptions
 from neutron.db import api as db_api
-from neutron.db import common_db_mixin as common_db
 from neutron.db.quota import api as quota_api
 from neutron.db.quota import models as quota_models
 
@@ -35,8 +34,7 @@ class DbQuotaDriver(object):
     @staticmethod
     def get_tenant_quotas(context, resources, tenant_id):
         """Given a list of resources, retrieve the quotas for the given
-        tenant. If no limits are found for the specified tenant, the operation
-        returns the default limits.
+        tenant.
 
         :param context: The request context, for access checks.
         :param resources: A dictionary of the registered resource keys.
@@ -49,7 +47,7 @@ class DbQuotaDriver(object):
                             for key, resource in resources.items())
 
         # update with tenant specific limits
-        q_qry = common_db.model_query(context, quota_models.Quota).filter_by(
+        q_qry = context.session.query(quota_models.Quota).filter_by(
             tenant_id=tenant_id)
         for item in q_qry:
             tenant_quota[item['resource']] = item['limit']
@@ -84,8 +82,7 @@ class DbQuotaDriver(object):
         for quota in context.session.query(quota_models.Quota):
             tenant_id = quota['tenant_id']
 
-            # avoid setdefault() because only want to copy when actually
-            # required
+            # avoid setdefault() because only want to copy when actually req'd
             tenant_quota = all_tenant_quotas.get(tenant_id)
             if tenant_quota is None:
                 tenant_quota = tenant_default.copy()
@@ -151,9 +148,9 @@ class DbQuotaDriver(object):
         # concurrent reservations.
         # For this reason it might be advisable to handle contention using
         # this kind of locks and paying the cost of a write set certification
-        # failure when a MySQL Galera cluster is employed. Also, this class of
+        # failure when a mysql galera cluster is employed. Also, this class of
         # locks should be ok to use when support for sending "hotspot" writes
-        # to a single node will be available.
+        # to a single node will be avaialable.
         requested_resources = deltas.keys()
         with db_api.autonested_transaction(context.session):
             # get_tenant_quotes needs in input a dictionary mapping resource
@@ -182,7 +179,7 @@ class DbQuotaDriver(object):
                     context, plugin, tenant_id, resync_usage=False)) for
                 resource in requested_resources)
             # Adjust for expired reservations. Apparently it is cheaper than
-            # querying every time for active reservations and counting overall
+            # querying everytime for active reservations and counting overall
             # quantity of resources reserved
             expired_deltas = quota_api.get_reservations_for_resources(
                 context, tenant_id, requested_resources, expired=True)
@@ -214,7 +211,7 @@ class DbQuotaDriver(object):
 
     def commit_reservation(self, context, reservation_id):
         # Do not mark resource usage as dirty. If a reservation is committed,
-        # then the relevant resources have been created. Usage data for these
+        # then the releveant resources have been created. Usage data for these
         # resources has therefore already been marked dirty.
         quota_api.remove_reservation(context, reservation_id,
                                      set_dirty=False)

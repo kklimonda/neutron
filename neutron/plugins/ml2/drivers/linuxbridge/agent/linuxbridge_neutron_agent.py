@@ -19,9 +19,12 @@
 # Based on the structure of the OpenVSwitch agent in the
 # Neutron OpenVSwitch Plugin.
 
-import collections
+import os
 import sys
 import time
+
+import eventlet
+eventlet.monkey_patch()
 
 import netaddr
 from oslo_config import cfg
@@ -32,8 +35,6 @@ from oslo_service import service
 from oslo_utils import excutils
 from six import moves
 
-from neutron._i18n import _LE, _LI, _LW
-from neutron.agent.l2.extensions import manager as ext_manager
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
@@ -45,6 +46,7 @@ from neutron.common import exceptions
 from neutron.common import topics
 from neutron.common import utils as n_utils
 from neutron import context
+from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.l2pop.rpc_manager \
     import l2population_rpc as l2pop_rpc
@@ -57,6 +59,12 @@ from neutron.plugins.ml2.drivers.linuxbridge.agent.common \
 LOG = logging.getLogger(__name__)
 
 BRIDGE_NAME_PREFIX = "brq"
+# NOTE(toabctl): Don't use /sys/devices/virtual/net here because not all tap
+# devices are listed here (i.e. when using Xen)
+BRIDGE_FS = "/sys/class/net/"
+BRIDGE_INTERFACES_FS = BRIDGE_FS + "%s/brif/"
+BRIDGE_PORT_FS_FOR_DEVICE = BRIDGE_FS + "%s/brport"
+BRIDGE_PATH_FOR_DEVICE = BRIDGE_PORT_FS_FOR_DEVICE + '/bridge'
 VXLAN_INTERFACE_PREFIX = "vxlan-"
 
 
@@ -79,7 +87,6 @@ class LinuxBridgeManager(object):
         self.vxlan_mode = lconst.VXLAN_NONE
         if cfg.CONF.VXLAN.enable_vxlan:
             device = self.get_local_ip_device(self.local_ip)
-            self.validate_vxlan_group_with_local_ip()
             self.local_int = device.name
             self.check_vxlan_support()
         # Store network mapping to segments
@@ -101,26 +108,6 @@ class LinuxBridgeManager(object):
                           {'brq': bridge, 'net': physnet})
                 sys.exit(1)
 
-    def validate_vxlan_group_with_local_ip(self):
-        if not cfg.CONF.VXLAN.vxlan_group:
-            return
-        try:
-            ip_addr = netaddr.IPAddress(self.local_ip)
-            # Ensure the configured group address/range is valid and multicast
-            group_net = netaddr.IPNetwork(cfg.CONF.VXLAN.vxlan_group)
-            if not group_net.is_multicast():
-                raise ValueError()
-            if not ip_addr.version == group_net.version:
-                raise ValueError()
-        except (netaddr.core.AddrFormatError, ValueError):
-            LOG.error(_LE("Invalid VXLAN Group: %(group)s, must be an address "
-                          "or network (in CIDR notation) in a multicast "
-                          "range of the same address family as local_ip: "
-                          "%(ip)s"),
-                      {'group': cfg.CONF.VXLAN.vxlan_group,
-                       'ip': self.local_ip})
-            sys.exit(1)
-
     def get_local_ip_device(self, local_ip):
         """Return the device with local_ip on the host."""
         device = self.ip.get_device_by_ip(local_ip)
@@ -132,6 +119,13 @@ class LinuxBridgeManager(object):
                       local_ip)
             sys.exit(1)
         return device
+
+    def interface_exists_on_bridge(self, bridge, interface):
+        directory = '/sys/class/net/%s/brif' % bridge
+        for filename in os.listdir(directory):
+            if filename == interface:
+                return True
+        return False
 
     def get_existing_bridge_name(self, physical_network):
         if not physical_network:
@@ -167,21 +161,64 @@ class LinuxBridgeManager(object):
                             "incorrect vxlan device name"), segmentation_id)
 
     def get_vxlan_group(self, segmentation_id):
-        net = netaddr.IPNetwork(cfg.CONF.VXLAN.vxlan_group)
-        # Map the segmentation ID to (one of) the group address(es)
-        return str(net.network +
-                   (int(segmentation_id) & int(net.hostmask)))
+        try:
+            # Ensure the configured group address/range is valid and multicast
+            net = netaddr.IPNetwork(cfg.CONF.VXLAN.vxlan_group)
+            if not net.is_multicast():
+                raise ValueError()
+            # Map the segmentation ID to (one of) the group address(es)
+            return str(net.network +
+                       (int(segmentation_id) & int(net.hostmask)))
+        except (netaddr.core.AddrFormatError, ValueError):
+            LOG.warning(_LW("Invalid VXLAN Group: %s, must be an address "
+                            "or network (in CIDR notation) in a multicast "
+                            "range"),
+                        cfg.CONF.VXLAN.vxlan_group)
 
-    def get_deletable_bridges(self):
-        bridge_list = bridge_lib.get_bridge_names()
-        bridges = {b for b in bridge_list if b.startswith(BRIDGE_NAME_PREFIX)}
-        bridges.difference_update(self.bridge_mappings.values())
-        return bridges
+    def get_all_neutron_bridges(self):
+        neutron_bridge_list = []
+        bridge_list = os.listdir(BRIDGE_FS)
+        for bridge in bridge_list:
+            if bridge.startswith(BRIDGE_NAME_PREFIX):
+                neutron_bridge_list.append(bridge)
+
+        # NOTE(nick-ma-z): Add pre-existing user-defined bridges
+        for bridge_name in self.bridge_mappings.values():
+            if bridge_name not in neutron_bridge_list:
+                neutron_bridge_list.append(bridge_name)
+        return neutron_bridge_list
+
+    def get_interfaces_on_bridge(self, bridge_name):
+        if ip_lib.device_exists(bridge_name):
+            return os.listdir(BRIDGE_INTERFACES_FS % bridge_name)
+        else:
+            return []
 
     def get_tap_devices_count(self, bridge_name):
-        if_list = bridge_lib.BridgeDevice(bridge_name).get_interfaces()
-        return len([interface for interface in if_list if
-                    interface.startswith(constants.TAP_DEVICE_PREFIX)])
+            try:
+                if_list = os.listdir(BRIDGE_INTERFACES_FS % bridge_name)
+                return len([interface for interface in if_list if
+                            interface.startswith(constants.TAP_DEVICE_PREFIX)])
+            except OSError:
+                return 0
+
+    def get_bridge_for_tap_device(self, tap_device_name):
+        try:
+            path = os.readlink(BRIDGE_PATH_FOR_DEVICE % tap_device_name)
+        except OSError:
+            pass
+        else:
+            bridge = path.rpartition('/')[-1]
+            if (bridge.startswith(BRIDGE_NAME_PREFIX)
+                    or bridge in self.bridge_mappings.values()):
+                return bridge
+        return None
+
+    def is_device_on_bridge(self, device_name):
+        if not device_name:
+            return False
+        else:
+            return os.path.exists(BRIDGE_PORT_FS_FOR_DEVICE % device_name)
 
     def ensure_vlan_bridge(self, network_id, phy_bridge_name,
                            physical_interface, vlan_id):
@@ -345,8 +382,6 @@ class LinuxBridgeManager(object):
                 return
             if bridge_device.disable_stp():
                 return
-            if bridge_device.disable_ipv6():
-                return
             if bridge_device.link.set_up():
                 return
             LOG.debug("Done starting bridge %(bridge_name)s for "
@@ -362,13 +397,12 @@ class LinuxBridgeManager(object):
         self.update_interface_ip_details(bridge_name, interface, ips, gateway)
 
         # Check if the interface is part of the bridge
-        if not bridge_device.owns_interface(interface):
+        if not self.interface_exists_on_bridge(bridge_name, interface):
             try:
                 # Check if the interface is not enslaved in another bridge
-                bridge = bridge_lib.BridgeDevice.get_interface_bridge(
-                    interface)
-                if bridge:
-                    bridge.delif(interface)
+                if self.is_device_on_bridge(interface):
+                    bridge = self.get_bridge_for_tap_device(interface)
+                    bridge_lib.BridgeDevice(bridge).delif(interface)
 
                 bridge_device.addif(interface)
             except Exception as e:
@@ -411,7 +445,7 @@ class LinuxBridgeManager(object):
                                              network_id: network_id})
 
     def add_tap_interface(self, network_id, network_type, physical_network,
-                          segmentation_id, tap_device_name, device_owner):
+                          segmentation_id, tap_device_name):
         """Add tap interface.
 
         If a VIF has been plugged into a network, this function will
@@ -436,25 +470,21 @@ class LinuxBridgeManager(object):
             if not phy_dev_name:
                 return False
             self.ensure_tap_mtu(tap_device_name, phy_dev_name)
-        # Avoid messing with plugging devices into a bridge that the agent
-        # does not own
-        if device_owner.startswith(constants.DEVICE_OWNER_PREFIXES):
-            # Check if device needs to be added to bridge
-            if not bridge_lib.BridgeDevice.get_interface_bridge(
-                tap_device_name):
-                data = {'tap_device_name': tap_device_name,
-                        'bridge_name': bridge_name}
-                LOG.debug("Adding device %(tap_device_name)s to bridge "
-                          "%(bridge_name)s", data)
-                if bridge_lib.BridgeDevice(bridge_name).addif(tap_device_name):
-                    return False
+
+        # Check if device needs to be added to bridge
+        tap_device_in_bridge = self.get_bridge_for_tap_device(tap_device_name)
+        if not tap_device_in_bridge:
+            data = {'tap_device_name': tap_device_name,
+                    'bridge_name': bridge_name}
+            LOG.debug("Adding device %(tap_device_name)s to bridge "
+                      "%(bridge_name)s", data)
+            if bridge_lib.BridgeDevice(bridge_name).addif(tap_device_name):
+                return False
         else:
             data = {'tap_device_name': tap_device_name,
-                    'device_owner': device_owner,
                     'bridge_name': bridge_name}
-            LOG.debug("Skip adding device %(tap_device_name)s to "
-                      "%(bridge_name)s. It is owned by %(device_owner)s and "
-                      "thus added elsewhere.", data)
+            LOG.debug("%(tap_device_name)s already exists on bridge "
+                      "%(bridge_name)s", data)
         return True
 
     def ensure_tap_mtu(self, tap_dev_name, phy_dev_name):
@@ -463,20 +493,19 @@ class LinuxBridgeManager(object):
         ip_lib.IPDevice(tap_dev_name).link.set_mtu(phy_dev_mtu)
 
     def add_interface(self, network_id, network_type, physical_network,
-                      segmentation_id, port_id, device_owner):
+                      segmentation_id, port_id):
         self.network_map[network_id] = NetworkSegment(network_type,
                                                       physical_network,
                                                       segmentation_id)
         tap_device_name = self.get_tap_device_name(port_id)
         return self.add_tap_interface(network_id, network_type,
                                       physical_network, segmentation_id,
-                                      tap_device_name, device_owner)
+                                      tap_device_name)
 
     def delete_bridge(self, bridge_name):
-        bridge_device = bridge_lib.BridgeDevice(bridge_name)
-        if bridge_device.exists():
+        if ip_lib.device_exists(bridge_name):
             physical_interfaces = set(self.interface_mappings.values())
-            interfaces_on_bridge = bridge_device.get_interfaces()
+            interfaces_on_bridge = self.get_interfaces_on_bridge(bridge_name)
             for interface in interfaces_on_bridge:
                 self.remove_interface(bridge_name, interface)
 
@@ -496,6 +525,7 @@ class LinuxBridgeManager(object):
                         self.delete_interface(interface)
 
             LOG.debug("Deleting bridge %s", bridge_name)
+            bridge_device = bridge_lib.BridgeDevice(bridge_name)
             if bridge_device.link.set_down():
                 return
             if bridge_device.delbr():
@@ -506,16 +536,27 @@ class LinuxBridgeManager(object):
             LOG.debug("Cannot delete bridge %s; it does not exist",
                       bridge_name)
 
+    def remove_empty_bridges(self):
+        for network_id in list(self.network_map.keys()):
+            # NOTE(nick-ma-z): Don't remove pre-existing user-defined bridges
+            phy_net = self.network_map[network_id].physical_network
+            if phy_net and phy_net in self.bridge_mappings:
+                continue
+
+            bridge_name = self.get_bridge_name(network_id)
+            if not self.get_tap_devices_count(bridge_name):
+                self.delete_bridge(bridge_name)
+                del self.network_map[network_id]
+
     def remove_interface(self, bridge_name, interface_name):
-        bridge_device = bridge_lib.BridgeDevice(bridge_name)
-        if bridge_device.exists():
-            if not bridge_lib.is_bridged_interface(interface_name):
+        if ip_lib.device_exists(bridge_name):
+            if not self.is_device_on_bridge(interface_name):
                 return True
             LOG.debug("Removing device %(interface_name)s from bridge "
                       "%(bridge_name)s",
                       {'interface_name': interface_name,
                        'bridge_name': bridge_name})
-            if bridge_device.delif(interface_name):
+            if bridge_lib.BridgeDevice(bridge_name).delif(interface_name):
                 return False
             LOG.debug("Done removing device %(interface_name)s from bridge "
                       "%(bridge_name)s",
@@ -530,17 +571,17 @@ class LinuxBridgeManager(object):
             return False
 
     def delete_interface(self, interface):
-        device = self.ip.device(interface)
-        if device.exists():
+        if ip_lib.device_exists(interface):
             LOG.debug("Deleting interface %s",
                       interface)
+            device = self.ip.device(interface)
             device.link.set_down()
             device.link.delete()
             LOG.debug("Done deleting interface %s", interface)
 
     def get_tap_devices(self):
         devices = set()
-        for device in bridge_lib.get_bridge_names():
+        for device in os.listdir(BRIDGE_FS):
             if device.startswith(constants.TAP_DEVICE_PREFIX):
                 devices.add(device)
         return devices
@@ -622,10 +663,16 @@ class LinuxBridgeManager(object):
         return (agent_ip in entries and mac in entries)
 
     def add_fdb_ip_entry(self, mac, ip, interface):
-        ip_lib.IPDevice(interface).neigh.add(ip, mac)
+        utils.execute(['ip', 'neigh', 'replace', ip, 'lladdr', mac,
+                       'dev', interface, 'nud', 'permanent'],
+                      run_as_root=True,
+                      check_exit_code=False)
 
     def remove_fdb_ip_entry(self, mac, ip, interface):
-        ip_lib.IPDevice(interface).neigh.delete(ip, mac)
+        utils.execute(['ip', 'neigh', 'del', ip, 'lladdr', mac,
+                       'dev', interface],
+                      run_as_root=True,
+                      check_exit_code=False)
 
     def add_fdb_bridge_entry(self, mac, agent_ip, interface, operation="add"):
         utils.execute(['bridge', 'fdb', operation, mac, 'dev', interface,
@@ -668,8 +715,7 @@ class LinuxBridgeRpcCallbacks(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
     # history
     #   1.1 Support Security Group RPC
     #   1.3 Added param devices_to_update to security_groups_provider_updated
-    #   1.4 Added support for network_update
-    target = oslo_messaging.Target(version='1.4')
+    target = oslo_messaging.Target(version='1.3')
 
     def __init__(self, context, agent, sg_agent):
         super(LinuxBridgeRpcCallbacks, self).__init__()
@@ -706,15 +752,6 @@ class LinuxBridgeRpcCallbacks(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         # processed in the same order as the relevant API requests.
         self.agent.updated_devices.add(tap_name)
         LOG.debug("port_update RPC received for port: %s", port_id)
-
-    def network_update(self, context, **kwargs):
-        network_id = kwargs['network']['id']
-        LOG.debug("network_update message processed for network "
-                  "%(network_id)s, with ports: %(ports)s",
-                  {'network_id': network_id,
-                   'ports': self.agent.network_ports[network_id]})
-        for port_data in self.agent.network_ports[network_id]:
-            self.agent.updated_devices.add(port_data['device'])
 
     def fdb_add(self, context, fdb_entries):
         LOG.debug("fdb_add received")
@@ -818,24 +855,8 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
     def start(self):
         self.prevent_arp_spoofing = cfg.CONF.AGENT.prevent_arp_spoofing
         self.setup_linux_bridge(self.bridge_mappings, self.interface_mappings)
-
-        # stores received port_updates and port_deletes for
-        # processing by the main loop
-        self.updated_devices = set()
-
-        # stores all configured ports on agent
-        self.network_ports = collections.defaultdict(list)
-        # flag to do a sync after revival
-        self.fullsync = False
-        self.context = context.get_admin_context_without_session()
-        self.setup_rpc(self.interface_mappings.values())
-        self.init_extension_manager(self.connection)
-
-        configurations = {
-            'bridge_mappings': self.bridge_mappings,
-            'interface_mappings': self.interface_mappings,
-            'extensions': self.ext_manager.names()
-        }
+        configurations = {'bridge_mappings': self.bridge_mappings,
+                          'interface_mappings': self.interface_mappings}
         if self.br_mgr.vxlan_mode != lconst.VXLAN_NONE:
             configurations['tunneling_ip'] = self.br_mgr.local_ip
             configurations['tunnel_types'] = [p_const.TYPE_VXLAN]
@@ -848,11 +869,14 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
             'agent_type': constants.AGENT_TYPE_LINUXBRIDGE,
             'start_flag': True}
 
-        report_interval = cfg.CONF.AGENT.report_interval
-        if report_interval:
-            heartbeat = loopingcall.FixedIntervalLoopingCall(
-                self._report_state)
-            heartbeat.start(interval=report_interval)
+        # stores received port_updates for processing by the main loop
+        self.updated_devices = set()
+        self.context = context.get_admin_context_without_session()
+        self.plugin_rpc = agent_rpc.PluginApi(topics.PLUGIN)
+        self.sg_plugin_rpc = sg_rpc.SecurityGroupServerRpcApi(topics.PLUGIN)
+        self.sg_agent = sg_rpc.SecurityGroupAgentRpc(self.context,
+                self.sg_plugin_rpc, defer_refresh_firewall=True)
+        self.setup_rpc(self.interface_mappings.values())
         self.daemon_loop()
 
     def stop(self, graceful=True):
@@ -868,13 +892,8 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
         try:
             devices = len(self.br_mgr.get_tap_devices())
             self.agent_state.get('configurations')['devices'] = devices
-            agent_status = self.state_rpc.report_state(self.context,
-                                                       self.agent_state,
-                                                       True)
-            if agent_status == constants.AGENT_REVIVED:
-                LOG.info(_LI('Agent has just been revived. '
-                             'Doing a full sync.'))
-                self.fullsync = True
+            self.state_rpc.report_state(self.context,
+                                        self.agent_state)
             self.agent_state.pop('start_flag', None)
         except Exception:
             LOG.exception(_LE("Failed reporting state!"))
@@ -890,17 +909,11 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
                 LOG.error(_LE("Unable to obtain MAC address for unique ID. "
                               "Agent terminated!"))
                 exit(1)
-
-        self.plugin_rpc = agent_rpc.PluginApi(topics.PLUGIN)
-        self.sg_plugin_rpc = sg_rpc.SecurityGroupServerRpcApi(topics.PLUGIN)
-        self.sg_agent = sg_rpc.SecurityGroupAgentRpc(
-            self.context, self.sg_plugin_rpc, defer_refresh_firewall=True)
-
         self.agent_id = '%s%s' % ('lb', (mac.replace(":", "")))
         LOG.info(_LI("RPC agent_id: %s"), self.agent_id)
 
         self.topic = topics.AGENT
-        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
         # RPC network init
         # Handle updates from service
         self.endpoints = [LinuxBridgeRpcCallbacks(self.context, self,
@@ -908,49 +921,27 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
         # Define the listening consumers for the agent
         consumers = [[topics.PORT, topics.UPDATE],
                      [topics.NETWORK, topics.DELETE],
-                     [topics.NETWORK, topics.UPDATE],
                      [topics.SECURITY_GROUP, topics.UPDATE]]
-
         if cfg.CONF.VXLAN.l2_population:
             consumers.append([topics.L2POPULATION, topics.UPDATE])
         self.connection = agent_rpc.create_consumers(self.endpoints,
                                                      self.topic,
                                                      consumers)
-
-    def init_extension_manager(self, connection):
-        ext_manager.register_opts(cfg.CONF)
-        self.ext_manager = (
-            ext_manager.AgentExtensionsManager(cfg.CONF))
-        self.ext_manager.initialize(
-            connection, lconst.EXTENSION_DRIVER_TYPE)
+        report_interval = cfg.CONF.AGENT.report_interval
+        if report_interval:
+            heartbeat = loopingcall.FixedIntervalLoopingCall(
+                self._report_state)
+            heartbeat.start(interval=report_interval)
 
     def setup_linux_bridge(self, bridge_mappings, interface_mappings):
         self.br_mgr = LinuxBridgeManager(bridge_mappings, interface_mappings)
 
-    def _ensure_port_admin_state(self, port_id, admin_state_up):
-        LOG.debug("Setting admin_state_up to %s for port %s",
-                  admin_state_up, port_id)
-        tap_name = self.br_mgr.get_tap_device_name(port_id)
-        if admin_state_up:
-            ip_lib.IPDevice(tap_name).link.set_up()
-        else:
-            ip_lib.IPDevice(tap_name).link.set_down()
-
-    def _clean_network_ports(self, device):
-        for netid, ports_list in self.network_ports.items():
-            for port_data in ports_list:
-                if device == port_data['device']:
-                    ports_list.remove(port_data)
-                    if ports_list == []:
-                        self.network_ports.pop(netid)
-                    return port_data['port_id']
-
-    def _update_network_ports(self, network_id, port_id, device):
-        self._clean_network_ports(device)
-        self.network_ports[network_id].append({
-            "port_id": port_id,
-            "device": device
-        })
+    def remove_port_binding(self, network_id, physical_network, interface_id):
+        bridge_name = self.br_mgr.get_existing_bridge_name(physical_network)
+        if not bridge_name:
+            bridge_name = self.br_mgr.get_bridge_name(network_id)
+        tap_device_name = self.br_mgr.get_tap_device_name(interface_id)
+        return self.br_mgr.remove_interface(bridge_name, tap_device_name)
 
     def process_network_devices(self, device_info):
         resync_a = False
@@ -975,8 +966,10 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
         try:
             devices_details_list = self.plugin_rpc.get_devices_details_list(
                 self.context, devices, self.agent_id)
-        except Exception:
-            LOG.exception(_LE("Unable to get port details for %s"), devices)
+        except Exception as e:
+            LOG.debug("Unable to get port details for "
+                      "%(devices)s: %(e)s",
+                      {'devices': devices, 'e': e})
             # resync is needed
             return True
 
@@ -992,56 +985,18 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
                         device_details['port_id'])
                     arp_protect.setup_arp_spoofing_protection(port,
                                                               device_details)
-                # create the networking for the port
-                network_type = device_details.get('network_type')
-                segmentation_id = device_details.get('segmentation_id')
-                tap_in_bridge = self.br_mgr.add_interface(
-                    device_details['network_id'], network_type,
-                    device_details['physical_network'], segmentation_id,
-                    device_details['port_id'], device_details['device_owner'])
-                # REVISIT(scheuran): Changed the way how ports admin_state_up
-                # is implemented.
-                #
-                # Old lb implementation:
-                # - admin_state_up: ensure that tap is plugged into bridge
-                # - admin_state_down: remove tap from bridge
-                # New lb implementation:
-                # - admin_state_up: set tap device state to up
-                # - admin_state_down: set tap device stae to down
-                #
-                # However both approaches could result in races with
-                # nova/libvirt and therefore to an invalid system state in the
-                # scenario, where an instance is booted with a port configured
-                # with admin_state_up = False:
-                #
-                # Libvirt does the following actions in exactly
-                # this order (see libvirt virnetdevtap.c)
-                #     1) Create the tap device, set its MAC and MTU
-                #     2) Plug the tap into the bridge
-                #     3) Set the tap online
-                #
-                # Old lb implementation:
-                #   A race could occur, if the lb agent removes the tap device
-                #   right after step 1). Then libvirt will add it to the bridge
-                #   again in step 2).
-                # New lb implementation:
-                #   The race could occur if the lb-agent sets the taps device
-                #   state to down right after step 2). In step 3) libvirt
-                #   might set it to up again.
-                #
-                # This is not an issue if an instance is booted with a port
-                # configured with admin_state_up = True. Libvirt would just
-                # set the tap device up again.
-                #
-                # This refactoring is recommended for the following reasons:
-                # 1) An existing race with libvirt caused by the behavior of
-                #    the old implementation. See Bug #1312016
-                # 2) The new code is much more readable
-                self._ensure_port_admin_state(device_details['port_id'],
-                                              device_details['admin_state_up'])
-                # update plugin about port status if admin_state is up
                 if device_details['admin_state_up']:
-                    if tap_in_bridge:
+                    # create the networking for the port
+                    network_type = device_details.get('network_type')
+                    segmentation_id = device_details.get('segmentation_id')
+                    if self.br_mgr.add_interface(
+                        device_details['network_id'],
+                        network_type,
+                        device_details['physical_network'],
+                        segmentation_id,
+                        device_details['port_id']):
+
+                        # update plugin about port status
                         self.plugin_rpc.update_device_up(self.context,
                                                          device,
                                                          self.agent_id,
@@ -1051,10 +1006,11 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
                                                            device,
                                                            self.agent_id,
                                                            cfg.CONF.host)
-                self._update_network_ports(device_details['network_id'],
-                                           device_details['port_id'],
-                                           device_details['device'])
-                self.ext_manager.handle_port(self.context, device_details)
+                else:
+                    physical_network = device_details['physical_network']
+                    self.remove_port_binding(device_details['network_id'],
+                                             physical_network,
+                                             device_details['port_id'])
             else:
                 LOG.info(_LI("Device %s not defined on plugin"), device)
         return False
@@ -1070,18 +1026,14 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
                                                              device,
                                                              self.agent_id,
                                                              cfg.CONF.host)
-            except Exception:
-                LOG.exception(_LE("Error occurred while removing port %s"),
-                              device)
+            except Exception as e:
+                LOG.debug("port_removed failed for %(device)s: %(e)s",
+                          {'device': device, 'e': e})
                 resync = True
             if details and details['exists']:
                 LOG.info(_LI("Port %s updated."), device)
             else:
                 LOG.debug("Device %s not defined on plugin", device)
-            port_id = self._clean_network_ports(device)
-            self.ext_manager.delete_port(self.context,
-                                         {'device': device,
-                                          'port_id': port_id})
         if self.prevent_arp_spoofing:
             arp_protect.delete_arp_spoofing_protection(devices)
         return resync
@@ -1089,7 +1041,7 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
     def scan_devices(self, previous, sync):
         device_info = {}
 
-        # Save and reinitialize the set variable that the port_update RPC uses.
+        # Save and reinitialise the set variable that the port_update RPC uses.
         # This should be thread-safe as the greenthread should not yield
         # between these two statements.
         updated_devices = self.updated_devices
@@ -1144,15 +1096,11 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
         while True:
             start = time.time()
 
-            if self.fullsync:
-                sync = True
-                self.fullsync = False
+            device_info = self.scan_devices(previous=device_info, sync=sync)
 
             if sync:
                 LOG.info(_LI("Agent out of sync with plugin!"))
-
-            device_info = self.scan_devices(previous=device_info, sync=sync)
-            sync = False
+                sync = False
 
             if (self._device_info_has_changes(device_info)
                 or self.sg_agent.firewall_refresh_needed()):
@@ -1211,3 +1159,7 @@ def main():
     LOG.info(_LI("Agent initialized successfully, now running... "))
     launcher = service.launch(cfg.CONF, agent)
     launcher.wait()
+
+
+if __name__ == "__main__":
+    main()

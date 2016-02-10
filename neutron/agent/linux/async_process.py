@@ -19,10 +19,9 @@ import eventlet.event
 import eventlet.queue
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LE
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.common import utils as common_utils
+from neutron.i18n import _LE
 
 
 LOG = logging.getLogger(__name__)
@@ -77,7 +76,6 @@ class AsyncProcess(object):
             raise ValueError(_('respawn_interval must be >= 0 if provided.'))
         self.respawn_interval = respawn_interval
         self._process = None
-        self._is_running = False
         self._kill_event = None
         self._reset_queues()
         self._watchers = []
@@ -106,10 +104,10 @@ class AsyncProcess(object):
         :raises eventlet.timeout.Timeout if blocking is True and the process
                 did not start in time.
         """
-        LOG.debug('Launching async process [%s].', self.cmd)
-        if self._is_running:
+        if self._kill_event:
             raise AsyncProcessException(_('Process is already started'))
         else:
+            LOG.debug('Launching async process [%s].', self.cmd)
             self._spawn()
 
         if block:
@@ -124,7 +122,7 @@ class AsyncProcess(object):
         :raises eventlet.timeout.Timeout if blocking is True and the process
                 did not stop in time.
         """
-        if self._is_running:
+        if self._kill_event:
             LOG.debug('Halting async process [%s].', self.cmd)
             self._kill(kill_signal)
         else:
@@ -135,7 +133,6 @@ class AsyncProcess(object):
 
     def _spawn(self):
         """Spawn a process and its watchers."""
-        self._is_running = True
         self._kill_event = eventlet.event.Event()
         self._process, cmd = utils.create_process(self._cmd,
                                                   run_as_root=self.run_as_root)
@@ -157,16 +154,22 @@ class AsyncProcess(object):
                 self._process.pid,
                 run_as_root=self.run_as_root)
 
-    def _kill(self, kill_signal):
-        """Kill the process and the associated watcher greenthreads."""
+    def _kill(self, kill_signal, respawning=False):
+        """Kill the process and the associated watcher greenthreads.
+
+        :param respawning: Optional, whether respawn will be subsequently
+               attempted.
+        """
+        # Halt the greenthreads
+        self._kill_event.send()
+
         pid = self.pid
         if pid:
-            self._is_running = False
             self._kill_process(pid, kill_signal)
 
-        # Halt the greenthreads if they weren't already.
-        if self._kill_event:
-            self._kill_event.send()
+        if not respawning:
+            # Clear the kill event to ensure the process can be
+            # explicitly started again.
             self._kill_event = None
 
     def _kill_process(self, pid, kill_signal):
@@ -191,15 +194,15 @@ class AsyncProcess(object):
         """Kill the async process and respawn if necessary."""
         LOG.debug('Halting async process [%s] in response to an error.',
                   self.cmd)
-        self._kill(signal.SIGKILL)
         if self.respawn_interval is not None and self.respawn_interval >= 0:
+            respawning = True
+        else:
+            respawning = False
+        self._kill(signal.SIGKILL, respawning=respawning)
+        if respawning:
             eventlet.sleep(self.respawn_interval)
             LOG.debug('Respawning async process [%s].', self.cmd)
-            try:
-                self.start()
-            except AsyncProcessException:
-                # Process was already respawned by someone else...
-                pass
+            self._spawn()
 
     def _watch_process(self, callback, kill_event):
         while not kill_event.ready():
@@ -214,17 +217,16 @@ class AsyncProcess(object):
             # Ensure that watching a process with lots of output does
             # not block execution of other greenthreads.
             eventlet.sleep()
-        # self._is_running being True indicates that the loop was
+        # The kill event not being ready indicates that the loop was
         # broken out of due to an error in the watched process rather
         # than the loop condition being satisfied.
-        if self._is_running:
-            self._is_running = False
+        if not kill_event.ready():
             self._handle_process_error()
 
     def _read(self, stream, queue):
         data = stream.readline()
         if data:
-            data = common_utils.safe_decode_utf8(data.strip())
+            data = data.strip()
             queue.put(data)
             return data
 

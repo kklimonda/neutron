@@ -14,11 +14,11 @@
 #    under the License.
 
 import sqlalchemy as sa
+from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy import orm
 
 from neutron.api.v2 import attributes as attr
 from neutron.common import constants
-from neutron.db import agentschedulers_db as agt
 from neutron.db import model_base
 from neutron.db import rbac_db_models
 
@@ -112,8 +112,7 @@ class SubnetRoute(model_base.BASEV2, Route):
                           primary_key=True)
 
 
-class Port(model_base.HasStandardAttributes, model_base.BASEV2,
-           HasId, HasTenant):
+class Port(model_base.BASEV2, HasId, HasTenant):
     """Represents a port on a Neutron v2 network."""
 
     name = sa.Column(sa.String(attr.NAME_MAX_LEN))
@@ -143,7 +142,6 @@ class Port(model_base.HasStandardAttributes, model_base.BASEV2,
                  mac_address=None, admin_state_up=None, status=None,
                  device_id=None, device_owner=None, fixed_ips=None,
                  dns_name=None):
-        super(Port, self).__init__()
         self.id = id
         self.tenant_id = tenant_id
         self.name = name
@@ -172,8 +170,7 @@ class DNSNameServer(model_base.BASEV2):
     order = sa.Column(sa.Integer, nullable=False, server_default='0')
 
 
-class Subnet(model_base.HasStandardAttributes, model_base.BASEV2,
-             HasId, HasTenant):
+class Subnet(model_base.BASEV2, HasId, HasTenant):
     """Represents a neutron subnet.
 
     When a subnet is created the first and last entries will be created. These
@@ -208,12 +205,7 @@ class Subnet(model_base.HasStandardAttributes, model_base.BASEV2,
                                   constants.DHCPV6_STATEFUL,
                                   constants.DHCPV6_STATELESS,
                                   name='ipv6_address_modes'), nullable=True)
-    # subnets don't have their own rbac_entries, they just inherit from
-    # the network rbac entries
-    rbac_entries = orm.relationship(
-        rbac_db_models.NetworkRBAC, lazy='joined',
-        foreign_keys='Subnet.network_id',
-        primaryjoin='Subnet.network_id==NetworkRBAC.object_id')
+    rbac_entries = association_proxy('networks', 'rbac_entries')
 
 
 class SubnetPoolPrefix(model_base.BASEV2):
@@ -230,18 +222,16 @@ class SubnetPoolPrefix(model_base.BASEV2):
                               primary_key=True)
 
 
-class SubnetPool(model_base.HasStandardAttributes, model_base.BASEV2,
-                 HasId, HasTenant):
+class SubnetPool(model_base.BASEV2, HasId, HasTenant):
     """Represents a neutron subnet pool.
     """
 
-    name = sa.Column(sa.String(attr.NAME_MAX_LEN))
+    name = sa.Column(sa.String(255))
     ip_version = sa.Column(sa.Integer, nullable=False)
     default_prefixlen = sa.Column(sa.Integer, nullable=False)
     min_prefixlen = sa.Column(sa.Integer, nullable=False)
     max_prefixlen = sa.Column(sa.Integer, nullable=False)
     shared = sa.Column(sa.Boolean, nullable=False)
-    is_default = sa.Column(sa.Boolean, nullable=False)
     default_quota = sa.Column(sa.Integer, nullable=True)
     hash = sa.Column(sa.String(36), nullable=False, server_default='')
     address_scope_id = sa.Column(sa.String(36), nullable=True)
@@ -251,8 +241,7 @@ class SubnetPool(model_base.HasStandardAttributes, model_base.BASEV2,
                                 lazy='joined')
 
 
-class Network(model_base.HasStandardAttributes, model_base.BASEV2,
-              HasId, HasTenant):
+class Network(model_base.BASEV2, HasId, HasTenant):
     """Represents a v2 neutron network."""
 
     name = sa.Column(sa.String(attr.NAME_MAX_LEN))
@@ -267,7 +256,3 @@ class Network(model_base.HasStandardAttributes, model_base.BASEV2,
     rbac_entries = orm.relationship(rbac_db_models.NetworkRBAC,
                                     backref='network', lazy='joined',
                                     cascade='all, delete, delete-orphan')
-    availability_zone_hints = sa.Column(sa.String(255))
-    dhcp_agents = orm.relationship(
-        'Agent', lazy='joined', viewonly=True,
-        secondary=agt.NetworkDhcpAgentBinding.__table__)

@@ -18,7 +18,6 @@ import re
 import eventlet
 import mock
 import netaddr
-import six
 import testtools
 
 from neutron.common import constants
@@ -27,7 +26,6 @@ from neutron.common import utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
 from neutron.tests import base
-from neutron.tests.common import helpers
 
 from oslo_log import log as logging
 
@@ -72,16 +70,16 @@ class TestParseMappings(base.BaseTestCase):
                          {'key1': 'val', 'key2': 'val'})
 
     def test_parse_mappings_succeeds_for_no_mappings(self):
-        self.assertEqual({}, self.parse(['']))
+        self.assertEqual(self.parse(['']), {})
 
 
 class TestParseTunnelRangesMixin(object):
     TUN_MIN = None
     TUN_MAX = None
     TYPE = None
-    _err_prefix = "Invalid network tunnel range: '%d:%d' - "
-    _err_suffix = "%s is not a valid %s identifier."
-    _err_range = "End of tunnel range is less than start of tunnel range."
+    _err_prefix = "Invalid network Tunnel range: '%d:%d' - "
+    _err_suffix = "%s is not a valid %s identifier"
+    _err_range = "End of tunnel range is less than start of tunnel range"
 
     def _build_invalid_tunnel_range_msg(self, t_range_tuple, n):
         bad_id = t_range_tuple[n - 1]
@@ -139,11 +137,11 @@ class TestVxlanTunnelRangeVerifyValid(TestParseTunnelRangesMixin,
 
 class UtilTestParseVlanRanges(base.BaseTestCase):
     _err_prefix = "Invalid network VLAN range: '"
-    _err_too_few = "' - 'need more than 2 values to unpack'."
+    _err_too_few = "' - 'need more than 2 values to unpack'"
     _err_too_many_prefix = "' - 'too many values to unpack"
-    _err_not_int = "' - 'invalid literal for int() with base 10: '%s''."
-    _err_bad_vlan = "' - '%s is not a valid VLAN tag'."
-    _err_range = "' - 'End of VLAN range is less than start of VLAN range'."
+    _err_not_int = "' - 'invalid literal for int() with base 10: '%s''"
+    _err_bad_vlan = "' - '%s is not a valid VLAN tag'"
+    _err_range = "' - 'End of VLAN range is less than start of VLAN range'"
 
     def _range_too_few_err(self, nv_range):
         return self._err_prefix + nv_range + self._err_too_few
@@ -572,7 +570,7 @@ class TestDvrServices(base.BaseTestCase):
         self._test_is_dvr_serviced(constants.DEVICE_OWNER_DHCP, True)
 
     def test_is_dvr_serviced_with_vm_port(self):
-        self._test_is_dvr_serviced(constants.DEVICE_OWNER_COMPUTE_PREFIX, True)
+        self._test_is_dvr_serviced('compute:', True)
 
 
 class TestIpToCidr(base.BaseTestCase):
@@ -718,24 +716,3 @@ class TestGetRandomString(base.BaseTestCase):
         self.assertEqual(length, len(random_string))
         regex = re.compile('^[0-9a-fA-F]+$')
         self.assertIsNotNone(regex.match(random_string))
-
-
-class TestSafeDecodeUtf8(base.BaseTestCase):
-
-    @helpers.requires_py2
-    def test_py2_does_nothing(self):
-        s = 'test-py2'
-        self.assertIs(s, utils.safe_decode_utf8(s))
-
-    @helpers.requires_py3
-    def test_py3_decoded_valid_bytes(self):
-        s = bytes('test-py2', 'utf-8')
-        decoded_str = utils.safe_decode_utf8(s)
-        self.assertIsInstance(decoded_str, six.text_type)
-        self.assertEqual(s, decoded_str.encode('utf-8'))
-
-    @helpers.requires_py3
-    def test_py3_decoded_invalid_bytes(self):
-        s = bytes('test-py2', 'utf_16')
-        decoded_str = utils.safe_decode_utf8(s)
-        self.assertIsInstance(decoded_str, six.text_type)

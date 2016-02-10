@@ -26,18 +26,15 @@ from oslo_db import exception as db_exc
 from oslo_utils import uuidutils
 from sqlalchemy.orm import exc as sqla_exc
 
-from neutron._i18n import _
 from neutron.callbacks import registry
 from neutron.common import constants
 from neutron.common import exceptions as exc
 from neutron.common import utils
 from neutron import context
-from neutron.db import agents_db
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2 as base_plugin
 from neutron.db import l3_db
 from neutron.db import models_v2
-from neutron.extensions import availability_zone as az_ext
 from neutron.extensions import external_net
 from neutron.extensions import multiprovidernet as mpnet
 from neutron.extensions import portbindings
@@ -72,7 +69,7 @@ config.cfg.CONF.import_opt('network_vlan_ranges',
 
 PLUGIN_NAME = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 
-DEVICE_OWNER_COMPUTE = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
+DEVICE_OWNER_COMPUTE = 'compute:None'
 HOST = 'fake_host'
 
 
@@ -322,9 +319,7 @@ class TestMl2NetworksV2(test_plugin.TestNetworksV2,
         ) as f:
             data = {'network': {'tenant_id': 'sometenant', 'name': 'dummy',
                                 'admin_state_up': True, 'shared': False}}
-            req = self.new_create_request('networks', data)
-            res = req.get_response(self.api)
-            self.assertEqual(500, res.status_int)
+            self.new_create_request('networks', data).get_response(self.api)
             self.assertEqual(db_api.MAX_RETRIES + 1, f.call_count)
 
 
@@ -395,21 +390,6 @@ class TestMl2NetworksWithVlanTransparencyAndMTU(TestMl2NetworksV2):
         self.assertIn('vlan_transparent', network)
 
 
-class TestMl2NetworksWithAvailabilityZone(TestMl2NetworksV2):
-    def test_create_network_availability_zone(self):
-        az_hints = ['az1', 'az2']
-        data = {'network': {'name': 'net1',
-                            az_ext.AZ_HINTS: az_hints,
-                            'tenant_id': 'tenant_one'}}
-        with mock.patch.object(agents_db.AgentAvailabilityZoneMixin,
-                               'validate_availability_zones'):
-            network_req = self.new_create_request('networks', data)
-            res = network_req.get_response(self.api)
-            self.assertEqual(201, res.status_int)
-            network = self.deserialize(self.fmt, res)['network']
-            self.assertEqual(az_hints, network[az_ext.AZ_HINTS])
-
-
 class TestMl2SubnetsV2(test_plugin.TestSubnetsV2,
                        Ml2PluginV2TestCase):
     def test_delete_subnet_race_with_dhcp_port_creation(self):
@@ -451,41 +431,6 @@ class TestMl2SubnetsV2(test_plugin.TestSubnetsV2,
                     req = self.new_delete_request('subnets', subnet_id)
                     res = req.get_response(self.api)
                     self.assertEqual(204, res.status_int)
-
-
-class TestMl2DbOperationBounds(test_plugin.DbOperationBoundMixin,
-                               Ml2PluginV2TestCase):
-    """Test cases to assert constant query count for list operations.
-
-    These test cases assert that an increase in the number of objects
-    does not result in an increase of the number of db operations. All
-    database lookups during a list operation should be performed in bulk
-    so the number of queries required for 2 objects instead of 1 should
-    stay the same.
-    """
-
-    def make_network(self):
-        return self._make_network(self.fmt, 'name', True)
-
-    def make_subnet(self):
-        net = self.make_network()
-        setattr(self, '_subnet_count', getattr(self, '_subnet_count', 0) + 1)
-        cidr = '1.%s.0.0/24' % self._subnet_count
-        return self._make_subnet(self.fmt, net, None, cidr)
-
-    def make_port(self):
-        net = self.make_network()
-        return self._make_port(self.fmt, net['network']['id'])
-
-    def test_network_list_queries_constant(self):
-        self._assert_object_list_queries_constant(self.make_network,
-                                                  'networks')
-
-    def test_subnet_list_queries_constant(self):
-        self._assert_object_list_queries_constant(self.make_subnet, 'subnets')
-
-    def test_port_list_queries_constant(self):
-        self._assert_object_list_queries_constant(self.make_port, 'ports')
 
 
 class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
@@ -696,7 +641,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
             self.assertTrue(notify.call_counts)
 
     def test_check_if_compute_port_serviced_by_dvr(self):
-        self.assertTrue(utils.is_dvr_serviced(DEVICE_OWNER_COMPUTE))
+        self.assertTrue(utils.is_dvr_serviced('compute:None'))
 
     def test_check_if_lbaas_vip_port_serviced_by_dvr(self):
         self.assertTrue(utils.is_dvr_serviced(
@@ -755,80 +700,9 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                 self.assertRaises(
                     exc.PortNotFound, plugin.get_port, ctx, port['port']['id'])
 
-    def test_port_create_resillient_to_duplicate_records(self):
-
-        def make_port():
-            with self.port():
-                pass
-
-        self._test_operation_resillient_to_ipallocation_failure(make_port)
-
-    def test_port_update_resillient_to_duplicate_records(self):
-        with self.port() as p:
-            data = {'port': {'fixed_ips': [{'ip_address': '10.0.0.9'}]}}
-            req = self.new_update_request('ports', data, p['port']['id'])
-
-            def do_request():
-                self.assertEqual(200, req.get_response(self.api).status_int)
-
-            self._test_operation_resillient_to_ipallocation_failure(do_request)
-
-    def _test_operation_resillient_to_ipallocation_failure(self, func):
-        from sqlalchemy import event
-
-        class IPAllocationsGrenade(object):
-            insert_ip_called = False
-            except_raised = False
-
-            def execute(self, con, curs, stmt, *args, **kwargs):
-                if 'INSERT INTO ipallocations' in stmt:
-                    self.insert_ip_called = True
-
-            def commit(self, con):
-                # we blow up on commit to simulate another thread/server
-                # stealing our IP before our transaction was done
-                if self.insert_ip_called and not self.except_raised:
-                    self.except_raised = True
-                    raise db_exc.DBDuplicateEntry()
-
-        listener = IPAllocationsGrenade()
-        engine = db_api.get_engine()
-        event.listen(engine, 'before_cursor_execute', listener.execute)
-        event.listen(engine, 'commit', listener.commit)
-        self.addCleanup(event.remove, engine, 'before_cursor_execute',
-                        listener.execute)
-        self.addCleanup(event.remove, engine, 'commit',
-                        listener.commit)
-        func()
-        # make sure that the grenade went off during the commit
-        self.assertTrue(listener.except_raised)
-
 
 class TestMl2PluginOnly(Ml2PluginV2TestCase):
     """For testing methods that don't call drivers"""
-
-    def test__verify_service_plugins_requirements(self):
-        plugin = manager.NeutronManager.get_plugin()
-        with mock.patch.dict(ml2_plugin.SERVICE_PLUGINS_REQUIRED_DRIVERS,
-                             {self.l3_plugin: self._mechanism_drivers}),\
-                mock.patch.object(plugin.extension_manager,
-                                  'names',
-                                  return_value=self._mechanism_drivers):
-
-            plugin._verify_service_plugins_requirements()
-
-    def test__verify_service_plugins_requirements_missing_driver(self):
-        plugin = manager.NeutronManager.get_plugin()
-        with mock.patch.dict(ml2_plugin.SERVICE_PLUGINS_REQUIRED_DRIVERS,
-                             {self.l3_plugin: ['test_required_driver']}),\
-                mock.patch.object(plugin.extension_manager,
-                                  'names',
-                                  return_value=self._mechanism_drivers):
-
-            self.assertRaises(
-                ml2_exc.ExtensionDriverNotFound,
-                plugin._verify_service_plugins_requirements
-            )
 
     def _test_check_mac_update_allowed(self, vif_type, expect_change=True):
         plugin = manager.NeutronManager.get_plugin()
@@ -919,10 +793,10 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
                                                         port['port']['id'])
 
     def test_delete_last_vm_port(self):
-        self._test_delete_dvr_serviced_port(device_owner=DEVICE_OWNER_COMPUTE)
+        self._test_delete_dvr_serviced_port(device_owner='compute:None')
 
     def test_delete_last_vm_port_with_floatingip(self):
-        self._test_delete_dvr_serviced_port(device_owner=DEVICE_OWNER_COMPUTE,
+        self._test_delete_dvr_serviced_port(device_owner='compute:None',
                                             floating_ip=True)
 
     def test_delete_lbaas_vip_port(self):
@@ -938,8 +812,7 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
             p_const.L3_ROUTER_NAT]
         r = plugin.create_router(
             self.context,
-            {'router': {'name': 'router', 'admin_state_up': True,
-             'tenant_id': self.context.tenant_id}})
+            {'router': {'name': 'router', 'admin_state_up': True}})
         with self.subnet() as s:
             p = plugin.add_router_interface(self.context, r['id'],
                                             {'subnet_id': s['subnet']['id']})
@@ -1119,7 +992,7 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
         plugin = manager.NeutronManager.get_plugin()
         port = {
             'id': 'foo_port_id',
-            portbindings.HOST_ID: 'foo_host',
+            'binding:host_id': 'foo_host',
         }
         with mock.patch.object(ml2_db, 'ensure_dvr_port_binding') as mock_dvr:
             plugin.update_dvr_port_binding(
@@ -1375,8 +1248,8 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
             req = self.new_delete_request('networks', network_id)
             res = req.get_response(self.api)
             self.assertEqual(2, rs.call_count)
-        self.assertEqual([], ml2_db.get_network_segments(
-            self.context.session, network_id))
+        self.assertEqual(ml2_db.get_network_segments(
+            self.context.session, network_id), [])
         self.assertIsNone(ml2_db.get_dynamic_segment(
             self.context.session, network_id, 'physnet2'))
 
@@ -1726,7 +1599,7 @@ class TestFaultyMechansimDriver(Ml2PluginV2FaultyDriverTestCase):
                             network['network']['tenant_id'],
                             'name': 'port1',
                             'device_owner':
-                            constants.DEVICE_OWNER_DVR_INTERFACE,
+                            'network:router_interface_distributed',
                             'admin_state_up': 1,
                             'fixed_ips':
                             [{'subnet_id': subnet_id}]}}
@@ -1790,7 +1663,6 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
         plugin.mechanism_manager = mock.Mock()
         plugin.notifier = mock.Mock()
         plugin._check_mac_update_allowed = mock.Mock(return_value=True)
-        plugin._extend_availability_zone = mock.Mock()
 
         self.notify.side_effect = (
             lambda r, e, t, **kwargs: self._ensure_transaction_is_closed())
@@ -1824,7 +1696,7 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
             admin_state_up=True,
             status='ACTIVE',
             device_id='vm_id',
-            device_owner=DEVICE_OWNER_COMPUTE)
+            device_owner='compute:None')
 
         binding = mock.Mock()
         binding.port_id = port_id

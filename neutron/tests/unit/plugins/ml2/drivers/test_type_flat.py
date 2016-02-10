@@ -19,7 +19,6 @@ from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import config
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import type_flat
-from neutron.tests import base
 from neutron.tests.unit import testlib_api
 
 
@@ -51,21 +50,14 @@ class FlatTypeTest(testlib_api.SqlTestCase):
         self.driver.validate_provider_segment(segment)
 
     def test_validate_provider_phynet_name(self):
-        self.driver._parse_networks([])
-        segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
-                   api.PHYSICAL_NETWORK: 'flat_net1'}
         self.assertRaises(exc.InvalidInput,
-                          self.driver.validate_provider_segment,
-                          segment=segment)
+                          self.driver._parse_networks,
+                          entries=[''])
 
     def test_validate_provider_phynet_name_multiple(self):
-        self.driver._parse_networks(['flat_net1', 'flat_net2'])
-        segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
-                   api.PHYSICAL_NETWORK: 'flat_net1'}
-        self.driver.validate_provider_segment(segment)
-        segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
-                   api.PHYSICAL_NETWORK: 'flat_net2'}
-        self.driver.validate_provider_segment(segment)
+        self.assertRaises(exc.InvalidInput,
+                          self.driver._parse_networks,
+                          entries=['flat_net1', ''])
 
     def test_validate_provider_segment_without_physnet_restriction(self):
         self.driver._parse_networks('*')
@@ -141,16 +133,3 @@ class FlatTypeTest(testlib_api.SqlTestCase):
         config.cfg.CONF.set_override('path_mtu', 0, group='ml2')
         self.driver.physnet_mtus = {}
         self.assertEqual(0, self.driver.get_mtu('physnet1'))
-
-
-class FlatTypeDefaultTest(base.BaseTestCase):
-
-    def setUp(self):
-        super(FlatTypeDefaultTest, self).setUp()
-        self.driver = type_flat.FlatTypeDriver()
-        self.driver.physnet_mtus = []
-
-    def test_validate_provider_segment_default(self):
-        segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
-                   api.PHYSICAL_NETWORK: 'other_flat_net'}
-        self.driver.validate_provider_segment(segment)

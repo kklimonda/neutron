@@ -30,27 +30,18 @@ FLOATINGIP_STATUS_ACTIVE = 'ACTIVE'
 FLOATINGIP_STATUS_DOWN = 'DOWN'
 FLOATINGIP_STATUS_ERROR = 'ERROR'
 
-DEVICE_OWNER_COMPUTE_PREFIX = "compute:"
-DEVICE_OWNER_NETWORK_PREFIX = "network:"
-DEVICE_OWNER_NEUTRON_PREFIX = "neutron:"
+DEVICE_OWNER_ROUTER_HA_INTF = "network:router_ha_interface"
+DEVICE_OWNER_ROUTER_INTF = "network:router_interface"
+DEVICE_OWNER_ROUTER_GW = "network:router_gateway"
+DEVICE_OWNER_FLOATINGIP = "network:floatingip"
+DEVICE_OWNER_DHCP = "network:dhcp"
+DEVICE_OWNER_DVR_INTERFACE = "network:router_interface_distributed"
+DEVICE_OWNER_AGENT_GW = "network:floatingip_agent_gateway"
+DEVICE_OWNER_ROUTER_SNAT = "network:router_centralized_snat"
+DEVICE_OWNER_LOADBALANCER = "neutron:LOADBALANCER"
+DEVICE_OWNER_LOADBALANCERV2 = "neutron:LOADBALANCERV2"
 
-DEVICE_OWNER_ROUTER_HA_INTF = (DEVICE_OWNER_NETWORK_PREFIX +
-                               "router_ha_interface")
-DEVICE_OWNER_ROUTER_INTF = DEVICE_OWNER_NETWORK_PREFIX + "router_interface"
-DEVICE_OWNER_ROUTER_GW = DEVICE_OWNER_NETWORK_PREFIX + "router_gateway"
-DEVICE_OWNER_FLOATINGIP = DEVICE_OWNER_NETWORK_PREFIX + "floatingip"
-DEVICE_OWNER_DHCP = DEVICE_OWNER_NETWORK_PREFIX + "dhcp"
-DEVICE_OWNER_DVR_INTERFACE = (DEVICE_OWNER_NETWORK_PREFIX +
-                              "router_interface_distributed")
-DEVICE_OWNER_AGENT_GW = (DEVICE_OWNER_NETWORK_PREFIX +
-                         "floatingip_agent_gateway")
-DEVICE_OWNER_ROUTER_SNAT = (DEVICE_OWNER_NETWORK_PREFIX +
-                            "router_centralized_snat")
-DEVICE_OWNER_LOADBALANCER = DEVICE_OWNER_NEUTRON_PREFIX + "LOADBALANCER"
-DEVICE_OWNER_LOADBALANCERV2 = DEVICE_OWNER_NEUTRON_PREFIX + "LOADBALANCERV2"
-
-DEVICE_OWNER_PREFIXES = (DEVICE_OWNER_NETWORK_PREFIX,
-                         DEVICE_OWNER_NEUTRON_PREFIX)
+DEVICE_OWNER_PREFIXES = ["network:", "neutron:"]
 
 # Collection used to identify devices owned by router interfaces.
 # DEVICE_OWNER_ROUTER_HA_INTF is a special case and so is not included.
@@ -151,8 +142,8 @@ IPV6_MODES = [DHCPV6_STATEFUL, DHCPV6_STATELESS, IPV6_SLAAC]
 
 IPV6_LLA_PREFIX = 'fe80::/64'
 
-# Human-readable ID to which the subnetpool ID should be set to
-# indicate that IPv6 Prefix Delegation is enabled for a given subnet
+# Human-readable ID to which default_ipv6_subnet_pool should be set to
+# indicate that IPv6 Prefix Delegation should be used to allocate subnet CIDRs
 IPV6_PD_POOL_ID = 'prefix_delegation'
 
 # Special provisional prefix for IPv6 Prefix Delegation
@@ -164,8 +155,6 @@ LLA_TASK_TIMEOUT = 40
 # Linux interface max length
 DEVICE_NAME_MAX_LEN = 15
 
-# vhost-user device names start with "vhu"
-VHOST_USER_DEVICE_PREFIX = 'vhu'
 # Device names start with "tap"
 TAP_DEVICE_PREFIX = 'tap'
 # The vswitch side of a veth pair for a nova iptables filter setup
@@ -211,11 +200,3 @@ ROUTER_MARK_MASK = "0xffff"
 
 # Time format
 ISO8601_TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%f'
-
-# Agent states as detected by server, used to reply on agent's state report
-# agent has just been registered
-AGENT_NEW = 'new'
-# agent is alive
-AGENT_ALIVE = 'alive'
-# agent has just returned to alive after being dead
-AGENT_REVIVED = 'revived'

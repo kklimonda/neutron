@@ -20,7 +20,6 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
 
-from neutron._i18n import _, _LE
 from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
 from neutron.agent.dhcp import config as dhcp_config
@@ -33,6 +32,7 @@ from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.api.v2 import attributes
 from neutron.common import config
+from neutron.i18n import _LE
 
 
 LOG = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ def setup_conf():
     conf = cfg.CONF
     conf.register_cli_opts(cli_opts)
     agent_config.register_interface_driver_opts_helper(conf)
+    agent_config.register_use_namespaces_opts_helper(conf)
     conf.register_opts(dhcp_config.DHCP_AGENT_OPTS)
     conf.register_opts(dhcp_config.DHCP_OPTS)
     conf.register_opts(dhcp_config.DNSMASQ_OPTS)
@@ -89,7 +90,7 @@ def kill_dhcp(conf, namespace):
         conf.dhcp_driver,
         conf=conf,
         process_monitor=_get_dhcp_process_monitor(conf),
-        network=dhcp.NetModel({'id': network_id}),
+        network=dhcp.NetModel(conf.use_namespaces, {'id': network_id}),
         plugin=FakeDhcpPlugin())
 
     if dhcp_driver.active:
@@ -112,12 +113,9 @@ def eligible_for_deletion(conf, namespace, force=False):
 
 
 def unplug_device(conf, device):
-    orig_log_fail_as_error = device.get_log_fail_as_error()
-    device.set_log_fail_as_error(False)
     try:
         device.link.delete()
     except RuntimeError:
-        device.set_log_fail_as_error(orig_log_fail_as_error)
         # Maybe the device is OVS port, so try to delete
         ovs = ovs_lib.BaseOVS()
         bridge_name = ovs.get_bridge_for_iface(device.name)
@@ -126,8 +124,6 @@ def unplug_device(conf, device):
             bridge.delete_port(device.name)
         else:
             LOG.debug('Unable to find bridge for device: %s', device.name)
-    finally:
-        device.set_log_fail_as_error(orig_log_fail_as_error)
 
 
 def destroy_namespace(conf, namespace, force=False):

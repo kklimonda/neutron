@@ -18,8 +18,6 @@ import six
 
 from oslo_config import cfg
 
-from neutron._i18n import _
-
 OPTS = [
     cfg.StrOpt('pd_confs',
                default='$state_path/pd',

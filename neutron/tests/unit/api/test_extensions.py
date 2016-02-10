@@ -19,7 +19,6 @@ import mock
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
-from oslo_service import wsgi as base_wsgi
 import routes
 import six
 import webob
@@ -49,10 +48,9 @@ _get_path = test_base._get_path
 extensions_path = ':'.join(neutron.tests.unit.extensions.__path__)
 
 
-class ExtensionsTestApp(base_wsgi.Router):
+class ExtensionsTestApp(wsgi.Router):
 
-    def __init__(self, options=None):
-        options = options or {}
+    def __init__(self, options={}):
         mapper = routes.Mapper()
         controller = ext_stubs.StubBaseAppController()
         mapper.resource("dummy_resource", "/dummy_resources",
@@ -82,7 +80,7 @@ class ExtensionPathTest(base.BaseTestCase):
                          '%s:neutron/tests/unit/extensions' % self.base_path)
 
     def test_get_extensions_path_no_extensions(self):
-        # Reset to default value, as it's overridden by base class
+        # Reset to default value, as it's overriden by base class
         cfg.CONF.set_override('api_extensions_path', '')
         path = extensions.get_extensions_path()
         self.assertEqual(path, self.base_path)

@@ -29,6 +29,7 @@ class TestRouterInfo(base.BaseTestCase):
         super(TestRouterInfo, self).setUp()
 
         conf = agent_config.setup_conf()
+        conf.use_namespaces = True
 
         self.ip_cls_p = mock.patch('neutron.agent.linux.ip_lib.IPWrapper')
         ip_cls = self.ip_cls_p.start()
@@ -97,7 +98,7 @@ class TestRouterInfo(base.BaseTestCase):
                             'nexthop': "10.100.10.30"}]
         ri.routes = fake_old_routes
         ri.router['routes'] = fake_new_routes
-        ri.routes_updated(fake_old_routes, fake_new_routes)
+        ri.routes_updated()
 
         expected = [['ip', 'route', 'replace', 'to', '110.100.30.0/24',
                     'via', '10.100.10.30'],
@@ -105,18 +106,18 @@ class TestRouterInfo(base.BaseTestCase):
                      'via', '10.100.10.30']]
 
         self._check_agent_method_called(expected)
-        ri.routes = fake_new_routes
+
         fake_new_routes = [{'destination': "110.100.30.0/24",
                             'nexthop': "10.100.10.30"}]
         ri.router['routes'] = fake_new_routes
-        ri.routes_updated(ri.routes, fake_new_routes)
+        ri.routes_updated()
         expected = [['ip', 'route', 'delete', 'to', '110.100.31.0/24',
                     'via', '10.100.10.30']]
 
         self._check_agent_method_called(expected)
         fake_new_routes = []
         ri.router['routes'] = fake_new_routes
-        ri.routes_updated(ri.routes, fake_new_routes)
+        ri.routes_updated()
 
         expected = [['ip', 'route', 'delete', 'to', '110.100.30.0/24',
                     'via', '10.100.10.30']]
@@ -128,6 +129,8 @@ class BasicRouterTestCaseFramework(base.BaseTestCase):
         if not router:
             router = mock.MagicMock()
         self.agent_conf = mock.Mock()
+        # NOTE The use_namespaces config will soon be deprecated
+        self.agent_conf.use_namespaces = True
         self.router_id = _uuid()
         return router_info.RouterInfo(self.router_id,
                                       router,

@@ -27,15 +27,14 @@ class MeteringPlugin(metering_db.MeteringDbMixin):
     def __init__(self):
         super(MeteringPlugin, self).__init__()
 
-        self.meter_rpc = metering_rpc_agent_api.MeteringAgentNotifyAPI()
-        self.start_rpc_listeners()
-
-    def start_rpc_listeners(self):
         self.endpoints = [metering_rpc.MeteringRpcCallbacks(self)]
-        self.conn = n_rpc.create_connection()
+
+        self.conn = n_rpc.create_connection(new=True)
         self.conn.create_consumer(
             topics.METERING_PLUGIN, self.endpoints, fanout=False)
-        return self.conn.consume_in_threads()
+        self.conn.consume_in_threads()
+
+        self.meter_rpc = metering_rpc_agent_api.MeteringAgentNotifyAPI()
 
     def create_metering_label(self, context, metering_label):
         label = super(MeteringPlugin, self).create_metering_label(

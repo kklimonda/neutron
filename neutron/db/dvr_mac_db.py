@@ -20,12 +20,12 @@ from oslo_log import log as logging
 import sqlalchemy as sa
 from sqlalchemy.orm import exc
 
-from neutron._i18n import _, _LE
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.db import model_base
 from neutron.extensions import dvr as ext_dvr
 from neutron.extensions import portbindings
+from neutron.i18n import _LE
 from neutron import manager
 
 
@@ -105,6 +105,12 @@ class DVRDbMixin(ext_dvr.DVRMacAddressPluginBase):
         LOG.error(_LE("MAC generation error after %s attempts"), max_retries)
         raise ext_dvr.MacAddressGenerationFailure(host=host)
 
+    def delete_dvr_mac_address(self, context, host):
+        query = context.session.query(DistributedVirtualRouterMacAddress)
+        (query.
+         filter(DistributedVirtualRouterMacAddress.host == host).
+         delete(synchronize_session=False))
+
     def get_dvr_mac_address_list(self, context):
         with context.session.begin(subtransactions=True):
             return (context.session.
@@ -126,7 +132,7 @@ class DVRDbMixin(ext_dvr.DVRMacAddressPluginBase):
 
     @log_helpers.log_method_call
     def get_ports_on_host_by_subnet(self, context, host, subnet):
-        """Returns DVR serviced ports on a given subnet in the input host
+        """Returns ports of interest, on a given subnet in the input host
 
         This method returns ports that need to be serviced by DVR.
         :param context: rpc request context
@@ -169,12 +175,11 @@ class DVRDbMixin(ext_dvr.DVRMacAddressPluginBase):
         else:
             # retrieve the gateway port on this subnet
             if fixed_ips:
-                ip_address = fixed_ips[0]['ip_address']
+                filter = fixed_ips[0]
             else:
-                ip_address = subnet_info['gateway_ip']
-
-            filter = {'fixed_ips': {'subnet_id': [subnet],
-                                    'ip_address': [ip_address]}}
+                filter = {'fixed_ips': {'subnet_id': [subnet],
+                                        'ip_address':
+                                        [subnet_info['gateway_ip']]}}
 
             internal_gateway_ports = self.plugin.get_ports(
                 context, filters=filter)

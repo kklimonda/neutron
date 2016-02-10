@@ -77,8 +77,6 @@ class QosRule(base.NeutronDbObject):
 
 @obj_base.VersionedObjectRegistry.register
 class QosBandwidthLimitRule(QosRule):
-    # Version 1.0: Initial version
-    VERSION = '1.0'
 
     db_model = qos_db_model.QosBandwidthLimitRule
 

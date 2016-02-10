@@ -31,12 +31,12 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 import six
 
-from neutron._i18n import _, _LE, _LW
 from neutron.agent.common import config
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import utils as linux_utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
+from neutron.i18n import _LE, _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -405,7 +405,7 @@ class IptablesManager(object):
             try:
                 self.defer_apply_off()
             except Exception:
-                msg = _('Failure applying iptables rules')
+                msg = _LE('Failure applying iptables rules')
                 LOG.exception(msg)
                 raise n_exc.IpTablesApplyException(msg)
 

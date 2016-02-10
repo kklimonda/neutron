@@ -18,12 +18,15 @@ import fixtures
 import netaddr
 from neutronclient.common import exceptions as nc_exc
 from oslo_config import cfg
+from oslo_log import log as logging
 
 from neutron.agent.linux import utils
 from neutron.common import utils as common_utils
 from neutron.tests.common import net_helpers
 from neutron.tests.fullstack.resources import config
 from neutron.tests.fullstack.resources import process
+
+LOG = logging.getLogger(__name__)
 
 
 class EnvironmentDescription(object):
@@ -47,9 +50,8 @@ class HostDescription(object):
     What agents should the host spawn? What mode should each agent operate
     under?
     """
-    def __init__(self, l3_agent=False, of_interface='ovs-ofctl'):
+    def __init__(self, l3_agent=False):
         self.l3_agent = l3_agent
-        self.of_interface = of_interface
 
 
 class Host(fixtures.Fixture):

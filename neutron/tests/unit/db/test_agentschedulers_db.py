@@ -52,10 +52,6 @@ DHCP_HOSTA = 'hosta'
 L3_HOSTB = 'hostb'
 DHCP_HOSTC = 'hostc'
 
-DEVICE_OWNER_COMPUTE = ''.join([constants.DEVICE_OWNER_COMPUTE_PREFIX,
-                                'test:',
-                                DHCP_HOSTA])
-
 
 class AgentSchedulerTestMixIn(object):
 
@@ -407,7 +403,7 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
             result0 = len(dhcp_agents['agents'])
             self._register_agent_states()
             with self.port(subnet=subnet,
-                           device_owner=DEVICE_OWNER_COMPUTE) as port:
+                           device_owner="compute:test:" + DHCP_HOSTA) as port:
                 dhcp_agents = self._list_dhcp_agents_hosting_network(
                     port['port']['network_id'])
                 result1 = len(dhcp_agents['agents'])
@@ -422,7 +418,7 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
             result0 = len(dhcp_agents['agents'])
             self._register_agent_states()
             with self.port(subnet=subnet,
-                           device_owner=DEVICE_OWNER_COMPUTE) as port:
+                           device_owner="compute:test:" + DHCP_HOSTA) as port:
                 dhcp_agents = self._list_dhcp_agents_hosting_network(
                     port['port']['network_id'])
                 result1 = len(dhcp_agents['agents'])
@@ -437,13 +433,13 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
             result0 = len(dhcp_agents['agents'])
             self._register_agent_states()
             with self.port(subnet=subnet,
-                           device_owner=DEVICE_OWNER_COMPUTE) as port:
+                           device_owner="compute:test:" + DHCP_HOSTA) as port:
                 dhcp_agents = self._list_dhcp_agents_hosting_network(
                     port['port']['network_id'])
                 result1 = len(dhcp_agents['agents'])
             helpers.register_dhcp_agent('host1')
             with self.port(subnet=subnet,
-                           device_owner=DEVICE_OWNER_COMPUTE) as port:
+                           device_owner="compute:test:" + DHCP_HOSTA) as port:
                 dhcp_agents = self._list_dhcp_agents_hosting_network(
                     port['port']['network_id'])
                 result2 = len(dhcp_agents['agents'])
@@ -778,12 +774,11 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
         with self.subnet() as s, \
                 mock.patch.object(
                         self.l3plugin,
-                        'check_dvr_serviceable_ports_on_host') as port_exists:
+                        'check_ports_exist_on_l3agent') as port_exists:
             net_id = s['subnet']['network_id']
             self._set_net_external(net_id)
             router = {'name': 'router1',
                       'admin_state_up': True,
-                      'tenant_id': 'tenant_id',
                       'external_gateway_info': {'network_id': net_id},
                       'distributed': True}
             r = self.l3plugin.create_router(
@@ -1088,14 +1083,13 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
 
             router = {'name': 'router1',
                       'external_gateway_info': {'network_id': net_id},
-                      'tenant_id': 'tenant_id',
                       'admin_state_up': True,
                       'distributed': True}
             r = self.l3plugin.create_router(self.adminContext,
                                             {'router': router})
             with mock.patch.object(
                     self.l3plugin,
-                    'check_dvr_serviceable_ports_on_host') as ports_exist:
+                    'check_ports_exist_on_l3agent') as ports_exist:
                 # emulating dvr serviceable ports exist on compute node
                 ports_exist.return_value = True
                 self.l3plugin.schedule_router(
@@ -1121,7 +1115,6 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
             self._set_net_external(net_id)
 
             router = {'name': 'router1',
-                      'tenant_id': 'tenant_id',
                       'admin_state_up': True,
                       'distributed': True}
             r = self.l3plugin.create_router(self.adminContext,
@@ -1161,7 +1154,6 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
 
             router = {'name': 'router1',
                       'external_gateway_info': {'network_id': net_id},
-                      'tenant_id': 'tenant_id',
                       'admin_state_up': True,
                       'distributed': True}
             r = self.l3plugin.create_router(self.adminContext,
@@ -1190,7 +1182,6 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
 
             router = {'name': 'router1',
                       'external_gateway_info': {'network_id': net_id},
-                      'tenant_id': 'tenant_id',
                       'admin_state_up': True,
                       'distributed': True}
             r = self.l3plugin.create_router(self.adminContext,

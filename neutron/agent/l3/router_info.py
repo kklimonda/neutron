@@ -16,7 +16,6 @@ import netaddr
 
 from oslo_log import log as logging
 
-from neutron._i18n import _LE, _LW
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
@@ -25,6 +24,7 @@ from neutron.common import constants as l3_constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
+from neutron.i18n import _LW
 
 LOG = logging.getLogger(__name__)
 INTERNAL_DEV_PREFIX = namespaces.INTERNAL_DEV_PREFIX
@@ -49,10 +49,13 @@ class RouterInfo(object):
         # Invoke the setter for establishing initial SNAT action
         self.router = router
         self.use_ipv6 = use_ipv6
-        ns = namespaces.RouterNamespace(
-            router_id, agent_conf, interface_driver, use_ipv6)
-        self.router_namespace = ns
-        self.ns_name = ns.name
+        self.ns_name = None
+        self.router_namespace = None
+        if agent_conf.use_namespaces:
+            ns = namespaces.RouterNamespace(
+                router_id, agent_conf, interface_driver, use_ipv6)
+            self.router_namespace = ns
+            self.ns_name = ns.name
         self.iptables_manager = iptables_manager.IptablesManager(
             use_ipv6=use_ipv6,
             namespace=self.ns_name)
@@ -76,10 +79,10 @@ class RouterInfo(object):
         self.radvd = ra.DaemonMonitor(self.router_id,
                                       self.ns_name,
                                       process_monitor,
-                                      self.get_internal_device_name,
-                                      self.agent_conf)
+                                      self.get_internal_device_name)
 
-        self.router_namespace.create()
+        if self.router_namespace:
+            self.router_namespace.create()
 
     @property
     def router(self):
@@ -92,6 +95,11 @@ class RouterInfo(object):
             return
         # enable_snat by default if it wasn't specified by plugin
         self._snat_enabled = self._router.get('enable_snat', True)
+
+    @property
+    def is_ha(self):
+        # TODO(Carl) Refactoring should render this obsolete.  Remove it.
+        return False
 
     def get_internal_device_name(self, port_id):
         return (INTERNAL_DEV_PREFIX + port_id)[:self.driver.DEV_NAME_LEN]
@@ -108,10 +116,15 @@ class RouterInfo(object):
         ip_wrapper = ip_lib.IPWrapper(namespace=namespace)
         ip_wrapper.netns.execute(cmd, check_exit_code=False)
 
-    def update_routing_table(self, operation, route):
-        self._update_routing_table(operation, route, self.ns_name)
+    def update_routing_table(self, operation, route, namespace=None):
+        if namespace is None:
+            namespace = self.ns_name
+        self._update_routing_table(operation, route, namespace)
 
-    def routes_updated(self, old_routes, new_routes):
+    def routes_updated(self):
+        new_routes = self.router['routes']
+
+        old_routes = self.routes
         adds, removes = common_utils.diff_list_of_dict(old_routes,
                                                        new_routes)
         for route in adds:
@@ -125,6 +138,7 @@ class RouterInfo(object):
         for route in removes:
             LOG.debug("Removed route entry is '%s'", route)
             self.update_routing_table('delete', route)
+        self.routes = new_routes
 
     def get_ex_gw_port(self):
         return self.router.get('gw_port')
@@ -256,9 +270,10 @@ class RouterInfo(object):
         self.router['gw_port'] = None
         self.router[l3_constants.INTERFACE_KEY] = []
         self.router[l3_constants.FLOATINGIP_KEY] = []
-        self.process_delete(agent)
+        self.process(agent)
         self.disable_radvd()
-        self.router_namespace.delete()
+        if self.router_namespace:
+            self.router_namespace.delete()
 
     def _internal_network_updated(self, port, subnet_id, prefix, old_prefix,
                                   updated_cidrs):
@@ -493,17 +508,11 @@ class RouterInfo(object):
             interface_name,
             ip_cidrs,
             namespace=ns_name,
+            gateway_ips=gateway_ips,
             extra_subnets=ex_gw_port.get('extra_subnets', []),
             preserve_ips=preserve_ips,
+            enable_ra_on_gw=enable_ra_on_gw,
             clean_connections=True)
-
-        device = ip_lib.IPDevice(interface_name, namespace=ns_name)
-        for ip in gateway_ips or []:
-            device.route.add_gateway(ip)
-
-        if enable_ra_on_gw:
-            self.driver.configure_ipv6_ra(ns_name, interface_name)
-
         for fixed_ip in ex_gw_port['fixed_ips']:
             ip_lib.send_ip_addr_adv_notif(ns_name,
                                           interface_name,
@@ -580,15 +589,13 @@ class RouterInfo(object):
         gw_port = self._router.get('gw_port')
         self._handle_router_snat_rules(gw_port, interface_name)
 
-    def external_gateway_nat_postroute_rules(self, interface_name):
+    def external_gateway_nat_rules(self, ex_gw_ip, interface_name):
         dont_snat_traffic_to_internal_ports_if_not_to_floating_ip = (
             'POSTROUTING', '! -i %(interface_name)s '
                            '! -o %(interface_name)s -m conntrack ! '
                            '--ctstate DNAT -j ACCEPT' %
                            {'interface_name': interface_name})
-        return [dont_snat_traffic_to_internal_ports_if_not_to_floating_ip]
 
-    def external_gateway_nat_snat_rules(self, ex_gw_ip, interface_name):
         snat_normal_external_traffic = (
             'snat', '-o %s -j SNAT --to-source %s' %
                     (interface_name, ex_gw_ip))
@@ -600,7 +607,9 @@ class RouterInfo(object):
                     '-m conntrack --ctstate DNAT '
                     '-j SNAT --to-source %s'
                     % (ext_in_mark, l3_constants.ROUTER_MARK_MASK, ex_gw_ip))
-        return [snat_normal_external_traffic,
+
+        return [dont_snat_traffic_to_internal_ports_if_not_to_floating_ip,
+                snat_normal_external_traffic,
                 snat_internal_traffic_to_floating_ip]
 
     def external_gateway_mangle_rules(self, interface_name):
@@ -617,25 +626,19 @@ class RouterInfo(object):
 
     def _add_snat_rules(self, ex_gw_port, iptables_manager,
                         interface_name):
-        if ex_gw_port:
+        if self._snat_enabled and ex_gw_port:
             # ex_gw_port should not be None in this case
             # NAT rules are added only if ex_gw_port has an IPv4 address
             for ip_addr in ex_gw_port['fixed_ips']:
                 ex_gw_ip = ip_addr['ip_address']
                 if netaddr.IPAddress(ex_gw_ip).version == 4:
-                    rules = self.external_gateway_nat_postroute_rules(
-                        interface_name)
+                    rules = self.external_gateway_nat_rules(ex_gw_ip,
+                                                            interface_name)
                     for rule in rules:
                         iptables_manager.ipv4['nat'].add_rule(*rule)
-                    if self._snat_enabled:
-                        rules = self.external_gateway_nat_snat_rules(
-                            ex_gw_ip, interface_name)
-                        for rule in rules:
-                            iptables_manager.ipv4['nat'].add_rule(*rule)
-                        rules = self.external_gateway_mangle_rules(
-                            interface_name)
-                        for rule in rules:
-                            iptables_manager.ipv4['mangle'].add_rule(*rule)
+                    rules = self.external_gateway_mangle_rules(interface_name)
+                    for rule in rules:
+                        iptables_manager.ipv4['mangle'].add_rule(*rule)
                     break
 
     def _handle_router_snat_rules(self, ex_gw_port, interface_name):
@@ -647,27 +650,9 @@ class RouterInfo(object):
                              self.iptables_manager,
                              interface_name)
 
-    def _process_external_on_delete(self, agent):
-        fip_statuses = {}
-        try:
-            ex_gw_port = self.get_ex_gw_port()
-            self._process_external_gateway(ex_gw_port, agent.pd)
-            if not ex_gw_port:
-                return
-
-            interface_name = self.get_external_device_interface_name(
-                ex_gw_port)
-            fip_statuses = self.configure_fip_addresses(interface_name)
-
-        except (n_exc.FloatingIpSetupException):
-                # All floating IPs must be put in error state
-                LOG.exception(_LE("Failed to process floating IPs."))
-                fip_statuses = self.put_fips_in_error_state()
-        finally:
-            self.update_fip_statuses(agent, fip_statuses)
-
     def process_external(self, agent):
         fip_statuses = {}
+        existing_floating_ips = self.floating_ips
         try:
             with self.iptables_manager.defer_apply():
                 ex_gw_port = self.get_ex_gw_port()
@@ -685,44 +670,13 @@ class RouterInfo(object):
             fip_statuses = self.configure_fip_addresses(interface_name)
 
         except (n_exc.FloatingIpSetupException,
-                n_exc.IpTablesApplyException):
+                n_exc.IpTablesApplyException) as e:
                 # All floating IPs must be put in error state
-                LOG.exception(_LE("Failed to process floating IPs."))
+                LOG.exception(e)
                 fip_statuses = self.put_fips_in_error_state()
         finally:
-            self.update_fip_statuses(agent, fip_statuses)
-
-    def update_fip_statuses(self, agent, fip_statuses):
-        # Identify floating IPs which were disabled
-        existing_floating_ips = self.floating_ips
-        self.floating_ips = set(fip_statuses.keys())
-        for fip_id in existing_floating_ips - self.floating_ips:
-            fip_statuses[fip_id] = l3_constants.FLOATINGIP_STATUS_DOWN
-        # filter out statuses that didn't change
-        fip_statuses = {f: stat for f, stat in fip_statuses.items()
-                        if stat != FLOATINGIP_STATUS_NOCHANGE}
-        if not fip_statuses:
-            return
-        LOG.debug('Sending floating ip statuses: %s', fip_statuses)
-        # Update floating IP status on the neutron server
-        agent.plugin_rpc.update_floatingip_statuses(
-            agent.context, self.router_id, fip_statuses)
-
-    @common_utils.exception_logger()
-    def process_delete(self, agent):
-        """Process the delete of this router
-
-        This method is the point where the agent requests that this router
-        be deleted. This is a separate code path from process in that it
-        avoids any changes to the qrouter namespace that will be removed
-        at the end of the operation.
-
-        :param agent: Passes the agent in order to send RPC messages.
-        """
-        LOG.debug("process router delete")
-        self._process_internal_ports(agent.pd)
-        agent.pd.sync_router(self.router['id'])
-        self._process_external_on_delete(agent)
+            agent.update_fip_statuses(
+                self, existing_floating_ips, fip_statuses)
 
     @common_utils.exception_logger()
     def process(self, agent):
@@ -738,8 +692,7 @@ class RouterInfo(object):
         agent.pd.sync_router(self.router['id'])
         self.process_external(agent)
         # Process static routes for router
-        self.routes_updated(self.routes, self.router['routes'])
-        self.routes = self.router['routes']
+        self.routes_updated()
 
         # Update ex_gw_port and enable_snat on the router info cache
         self.ex_gw_port = self.get_ex_gw_port()

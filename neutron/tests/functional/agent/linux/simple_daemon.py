@@ -16,7 +16,6 @@ import time
 
 from oslo_config import cfg
 
-from neutron._i18n import _
 from neutron.agent.linux import daemon
 
 

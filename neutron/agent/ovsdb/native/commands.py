@@ -17,9 +17,9 @@ import collections
 from oslo_log import log as logging
 from oslo_utils import excutils
 
-from neutron._i18n import _, _LE
 from neutron.agent.ovsdb import api
 from neutron.agent.ovsdb.native import idlutils
+from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -61,8 +61,6 @@ class AddBridgeCommand(BaseCommand):
             br = idlutils.row_by_value(self.api.idl, 'Bridge', 'name',
                                        self.name, None)
             if br:
-                if self.datapath_type:
-                    br.datapath_type = self.datapath_type
                 return
         row = txn.insert(self.api._tables['Bridge'])
         row.name = self.name
@@ -94,7 +92,7 @@ class DelBridgeCommand(BaseCommand):
             if self.if_exists:
                 return
             else:
-                msg = _("Bridge %s does not exist") % self.name
+                msg = _LE("Bridge %s does not exist") % self.name
                 LOG.error(msg)
                 raise RuntimeError(msg)
         self.api._ovs.verify('bridges')
@@ -322,7 +320,7 @@ class DelPortCommand(BaseCommand):
         except idlutils.RowNotFound:
             if self.if_exists:
                 return
-            msg = _("Port %s does not exist") % self.port
+            msg = _LE("Port %s does not exist") % self.port
             raise RuntimeError(msg)
         if self.bridge:
             br = idlutils.row_by_value(self.api.idl, 'Bridge', 'name',
@@ -333,7 +331,7 @@ class DelPortCommand(BaseCommand):
 
         if port.uuid not in br.ports and not self.if_exists:
             # TODO(twilson) Make real errors across both implementations
-            msg = _("Port %(port)s does not exist on %(bridge)s!") % {
+            msg = _LE("Port %(port)s does not exist on %(bridge)s!") % {
                 'port': self.name, 'bridge': self.bridge
             }
             LOG.error(msg)
@@ -427,7 +425,7 @@ class DbListCommand(BaseCommand):
                     # NOTE(kevinbenton): this is converted to a RuntimeError
                     # for compat with the vsctl version. It might make more
                     # sense to change this to a RowNotFoundError in the future.
-                    raise RuntimeError(_(
+                    raise RuntimeError(_LE(
                           "Row doesn't exist in the DB. Request info: "
                           "Table=%(table)s. Columns=%(columns)s. "
                           "Records=%(records)s.") % {

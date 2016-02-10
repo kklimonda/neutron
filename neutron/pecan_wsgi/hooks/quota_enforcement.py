@@ -29,13 +29,13 @@ class QuotaEnforcementHook(hooks.PecanHook):
     priority = 130
 
     def before(self, state):
-        # TODO(salv-orlando): This hook must go when adapting the pecan code to
+        # TODO(salv-orlando): This hook must go when adaptin the pecan code to
         # use reservations.
-        resource = state.request.context.get('resource')
-        if state.request.method != 'POST' or not resource:
+        if state.request.method != 'POST':
             return
+        resource = state.request.context.get('resource')
         plugin = manager.NeutronManager.get_plugin_for_resource(resource)
-        items = state.request.context.get('resources')
+        items = state.request.resources
         deltas = {}
         for item in items:
             tenant_id = item['tenant_id']

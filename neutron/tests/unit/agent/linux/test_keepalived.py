@@ -321,12 +321,13 @@ class KeepalivedVipAddressTestCase(base.BaseTestCase):
         self.assertEqual('fe80::3e97:eff:fe26:3bfa/64 dev eth1 scope link',
                          vip.build_config())
 
-    def test_add_vip_idempotent(self):
+    def test_add_vip_returns_exception_on_duplicate_ip(self):
         instance = keepalived.KeepalivedInstance('MASTER', 'eth0', 1,
                                                  ['169.254.192.0/18'])
         instance.add_vip('192.168.222.1/32', 'eth11', None)
-        instance.add_vip('192.168.222.1/32', 'eth12', 'link')
-        self.assertEqual(1, len(instance.vips))
+        self.assertRaises(keepalived.VIPDuplicateAddressException,
+                          instance.add_vip, '192.168.222.1/32', 'eth12',
+                          'link')
 
 
 class KeepalivedVirtualRouteTestCase(base.BaseTestCase):

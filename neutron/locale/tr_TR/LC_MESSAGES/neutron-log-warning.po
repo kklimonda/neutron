@@ -7,19 +7,19 @@
 # OpenStack Infra <zanata@openstack.org>, 2015. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: neutron 8.0.0.dev524\n"
+"Project-Id-Version: neutron 7.0.2.dev74\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2015-11-29 06:23+0000\n"
-"PO-Revision-Date: 2015-08-21 01:06+0000\n"
-"Last-Translator: openstackjenkins <jenkins@openstack.org>\n"
-"Language-Team: Turkish (Turkey)\n"
-"Language: tr-TR\n"
+"POT-Creation-Date: 2016-01-13 20:56+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"PO-Revision-Date: 2015-08-21 01:06+0000\n"
+"Last-Translator: openstackjenkins <jenkins@openstack.org>\n"
+"Language: tr-TR\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 "Generated-By: Babel 2.0\n"
 "X-Generator: Zanata 3.7.3\n"
+"Language-Team: Turkish (Turkey)\n"
 
 #, python-format
 msgid "%(agent_type)s agent %(agent_id)s is not active"
@@ -60,6 +60,14 @@ msgstr "%s zincirinin mevcut olmayan trafik sayaçları alınmaya çalışıldı
 msgid "Attempting to bind with dead agent: %s"
 msgstr "Ölü ajanla bağlama deneniyor: %s"
 
+msgid ""
+"Authenticating to nova using nova_admin_* options is deprecated. This should "
+"be done using an auth plugin, like password"
+msgstr ""
+"Nova'ya nova_admin_* seçeneklerini kullanarak kimlik doğrulama artık "
+"kullanılmıyor. Bu parola gibi bir yetkilendirme eklentisi kullanılarak "
+"yapılmalı"
+
 #, python-format
 msgid "Cannot find vf index for pci slot %s"
 msgstr "%s pci yuvası için vf indisi bulunamıyor"
@@ -76,6 +84,14 @@ msgstr ""
 #, python-format
 msgid "Could not expand segment %s"
 msgstr "Dilim %s genişletilemedi"
+
+#, python-format
+msgid ""
+"Creating an interface named %(name)s exceeds the %(limit)d character "
+"limitation. It was shortened to %(new_name)s to fit."
+msgstr ""
+"%(name)s isimli bir arayüz oluşturmak %(limit)d karakter sınırını aşar. "
+"Sığması için %(new_name)s'e kısaltıldı."
 
 #, python-format
 msgid "DHCP agent %s is not active"
@@ -155,6 +171,10 @@ msgstr ""
 "%s yönlendiricisi için bilgi bulunamadı. Yönlendirici temizliği "
 "gerçekleştiriliyor"
 
+#, python-format
+msgid "Interface %s not found in the heleos back-end, likely already deleted"
+msgstr "Arayüz %s heleos arka-ucunda bulunamadı, muhtemelen zaten silinmiş"
+
 msgid "Invalid Interface ID, will lead to incorrect tap device name"
 msgstr "Geçersiz arayüz kimliği, geçersiz tap aygıt ismine yol açacak"
 
@@ -219,6 +239,9 @@ msgstr "Uygun DHCP ajanı yok, yeniden zamanlama atlanıyor"
 #, python-format
 msgid "No L3 agents can host the router %s"
 msgstr "Hiçbir L3 ajanı %s yönlendiricisini sunamaz"
+
+msgid "No Token, Re-login"
+msgstr "Jeton yok, Yeniden-giriş"
 
 msgid "No active L3 agents"
 msgstr "Etkin L3 ajanı yok"
@@ -319,6 +342,9 @@ msgstr ""
 "Güvenlik grubu ajan bağlama şu an ayarlanmış değil. Bu init sürecinin "
 "sonunda ayarlanmış olmalı."
 
+msgid "Server does not support metadata RPC, fallback to using neutron client"
+msgstr "Sunucu metadata RPC desteklemiyor, neutron istemcisine geri dönülüyor"
+
 #, python-format
 msgid ""
 "The configured driver %(driver)s has been moved, automatically using "
@@ -335,6 +361,10 @@ msgid ""
 msgstr ""
 "Uzak metadata sunucu Yasaklı yanıtı döndü. Bu yanıt genellikle paylaşılan "
 "gizler eşleşmediğinde oluşur."
+
+#, python-format
+msgid "The router %s had no physical representation, likely already deleted"
+msgstr "%s yönlendiricisinin fiziksel temsili yoktu, muhtemelen zaten silinmiş"
 
 msgid ""
 "The user that is executing neutron can read the namespaces without using the "

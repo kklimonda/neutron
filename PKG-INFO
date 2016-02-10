@@ -1,6 +1,6 @@
 Metadata-Version: 1.1
 Name: neutron
-Version: 8.0.0.0b2
+Version: 7.0.2
 Summary: OpenStack Networking
 Home-page: http://www.openstack.org/
 Author: OpenStack
@@ -50,5 +50,3 @@ Classifier: Operating System :: POSIX :: Linux
 Classifier: Programming Language :: Python
 Classifier: Programming Language :: Python :: 2
 Classifier: Programming Language :: Python :: 2.7
-Classifier: Programming Language :: Python :: 3
-Classifier: Programming Language :: Python :: 3.4

@@ -19,7 +19,6 @@ from oslo_log import log as logging
 import sqlalchemy as sa
 from sqlalchemy import orm
 
-from neutron._i18n import _
 from neutron.common import utils
 from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
@@ -34,7 +33,7 @@ LOG = logging.getLogger(__name__)
 extra_route_opts = [
     #TODO(nati): use quota framework when it support quota for attributes
     cfg.IntOpt('max_routes', default=30,
-               help=_("Maximum number of routes per router")),
+               help=_("Maximum number of routes")),
 ]
 
 cfg.CONF.register_opts(extra_route_opts)

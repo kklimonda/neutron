@@ -43,7 +43,7 @@ HOST_5 = HOST + '_5'
 
 
 NOTIFIER = 'neutron.plugins.ml2.rpc.AgentNotifierApi'
-DEVICE_OWNER_COMPUTE = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
+DEVICE_OWNER_COMPUTE = 'compute:None'
 
 
 class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
@@ -97,7 +97,8 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         cast_patch = mock.patch(cast)
         self.mock_cast = cast_patch.start()
 
-        uptime = ('neutron.plugins.ml2.drivers.l2pop.db.get_agent_uptime')
+        uptime = ('neutron.plugins.ml2.drivers.l2pop.db.L2populationDbMixin.'
+                  'get_agent_uptime')
         uptime_patch = mock.patch(uptime, return_value=190)
         uptime_patch.start()
 
@@ -642,7 +643,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 req = self.new_update_request('ports', data, p1['id'])
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 ips = res['port']['fixed_ips']
-                self.assertEqual(2, len(ips))
+                self.assertEqual(len(ips), 2)
 
                 add_expected = {'chg_ip':
                                 {p1['network_id']:
@@ -660,7 +661,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 req = self.new_update_request('ports', data, p1['id'])
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 ips = res['port']['fixed_ips']
-                self.assertEqual(2, len(ips))
+                self.assertEqual(len(ips), 2)
 
                 upd_expected = {'chg_ip':
                                 {p1['network_id']:
@@ -679,7 +680,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 req = self.new_update_request('ports', data, p1['id'])
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 ips = res['port']['fixed_ips']
-                self.assertEqual(1, len(ips))
+                self.assertEqual(len(ips), 1)
 
                 del_expected = {'chg_ip':
                                 {p1['network_id']:
@@ -730,11 +731,11 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 self.assertEqual(port_id, details['port_id'])
 
     def _update_and_check_portbinding(self, port_id, host_id):
-        data = {'port': {portbindings.HOST_ID: host_id}}
+        data = {'port': {'binding:host_id': host_id}}
         req = self.new_update_request('ports', data, port_id)
         res = self.deserialize(self.fmt,
                                req.get_response(self.api))
-        self.assertEqual(host_id, res['port'][portbindings.HOST_ID])
+        self.assertEqual(host_id, res['port']['binding:host_id'])
 
     def _test_host_changed(self, twice):
         self._register_ml2_agents()
@@ -791,39 +792,6 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
             l2pop_mech.delete_port_postcommit(mock.Mock())
             self.assertTrue(upd_port_down.called)
 
-    def test_delete_unbound_port(self):
-        l2pop_mech = l2pop_mech_driver.L2populationMechanismDriver()
-        l2pop_mech.initialize()
-
-        with self.port() as port:
-            port_context = driver_context.PortContext(
-                self.driver, self.context, port['port'],
-                self.driver.get_network(
-                    self.context, port['port']['network_id']),
-                None, None)
-            # The point is to provide coverage and to assert that no exceptions
-            # are raised.
-            l2pop_mech.delete_port_postcommit(port_context)
-
-    def test_fixed_ips_change_unbound_port_no_rpc(self):
-        l2pop_mech = l2pop_mech_driver.L2populationMechanismDriver()
-        l2pop_mech.initialize()
-        l2pop_mech.L2populationAgentNotify = mock.Mock()
-
-        with self.port() as port:
-            port_context = driver_context.PortContext(
-                self.driver, self.context, port['port'],
-                self.driver.get_network(
-                    self.context, port['port']['network_id']),
-                None, None)
-            l2pop_mech._fixed_ips_changed(
-                port_context, None, port['port'], (set(['10.0.0.1']), set()))
-
-        # There's no need to send an RPC update if the IP address for an
-        # unbound port changed.
-        self.assertFalse(
-            l2pop_mech.L2populationAgentNotify.update_fdb_entries.called)
-
 
 class TestL2PopulationMechDriver(base.BaseTestCase):
 
@@ -832,14 +800,15 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
         agent = mock.Mock()
         agent.host = HOST
         network_ports = ((None, agent),)
-        with mock.patch.object(l2pop_db, 'get_agent_ip',
+        with mock.patch.object(l2pop_db.L2populationDbMixin,
+                               'get_agent_ip',
                                return_value=agent_ip):
             excluded_host = HOST + '-EXCLUDE' if exclude_host else HOST
             return mech_driver._get_tunnels(network_ports, excluded_host)
 
     def test_get_tunnels(self):
         tunnels = self._test_get_tunnels('20.0.0.1')
-        self.assertIn('20.0.0.1', tunnels)
+        self.assertTrue('20.0.0.1' in tunnels)
 
     def test_get_tunnels_no_ip(self):
         tunnels = self._test_get_tunnels(None)
@@ -858,11 +827,14 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
         def agent_ip_side_effect(agent):
             return agent_ips[agent]
 
-        with mock.patch.object(l2pop_db, 'get_agent_ip',
+        with mock.patch.object(l2pop_db.L2populationDbMixin,
+                               'get_agent_ip',
                                side_effect=agent_ip_side_effect),\
-                mock.patch.object(l2pop_db, 'get_nondvr_active_network_ports',
+                mock.patch.object(l2pop_db.L2populationDbMixin,
+                                  'get_nondvr_active_network_ports',
                                   return_value=fdb_network_ports),\
-                mock.patch.object(l2pop_db, 'get_dvr_active_network_ports',
+                mock.patch.object(l2pop_db.L2populationDbMixin,
+                                  'get_dvr_active_network_ports',
                                   return_value=tunnel_network_ports):
             session = mock.Mock()
             agent = mock.Mock()
@@ -915,7 +887,7 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
 
     def test_update_port_precommit_mac_address_changed_raises(self):
         port = {'status': u'ACTIVE',
-                'device_owner': DEVICE_OWNER_COMPUTE,
+                'device_owner': u'compute:None',
                 'mac_address': u'12:34:56:78:4b:0e',
                 'id': u'1'}
 

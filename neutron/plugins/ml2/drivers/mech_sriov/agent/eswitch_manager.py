@@ -13,14 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import glob
 import os
 import re
 
 from oslo_log import log as logging
 import six
 
-from neutron._i18n import _, _LE, _LW
 from neutron.common import utils
+from neutron.i18n import _LE, _LW
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
 from neutron.plugins.ml2.drivers.mech_sriov.agent import pci_lib
@@ -35,6 +36,7 @@ class PciOsWrapper(object):
     PCI_PATH = "/sys/class/net/%s/device/virtfn%s/net"
     VIRTFN_FORMAT = r"^virtfn(?P<vf_index>\d+)"
     VIRTFN_REG_EX = re.compile(VIRTFN_FORMAT)
+    MAC_VTAP_PREFIX = "upper_macvtap*"
 
     @classmethod
     def scan_vf_devices(cls, dev_name):
@@ -73,25 +75,15 @@ class PciOsWrapper(object):
         by checking the relevant path in the system:
         VF is assigned if:
             Direct VF: PCI_PATH does not exist.
-            Macvtap VF: macvtap@<vf interface> interface exists in ip link show
+            Macvtap VF: upper_macvtap path exists.
         @param dev_name: pf network device name
         @param vf_index: vf index
         """
         path = cls.PCI_PATH % (dev_name, vf_index)
-
-        try:
-            ifname_list = os.listdir(path)
-        except OSError:
-            # PCI_PATH does not exist means that the DIRECT VF assigend
+        if not os.path.isdir(path):
             return True
-
-        # Note(moshele) kernel < 3.13 doesn't create symbolic link
-        # for macvtap interface. Therefore we workaround it
-        # by parsing ip link show and checking if macvtap interface exists
-        for ifname in ifname_list:
-            if pci_lib.PciDeviceIPWrapper.is_macvtap_assigned(ifname):
-                return True
-        return False
+        upper_macvtap_path = os.path.join(path, "*", cls.MAC_VTAP_PREFIX)
+        return bool(glob.glob(upper_macvtap_path))
 
 
 class EmbSwitch(object):

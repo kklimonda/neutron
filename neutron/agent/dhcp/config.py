@@ -16,47 +16,22 @@
 
 from oslo_config import cfg
 
-from neutron._i18n import _
-
 DHCP_AGENT_OPTS = [
     cfg.IntOpt('resync_interval', default=5,
-               help=_("The DHCP agent will resync its state with Neutron to "
-                      "recover from any transient notification or RPC errors. "
-                      "The interval is number of seconds between attempts.")),
+               help=_("Interval to resync.")),
     cfg.StrOpt('dhcp_driver',
                default='neutron.agent.linux.dhcp.Dnsmasq',
                help=_("The driver used to manage the DHCP server.")),
     cfg.BoolOpt('enable_isolated_metadata', default=False,
-                help=_("The DHCP server can assist with providing metadata "
-                       "support on isolated networks. Setting this value to "
-                       "True will cause the DHCP server to append specific "
-                       "host routes to the DHCP request. The metadata service "
-                       "will only be activated when the subnet does not "
-                       "contain any router port. The guest instance must be "
-                       "configured to request host routes via DHCP (Option "
-                       "121). This option doesn't have any effect when "
-                       "force_metadata is set to True.")),
+                help=_("Support Metadata requests on isolated networks.")),
     cfg.BoolOpt('force_metadata', default=False,
-                help=_("In some cases the Neutron router is not present to "
-                       "provide the metadata IP but the DHCP server can be "
-                       "used to provide this info. Setting this value will "
-                       "force the DHCP server to append specific host routes "
-                       "to the DHCP request. If this option is set, then the "
-                       "metadata service will be activated for all the "
-                       "networks.")),
+                help=_("Force to use DHCP to get Metadata on all networks.")),
     cfg.BoolOpt('enable_metadata_network', default=False,
-                help=_("Allows for serving metadata requests coming from a "
-                       "dedicated metadata access network whose CIDR is "
-                       "169.254.169.254/16 (or larger prefix), and is "
-                       "connected to a Neutron router from which the VMs send "
-                       "metadata:1 request. In this case DHCP Option 121 will "
-                       "not be injected in VMs, as they will be able to reach "
-                       "169.254.169.254 through a router. This option "
-                       "requires enable_isolated_metadata = True.")),
+                help=_("Allows for serving metadata requests from a "
+                       "dedicated network. Requires "
+                       "enable_isolated_metadata = True")),
     cfg.IntOpt('num_sync_threads', default=4,
-               help=_('Number of threads to use during sync process. '
-                      'Should not exceed connection pool size configured on '
-                      'server.'))
+               help=_('Number of threads to use during sync process.'))
 ]
 
 DHCP_OPTS = [
@@ -80,18 +55,16 @@ DNSMASQ_OPTS = [
                 help=_('Comma-separated list of the DNS servers which will be '
                        'used as forwarders.'),
                 deprecated_name='dnsmasq_dns_server'),
+    cfg.BoolOpt('dhcp_delete_namespaces', default=True,
+                help=_("Delete namespace after removing a dhcp server."
+                       "This option is deprecated and "
+                       "will be removed in a future release."),
+                deprecated_for_removal=True),
     cfg.StrOpt('dnsmasq_base_log_dir',
                help=_("Base log dir for dnsmasq logging. "
                       "The log contains DHCP and DNS log information and "
                       "is useful for debugging issues with either DHCP or "
                       "DNS. If this section is null, disable dnsmasq log.")),
-    cfg.BoolOpt('dnsmasq_local_resolv', default=True,
-                help=_("Enables the dnsmasq service to provide name "
-                       "resolution for instances via DNS resolvers on the "
-                       "host running the DHCP agent. Effectively removes the "
-                       "'--no-resolv' option from the dnsmasq process "
-                       "arguments. Adding custom DNS resolvers to the "
-                       "'dnsmasq_dns_servers' option disables this feature.")),
     cfg.IntOpt(
         'dnsmasq_lease_max',
         default=(2 ** 24),

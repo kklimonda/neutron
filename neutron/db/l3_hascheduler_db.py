@@ -21,7 +21,7 @@ from neutron.db import l3_attrs_db
 from neutron.db import l3_db
 
 
-class L3_HA_scheduler_db_mixin(l3_sch_db.AZL3AgentSchedulerDbMixin):
+class L3_HA_scheduler_db_mixin(l3_sch_db.L3AgentSchedulerDbMixin):
 
     def get_ha_routers_l3_agents_count(self, context):
         """Return a map between HA routers and how many agents every
@@ -43,11 +43,10 @@ class L3_HA_scheduler_db_mixin(l3_sch_db.AZL3AgentSchedulerDbMixin):
             filter(l3_attrs_db.RouterExtraAttributes.ha == sql.true()).
             group_by(binding_model.router_id).subquery())
 
-        query = (context.session.query(l3_db.Router, sub_query.c.count).
+        query = (context.session.query(
+                 l3_db.Router.id, l3_db.Router.tenant_id, sub_query.c.count).
                  join(sub_query))
-
-        return [(self._make_router_dict(router), agent_count)
-                for router, agent_count in query]
+        return query
 
     def get_l3_agents_ordered_by_num_routers(self, context, agent_ids):
         if not agent_ids:

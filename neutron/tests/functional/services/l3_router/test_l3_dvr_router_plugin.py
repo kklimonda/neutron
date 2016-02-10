@@ -15,23 +15,17 @@
 import mock
 
 from neutron.api.v2 import attributes
-from neutron.common import constants
-from neutron.common import topics
-from neutron import context
+from neutron.common import constants as l3_const
 from neutron.extensions import external_net
-from neutron.extensions import portbindings
 from neutron.tests.common import helpers
 from neutron.tests.unit.plugins.ml2 import base as ml2_test_base
-
-
-DEVICE_OWNER_COMPUTE = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
 
 
 class L3DvrTestCase(ml2_test_base.ML2TestFramework):
     def setUp(self):
         super(L3DvrTestCase, self).setUp()
         self.l3_agent = helpers.register_l3_agent(
-            agent_mode=constants.L3_AGENT_MODE_DVR_SNAT)
+            agent_mode=l3_const.L3_AGENT_MODE_DVR_SNAT)
 
     def _create_router(self, distributed=True):
         return (super(L3DvrTestCase, self).
@@ -51,19 +45,19 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
     def test_get_device_owner_distributed_router_object(self):
         router = self._create_router()
         self.assertEqual(
-            constants.DEVICE_OWNER_DVR_INTERFACE,
+            l3_const.DEVICE_OWNER_DVR_INTERFACE,
             self.l3_plugin._get_device_owner(self.context, router))
 
     def test_get_device_owner_distributed_router_id(self):
         router = self._create_router()
         self.assertEqual(
-            constants.DEVICE_OWNER_DVR_INTERFACE,
+            l3_const.DEVICE_OWNER_DVR_INTERFACE,
             self.l3_plugin._get_device_owner(self.context, router['id']))
 
     def test_get_device_owner_centralized(self):
         router = self._create_router(distributed=False)
         self.assertEqual(
-            constants.DEVICE_OWNER_ROUTER_INTF,
+            l3_const.DEVICE_OWNER_ROUTER_INTF,
             self.l3_plugin._get_device_owner(self.context, router['id']))
 
     def test_get_agent_gw_ports_exist_for_network_no_port(self):
@@ -104,7 +98,7 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                         self.context, filters={
                             'network_id': [subnet1['subnet']['network_id']],
                             'device_owner':
-                                [constants.DEVICE_OWNER_DVR_INTERFACE]})[0]
+                                [l3_const.DEVICE_OWNER_DVR_INTERFACE]})[0]
                     self.l3_plugin.remove_router_interface(
                         self.context, router['id'],
                         {'port_id': port['id']})
@@ -131,8 +125,8 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                       'mac_address': attributes.ATTR_NOT_SPECIFIED,
                       'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
                       'device_id': self.l3_agent['id'],
-                      'device_owner': constants.DEVICE_OWNER_AGENT_GW,
-                      portbindings.HOST_ID: '',
+                      'device_owner': l3_const.DEVICE_OWNER_AGENT_GW,
+                      'binding:host_id': '',
                       'admin_state_up': True,
                       'name': ''}})
         return network_id, port
@@ -168,6 +162,15 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
         result = self.l3_plugin._process_routers(self.context, [router])
         self.assertEqual(
             router['id'], result[router['id']]['id'])
+
+    def test_get_router_ids(self):
+        router = self._create_router()
+        self.assertEqual(
+            router['id'],
+            self.l3_plugin._get_router_ids(self.context)[0])
+        self._create_router()
+        self.assertEqual(
+            2, len(self.l3_plugin._get_router_ids(self.context)))
 
     def test_agent_gw_port_delete_when_last_gateway_for_ext_net_removed(self):
         kwargs = {'arg_list': (external_net.EXTERNAL,),
@@ -220,11 +223,66 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
             self.l3_plugin._get_agent_gw_ports_exist_for_network(
                 self.context, ext_net_id, "", self.l3_agent['id']))
 
+    def test_update_vm_port_host_router_update(self):
+        # register l3 agents in dvr mode in addition to existing dvr_snat agent
+        HOST1 = 'host1'
+        dvr_agent1 = helpers.register_l3_agent(
+            host=HOST1, agent_mode=l3_const.L3_AGENT_MODE_DVR)
+        HOST2 = 'host2'
+        dvr_agent2 = helpers.register_l3_agent(
+            host=HOST2, agent_mode=l3_const.L3_AGENT_MODE_DVR)
+        router = self._create_router()
+        with self.subnet() as subnet:
+            self.l3_plugin.add_router_interface(
+                self.context, router['id'],
+                {'subnet_id': subnet['subnet']['id']})
+
+            # since there are no vm ports on HOST, and the router
+            # has no external gateway at this point the router
+            # should neither be scheduled to dvr nor to dvr_snat agents
+            agents = self.l3_plugin.list_l3_agents_hosting_router(
+                self.context, router['id'])['agents']
+            self.assertEqual(0, len(agents))
+            with mock.patch.object(self.l3_plugin,
+                                   '_l3_rpc_notifier') as l3_notifier,\
+                    self.port(subnet=subnet,
+                              device_owner='compute:None') as port:
+                self.l3_plugin.agent_notifiers[
+                    l3_const.AGENT_TYPE_L3] = l3_notifier
+                self.core_plugin.update_port(
+                    self.context, port['port']['id'],
+                    {'port': {'binding:host_id': HOST1}})
+
+                # now router should be scheduled to agent on HOST1
+                agents = self.l3_plugin.list_l3_agents_hosting_router(
+                    self.context, router['id'])['agents']
+                self.assertEqual(1, len(agents))
+                self.assertEqual(dvr_agent1['id'], agents[0]['id'])
+                # and notification should only be sent to the agent on HOST1
+                l3_notifier.routers_updated_on_host.assert_called_once_with(
+                    self.context, {router['id']}, HOST1)
+                self.assertFalse(l3_notifier.routers_updated.called)
+
+                # updating port's host (instance migration)
+                l3_notifier.reset_mock()
+                self.core_plugin.update_port(
+                    self.context, port['port']['id'],
+                    {'port': {'binding:host_id': HOST2}})
+                # now router should only be scheduled to dvr agent on host2
+                agents = self.l3_plugin.list_l3_agents_hosting_router(
+                    self.context, router['id'])['agents']
+                self.assertEqual(1, len(agents))
+                self.assertEqual(dvr_agent2['id'], agents[0]['id'])
+                l3_notifier.routers_updated_on_host.assert_called_once_with(
+                    self.context, {router['id']}, HOST2)
+                l3_notifier.router_removed_from_agent.assert_called_once_with(
+                    self.context, router['id'], HOST1)
+
     def _test_create_floating_ip_agent_notification(self, dvr=True):
         with self.subnet() as ext_subnet,\
                 self.subnet(cidr='20.0.0.0/24') as int_subnet,\
                 self.port(subnet=int_subnet,
-                          device_owner=DEVICE_OWNER_COMPUTE) as int_port:
+                          device_owner='compute:None') as int_port:
             # make net external
             ext_net_id = ext_subnet['subnet']['network_id']
             self._update('networks', ext_net_id,
@@ -250,7 +308,7 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                 if dvr:
                     l3_notif.routers_updated_on_host.assert_called_once_with(
                         self.context, [router['id']],
-                        int_port['port'][portbindings.HOST_ID])
+                        int_port['port']['binding:host_id'])
                     self.assertFalse(l3_notif.routers_updated.called)
                 else:
                     l3_notif.routers_updated.assert_called_once_with(
@@ -269,21 +327,21 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                 self.subnet(cidr='20.0.0.0/24') as int_subnet1,\
                 self.subnet(cidr='30.0.0.0/24') as int_subnet2,\
                 self.port(subnet=int_subnet1,
-                          device_owner=DEVICE_OWNER_COMPUTE) as int_port1,\
+                          device_owner='compute:None') as int_port1,\
                 self.port(subnet=int_subnet2,
-                          device_owner=DEVICE_OWNER_COMPUTE) as int_port2:
+                          device_owner='compute:None') as int_port2:
             # locate internal ports on different hosts
             self.core_plugin.update_port(
                 self.context, int_port1['port']['id'],
-                {'port': {portbindings.HOST_ID: 'host1'}})
+                {'port': {'binding:host_id': 'host1'}})
             self.core_plugin.update_port(
                 self.context, int_port2['port']['id'],
-                {'port': {portbindings.HOST_ID: 'host2'}})
+                {'port': {'binding:host_id': 'host2'}})
             # and create l3 agents on corresponding hosts
             helpers.register_l3_agent(host='host1',
-                agent_mode=constants.L3_AGENT_MODE_DVR)
+                agent_mode=l3_const.L3_AGENT_MODE_DVR)
             helpers.register_l3_agent(host='host2',
-                agent_mode=constants.L3_AGENT_MODE_DVR)
+                agent_mode=l3_const.L3_AGENT_MODE_DVR)
 
             # make net external
             ext_net_id = ext_subnet['subnet']['network_id']
@@ -347,7 +405,7 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
         with self.subnet() as ext_subnet,\
                 self.subnet(cidr='20.0.0.0/24') as int_subnet,\
                 self.port(subnet=int_subnet,
-                          device_owner=DEVICE_OWNER_COMPUTE) as int_port:
+                          device_owner='compute:None') as int_port:
             # make net external
             ext_net_id = ext_subnet['subnet']['network_id']
             self._update('networks', ext_net_id,
@@ -375,7 +433,7 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                 if dvr:
                     l3_notif.routers_updated_on_host.assert_called_once_with(
                         self.context, [router['id']],
-                        int_port['port'][portbindings.HOST_ID])
+                        int_port['port']['binding:host_id'])
                     self.assertFalse(l3_notif.routers_updated.called)
                 else:
                     l3_notif.routers_updated.assert_called_once_with(
@@ -388,260 +446,3 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
 
     def test_delete_floating_ip_agent_notification_non_dvr(self):
         self._test_delete_floating_ip_agent_notification(dvr=False)
-
-    def test_router_with_ipv4_and_multiple_ipv6_on_same_network(self):
-        kwargs = {'arg_list': (external_net.EXTERNAL,),
-                  external_net.EXTERNAL: True}
-        ext_net = self._make_network(self.fmt, '', True, **kwargs)
-        self._make_subnet(
-            self.fmt, ext_net, '10.0.0.1', '10.0.0.0/24',
-            ip_version=4, enable_dhcp=True)
-        self._make_subnet(
-            self.fmt, ext_net, '2001:db8::1', '2001:db8::/64',
-            ip_version=6, enable_dhcp=True)
-        router1 = self._create_router()
-        self.l3_plugin._update_router_gw_info(
-            self.context, router1['id'],
-            {'network_id': ext_net['network']['id']})
-        snat_router_intfs = self.l3_plugin._get_snat_sync_interfaces(
-            self.context, [router1['id']])
-        self.assertEqual(0, len(snat_router_intfs[router1['id']]))
-        private_net1 = self._make_network(self.fmt, 'net1', True)
-        private_ipv6_subnet1 = self._make_subnet(self.fmt,
-            private_net1, 'fd00::1',
-            cidr='fd00::1/64', ip_version=6,
-            ipv6_ra_mode='slaac',
-            ipv6_address_mode='slaac')
-        private_ipv6_subnet2 = self._make_subnet(self.fmt,
-            private_net1, 'fd01::1',
-            cidr='fd01::1/64', ip_version=6,
-            ipv6_ra_mode='slaac',
-            ipv6_address_mode='slaac')
-        # Add the first IPv6 subnet to the router
-        self.l3_plugin.add_router_interface(
-            self.context, router1['id'],
-            {'subnet_id': private_ipv6_subnet1['subnet']['id']})
-        # Check for the internal snat port interfaces
-        snat_router_intfs = self.l3_plugin._get_snat_sync_interfaces(
-            self.context, [router1['id']])
-        self.assertEqual(1, len(snat_router_intfs[router1['id']]))
-        # Add the second IPv6 subnet to the router
-        self.l3_plugin.add_router_interface(
-            self.context, router1['id'],
-            {'subnet_id': private_ipv6_subnet2['subnet']['id']})
-        # Check for the internal snat port interfaces
-        snat_router_intfs = self.l3_plugin._get_snat_sync_interfaces(
-            self.context, [router1['id']])
-        snat_intf_list = snat_router_intfs[router1['id']]
-        fixed_ips = snat_intf_list[0]['fixed_ips']
-        self.assertEqual(1, len(snat_router_intfs[router1['id']]))
-        self.assertEqual(2, len(fixed_ips))
-        # Now delete the router interface and it should update the
-        # SNAT port with the right fixed_ips instead of deleting it.
-        self.l3_plugin.remove_router_interface(
-            self.context, router1['id'],
-            {'subnet_id': private_ipv6_subnet2['subnet']['id']})
-        # Check for the internal snat port interfaces
-        snat_router_intfs = self.l3_plugin._get_snat_sync_interfaces(
-            self.context, [router1['id']])
-        snat_intf_list = snat_router_intfs[router1['id']]
-        fixed_ips = snat_intf_list[0]['fixed_ips']
-        self.assertEqual(1, len(snat_router_intfs[router1['id']]))
-        self.assertEqual(1, len(fixed_ips))
-
-    def test_update_vm_port_host_router_update(self):
-        # register l3 agents in dvr mode in addition to existing dvr_snat agent
-        HOST1 = 'host1'
-        dvr_agent1 = helpers.register_l3_agent(
-            host=HOST1, agent_mode=constants.L3_AGENT_MODE_DVR)
-        HOST2 = 'host2'
-        dvr_agent2 = helpers.register_l3_agent(
-            host=HOST2, agent_mode=constants.L3_AGENT_MODE_DVR)
-        router = self._create_router()
-        with self.subnet() as subnet:
-            self.l3_plugin.add_router_interface(
-                self.context, router['id'],
-                {'subnet_id': subnet['subnet']['id']})
-
-            # since there are no vm ports on HOST, and the router
-            # has no external gateway at this point the router
-            # should neither be scheduled to dvr nor to dvr_snat agents
-            agents = self.l3_plugin.list_l3_agents_hosting_router(
-                self.context, router['id'])['agents']
-            self.assertEqual(0, len(agents))
-            with mock.patch.object(self.l3_plugin,
-                                   '_l3_rpc_notifier') as l3_notifier,\
-                    self.port(subnet=subnet,
-                              device_owner=DEVICE_OWNER_COMPUTE) as port:
-                self.l3_plugin.agent_notifiers[
-                    constants.AGENT_TYPE_L3] = l3_notifier
-                self.core_plugin.update_port(
-                    self.context, port['port']['id'],
-                    {'port': {portbindings.HOST_ID: HOST1}})
-
-                # now router should be scheduled to agent on HOST1
-                agents = self.l3_plugin.list_l3_agents_hosting_router(
-                    self.context, router['id'])['agents']
-                self.assertEqual(1, len(agents))
-                self.assertEqual(dvr_agent1['id'], agents[0]['id'])
-                # and notification should only be sent to the agent on HOST1
-                l3_notifier.routers_updated_on_host.assert_called_once_with(
-                    self.context, {router['id']}, HOST1)
-                self.assertFalse(l3_notifier.routers_updated.called)
-
-                # updating port's host (instance migration)
-                l3_notifier.reset_mock()
-                self.core_plugin.update_port(
-                    self.context, port['port']['id'],
-                    {'port': {portbindings.HOST_ID: HOST2}})
-                # now router should only be scheduled to dvr agent on host2
-                agents = self.l3_plugin.list_l3_agents_hosting_router(
-                    self.context, router['id'])['agents']
-                self.assertEqual(1, len(agents))
-                self.assertEqual(dvr_agent2['id'], agents[0]['id'])
-                l3_notifier.routers_updated_on_host.assert_called_once_with(
-                    self.context, {router['id']}, HOST2)
-                l3_notifier.router_removed_from_agent.assert_called_once_with(
-                    mock.ANY, router['id'], HOST1)
-
-    def _test_router_remove_from_agent_on_vm_port_deletion(
-            self, non_admin_port=False):
-        # register l3 agent in dvr mode in addition to existing dvr_snat agent
-        HOST = 'host1'
-        non_admin_tenant = 'tenant1'
-        dvr_agent = helpers.register_l3_agent(
-            host=HOST, agent_mode=constants.L3_AGENT_MODE_DVR)
-        router = self._create_router()
-        with self.network(shared=True) as net,\
-                self.subnet(network=net) as subnet,\
-                self.port(subnet=subnet,
-                          device_owner=DEVICE_OWNER_COMPUTE,
-                          tenant_id=non_admin_tenant,
-                          set_context=non_admin_port) as port:
-            self.core_plugin.update_port(
-                    self.context, port['port']['id'],
-                    {'port': {portbindings.HOST_ID: HOST}})
-            self.l3_plugin.add_router_interface(
-                self.context, router['id'],
-                {'subnet_id': subnet['subnet']['id']})
-
-            # router should be scheduled to agent on HOST
-            agents = self.l3_plugin.list_l3_agents_hosting_router(
-                self.context, router['id'])
-            self.assertEqual(1, len(agents['agents']))
-            self.assertEqual(dvr_agent['id'], agents['agents'][0]['id'])
-
-            notifier = self.l3_plugin.agent_notifiers[
-                constants.AGENT_TYPE_L3]
-            with mock.patch.object(
-                    notifier, 'router_removed_from_agent') as remove_mock:
-                ctx = context.Context(
-                    '', non_admin_tenant) if non_admin_port else self.context
-                self._delete('ports', port['port']['id'], neutron_context=ctx)
-                # now when port is deleted the router should be unscheduled
-                agents = self.l3_plugin.list_l3_agents_hosting_router(
-                    self.context, router['id'])
-                self.assertEqual(0, len(agents['agents']))
-                remove_mock.assert_called_once_with(
-                    mock.ANY, router['id'], HOST)
-
-    def test_router_remove_from_agent_on_vm_port_deletion(self):
-        self._test_router_remove_from_agent_on_vm_port_deletion()
-
-    def test_admin_router_remove_from_agent_on_vm_port_deletion(self):
-        self._test_router_remove_from_agent_on_vm_port_deletion(
-            non_admin_port=True)
-
-    def test_dvr_router_notifications(self):
-        """Check that notifications go to the right hosts in different
-        conditions
-        """
-        # register l3 agents in dvr mode in addition to existing dvr_snat agent
-        HOST1, HOST2, HOST3 = 'host1', 'host2', 'host3'
-        for host in [HOST1, HOST2, HOST3]:
-            helpers.register_l3_agent(
-                host=host, agent_mode=constants.L3_AGENT_MODE_DVR)
-
-        router = self._create_router()
-        arg_list = (portbindings.HOST_ID,)
-        with self.subnet() as ext_subnet,\
-                self.subnet(cidr='20.0.0.0/24') as subnet1,\
-                self.subnet(cidr='30.0.0.0/24') as subnet2,\
-                self.subnet(cidr='40.0.0.0/24') as subnet3,\
-                self.port(subnet=subnet1,
-                          device_owner=DEVICE_OWNER_COMPUTE,
-                          arg_list=arg_list,
-                          **{portbindings.HOST_ID: HOST1}),\
-                self.port(subnet=subnet2,
-                          device_owner=constants.DEVICE_OWNER_DHCP,
-                          arg_list=arg_list,
-                          **{portbindings.HOST_ID: HOST2}),\
-                self.port(subnet=subnet3,
-                          device_owner=constants.DEVICE_OWNER_NEUTRON_PREFIX,
-                          arg_list=arg_list,
-                          **{portbindings.HOST_ID: HOST3}):
-            # make net external
-            ext_net_id = ext_subnet['subnet']['network_id']
-            self._update('networks', ext_net_id,
-                     {'network': {external_net.EXTERNAL: True}})
-
-            with mock.patch.object(self.l3_plugin.l3_rpc_notifier.client,
-                                   'prepare') as mock_prepare:
-                # add external gateway to router
-                self.l3_plugin.update_router(
-                    self.context, router['id'],
-                    {'router': {
-                        'external_gateway_info': {'network_id': ext_net_id}}})
-                # router has no interfaces so notification goes
-                # to only dvr_snat agent
-                mock_prepare.assert_called_once_with(
-                    server=self.l3_agent['host'],
-                    topic=topics.L3_AGENT,
-                    version='1.1')
-
-                mock_prepare.reset_mock()
-                self.l3_plugin.add_router_interface(
-                    self.context, router['id'],
-                    {'subnet_id': subnet1['subnet']['id']})
-                self.assertEqual(2, mock_prepare.call_count)
-                expected = [mock.call(server=self.l3_agent['host'],
-                                      topic=topics.L3_AGENT,
-                                      version='1.1'),
-                            mock.call(server=HOST1,
-                                      topic=topics.L3_AGENT,
-                                      version='1.1')]
-                mock_prepare.assert_has_calls(expected, any_order=True)
-
-                mock_prepare.reset_mock()
-                self.l3_plugin.add_router_interface(
-                    self.context, router['id'],
-                    {'subnet_id': subnet2['subnet']['id']})
-                self.assertEqual(3, mock_prepare.call_count)
-                expected = [mock.call(server=self.l3_agent['host'],
-                                      topic=topics.L3_AGENT,
-                                      version='1.1'),
-                            mock.call(server=HOST1,
-                                      topic=topics.L3_AGENT,
-                                      version='1.1'),
-                            mock.call(server=HOST2,
-                                      topic=topics.L3_AGENT,
-                                      version='1.1')]
-                mock_prepare.assert_has_calls(expected, any_order=True)
-
-                mock_prepare.reset_mock()
-                self.l3_plugin.add_router_interface(
-                    self.context, router['id'],
-                    {'subnet_id': subnet3['subnet']['id']})
-                # there are no dvr serviceable ports on HOST3, so notification
-                # goes to the same hosts
-                self.assertEqual(3, mock_prepare.call_count)
-                expected = [mock.call(server=self.l3_agent['host'],
-                                      topic=topics.L3_AGENT,
-                                      version='1.1'),
-                            mock.call(server=HOST1,
-                                      topic=topics.L3_AGENT,
-                                      version='1.1'),
-                            mock.call(server=HOST2,
-                                      topic=topics.L3_AGENT,
-                                      version='1.1')]
-                mock_prepare.assert_has_calls(expected, any_order=True)

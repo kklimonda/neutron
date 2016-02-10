@@ -17,7 +17,6 @@ import abc
 
 from oslo_config import cfg
 
-from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import resource_helper
@@ -79,7 +78,6 @@ class RouterExternalGatewayInUseByFloatingIp(nexception.InUse):
 
 ROUTERS = 'routers'
 EXTERNAL_GW_INFO = 'external_gateway_info'
-FLOATINGIPS = 'floatingips'
 
 RESOURCE_ATTRIBUTE_MAP = {
     ROUTERS: {
@@ -117,7 +115,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                                }
                            }}
     },
-    FLOATINGIPS: {
+    'floatingips': {
         'id': {'allow_post': False, 'allow_put': False,
                'validate': {'type:uuid': None},
                'is_visible': True,

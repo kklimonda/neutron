@@ -24,11 +24,11 @@ import retrying
 import six
 import uuid
 
-from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.common import utils
 from neutron.agent.linux import ip_lib
 from neutron.agent.ovsdb import api as ovsdb
 from neutron.common import exceptions
+from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants
@@ -47,18 +47,11 @@ FAILMODE_STANDALONE = 'standalone'
 OPTS = [
     cfg.IntOpt('ovs_vsctl_timeout',
                default=DEFAULT_OVS_VSCTL_TIMEOUT,
-               help=_('Timeout in seconds for ovs-vsctl commands. '
-                      'If the timeout expires, ovs commands will fail with '
-                      'ALARMCLOCK error.')),
+               help=_('Timeout in seconds for ovs-vsctl commands')),
 ]
 cfg.CONF.register_opts(OPTS)
 
 LOG = logging.getLogger(__name__)
-
-OVS_DEFAULT_CAPS = {
-    'datapath_types': [],
-    'iface_types': [],
-}
 
 
 def _ofport_result_pending(result):
@@ -99,11 +92,10 @@ class VifPort(object):
         self.switch = switch
 
     def __str__(self):
-        return ("iface-id=%s, vif_mac=%s, port_name=%s, ofport=%s, "
-                "bridge_name=%s") % (
-                    self.vif_id, self.vif_mac,
-                    self.port_name, self.ofport,
-                    self.switch.br_name)
+        return ("iface-id=" + self.vif_id + ", vif_mac=" +
+                self.vif_mac + ", port_name=" + self.port_name +
+                ", ofport=" + str(self.ofport) + ", bridge_name=" +
+                self.switch.br_name)
 
 
 class BaseOVS(object):
@@ -153,23 +145,6 @@ class BaseOVS(object):
                    log_errors=True):
         return self.ovsdb.db_get(table, record, column).execute(
             check_error=check_error, log_errors=log_errors)
-
-    @property
-    def config(self):
-        """A dict containing the only row from the root Open_vSwitch table
-
-        This row contains several columns describing the Open vSwitch install
-        and the system on which it is installed. Useful keys include:
-            datapath_types: a list of supported datapath types
-            iface_types: a list of supported interface types
-            ovs_version: the OVS version
-        """
-        return self.ovsdb.db_list("Open_vSwitch").execute()[0]
-
-    @property
-    def capabilities(self):
-        _cfg = self.config
-        return {k: _cfg.get(k, OVS_DEFAULT_CAPS[k]) for k in OVS_DEFAULT_CAPS}
 
 
 class OVSBridge(BaseOVS):
@@ -230,12 +205,8 @@ class OVSBridge(BaseOVS):
 
     def replace_port(self, port_name, *interface_attr_tuples):
         """Replace existing port or create it, and configure port interface."""
-
-        # NOTE(xiaohhui): If del_port is inside the transaction, there will
-        # only be one command for replace_port. This will cause the new port
-        # not be found by system, which will lead to Bug #1519926.
-        self.ovsdb.del_port(port_name).execute()
         with self.ovsdb.transaction() as txn:
+            txn.add(self.ovsdb.del_port(port_name))
             txn.add(self.ovsdb.add_port(self.br_name, port_name,
                                         may_exist=False))
             if interface_attr_tuples:
@@ -273,9 +244,10 @@ class OVSBridge(BaseOVS):
         ofport = INVALID_OFPORT
         try:
             ofport = self._get_port_ofport(port_name)
-        except retrying.RetryError:
-            LOG.exception(_LE("Timed out retrieving ofport on port %s."),
-                          port_name)
+        except retrying.RetryError as e:
+            LOG.exception(_LE("Timed out retrieving ofport on port %(pname)s. "
+                              "Exception: %(exception)s"),
+                          {'pname': port_name, 'exception': e})
         return ofport
 
     def get_datapath_id(self):

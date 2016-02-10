@@ -19,7 +19,6 @@ from oslo_utils import excutils
 import six
 import stevedore
 
-from neutron._i18n import _, _LE, _LI, _LW
 from neutron.api.v2 import attributes
 from neutron.common import exceptions as exc
 from neutron.extensions import external_net
@@ -27,6 +26,7 @@ from neutron.extensions import multiprovidernet as mpnet
 from neutron.extensions import portbindings
 from neutron.extensions import providernet as provider
 from neutron.extensions import vlantransparent
+from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
@@ -379,7 +379,10 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         VlanTransparencyDriverError if any mechanism driver doesn't
         support vlan transparency.
         """
-        if context.current.get('vlan_transparent'):
+        if context.current['vlan_transparent'] is None:
+            return
+
+        if context.current['vlan_transparent']:
             for driver in self.ordered_mech_drivers:
                 if not driver.obj.check_vlan_transparency(context):
                     raise vlantransparent.VlanTransparencyDriverError()
@@ -756,7 +759,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         # To prevent a possible binding loop, don't try to bind with
         # this driver if the same driver has already bound at a higher
         # level to one of the segments we are currently trying to
-        # bind. Note that it is OK for the same driver to bind at
+        # bind. Note that is is OK for the same driver to bind at
         # multiple levels using different segments.
         for level in binding_levels:
             if (level.driver == driver and

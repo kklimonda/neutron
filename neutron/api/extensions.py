@@ -1,4 +1,5 @@
 # Copyright 2011 OpenStack Foundation.
+# Copyright 2011 Justin Santa Barbara
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -20,15 +21,14 @@ import os
 
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_middleware import base
 import routes
 import six
 import webob.dec
 import webob.exc
 
-from neutron._i18n import _, _LE, _LI, _LW
 from neutron.common import exceptions
 import neutron.extensions
+from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
 from neutron.services import provider_configuration
 from neutron import wsgi
@@ -144,10 +144,6 @@ class ExtensionDescriptor(object):
         """
         return None
 
-    def get_required_extensions(self):
-        """Returns a list of extensions to be processed before this one."""
-        return []
-
     def update_attributes_map(self, extended_attributes,
                               extension_attrs_map=None):
         """Update attributes map for this extension.
@@ -244,7 +240,7 @@ class ExtensionController(wsgi.Controller):
         raise webob.exc.HTTPNotFound(msg)
 
 
-class ExtensionMiddleware(base.ConfigurableMiddleware):
+class ExtensionMiddleware(wsgi.Middleware):
     """Extensions middleware for WSGI."""
 
     def __init__(self, application,
@@ -393,21 +389,36 @@ class ExtensionManager(object):
         resources.append(ResourceExtension('extensions',
                                            ExtensionController(self)))
         for ext in self.extensions.values():
-            resources.extend(ext.get_resources())
+            try:
+                resources.extend(ext.get_resources())
+            except AttributeError:
+                # NOTE(dprince): Extension aren't required to have resource
+                # extensions
+                pass
         return resources
 
     def get_actions(self):
         """Returns a list of ActionExtension objects."""
         actions = []
         for ext in self.extensions.values():
-            actions.extend(ext.get_actions())
+            try:
+                actions.extend(ext.get_actions())
+            except AttributeError:
+                # NOTE(dprince): Extension aren't required to have action
+                # extensions
+                pass
         return actions
 
     def get_request_extensions(self):
         """Returns a list of RequestExtension objects."""
         request_exts = []
         for ext in self.extensions.values():
-            request_exts.extend(ext.get_request_extensions())
+            try:
+                request_exts.extend(ext.get_request_extensions())
+            except AttributeError:
+                # NOTE(dprince): Extension aren't required to have request
+                # extensions
+                pass
         return request_exts
 
     def extend_resources(self, version, attr_map):
@@ -419,22 +430,33 @@ class ExtensionManager(object):
         After this function, we will extend the attr_map if an extension
         wants to extend this map.
         """
-        processed_exts = {}
+        update_exts = []
+        processed_exts = set()
         exts_to_process = self.extensions.copy()
         # Iterate until there are unprocessed extensions or if no progress
         # is made in a whole iteration
         while exts_to_process:
             processed_ext_count = len(processed_exts)
             for ext_name, ext in list(exts_to_process.items()):
-                # Process extension only if all required extensions
-                # have been processed already
-                required_exts_set = set(ext.get_required_extensions())
-                if required_exts_set - set(processed_exts):
+                if not hasattr(ext, 'get_extended_resources'):
+                    del exts_to_process[ext_name]
                     continue
-                extended_attrs = ext.get_extended_resources(version)
-                for res, resource_attrs in six.iteritems(extended_attrs):
-                    attr_map.setdefault(res, {}).update(resource_attrs)
-                processed_exts[ext_name] = ext
+                if hasattr(ext, 'update_attributes_map'):
+                    update_exts.append(ext)
+                if hasattr(ext, 'get_required_extensions'):
+                    # Process extension only if all required extensions
+                    # have been processed already
+                    required_exts_set = set(ext.get_required_extensions())
+                    if required_exts_set - processed_exts:
+                        continue
+                try:
+                    extended_attrs = ext.get_extended_resources(version)
+                    for res, resource_attrs in six.iteritems(extended_attrs):
+                        attr_map.setdefault(res, {}).update(resource_attrs)
+                except AttributeError:
+                    LOG.exception(_LE("Error fetching extended attributes for "
+                                      "extension '%s'"), ext.get_name())
+                processed_exts.add(ext_name)
                 del exts_to_process[ext_name]
             if len(processed_exts) == processed_ext_count:
                 # Exit loop as no progress was made
@@ -446,7 +468,7 @@ class ExtensionManager(object):
                       ','.join(exts_to_process.keys()))
 
         # Extending extensions' attributes map.
-        for ext in processed_exts.values():
+        for ext in update_exts:
             ext.update_attributes_map(attr_map)
 
     def _check_extension(self, extension):
@@ -456,10 +478,11 @@ class ExtensionManager(object):
             LOG.debug('Ext alias: %s', extension.get_alias())
             LOG.debug('Ext description: %s', extension.get_description())
             LOG.debug('Ext updated: %s', extension.get_updated())
-        except AttributeError:
-            LOG.exception(_LE("Exception loading extension"))
+        except AttributeError as ex:
+            LOG.exception(_LE("Exception loading extension: %s"),
+                          six.text_type(ex))
             return False
-        return isinstance(extension, ExtensionDescriptor)
+        return True
 
     def _load_all_extensions(self):
         """Load extensions from the configured path.
@@ -544,7 +567,8 @@ class PluginAwareExtensionManager(ExtensionManager):
         return supports_extension
 
     def _plugins_implement_interface(self, extension):
-        if extension.get_plugin_interface() is None:
+        if(not hasattr(extension, "get_plugin_interface") or
+           extension.get_plugin_interface() is None):
             return True
         for plugin in self.plugins.values():
             if isinstance(plugin, extension.get_plugin_interface()):
@@ -617,10 +641,7 @@ class ResourceExtension(object):
     """Add top level resources to the OpenStack API in Neutron."""
 
     def __init__(self, collection, controller, parent=None, path_prefix="",
-                 collection_actions=None, member_actions=None, attr_map=None):
-        collection_actions = collection_actions or {}
-        member_actions = member_actions or {}
-        attr_map = attr_map or {}
+                 collection_actions={}, member_actions={}, attr_map={}):
         self.collection = collection
         self.controller = controller
         self.parent = parent

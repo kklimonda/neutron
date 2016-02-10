@@ -14,7 +14,6 @@
 
 from oslo_log import log as logging
 
-from neutron._i18n import _LE
 from neutron.agent.l3 import dvr_local_router
 from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import router_info as router
@@ -36,11 +35,6 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
             ex_gw_port, interface_name)
         if self._is_this_snat_host():
             self._create_dvr_gateway(ex_gw_port, interface_name)
-            # NOTE: When a router is created without a gateway the routes get
-            # added to the router namespace, but if we wanted to populate
-            # the same routes to the snat namespace after the gateway port
-            # is added, we need to call routes_updated here.
-            self.routes_updated([], self.router['routes'])
 
     def external_gateway_updated(self, ex_gw_port, interface_name):
         if not self._is_this_snat_host():
@@ -63,7 +57,7 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
                                         self.snat_namespace.name,
                                         preserve_ips=[])
 
-    def _external_gateway_removed(self, ex_gw_port, interface_name):
+    def external_gateway_removed(self, ex_gw_port, interface_name):
         super(DvrEdgeRouter, self).external_gateway_removed(ex_gw_port,
                                                             interface_name)
         if not self._is_this_snat_host() and not self.snat_namespace:
@@ -75,12 +69,8 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
                            bridge=self.agent_conf.external_network_bridge,
                            namespace=self.snat_namespace.name,
                            prefix=router.EXTERNAL_DEV_PREFIX)
-
-    def external_gateway_removed(self, ex_gw_port, interface_name):
-        self._external_gateway_removed(ex_gw_port, interface_name)
-        if self.snat_namespace:
-            self.snat_namespace.delete()
-            self.snat_namespace = None
+        self.snat_namespace.delete()
+        self.snat_namespace = None
 
     def internal_network_added(self, port):
         super(DvrEdgeRouter, self).internal_network_added(port)
@@ -125,21 +115,18 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
             self.driver.unplug(snat_interface, namespace=ns_name,
                                prefix=prefix)
 
-    def _plug_snat_port(self, port):
-        interface_name = self._get_snat_int_device_name(port['id'])
-        self._internal_network_added(
-            self.snat_namespace.name, port['network_id'],
-            port['id'], port['fixed_ips'],
-            port['mac_address'], interface_name,
-            dvr_snat_ns.SNAT_INT_DEV_PREFIX)
-
     def _create_dvr_gateway(self, ex_gw_port, gw_interface_name):
         """Create SNAT namespace."""
         snat_ns = self._create_snat_namespace()
         # connect snat_ports to br_int from SNAT namespace
         for port in self.get_snat_interfaces():
             # create interface_name
-            self._plug_snat_port(port)
+            interface_name = self._get_snat_int_device_name(port['id'])
+            self._internal_network_added(
+                snat_ns.name, port['network_id'],
+                port['id'], port['fixed_ips'],
+                port['mac_address'], interface_name,
+                dvr_snat_ns.SNAT_INT_DEV_PREFIX)
         self._external_gateway_added(ex_gw_port, gw_interface_name,
                                      snat_ns.name, preserve_ips=[])
         self.snat_iptables_manager = iptables_manager.IptablesManager(
@@ -188,22 +175,7 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
             self._add_snat_rules(ex_gw_port, self.snat_iptables_manager,
                                  interface_name)
 
-    def update_routing_table(self, operation, route):
-        if self.get_ex_gw_port() and self._is_this_snat_host():
-            ns_name = dvr_snat_ns.SnatNamespace.get_snat_ns_name(
-                self.router['id'])
-            # NOTE: For now let us apply the static routes both in SNAT
-            # namespace and Router Namespace, to reduce the complexity.
-            ip_wrapper = ip_lib.IPWrapper(namespace=ns_name)
-            if ip_wrapper.netns.exists(ns_name):
-                super(DvrEdgeRouter, self)._update_routing_table(
-                    operation, route, namespace=ns_name)
-            else:
-                LOG.error(_LE("The SNAT namespace %s does not exist for "
-                              "the router."), ns_name)
-        super(DvrEdgeRouter, self).update_routing_table(operation, route)
-
-    def delete(self, agent):
-        super(DvrEdgeRouter, self).delete(agent)
-        if self.snat_namespace:
-            self.snat_namespace.delete()
+    def update_routing_table(self, operation, route, namespace=None):
+        ns_name = dvr_snat_ns.SnatNamespace.get_snat_ns_name(self.router['id'])
+        super(DvrEdgeRouter, self).update_routing_table(operation, route,
+                                                        namespace=ns_name)

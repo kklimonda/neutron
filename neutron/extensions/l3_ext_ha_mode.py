@@ -13,7 +13,6 @@
 # under the License.
 #
 
-from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes
 from neutron.common import constants
@@ -30,7 +29,7 @@ EXTENDED_ATTRIBUTES_2_0 = {
 }
 
 
-class DistributedHARouterNotSupported(exceptions.BadRequest):
+class DistributedHARouterNotSupported(NotImplementedError):
     message = _("Currently distributed HA routers are "
                 "not supported.")
 

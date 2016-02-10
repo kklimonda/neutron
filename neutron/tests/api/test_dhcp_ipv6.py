@@ -20,7 +20,6 @@ import six
 from tempest_lib.common.utils import data_utils
 from tempest_lib import exceptions as lib_exc
 
-from neutron.common import constants
 from neutron.tests.api import base
 from neutron.tests.tempest import config
 from neutron.tests.tempest import test
@@ -66,8 +65,7 @@ class NetworksTestDHCPv6(base.BaseNetworkTest):
         body = self.client.list_ports()
         ports = body['ports']
         for port in ports:
-            if (port['device_owner'].startswith(
-                    constants.DEVICE_OWNER_ROUTER_INTF)
+            if (port['device_owner'].startswith('network:router_interface')
                 and port['device_id'] in [r['id'] for r in self.routers]):
                 self.client.remove_router_interface_with_port_id(
                     port['device_id'], port['id']

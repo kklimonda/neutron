@@ -15,8 +15,12 @@
 
 import copy
 
+from oslo_log import log as logging
+
 import neutron.tests.tempest.common.generator.base_generator as base
 import neutron.tests.tempest.common.generator.valid_generator as valid
+
+LOG = logging.getLogger(__name__)
 
 
 class NegativeTestGenerator(base.BasicGeneratorSet):

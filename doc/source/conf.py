@@ -28,7 +28,6 @@
 # serve to show the default.
 
 import os
-import subprocess
 import sys
 
 # If extensions (or modules to document with autodoc) are in another directory,
@@ -119,6 +118,17 @@ pygments_style = 'sphinx'
 # A list of ignored prefixes for module index sorting.
 modindex_common_prefix = ['neutron.']
 
+# -- Options for man page output --------------------------------------------
+
+# Grouping the document tree for man pages.
+# List of tuples 'sourcefile', 'target', u'title', u'Authors name', 'manual'
+
+man_pages = [
+    ('man/neutron-server', 'neutron-server', u'Neutron Server',
+     [u'OpenStack'], 1)
+]
+
+
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  Major themes that come with
@@ -158,11 +168,8 @@ modindex_common_prefix = ['neutron.']
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
 #html_last_updated_fmt = '%b %d, %Y'
-git_cmd = ["git", "log", "--pretty=format:'%ad, commit %h'", "--date=local -",
-   "n1"]
-html_last_updated_fmt = subprocess.Popen(git_cmd,
-                                         stdout=subprocess.PIPE).\
-                                         communicate()[0]
+git_cmd = "git log --pretty=format:'%ad, commit %h' --date=local -n1"
+html_last_updated_fmt = os.popen(git_cmd).read()
 
 # If true, SmartyPants will be used to convert quotes and dashes to
 # typographically correct entities.

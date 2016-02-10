@@ -14,7 +14,6 @@
 
 from oslo_config import cfg
 
-from neutron._i18n import _
 from neutron.agent.common import config
 
 DEFAULT_BRIDGE_MAPPINGS = []
@@ -34,13 +33,11 @@ vxlan_opts = [
     cfg.StrOpt('vxlan_group', default=DEFAULT_VXLAN_GROUP,
                help=_("Multicast group(s) for vxlan interface. A range of "
                       "group addresses may be specified by using CIDR "
-                      "notation. Specifying a range allows different VNIs to "
-                      "use different group addresses, reducing or eliminating "
-                      "spurious broadcast traffic to the tunnel endpoints. "
-                      "To reserve a unique group for each possible "
+                      "notation. To reserve a unique group for each possible "
                       "(24-bit) VNI, use a /8 such as 239.0.0.0/8. This "
                       "setting must be the same on all the agents.")),
-    cfg.IPOpt('local_ip', help=_("Local IP address of the VXLAN endpoints.")),
+    cfg.IPOpt('local_ip', version=4,
+              help=_("Local IP address of the VXLAN endpoints.")),
     cfg.BoolOpt('l2_population', default=False,
                 help=_("Extension to use alongside ml2 plugin's l2population "
                        "mechanism driver. It enables the plugin to populate "
@@ -50,14 +47,7 @@ vxlan_opts = [
 bridge_opts = [
     cfg.ListOpt('physical_interface_mappings',
                 default=DEFAULT_INTERFACE_MAPPINGS,
-                help=_("Comma-separated list of "
-                       "<physical_network>:<physical_interface> tuples "
-                       "mapping physical network names to the agent's "
-                       "node-specific physical network interfaces to be used "
-                       "for flat and VLAN networks. All physical networks "
-                       "listed in network_vlan_ranges on the server should "
-                       "have mappings to appropriate interfaces on each "
-                       "agent.")),
+                help=_("List of <physical_network>:<physical_interface>")),
     cfg.ListOpt('bridge_mappings',
                 default=DEFAULT_BRIDGE_MAPPINGS,
                 help=_("List of <physical_network>:<physical_bridge>")),

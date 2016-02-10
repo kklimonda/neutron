@@ -41,9 +41,6 @@ class SanityTestCase(base.BaseTestCase):
     def test_ipset_support(self):
         checks.ipset_supported()
 
-    def test_ip6tables_support(self):
-        checks.ip6tables_supported()
-
 
 class SanityTestCaseRoot(functional_base.BaseSudoTestCase):
     """Sanity checks that require root access.

@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_log import log as logging
+
 from tempest_lib.services.identity.v2.token_client import TokenClient
 from tempest_lib.services.identity.v3.token_client import V3TokenClient
 
@@ -38,6 +40,7 @@ from neutron.tests.tempest.services.network.json.network_client import \
 
 
 CONF = config.CONF
+LOG = logging.getLogger(__name__)
 
 
 class Manager(manager.Manager):
