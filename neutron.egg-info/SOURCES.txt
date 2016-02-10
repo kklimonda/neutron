@@ -265,8 +265,8 @@ neutron/cmd/netns_cleanup.py
 neutron/cmd/ovs_cleanup.py
 neutron/cmd/pd_notify.py
 neutron/cmd/sanity_check.py
-neutron/cmd/usage_audit.py
 neutron/cmd/eventlet/__init__.py
+neutron/cmd/eventlet/usage_audit.py
 neutron/cmd/eventlet/agents/__init__.py
 neutron/cmd/eventlet/agents/dhcp.py
 neutron/cmd/eventlet/agents/l3.py
@@ -1147,6 +1147,7 @@ neutron/tests/unit/plugins/ml2/test_plugin.py
 neutron/tests/unit/plugins/ml2/test_port_binding.py
 neutron/tests/unit/plugins/ml2/test_rpc.py
 neutron/tests/unit/plugins/ml2/test_security_group.py
+neutron/tests/unit/plugins/ml2/test_tracked_resources.py
 neutron/tests/unit/plugins/ml2/db/__init__.py
 neutron/tests/unit/plugins/ml2/drivers/__init__.py
 neutron/tests/unit/plugins/ml2/drivers/base_type_tunnel.py

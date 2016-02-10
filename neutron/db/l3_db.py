@@ -938,7 +938,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
         net = self._core_plugin._get_network(context, net_id)
         return any(s.ip_version == 4 for s in net.subnets)
 
-    def create_floatingip(self, context, floatingip,
+    def _create_floatingip(self, context, floatingip,
             initial_status=l3_constants.FLOATINGIP_STATUS_ACTIVE):
         fip = floatingip['floatingip']
         tenant_id = self._get_tenant_id_for_create(context, fip)
@@ -1002,6 +1002,10 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
 
         return self._make_floatingip_dict(floatingip_db)
 
+    def create_floatingip(self, context, floatingip,
+            initial_status=l3_constants.FLOATINGIP_STATUS_ACTIVE):
+        return self._create_floatingip(context, floatingip, initial_status)
+
     def _update_floatingip(self, context, id, floatingip):
         fip = floatingip['floatingip']
         with context.session.begin(subtransactions=True):
@@ -1033,7 +1037,6 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
 
     def _delete_floatingip(self, context, id):
         floatingip = self._get_floatingip(context, id)
-        router_id = floatingip['router_id']
         # Foreign key cascade will take care of the removal of the
         # floating IP record once the port is deleted. We can't start
         # a transaction first to remove it ourselves because the delete_port
@@ -1041,7 +1044,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
         self._core_plugin.delete_port(context.elevated(),
                                       floatingip['floating_port_id'],
                                       l3_port_check=False)
-        return router_id
+        return self._make_floatingip_dict(floatingip)
 
     def delete_floatingip(self, context, id):
         self._delete_floatingip(context, id)
@@ -1372,8 +1375,9 @@ class L3_NAT_db_mixin(L3_NAT_dbonly_mixin, L3RpcNotifierMixin):
         return floatingip
 
     def delete_floatingip(self, context, id):
-        router_id = self._delete_floatingip(context, id)
-        self.notify_router_updated(context, router_id, 'delete_floatingip')
+        floating_ip = self._delete_floatingip(context, id)
+        self.notify_router_updated(context, floating_ip['router_id'],
+                                   'delete_floatingip')
 
     def disassociate_floatingips(self, context, port_id, do_notify=True):
         """Disassociate all floating IPs linked to specific port.

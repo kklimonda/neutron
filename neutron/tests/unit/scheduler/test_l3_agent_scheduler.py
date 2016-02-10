@@ -278,6 +278,33 @@ class L3SchedulerBaseTestCase(base.BaseTestCase):
         router['distributed'] = True
         plugin.get_l3_agents.return_value = []
         iter(self.scheduler._get_candidates(plugin, mock.MagicMock(), router))
+        self.assertFalse(plugin.get_l3_agent_candidates.called)
+
+    def test__get_candidates_skips_get_l3_agent_candidates_if_dvr_scheduled(
+            self):
+        plugin = mock.MagicMock()
+        # distributed router already hosted
+        plugin.get_l3_agents_hosting_routers.return_value = ['a1']
+        router = {'distributed': True, 'id': str(uuid.uuid4())}
+        plugin.get_l3_agents.return_value = ['a1']
+        self.scheduler._get_candidates(plugin, mock.MagicMock(), router)
+        self.assertFalse(plugin.get_l3_agent_candidates.called)
+
+    def test__get_candidates_calls_get_l3_agent_candidates_if_agent_available(
+            self):
+        plugin = mock.MagicMock()
+        # distributed router already hosted in two agent 'a1' and 'a2'
+        plugin.get_l3_agents_hosting_routers.return_value = ['a1', 'a2']
+        router = {'distributed': True, 'id': str(uuid.uuid4())}
+        # Available distributed agents
+        plugin.get_l3_agents.return_value = ['a1', 'a2', 'a3', 'a4', 'a5']
+        unscheduled_agents = ['a3', 'a4', 'a5']
+        plugin.get_l3_agent_candidates.return_value = ['a3', 'a4']
+        agents_returned = self.scheduler._get_candidates(
+            plugin, mock.MagicMock(), router)
+        plugin.get_l3_agent_candidates.called_once_with(
+            mock.ANY, router, unscheduled_agents)
+        self.assertEqual(['a3', 'a4'], sorted(agents_returned))
 
 
 class L3SchedulerBaseMixin(object):
@@ -671,86 +698,6 @@ class L3SchedulerTestBaseMixin(object):
         agent_list = [self.l3_dvr_snat_agent]
         self._check_get_l3_agent_candidates(router, agent_list, HOST_DVR_SNAT)
 
-    def _prepare_check_ports_exist_tests(self):
-        l3_agent = agents_db.Agent()
-        l3_agent.admin_state_up = True
-        l3_agent.host = 'host_1'
-        router = self._make_router(self.fmt,
-                                   tenant_id=str(uuid.uuid4()),
-                                   name='r2')
-        router['external_gateway_info'] = None
-        router['id'] = str(uuid.uuid4())
-        self.plugin.get_ports = mock.Mock(return_value=[])
-        self.get_subnet_ids_on_router = mock.Mock(return_value=[])
-        return l3_agent, router
-
-    def test_check_ports_exist_on_l3agent_no_subnets(self):
-        l3_agent, router = self._prepare_check_ports_exist_tests()
-        # no subnets
-        val = self.check_ports_exist_on_l3agent(self.adminContext,
-                                                l3_agent, router['id'])
-        self.assertFalse(val)
-
-    def test_check_ports_exist_on_l3agent_with_dhcp_enabled_subnets(self):
-        self._register_l3_dvr_agents()
-        router = self._make_router(self.fmt,
-                                   tenant_id=str(uuid.uuid4()),
-                                   name='r2')
-        router['external_gateway_info'] = None
-        router['id'] = str(uuid.uuid4())
-        router['distributed'] = True
-
-        agent_list = [self.l3_dvr_snat_agent]
-        subnet = {'id': str(uuid.uuid4()),
-                  'enable_dhcp': True}
-
-        self.get_subnet_ids_on_router = mock.Mock(
-            return_value=[subnet['id']])
-
-        self.plugin.get_subnet = mock.Mock(return_value=subnet)
-        self.plugin.get_ports = mock.Mock()
-        val = self.check_ports_exist_on_l3agent(
-            self.adminContext, agent_list[0], router['id'])
-        self.assertTrue(val)
-        self.assertFalse(self.plugin.get_ports.called)
-
-    def test_check_ports_exist_on_l3agent_if_no_subnets_then_return(self):
-        l3_agent, router = self._prepare_check_ports_exist_tests()
-        with mock.patch.object(manager.NeutronManager,
-                               'get_plugin') as getp:
-            getp.return_value = self.plugin
-            # no subnets and operation is remove_router_interface,
-            # so return immediately without calling get_ports
-            self.check_ports_exist_on_l3agent(self.adminContext,
-                                          l3_agent, router['id'])
-        self.assertFalse(self.plugin.get_ports.called)
-
-    def test_check_ports_exist_on_l3agent_no_subnet_match(self):
-        l3_agent, router = self._prepare_check_ports_exist_tests()
-        # no matching subnet
-        self.plugin.get_subnet_ids_on_router = mock.Mock(
-            return_value=[str(uuid.uuid4())])
-        val = self.check_ports_exist_on_l3agent(self.adminContext,
-                                                l3_agent, router['id'])
-        self.assertFalse(val)
-
-    def test_check_ports_exist_on_l3agent_subnet_match(self):
-        l3_agent, router = self._prepare_check_ports_exist_tests()
-        # matching subnet
-        port = {'subnet_id': str(uuid.uuid4()),
-                'binding:host_id': 'host_1',
-                'device_owner': 'compute:',
-                'id': 1234}
-        subnet = {'id': str(uuid.uuid4()),
-                  'enable_dhcp': False}
-        self.plugin.get_ports.return_value = [port]
-        self.get_subnet_ids_on_router = mock.Mock(
-            return_value=[port['subnet_id']])
-        self.plugin.get_subnet = mock.Mock(return_value=subnet)
-        val = self.check_ports_exist_on_l3agent(self.adminContext,
-                                                l3_agent, router['id'])
-        self.assertTrue(val)
-
     def test_get_l3_agents_hosting_routers(self):
         agent = helpers.register_l3_agent('host_6')
         router = self._make_router(self.fmt,
@@ -1025,8 +972,10 @@ class L3DvrSchedulerTestCase(testlib_api.SqlTestCase):
 
     def test_dvr_update_router_addvm(self):
         port = {
+                'id': 'port1',
                 'device_id': 'abcd',
                 'device_owner': 'compute:nova',
+                'binding:host_id': 'host1',
                 'fixed_ips': [
                     {
                         'subnet_id': '80947d4a-fbc8-484b-9f92-623a6bfcf3e0',
@@ -1058,39 +1007,27 @@ class L3DvrSchedulerTestCase(testlib_api.SqlTestCase):
                 ]
             }
         ]
-        r1 = {
-              'id': 'r1',
-              'distributed': True,
-        }
-        r2 = {
-              'id': 'r2',
-              'distributed': True,
-        }
+        agent_on_host = {'id': 'agent1'}
 
         with mock.patch(
             'neutron.db.db_base_plugin_v2.NeutronDbPluginV2' '.get_ports',
             return_value=dvr_ports),\
-                mock.patch(
-                    'neutron.manager.NeutronManager.get_service_plugins',
-                    return_value=mock.Mock()),\
-                mock.patch('neutron.db.l3_db.L3_NAT_db_mixin.get_router',
-                           router_id='r1', return_value=r1),\
-                mock.patch('neutron.db.l3_db.L3_NAT_db_mixin.get_router',
-                           router_id='r2', return_value=r2),\
                 mock.patch('neutron.api.rpc.agentnotifiers.l3_rpc_agent_api'
-                           '.L3AgentNotifyAPI'):
+                           '.L3AgentNotifyAPI'),\
+                mock.patch(
+                    'neutron.db.db_base_plugin_v2.NeutronDbPluginV2.get_port',
+                    return_value=port),\
+                mock.patch.object(
+                        self.dut, 'get_l3_agents',
+                        return_value=[agent_on_host]) as get_l3_agents:
             self.dut.dvr_update_router_addvm(self.adminContext, port)
-            self.assertEqual(
-                self.dut.l3_rpc_notifier.routers_updated.call_count, 2)
-            payload = {'subnet_id': port['fixed_ips'][0]['subnet_id']}
-            expected_calls = [
-                mock.call.routers_updated(
-                    self.adminContext, ['r1'], None, payload),
-                mock.call.routers_updated(
-                    self.adminContext, ['r2'], None, payload)
-            ]
-            self.dut.l3_rpc_notifier.routers_updated.assert_has_calls(
-                expected_calls, any_order=True)
+
+            get_l3_agents.assert_called_once_with(
+                self.adminContext, filters={'host': [port['binding:host_id']]})
+            (self.dut.l3_rpc_notifier.routers_updated_on_host.
+                assert_called_once_with(
+                    self.adminContext, {'r1', 'r2'}, 'host1'))
+            self.assertFalse(self.dut.l3_rpc_notifier.routers_updated.called)
 
     def test_get_dvr_routers_by_portid(self):
         dvr_port = {
@@ -1662,6 +1599,7 @@ class L3HATestCaseMixin(testlib_api.SqlTestCase,
         super(L3HATestCaseMixin, self).setUp()
 
         self.adminContext = n_context.get_admin_context()
+        mock.patch('neutron.common.rpc.get_client').start()
         self.plugin = L3HAPlugin()
 
         self.setup_coreplugin('neutron.plugins.ml2.plugin.Ml2Plugin')

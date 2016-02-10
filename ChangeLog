@@ -1,15 +1,67 @@
 CHANGES
 =======
 
+7.0.2
+-----
+
+* Imported Translations from Zanata
+* Revert "Change function call order in ovs_neutron_agent."
+* Remove check on dhcp enabled subnets while scheduling dvr
+* Check gateway ip when update subnet
+* Log INFO message when setting admin state up flag to False for OVS port
+* DVR: notify specific agent when deleting floating ip
+* Call _allocate_vr_id outside of transaction
+* Move notifications before DB retry decorator
+* DVR: handle dvr serviceable port's host change
+* Imported Translations from Zanata
+* Run functional gate jobs in a constrained environment
+* DVR: notify specific agent when creating floating ip
+* Tox: Remove fullstack env, keep only dsvm-fullstack
+* Force L3 agent to resync router it could not configure
+* Support migrating of legacy routers to HA and back
+* Updated from global requirements
+* Catch known exceptions during deleting last HA router
+* ML2: Add tests to validate quota usage tracking
+* test_migrations: Avoid returning a filter object for python3
+* move usage_audit to cmd/eventlet package
+* Do not autoreschedule routers if l3 agent is back online
+* Make port binding message on dead agents clear
+* Disallow updating SG rule direction in RESOURCE_ATTRIBUTE_MAP
+* Force service provider relationships to load
+* Avoid full_sync in l3_agent for router updates
+* In port_dead, handle case when port already deleted
+* Kill the vrrp orphan process when (re)spawn keepalived
+* Add check that list of agents is not empty in _get_enabled_agents
+* Batch db segment retrieval
+* Ignore possible suffix in iproute commands
+* Add compatibility with iproute2 >= 4.0
+* Tune _get_candidates for faster scheduling in dvr
+* Separate rbac calculation from _make_network_dict
+* Skip keepalived_respawns test
+* Support Unicode request_id on Python 3
+* Validate local_ip for linuxbridge-agent
+* Use diffs for iptables restore instead of all rules
+* Fix timestamp in RBAC extension
+* Notify about port create/update unconditionally
+
 7.0.1
 -----
 
+* DVR: only notify needed agents on new VM port creation
 * Fix default RBAC policy quota
+* DVR:don't reschedule the l3 agent running on compute node
+* Ensure l3 agent receives notification about added router
+* get_device_by_ip: don't fail if device was deleted
 * Skip bindings with agent_id=None
 * Correct unwatch_log to support python <= 2.7.5
+* Make fullstack test_connectivity tests more forgiving
+* Adding security-groups unittests
+* Check missed IPSet utility using neutron-sanity-check
 * Add the missing arg of RetryRequest exception in _lock_subnetpool
+* Remove duplicate deprecation messages for quota_items option
 * Fix get_subnet_ids_on_router in dvr scheduler
 * Avoid race condition for reserved DHCP ports
+* Lower l2pop "isn't bound to any segement" log to debug
 * force releasenotes warnings to be treated as errors
 * Delete HA network when last HA router is deleted
 * Add UnionModel support to filter query generator

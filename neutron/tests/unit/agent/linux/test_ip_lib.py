@@ -27,6 +27,11 @@ NETNS_SAMPLE = [
     'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
     'cccccccc-cccc-cccc-cccc-cccccccccccc']
 
+NETNS_SAMPLE_IPROUTE2_4 = [
+    '12345678-1234-5678-abcd-1234567890ab (id: 1)',
+    'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb (id: 0)',
+    'cccccccc-cccc-cccc-cccc-cccccccccccc (id: 2)']
+
 LINK_SAMPLE = [
     '1: lo: <LOOPBACK,UP,LOWER_UP> mtu 16436 qdisc noqueue state UNKNOWN \\'
     'link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0',
@@ -117,6 +122,13 @@ ADDR_SAMPLE2 = ("""
        valid_lft 14187sec preferred_lft 3387sec
     inet6 fe80::dfcc:aaff:feb9:76ce/64 scope link
        valid_lft forever preferred_lft forever
+""")
+
+
+ADDR_SAMPLE3 = ("""
+2: eth0@NONE: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP
+    link/ether dd:cc:aa:b9:76:ce brd ff:ff:ff:ff:ff:ff
+    inet 172.16.77.240/24 brd 172.16.77.255 scope global eth0
 """)
 
 GATEWAY_SAMPLE1 = ("""
@@ -271,6 +283,16 @@ class TestIpWrapper(base.BaseTestCase):
 
     def test_get_namespaces(self):
         self.execute.return_value = '\n'.join(NETNS_SAMPLE)
+        retval = ip_lib.IPWrapper.get_namespaces()
+        self.assertEqual(retval,
+                         ['12345678-1234-5678-abcd-1234567890ab',
+                          'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+                          'cccccccc-cccc-cccc-cccc-cccccccccccc'])
+
+        self.execute.assert_called_once_with([], 'netns', ('list',))
+
+    def test_get_namespaces_iproute2_4(self):
+        self.execute.return_value = '\n'.join(NETNS_SAMPLE_IPROUTE2_4)
         retval = ip_lib.IPWrapper.get_namespaces()
         self.assertEqual(retval,
                          ['12345678-1234-5678-abcd-1234567890ab',
@@ -763,21 +785,21 @@ class TestIpAddrCommand(TestIPCmdBase):
 
     def test_list(self):
         expected = [
-            dict(scope='global', dadfailed=False, tentative=False,
+            dict(name='eth0', scope='global', dadfailed=False, tentative=False,
                  dynamic=False, cidr='172.16.77.240/24'),
-            dict(scope='global', dadfailed=False, tentative=False,
+            dict(name='eth0', scope='global', dadfailed=False, tentative=False,
                  dynamic=True, cidr='2001:470:9:1224:5595:dd51:6ba2:e788/64'),
-            dict(scope='link', dadfailed=False, tentative=True,
+            dict(name='eth0', scope='link', dadfailed=False, tentative=True,
                  dynamic=False, cidr='fe80::3023:39ff:febc:22ae/64'),
-            dict(scope='link', dadfailed=True, tentative=True,
+            dict(name='eth0', scope='link', dadfailed=True, tentative=True,
                  dynamic=False, cidr='fe80::3023:39ff:febc:22af/64'),
-            dict(scope='global', dadfailed=False, tentative=False,
+            dict(name='eth0', scope='global', dadfailed=False, tentative=False,
                  dynamic=True, cidr='2001:470:9:1224:fd91:272:581e:3a32/64'),
-            dict(scope='global', dadfailed=False, tentative=False,
+            dict(name='eth0', scope='global', dadfailed=False, tentative=False,
                  dynamic=True, cidr='2001:470:9:1224:4508:b885:5fb:740b/64'),
-            dict(scope='global', dadfailed=False, tentative=False,
+            dict(name='eth0', scope='global', dadfailed=False, tentative=False,
                  dynamic=True, cidr='2001:470:9:1224:dfcc:aaff:feb9:76ce/64'),
-            dict(scope='link', dadfailed=False, tentative=False,
+            dict(name='eth0', scope='link', dadfailed=False, tentative=False,
                  dynamic=False, cidr='fe80::dfcc:aaff:feb9:76ce/64')]
 
         test_cases = [ADDR_SAMPLE, ADDR_SAMPLE2]
@@ -809,7 +831,7 @@ class TestIpAddrCommand(TestIPCmdBase):
 
     def test_list_filtered(self):
         expected = [
-            dict(scope='global', tentative=False, dadfailed=False,
+            dict(name='eth0', scope='global', tentative=False, dadfailed=False,
                  dynamic=False, cidr='172.16.77.240/24')]
 
         test_cases = [ADDR_SAMPLE, ADDR_SAMPLE2]
@@ -821,6 +843,12 @@ class TestIpAddrCommand(TestIPCmdBase):
                              filters=['permanent']), expected)
             self._assert_call([], ('show', 'tap0', 'permanent', 'scope',
                               'global'))
+
+    def test_get_devices_with_ip(self):
+        self.parent._run.return_value = ADDR_SAMPLE3
+        devices = self.addr_cmd.get_devices_with_ip('172.16.77.240/24')
+        self.assertEqual(1, len(devices))
+        self.assertEqual('eth0', devices[0]['name'])
 
 
 class TestIpRouteCommand(TestIPCmdBase):

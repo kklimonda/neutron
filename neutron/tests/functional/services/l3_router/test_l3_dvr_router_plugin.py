@@ -12,6 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import mock
+
 from neutron.api.v2 import attributes
 from neutron.common import constants as l3_const
 from neutron.extensions import external_net
@@ -220,3 +222,227 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
         self.assertIsNone(
             self.l3_plugin._get_agent_gw_ports_exist_for_network(
                 self.context, ext_net_id, "", self.l3_agent['id']))
+
+    def test_update_vm_port_host_router_update(self):
+        # register l3 agents in dvr mode in addition to existing dvr_snat agent
+        HOST1 = 'host1'
+        dvr_agent1 = helpers.register_l3_agent(
+            host=HOST1, agent_mode=l3_const.L3_AGENT_MODE_DVR)
+        HOST2 = 'host2'
+        dvr_agent2 = helpers.register_l3_agent(
+            host=HOST2, agent_mode=l3_const.L3_AGENT_MODE_DVR)
+        router = self._create_router()
+        with self.subnet() as subnet:
+            self.l3_plugin.add_router_interface(
+                self.context, router['id'],
+                {'subnet_id': subnet['subnet']['id']})
+
+            # since there are no vm ports on HOST, and the router
+            # has no external gateway at this point the router
+            # should neither be scheduled to dvr nor to dvr_snat agents
+            agents = self.l3_plugin.list_l3_agents_hosting_router(
+                self.context, router['id'])['agents']
+            self.assertEqual(0, len(agents))
+            with mock.patch.object(self.l3_plugin,
+                                   '_l3_rpc_notifier') as l3_notifier,\
+                    self.port(subnet=subnet,
+                              device_owner='compute:None') as port:
+                self.l3_plugin.agent_notifiers[
+                    l3_const.AGENT_TYPE_L3] = l3_notifier
+                self.core_plugin.update_port(
+                    self.context, port['port']['id'],
+                    {'port': {'binding:host_id': HOST1}})
+
+                # now router should be scheduled to agent on HOST1
+                agents = self.l3_plugin.list_l3_agents_hosting_router(
+                    self.context, router['id'])['agents']
+                self.assertEqual(1, len(agents))
+                self.assertEqual(dvr_agent1['id'], agents[0]['id'])
+                # and notification should only be sent to the agent on HOST1
+                l3_notifier.routers_updated_on_host.assert_called_once_with(
+                    self.context, {router['id']}, HOST1)
+                self.assertFalse(l3_notifier.routers_updated.called)
+
+                # updating port's host (instance migration)
+                l3_notifier.reset_mock()
+                self.core_plugin.update_port(
+                    self.context, port['port']['id'],
+                    {'port': {'binding:host_id': HOST2}})
+                # now router should only be scheduled to dvr agent on host2
+                agents = self.l3_plugin.list_l3_agents_hosting_router(
+                    self.context, router['id'])['agents']
+                self.assertEqual(1, len(agents))
+                self.assertEqual(dvr_agent2['id'], agents[0]['id'])
+                l3_notifier.routers_updated_on_host.assert_called_once_with(
+                    self.context, {router['id']}, HOST2)
+                l3_notifier.router_removed_from_agent.assert_called_once_with(
+                    self.context, router['id'], HOST1)
+
+    def _test_create_floating_ip_agent_notification(self, dvr=True):
+        with self.subnet() as ext_subnet,\
+                self.subnet(cidr='20.0.0.0/24') as int_subnet,\
+                self.port(subnet=int_subnet,
+                          device_owner='compute:None') as int_port:
+            # make net external
+            ext_net_id = ext_subnet['subnet']['network_id']
+            self._update('networks', ext_net_id,
+                     {'network': {external_net.EXTERNAL: True}})
+
+            router = self._create_router(distributed=dvr)
+            self.l3_plugin.update_router(
+                self.context, router['id'],
+                {'router': {
+                    'external_gateway_info': {'network_id': ext_net_id}}})
+            self.l3_plugin.add_router_interface(
+                self.context, router['id'],
+                {'subnet_id': int_subnet['subnet']['id']})
+
+            floating_ip = {'floating_network_id': ext_net_id,
+                           'router_id': router['id'],
+                           'port_id': int_port['port']['id'],
+                           'tenant_id': int_port['port']['tenant_id']}
+            with mock.patch.object(
+                    self.l3_plugin, '_l3_rpc_notifier') as l3_notif:
+                self.l3_plugin.create_floatingip(
+                    self.context, {'floatingip': floating_ip})
+                if dvr:
+                    l3_notif.routers_updated_on_host.assert_called_once_with(
+                        self.context, [router['id']],
+                        int_port['port']['binding:host_id'])
+                    self.assertFalse(l3_notif.routers_updated.called)
+                else:
+                    l3_notif.routers_updated.assert_called_once_with(
+                        self.context, [router['id']], None)
+                    self.assertFalse(
+                        l3_notif.routers_updated_on_host.called)
+
+    def test_create_floating_ip_agent_notification(self):
+        self._test_create_floating_ip_agent_notification()
+
+    def test_create_floating_ip_agent_notification_non_dvr(self):
+        self._test_create_floating_ip_agent_notification(dvr=False)
+
+    def _test_update_floating_ip_agent_notification(self, dvr=True):
+        with self.subnet() as ext_subnet,\
+                self.subnet(cidr='20.0.0.0/24') as int_subnet1,\
+                self.subnet(cidr='30.0.0.0/24') as int_subnet2,\
+                self.port(subnet=int_subnet1,
+                          device_owner='compute:None') as int_port1,\
+                self.port(subnet=int_subnet2,
+                          device_owner='compute:None') as int_port2:
+            # locate internal ports on different hosts
+            self.core_plugin.update_port(
+                self.context, int_port1['port']['id'],
+                {'port': {'binding:host_id': 'host1'}})
+            self.core_plugin.update_port(
+                self.context, int_port2['port']['id'],
+                {'port': {'binding:host_id': 'host2'}})
+            # and create l3 agents on corresponding hosts
+            helpers.register_l3_agent(host='host1',
+                agent_mode=l3_const.L3_AGENT_MODE_DVR)
+            helpers.register_l3_agent(host='host2',
+                agent_mode=l3_const.L3_AGENT_MODE_DVR)
+
+            # make net external
+            ext_net_id = ext_subnet['subnet']['network_id']
+            self._update('networks', ext_net_id,
+                     {'network': {external_net.EXTERNAL: True}})
+
+            router1 = self._create_router(distributed=dvr)
+            router2 = self._create_router(distributed=dvr)
+            for router in (router1, router2):
+                self.l3_plugin.update_router(
+                    self.context, router['id'],
+                    {'router': {
+                        'external_gateway_info': {'network_id': ext_net_id}}})
+            self.l3_plugin.add_router_interface(
+                self.context, router1['id'],
+                {'subnet_id': int_subnet1['subnet']['id']})
+            self.l3_plugin.add_router_interface(
+                self.context, router2['id'],
+                {'subnet_id': int_subnet2['subnet']['id']})
+
+            floating_ip = {'floating_network_id': ext_net_id,
+                           'router_id': router1['id'],
+                           'port_id': int_port1['port']['id'],
+                           'tenant_id': int_port1['port']['tenant_id']}
+            floating_ip = self.l3_plugin.create_floatingip(
+                self.context, {'floatingip': floating_ip})
+
+            with mock.patch.object(
+                    self.l3_plugin, '_l3_rpc_notifier') as l3_notif:
+                updated_floating_ip = {'router_id': router2['id'],
+                                       'port_id': int_port2['port']['id']}
+                self.l3_plugin.update_floatingip(
+                    self.context, floating_ip['id'],
+                    {'floatingip': updated_floating_ip})
+                if dvr:
+                    self.assertEqual(
+                        2, l3_notif.routers_updated_on_host.call_count)
+                    expected_calls = [
+                        mock.call(self.context, [router1['id']], 'host1'),
+                        mock.call(self.context, [router2['id']], 'host2')]
+                    l3_notif.routers_updated_on_host.assert_has_calls(
+                        expected_calls)
+                    self.assertFalse(l3_notif.routers_updated.called)
+                else:
+                    self.assertEqual(
+                        2, l3_notif.routers_updated.call_count)
+                    expected_calls = [
+                        mock.call(self.context, [router1['id']], None),
+                        mock.call(self.context, [router2['id']], None)]
+                    l3_notif.routers_updated.assert_has_calls(
+                        expected_calls)
+                    self.assertFalse(l3_notif.routers_updated_on_host.called)
+
+    def test_update_floating_ip_agent_notification(self):
+        self._test_update_floating_ip_agent_notification()
+
+    def test_update_floating_ip_agent_notification_non_dvr(self):
+        self._test_update_floating_ip_agent_notification(dvr=False)
+
+    def _test_delete_floating_ip_agent_notification(self, dvr=True):
+        with self.subnet() as ext_subnet,\
+                self.subnet(cidr='20.0.0.0/24') as int_subnet,\
+                self.port(subnet=int_subnet,
+                          device_owner='compute:None') as int_port:
+            # make net external
+            ext_net_id = ext_subnet['subnet']['network_id']
+            self._update('networks', ext_net_id,
+                     {'network': {external_net.EXTERNAL: True}})
+
+            router = self._create_router(distributed=dvr)
+            self.l3_plugin.update_router(
+                self.context, router['id'],
+                {'router': {
+                    'external_gateway_info': {'network_id': ext_net_id}}})
+            self.l3_plugin.add_router_interface(
+                self.context, router['id'],
+                {'subnet_id': int_subnet['subnet']['id']})
+
+            floating_ip = {'floating_network_id': ext_net_id,
+                           'router_id': router['id'],
+                           'port_id': int_port['port']['id'],
+                           'tenant_id': int_port['port']['tenant_id']}
+            floating_ip = self.l3_plugin.create_floatingip(
+                self.context, {'floatingip': floating_ip})
+            with mock.patch.object(
+                    self.l3_plugin, '_l3_rpc_notifier') as l3_notif:
+                self.l3_plugin.delete_floatingip(
+                    self.context, floating_ip['id'])
+                if dvr:
+                    l3_notif.routers_updated_on_host.assert_called_once_with(
+                        self.context, [router['id']],
+                        int_port['port']['binding:host_id'])
+                    self.assertFalse(l3_notif.routers_updated.called)
+                else:
+                    l3_notif.routers_updated.assert_called_once_with(
+                        self.context, [router['id']], None)
+                    self.assertFalse(
+                        l3_notif.routers_updated_on_host.called)
+
+    def test_delete_floating_ip_agent_notification(self):
+        self._test_delete_floating_ip_agent_notification()
+
+    def test_delete_floating_ip_agent_notification_non_dvr(self):
+        self._test_delete_floating_ip_agent_notification(dvr=False)

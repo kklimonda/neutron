@@ -951,7 +951,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         # Don't kill a port if it's already dead
         cur_tag = self.int_br.db_get_val("Port", port.port_name, "tag",
                                          log_errors=log_errors)
-        if cur_tag != DEAD_VLAN_TAG:
+        if cur_tag and cur_tag != DEAD_VLAN_TAG:
             self.int_br.set_db_attribute("Port", port.port_name, "tag",
                                          DEAD_VLAN_TAG, log_errors=log_errors)
             self.int_br.drop_port(in_port=port.ofport)
@@ -1278,6 +1278,9 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                 physical_network, segmentation_id,
                                 fixed_ips, device_owner, ovs_restarted)
             else:
+                LOG.info(_LI("VIF port: %s admin state up disabled, "
+                             "putting on the dead VLAN"), vif_port.vif_id)
+
                 self.port_dead(vif_port)
                 port_needs_binding = False
         else:
@@ -1511,9 +1514,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                   "from server"), self.iter_num)
                 resync_a = True
 
-        # Ports are bound before calling the sg_agent setup. This function
-        # fulfill the information needed by the sg_agent setup.
-        self._bind_devices(need_binding_devices)
         # TODO(salv-orlando): Optimize avoiding applying filters
         # unnecessarily, (eg: when there are no IP address changes)
         added_ports = port_info.get('added', set())
@@ -1521,6 +1521,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             added_ports -= set(security_disabled_ports)
         self.sg_agent.setup_port_filters(added_ports,
                                          port_info.get('updated', set()))
+        self._bind_devices(need_binding_devices)
 
         if 'removed' in port_info and port_info['removed']:
             start = time.time()

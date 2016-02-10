@@ -41,6 +41,18 @@ LOOPBACK_DEVNAME = 'lo'
 SYS_NET_PATH = '/sys/class/net'
 DEFAULT_GW_PATTERN = re.compile(r"via (\S+)")
 METRIC_PATTERN = re.compile(r"metric (\S+)")
+DEVICE_NAME_PATTERN = re.compile(r"(\d+?): (\S+?):.*")
+
+
+def remove_interface_suffix(interface):
+    """Remove a possible "<if>@<endpoint>" suffix from an interface' name.
+
+    This suffix can appear in some kernel versions, and intends on specifying,
+    for example, a veth's pair. However, this interface name is useless to us
+    as further 'ip' commands require that the suffix be removed.
+    """
+    # If '@' is not present, this will do nothing.
+    return interface.partition("@")[0]
 
 
 class AddressNotReady(exceptions.NeutronException):
@@ -126,10 +138,19 @@ class IPWrapper(SubProcessBase):
         return retval
 
     def get_device_by_ip(self, ip):
-        """Get the IPDevice from system which has ip configured."""
-        for device in self.get_devices():
-            if device.addr.list(to=ip):
-                return device
+        """Get the IPDevice from system which has ip configured.
+
+        @param ip: look for the device holding this ip. If this is None,
+                   None is returned.
+        @type ip: str.
+        """
+        if not ip:
+            return None
+
+        addr = IpAddrCommand(self)
+        devices = addr.get_devices_with_ip(to=ip)
+        if devices:
+            return IPDevice(devices[0]['name'], namespace=self.namespace)
 
     def add_tuntap(self, name, mode='tap'):
         self._as_root([], 'tuntap', ('add', name, 'mode', mode))
@@ -208,7 +229,7 @@ class IPWrapper(SubProcessBase):
     @classmethod
     def get_namespaces(cls):
         output = cls._execute([], 'netns', ('list',))
-        return [l.strip() for l in output.split('\n')]
+        return [l.split()[0] for l in output.splitlines()]
 
 
 class IPDevice(SubProcessBase):
@@ -498,24 +519,40 @@ class IpAddrCommand(IpDeviceCommandBase):
     def flush(self, ip_version):
         self._as_root([ip_version], ('flush', self.name))
 
-    def list(self, scope=None, to=None, filters=None, ip_version=None):
+    def get_devices_with_ip(self, name=None, scope=None, to=None,
+                            filters=None, ip_version=None):
+        """Get a list of all the devices with an IP attached in the namespace.
+
+        @param name: if it's not None, only a device with that matching name
+                     will be returned.
+        """
         options = [ip_version] if ip_version else []
-        args = ['show', self.name]
+
+        args = ['show']
+        if name:
+            args += [name]
         if filters:
             args += filters
-
-        retval = []
-
         if scope:
             args += ['scope', scope]
         if to:
             args += ['to', to]
 
+        retval = []
+
         for line in self._run(options, tuple(args)).split('\n'):
             line = line.strip()
-            if not line.startswith('inet'):
+
+            match = DEVICE_NAME_PATTERN.search(line)
+            if match:
+                # Found a match for a device name, but its' addresses will
+                # only appear in following lines, so we may as well continue.
+                device_name = remove_interface_suffix(match.group(2))
                 continue
-            parts = line.split()
+            elif not line.startswith('inet'):
+                continue
+
+            parts = line.split(" ")
             if parts[0] == 'inet6':
                 scope = parts[3]
             else:
@@ -524,12 +561,18 @@ class IpAddrCommand(IpDeviceCommandBase):
                 else:
                     scope = parts[3]
 
-            retval.append(dict(cidr=parts[1],
+            retval.append(dict(name=device_name,
+                               cidr=parts[1],
                                scope=scope,
                                dynamic=('dynamic' == parts[-1]),
                                tentative=('tentative' in line),
                                dadfailed=('dadfailed' == parts[-1])))
         return retval
+
+    def list(self, scope=None, to=None, filters=None, ip_version=None):
+        """Get device details of a device named <self.name>."""
+        return self.get_devices_with_ip(
+            self.name, scope, to, filters, ip_version)
 
     def wait_until_address_ready(self, address, wait_time=30):
         """Wait until an address is no longer marked 'tentative'
@@ -821,8 +864,8 @@ class IpNetnsCommand(IpCommandBase):
         output = self._parent._execute(
             ['o'], 'netns', ['list'],
             run_as_root=cfg.CONF.AGENT.use_helper_for_ns_read)
-        for line in output.split('\n'):
-            if name == line.strip():
+        for line in [l.split()[0] for l in output.splitlines()]:
+            if name == line:
                 return True
         return False
 

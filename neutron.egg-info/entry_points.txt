@@ -25,7 +25,7 @@ neutron-rpc-server = neutron.cmd.eventlet.server:main_rpc_eventlet
 neutron-sanity-check = neutron.cmd.sanity_check:main
 neutron-server = neutron.cmd.eventlet.server:main_wsgi_eventlet
 neutron-sriov-nic-agent = neutron.plugins.ml2.drivers.mech_sriov.agent.sriov_nic_agent:main
-neutron-usage-audit = neutron.cmd.usage_audit:main
+neutron-usage-audit = neutron.cmd.eventlet.usage_audit:main
 
 [neutron.agent.l2.extensions]
 qos = neutron.agent.l2.extensions.qos:QosAgentExtension
