@@ -1,13 +1,43 @@
 CHANGES
 =======
 
+7.0.3
+-----
+
+* DHCP: fix regression with DNS nameservers
+* Add relationship between port and floating ip
+* OVS agent should fail if it can't get DVR mac address
+* DVR: optimize check_ports_exist_on_l3_agent()
+* Change check_ports_exist_on_l3agent to pass the subnet_ids
+* Add systemd notification after reporting initial state
+* Raise RetryRequest on policy parent not found
+* Keep reading stdout/stderr until after kill
+* Revert "Revert "Revert "Remove TEMPEST_CONFIG_DIR in the api tox env"""
+* Ensure that tunnels are fully reset on ovs restart
+* Update HA router state if agent is not active
+* Resync L3, DHCP and OVS/LB agents upon revival
+* Fix floatingip status for an HA router
+
 7.0.2
 -----
 
+* DVR: when updating port's fixed_ips, update arp
+* DVR:Fix _notify_l3_agent_new_port for proper arp update
+* Fix L3 HA with IPv6
+* Make object creation methods in l3_hamode_db atomic
+* Cache the ARP entries in L3 Agent for DVR
+* Cleanup veth-pairs in default netns for functional tests
+* Do not prohibit VXLAN over IPv6
+* Fix get_subnet_for_dvr() to return correct gateway mac
+* Check missed ip6tables utility
+* SR-IOV: Fix macvtap assigned vf check when kernel < 3.13
+* Make security_groups_provider_updated work with Kilo agents
 * Imported Translations from Zanata
 * Revert "Change function call order in ovs_neutron_agent."
 * Remove check on dhcp enabled subnets while scheduling dvr
 * Check gateway ip when update subnet
+* Add tests that constrain db query count
+* Don't call add_ha_port inside a transaction
 * Log INFO message when setting admin state up flag to False for OVS port
 * DVR: notify specific agent when deleting floating ip
 * Call _allocate_vr_id outside of transaction

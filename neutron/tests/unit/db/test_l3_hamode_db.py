@@ -113,6 +113,7 @@ class L3HATestFramework(testlib_api.SqlTestCase):
 
 
 class L3HATestCase(L3HATestFramework):
+
     def test_verify_configuration_succeed(self):
         # Default configuration should pass
         self.plugin._verify_configuration()
@@ -195,6 +196,21 @@ class L3HATestCase(L3HATestFramework):
         bindings = self.plugin.get_l3_bindings_hosting_router_with_ha_states(
             self.admin_ctx, router['id'])
         self.assertEqual([], bindings)
+
+    def test_get_l3_bindings_hosting_router_with_ha_states_active_and_dead(
+            self):
+        router = self._create_router()
+        self._bind_router(router['id'])
+        with mock.patch.object(agents_db.Agent, 'is_active',
+                               new_callable=mock.PropertyMock,
+                               return_value=False):
+            self.plugin.update_routers_states(
+                self.admin_ctx, {router['id']: 'active'}, self.agent1['host'])
+            bindings = (
+                self.plugin.get_l3_bindings_hosting_router_with_ha_states(
+                    self.admin_ctx, router['id']))
+            agent_ids = [(agent[0]['id'], agent[1]) for agent in bindings]
+            self.assertIn((self.agent1['id'], 'standby'), agent_ids)
 
     def test_ha_router_create(self):
         router = self._create_router()
@@ -432,6 +448,11 @@ class L3HATestCase(L3HATestFramework):
 
         self.assertNotEqual(ha0, ha1)
 
+    def test_add_ha_port_subtransactions_blocked(self):
+        with self.admin_ctx.session.begin():
+            self.assertRaises(RuntimeError, self.plugin.add_ha_port,
+                              self.admin_ctx, 'id', 'id', 'id')
+
     def test_add_ha_port_binding_failure_rolls_back_port(self):
         router = self._create_router()
         device_filter = {'device_id': [router['id']]}
@@ -440,7 +461,7 @@ class L3HATestCase(L3HATestFramework):
         network = self.plugin.get_ha_network(self.admin_ctx,
                                              router['tenant_id'])
 
-        with mock.patch.object(self.plugin, '_create_ha_port_binding',
+        with mock.patch.object(l3_hamode_db, 'L3HARouterAgentPortBinding',
                                side_effect=ValueError):
             self.assertRaises(ValueError, self.plugin.add_ha_port,
                               self.admin_ctx, router['id'], network.network_id,
@@ -454,8 +475,8 @@ class L3HATestCase(L3HATestFramework):
     def test_create_ha_network_binding_failure_rolls_back_network(self):
         networks_before = self.core_plugin.get_networks(self.admin_ctx)
 
-        with mock.patch.object(self.plugin,
-                               '_create_ha_network_tenant_binding',
+        with mock.patch.object(l3_hamode_db,
+                               'L3HARouterNetwork',
                                side_effect=ValueError):
             self.assertRaises(ValueError, self.plugin._create_ha_network,
                               self.admin_ctx, _uuid())
@@ -467,9 +488,10 @@ class L3HATestCase(L3HATestFramework):
         networks_before = self.core_plugin.get_networks(self.admin_ctx)
 
         with mock.patch.object(self.plugin, '_create_ha_subnet',
-                               side_effect=ValueError):
-            self.assertRaises(ValueError, self.plugin._create_ha_network,
-                              self.admin_ctx, _uuid())
+                               side_effect=ValueError),\
+            self.admin_ctx._session.begin():
+                self.assertRaises(ValueError, self.plugin._create_ha_network,
+                                  self.admin_ctx, _uuid())
 
         networks_after = self.core_plugin.get_networks(self.admin_ctx)
         self.assertEqual(networks_before, networks_after)
@@ -483,7 +505,7 @@ class L3HATestCase(L3HATestFramework):
             self.admin_ctx, filters=device_filter)
 
         router_db = self.plugin._get_router(self.admin_ctx, router['id'])
-        with mock.patch.object(self.plugin, '_create_ha_port_binding',
+        with mock.patch.object(l3_hamode_db, 'L3HARouterAgentPortBinding',
                                side_effect=ValueError):
             self.assertRaises(ValueError, self.plugin._create_ha_interfaces,
                               self.admin_ctx, router_db, network)

@@ -41,6 +41,7 @@ DEVICE_OWNER_ROUTER_SNAT = "network:router_centralized_snat"
 DEVICE_OWNER_LOADBALANCER = "neutron:LOADBALANCER"
 DEVICE_OWNER_LOADBALANCERV2 = "neutron:LOADBALANCERV2"
 
+DEVICE_OWNER_COMPUTE_PREFIX = "compute:"
 DEVICE_OWNER_PREFIXES = ["network:", "neutron:"]
 
 # Collection used to identify devices owned by router interfaces.
@@ -200,3 +201,11 @@ ROUTER_MARK_MASK = "0xffff"
 
 # Time format
 ISO8601_TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%f'
+
+# Agent states as detected by server, used to reply on agent's state report
+# agent has just been registered
+AGENT_NEW = 'new'
+# agent is alive
+AGENT_ALIVE = 'alive'
+# agent has just returned to alive after being dead
+AGENT_REVIVED = 'revived'

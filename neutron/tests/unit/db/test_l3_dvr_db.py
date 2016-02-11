@@ -467,6 +467,8 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         plugin = mock.MagicMock()
         plugin.get_l3_agents_hosting_routers = mock.Mock(
             return_value=[mock.MagicMock()])
+        plugin.get_subnet_ids_on_router = mock.Mock(
+            return_value=interface_info)
         plugin.check_ports_exist_on_l3agent = mock.Mock(
             return_value=False)
         plugin.remove_router_from_l3_agent = mock.Mock(
@@ -503,6 +505,8 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         router_dict = {'name': 'test_router', 'admin_state_up': True,
                        'distributed': True}
         router = self._create_router(router_dict)
+        plugin = mock.MagicMock()
+        plugin.get_subnet_ids_on_router = mock.Mock()
         with self.network() as net_ext,\
                 self.subnet() as subnet1,\
                 self.subnet(cidr='20.0.0.0/24') as subnet2:
@@ -534,7 +538,8 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             with mock.patch.object(manager.NeutronManager,
                                   'get_service_plugins') as get_svc_plugin:
                 get_svc_plugin.return_value = {
-                    plugin_const.L3_ROUTER_NAT: self.mixin}
+                    plugin_const.L3_ROUTER_NAT: plugin}
+                self.mixin.manager = manager
                 self.mixin.remove_router_interface(
                     self.ctx, router['id'], {'port_id': dvr_ports[0]['id']})
 
@@ -547,6 +552,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             dvr_ports = self.core_plugin.get_ports(
                 self.ctx, filters=dvr_filters)
             self.assertEqual(1, len(dvr_ports))
+            self.assertEqual(1, plugin.get_subnet_ids_on_router.call_count)
 
     def test__validate_router_migration_notify_advanced_services(self):
         router = {'name': 'foo_router', 'admin_state_up': False}
@@ -567,10 +573,13 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             gp.return_value = plugin
             port = {
                 'id': 'my_port_id',
-                'fixed_ips': [{
-                    'ip_address': 'my_ip',
-                    'subnet_id': 'my_subnet_id',
-                }],
+                'fixed_ips': [
+                    {'subnet_id': '51edc9e0-24f9-47f2-8e1e-2a41cb691323',
+                     'ip_address': '10.0.0.11'},
+                    {'subnet_id': '2b7c8a07-6f8e-4937-8701-f1d5da1a807c',
+                     'ip_address': '10.0.0.21'},
+                    {'subnet_id': '48534187-f077-4e81-93ff-81ec4cc0ad3b',
+                     'ip_address': 'fd45:1515:7e0:0:f816:3eff:fe1a:1111'}],
                 'mac_address': 'my_mac',
                 'device_owner': device_owner
             }
@@ -585,9 +594,9 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             dvr_router.extra_attributes.distributed = True
             self.mixin.dvr_vmarp_table_update(self.ctx, port, action)
             if action == 'add':
-                self.assertTrue(l3_notify.add_arp_entry.called)
+                self.assertEqual(3, l3_notify.add_arp_entry.call_count)
             elif action == 'del':
-                self.assertTrue(l3_notify.del_arp_entry.called)
+                self.assertTrue(3, l3_notify.del_arp_entry.call_count)
 
     def test_dvr_vmarp_table_update_with_service_port_added(self):
         action = 'add'
