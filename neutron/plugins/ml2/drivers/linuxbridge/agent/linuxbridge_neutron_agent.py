@@ -87,6 +87,7 @@ class LinuxBridgeManager(object):
         self.vxlan_mode = lconst.VXLAN_NONE
         if cfg.CONF.VXLAN.enable_vxlan:
             device = self.get_local_ip_device(self.local_ip)
+            self.validate_vxlan_group_with_local_ip()
             self.local_int = device.name
             self.check_vxlan_support()
         # Store network mapping to segments
@@ -107,6 +108,26 @@ class LinuxBridgeManager(object):
                               " does not exist. Agent terminated!"),
                           {'brq': bridge, 'net': physnet})
                 sys.exit(1)
+
+    def validate_vxlan_group_with_local_ip(self):
+        if not cfg.CONF.VXLAN.vxlan_group:
+            return
+        try:
+            ip_addr = netaddr.IPAddress(self.local_ip)
+            # Ensure the configured group address/range is valid and multicast
+            group_net = netaddr.IPNetwork(cfg.CONF.VXLAN.vxlan_group)
+            if not group_net.is_multicast():
+                raise ValueError()
+            if not ip_addr.version == group_net.version:
+                raise ValueError()
+        except (netaddr.core.AddrFormatError, ValueError):
+            LOG.error(_LE("Invalid VXLAN Group: %(group)s, must be an address "
+                          "or network (in CIDR notation) in a multicast "
+                          "range of the same address family as local_ip: "
+                          "%(ip)s"),
+                      {'group': cfg.CONF.VXLAN.vxlan_group,
+                       'ip': self.local_ip})
+            sys.exit(1)
 
     def get_local_ip_device(self, local_ip):
         """Return the device with local_ip on the host."""
@@ -161,19 +182,10 @@ class LinuxBridgeManager(object):
                             "incorrect vxlan device name"), segmentation_id)
 
     def get_vxlan_group(self, segmentation_id):
-        try:
-            # Ensure the configured group address/range is valid and multicast
-            net = netaddr.IPNetwork(cfg.CONF.VXLAN.vxlan_group)
-            if not net.is_multicast():
-                raise ValueError()
-            # Map the segmentation ID to (one of) the group address(es)
-            return str(net.network +
-                       (int(segmentation_id) & int(net.hostmask)))
-        except (netaddr.core.AddrFormatError, ValueError):
-            LOG.warning(_LW("Invalid VXLAN Group: %s, must be an address "
-                            "or network (in CIDR notation) in a multicast "
-                            "range"),
-                        cfg.CONF.VXLAN.vxlan_group)
+        net = netaddr.IPNetwork(cfg.CONF.VXLAN.vxlan_group)
+        # Map the segmentation ID to (one of) the group address(es)
+        return str(net.network +
+                   (int(segmentation_id) & int(net.hostmask)))
 
     def get_all_neutron_bridges(self):
         neutron_bridge_list = []
@@ -871,6 +883,8 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
 
         # stores received port_updates for processing by the main loop
         self.updated_devices = set()
+        # flag to do a sync after revival
+        self.fullsync = False
         self.context = context.get_admin_context_without_session()
         self.plugin_rpc = agent_rpc.PluginApi(topics.PLUGIN)
         self.sg_plugin_rpc = sg_rpc.SecurityGroupServerRpcApi(topics.PLUGIN)
@@ -892,8 +906,13 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
         try:
             devices = len(self.br_mgr.get_tap_devices())
             self.agent_state.get('configurations')['devices'] = devices
-            self.state_rpc.report_state(self.context,
-                                        self.agent_state)
+            agent_status = self.state_rpc.report_state(self.context,
+                                                       self.agent_state,
+                                                       True)
+            if agent_status == constants.AGENT_REVIVED:
+                LOG.info(_LI('Agent has just been revived. '
+                             'Doing a full sync.'))
+                self.fullsync = True
             self.agent_state.pop('start_flag', None)
         except Exception:
             LOG.exception(_LE("Failed reporting state!"))
@@ -1096,11 +1115,15 @@ class LinuxBridgeNeutronAgentRPC(service.Service):
         while True:
             start = time.time()
 
-            device_info = self.scan_devices(previous=device_info, sync=sync)
+            if self.fullsync:
+                sync = True
+                self.fullsync = False
 
             if sync:
                 LOG.info(_LI("Agent out of sync with plugin!"))
-                sync = False
+
+            device_info = self.scan_devices(previous=device_info, sync=sync)
+            sync = False
 
             if (self._device_info_has_changes(device_info)
                 or self.sg_agent.firewall_refresh_needed()):

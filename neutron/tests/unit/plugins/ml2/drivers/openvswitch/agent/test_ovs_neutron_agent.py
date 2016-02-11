@@ -119,6 +119,9 @@ class TestOvsNeutronAgent(object):
         notifier_cls = notifier_p.start()
         self.notifier = mock.Mock()
         notifier_cls.return_value = self.notifier
+        systemd_patch = mock.patch('oslo_service.systemd.notify_once')
+        self.systemd_notify = systemd_patch.start()
+
         cfg.CONF.set_default('firewall_driver',
                              'neutron.agent.firewall.NoopFirewallDriver',
                              group='SECURITYGROUP')
@@ -145,9 +148,6 @@ class TestOvsNeutronAgent(object):
                     return_value=[]):
             self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
                                                         **kwargs)
-            # set back to true because initial report state will succeed due
-            # to mocked out RPC calls
-            self.agent.use_call = True
             self.agent.tun_br = self.br_tun_cls(br_name='br-tun')
         self.agent.sg_agent = mock.Mock()
 
@@ -705,18 +705,21 @@ class TestOvsNeutronAgent(object):
         with mock.patch.object(self.agent.state_rpc,
                                "report_state") as report_st:
             self.agent.int_br_device_count = 5
+            self.systemd_notify.assert_not_called()
             self.agent._report_state()
             report_st.assert_called_with(self.agent.context,
                                          self.agent.agent_state, True)
+            self.systemd_notify.assert_called_once_with()
+            self.systemd_notify.reset_mock()
             self.assertNotIn("start_flag", self.agent.agent_state)
-            self.assertFalse(self.agent.use_call)
             self.assertEqual(
                 self.agent.agent_state["configurations"]["devices"],
                 self.agent.int_br_device_count
             )
             self.agent._report_state()
             report_st.assert_called_with(self.agent.context,
-                                         self.agent.agent_state, False)
+                                         self.agent.agent_state, True)
+            self.systemd_notify.assert_not_called()
 
     def test_report_state_fail(self):
         with mock.patch.object(self.agent.state_rpc,
@@ -728,6 +731,14 @@ class TestOvsNeutronAgent(object):
             self.agent._report_state()
             report_st.assert_called_with(self.agent.context,
                                          self.agent.agent_state, True)
+            self.systemd_notify.assert_not_called()
+
+    def test_report_state_revived(self):
+        with mock.patch.object(self.agent.state_rpc,
+                               "report_state") as report_st:
+            report_st.return_value = n_const.AGENT_REVIVED
+            self.agent._report_state()
+            self.assertTrue(self.agent.fullsync)
 
     def test_port_update(self):
         port = {"id": TEST_PORT_ID1,
@@ -1331,6 +1342,12 @@ class TestOvsNeutronAgent(object):
             self.agent.tunnel_delete(context=None, **kwargs)
             self.assertTrue(clean_tun_fn.called)
 
+    def test_reset_tunnel_ofports(self):
+        tunnel_handles = self.agent.tun_br_ofports
+        self.agent.tun_br_ofports = {'gre': {'10.10.10.10': '1'}}
+        self.agent._reset_tunnel_ofports()
+        self.assertEqual(self.agent.tun_br_ofports, tunnel_handles)
+
     def _test_ovs_status(self, *args):
         reply2 = {'current': set(['tap0']),
                   'added': set(['tap2']),
@@ -1339,6 +1356,8 @@ class TestOvsNeutronAgent(object):
         reply3 = {'current': set(['tap2']),
                   'added': set([]),
                   'removed': set(['tap0'])}
+
+        self.agent.enable_tunneling = True
 
         with mock.patch.object(async_process.AsyncProcess, "_spawn"),\
                 mock.patch.object(log.KeywordArgumentAdapter,
@@ -1359,7 +1378,15 @@ class TestOvsNeutronAgent(object):
                     self.mod_agent.OVSNeutronAgent,
                     'update_stale_ofport_rules') as update_stale, \
                 mock.patch.object(self.mod_agent.OVSNeutronAgent,
-                                  'cleanup_stale_flows') as cleanup:
+                                  'cleanup_stale_flows') as cleanup, \
+                mock.patch.object(self.mod_agent.OVSNeutronAgent,
+                                  'setup_tunnel_br') as setup_tunnel_br,\
+                mock.patch.object(
+                    self.mod_agent.OVSNeutronAgent,
+                    'setup_tunnel_br_flows') as setup_tunnel_br_flows,\
+                mock.patch.object(
+                    self.mod_agent.OVSNeutronAgent,
+                    '_reset_tunnel_ofports') as reset_tunnel_ofports:
             log_exception.side_effect = Exception(
                 'Fake exception to get out of the loop')
             scan_ports.side_effect = [reply2, reply3]
@@ -1385,6 +1412,11 @@ class TestOvsNeutronAgent(object):
             # re-setup the bridges
             setup_int_br.assert_has_calls([mock.call()])
             setup_phys_br.assert_has_calls([mock.call({})])
+            # Ensure that tunnel handles are reset and bridge
+            # and flows reconfigured.
+            self.assertTrue(reset_tunnel_ofports.called)
+            self.assertTrue(setup_tunnel_br_flows.called)
+            self.assertTrue(setup_tunnel_br.called)
 
     def test_ovs_status(self):
         self._test_ovs_status(constants.OVS_NORMAL,
@@ -1775,9 +1807,6 @@ class TestOvsDvrNeutronAgent(object):
                     return_value=[]):
             self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
                                                         **kwargs)
-            # set back to true because initial report state will succeed due
-            # to mocked out RPC calls
-            self.agent.use_call = True
             self.agent.tun_br = self.br_tun_cls(br_name='br-tun')
         self.agent.sg_agent = mock.Mock()
 
@@ -2469,10 +2498,10 @@ class TestOvsDvrNeutronAgent(object):
                                side_effect=oslo_messaging.RemoteError),\
                 mock.patch.object(self.agent, 'int_br', new=int_br),\
                 mock.patch.object(self.agent.dvr_agent, 'int_br', new=int_br):
-            self.agent.dvr_agent.get_dvr_mac_address()
-            self.assertIsNone(self.agent.dvr_agent.dvr_mac_address)
-            self.assertFalse(self.agent.dvr_agent.in_distributed_mode())
-            self.assertEqual([mock.call.install_normal()], int_br.mock_calls)
+            with testtools.ExpectedException(SystemExit):
+                self.agent.dvr_agent.get_dvr_mac_address()
+                self.assertIsNone(self.agent.dvr_agent.dvr_mac_address)
+                self.assertFalse(self.agent.dvr_agent.in_distributed_mode())
 
     def test_get_dvr_mac_address_retried(self):
         valid_entry = {'host': 'cn1', 'mac_address': 'aa:22:33:44:55:66'}
@@ -2503,11 +2532,12 @@ class TestOvsDvrNeutronAgent(object):
                 mock.patch.object(utils, "execute"),\
                 mock.patch.object(self.agent, 'int_br', new=int_br),\
                 mock.patch.object(self.agent.dvr_agent, 'int_br', new=int_br):
-            self.agent.dvr_agent.get_dvr_mac_address()
-            self.assertIsNone(self.agent.dvr_agent.dvr_mac_address)
-            self.assertFalse(self.agent.dvr_agent.in_distributed_mode())
-            self.assertEqual(self.agent.dvr_agent.plugin_rpc.
-                             get_dvr_mac_address_by_host.call_count, 5)
+            with testtools.ExpectedException(SystemExit):
+                self.agent.dvr_agent.get_dvr_mac_address()
+                self.assertIsNone(self.agent.dvr_agent.dvr_mac_address)
+                self.assertFalse(self.agent.dvr_agent.in_distributed_mode())
+                self.assertEqual(self.agent.dvr_agent.plugin_rpc.
+                                 get_dvr_mac_address_by_host.call_count, 5)
 
     def test_dvr_mac_address_update(self):
         self._setup_for_dvr_test()

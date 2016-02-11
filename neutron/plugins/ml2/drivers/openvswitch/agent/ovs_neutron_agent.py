@@ -26,6 +26,7 @@ from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import loopingcall
+from oslo_service import systemd
 import six
 from six import moves
 
@@ -182,6 +183,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         super(OVSNeutronAgent, self).__init__()
         self.conf = conf or cfg.CONF
 
+        self.fullsync = True
         # init bridge classes with configured datapath type.
         self.br_int_cls, self.br_phys_cls, self.br_tun_cls = (
             functools.partial(bridge_classes[b],
@@ -192,7 +194,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.veth_mtu = veth_mtu
         self.available_local_vlans = set(moves.range(p_const.MIN_VLAN_TAG,
                                                      p_const.MAX_VLAN_TAG))
-        self.use_call = True
         self.tunnel_types = tunnel_types or []
         self.l2_pop = l2_population
         # TODO(ethuleau): Change ARP responder so it's not dependent on the
@@ -230,9 +231,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.setup_physical_bridges(self.bridge_mappings)
         self.local_vlan_map = {}
 
-        self.tun_br_ofports = {p_const.TYPE_GENEVE: {},
-                               p_const.TYPE_GRE: {},
-                               p_const.TYPE_VXLAN: {}}
+        self._reset_tunnel_ofports()
 
         self.polling_interval = polling_interval
         self.minimize_polling = minimize_polling
@@ -326,11 +325,19 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             self.dvr_agent.in_distributed_mode())
 
         try:
-            self.state_rpc.report_state(self.context,
-                                        self.agent_state,
-                                        self.use_call)
+            agent_status = self.state_rpc.report_state(self.context,
+                                                       self.agent_state,
+                                                       True)
+            if agent_status == n_const.AGENT_REVIVED:
+                LOG.info(_LI('Agent has just been revived. '
+                             'Doing a full sync.'))
+                self.fullsync = True
             self.use_call = False
-            self.agent_state.pop('start_flag', None)
+
+            if self.agent_state.pop('start_flag', None):
+                # On initial start, we notify systemd after initialization
+                # is complete.
+                systemd.notify_once()
         except Exception:
             LOG.exception(_LE("Failed reporting state!"))
 
@@ -362,6 +369,11 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
     def _dispose_local_vlan_hints(self):
         self.available_local_vlans.update(self._local_vlan_hints.values())
         self._local_vlan_hints = {}
+
+    def _reset_tunnel_ofports(self):
+        self.tun_br_ofports = {p_const.TYPE_GENEVE: {},
+                               p_const.TYPE_GRE: {},
+                               p_const.TYPE_VXLAN: {}}
 
     def setup_rpc(self):
         self.agent_id = 'ovs-agent-%s' % self.conf.host
@@ -1662,7 +1674,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         if not polling_manager:
             polling_manager = polling.get_polling_manager(
                 minimize_polling=False)
-
         sync = True
         ports = set()
         updated_ports_copy = set()
@@ -1672,6 +1683,10 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         consecutive_resyncs = 0
         need_clean_stale_flow = True
         while self._check_and_handle_signal():
+            if self.fullsync:
+                LOG.info(_LI("rpc_loop doing a full sync."))
+                sync = True
+                self.fullsync = False
             port_info = {}
             ancillary_port_info = {}
             start = time.time()
@@ -1696,6 +1711,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 self.setup_integration_br()
                 self.setup_physical_bridges(self.bridge_mappings)
                 if self.enable_tunneling:
+                    self._reset_tunnel_ofports()
                     self.setup_tunnel_br()
                     self.setup_tunnel_br_flows()
                     tunnel_sync = True
