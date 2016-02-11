@@ -1,10 +1,10 @@
-neutron (2:7.0.3-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:7.0.3-0ubuntu1) wily; urgency=medium
 
   * New upstream point release (LP: #1544568):
     - Ensure that tunnels are fully reset on ovs restart (LP: #1460164).
     - d/p/iproute2-compat.patch: Drop, included upstream.
 
- -- James Page <james.page@ubuntu.com>  Wed, 10 Feb 2016 10:32:48 +0000
+ -- James Page <james.page@ubuntu.com>  Thu, 11 Feb 2016 17:07:16 +0000
 
 neutron (2:7.0.1-0ubuntu1) wily; urgency=medium
 
