@@ -1,4 +1,4 @@
-neutron (2:8.0.0~b2-0ubuntu3) UNRELEASED; urgency=medium
+neutron (2:8.0.0~b2-0ubuntu3) xenial; urgency=medium
 
   * d/tests/*: Adjust plugin tests to handle recent changes to /etc/default
     files.
