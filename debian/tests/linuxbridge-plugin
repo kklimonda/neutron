@@ -1,0 +1,9 @@
+#!/bin/bash
+#---------------------------
+# Testing ml2 linuxbridge plugin
+#---------------------------
+set -e
+
+$(dirname $0)/test-plugin neutron-plugin-linuxbridge-agent \
+    /etc/neutron/plugins/linuxbridge/linuxbridge_conf.ini ml2 \
+    neutron-plugin-linuxbridge-agent

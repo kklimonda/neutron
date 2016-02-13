@@ -1,3 +1,10 @@
+neutron (2:8.0.0~b2-0ubuntu3) UNRELEASED; urgency=medium
+
+  * d/tests/*: Adjust plugin tests to handle recent changes to /etc/default
+    files.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Fri, 12 Feb 2016 15:11:36 -0500
+
 neutron (2:8.0.0~b2-0ubuntu2) xenial; urgency=medium
 
   * d/control: Set min version of python-debtcollector to 1.2.0 to fix failing

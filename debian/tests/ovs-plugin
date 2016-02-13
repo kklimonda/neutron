@@ -1,0 +1,8 @@
+#!/bin/bash
+#---------------------------
+# Testing ml2 openvswitch plugin
+#---------------------------
+set -e
+
+$(dirname $0)/test-plugin neutron-openvswitch-agent /etc/neutron/plugins/ml2/ml2_conf.ini ml2 \
+    neutron-openvswitch-agent
