@@ -1,3 +1,10 @@
+neutron (2:8.0.0~b2-0ubuntu4) UNRELEASED; urgency=medium
+
+  * d/tests/linuxbridge-plugin, d/neutron-plugin-linuxbridge-agent.default:
+    Correct the linuxbridge config file.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Fri, 19 Feb 2016 08:11:38 -0500
+
 neutron (2:8.0.0~b2-0ubuntu3) xenial; urgency=medium
 
   * d/tests/*: Adjust plugin tests to handle recent changes to /etc/default

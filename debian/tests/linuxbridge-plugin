@@ -5,5 +5,5 @@
 set -e
 
 $(dirname $0)/test-plugin neutron-plugin-linuxbridge-agent \
-    /etc/neutron/plugins/linuxbridge/linuxbridge_conf.ini ml2 \
+    /etc/neutron/plugins/ml2/linuxbridge_agent.ini ml2 \
     neutron-plugin-linuxbridge-agent
