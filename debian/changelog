@@ -1,4 +1,4 @@
-neutron (2:8.0.0~b2-0ubuntu4) UNRELEASED; urgency=medium
+neutron (2:8.0.0~b2-0ubuntu4) xenial; urgency=medium
 
   * d/tests/linuxbridge-plugin, d/neutron-plugin-linuxbridge-agent.default:
     Correct the linuxbridge config file.
