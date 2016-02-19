@@ -17,14 +17,24 @@ sed -i "s/core_plugin = .*/core_plugin = $plugin/g" /etc/neutron/neutron.conf
 
 service neutron-server restart > /dev/null 2>&1
 
-sleep 5
+DAEMONS=('neutron-server')
+for daemon in "${DAEMONS[@]}"; do
+    TIMEOUT=50
+    while [ "$TIMEOUT" -gt 0 ]; do
+        if service $daemon status > /dev/null; then
+            echo "OK"
+            break
+        fi
+        TIMEOUT=$((TIMEOUT - 1))
+        sleep 0.5
+    done
 
-if service neutron-server status > /dev/null; then
-    apt-get -y remove --purge $pkg
-    echo "OK"
-else
-    echo "ERROR: $pkg IS NOT RUNNING"
-    tail -50 /var/log/neutron/neutron-server.log
-    apt-get -y remove --purge $pkg
-    exit 1
-fi
+    if [ "$TIMEOUT" -le 0 ]; then
+        echo "ERROR: ${daemon} IS NOT RUNNING"
+        tail -50 /var/log/neutron/neutron-server.log
+        apt-get -y remove --purge $pkg
+        exit 1
+    fi
+done
+
+apt-get -y remove --purge $pkg

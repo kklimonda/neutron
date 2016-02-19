@@ -16,8 +16,6 @@ service neutron-dhcp-agent restart
 service neutron-metadata-agent restart
 service neutron-server restart
 
-sleep 5
-
 DAEMONS=('neutron-server' 'neutron-l3-agent' 'neutron-dhcp-agent' 'neutron-metadata-agent')
 for daemon in "${DAEMONS[@]}"; do
     TIMEOUT=50
@@ -27,7 +25,7 @@ for daemon in "${DAEMONS[@]}"; do
             break
         fi
         TIMEOUT=$((TIMEOUT - 1))
-        sleep 0.1
+        sleep 0.5
     done
 
     if [ "$TIMEOUT" -le 0 ]; then

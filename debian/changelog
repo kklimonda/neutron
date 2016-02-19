@@ -2,6 +2,7 @@ neutron (2:8.0.0~b2-0ubuntu4) UNRELEASED; urgency=medium
 
   * d/tests/linuxbridge-plugin, d/neutron-plugin-linuxbridge-agent.default:
     Correct the linuxbridge config file.
+  * d/tests/*: Loop to check daemon status instead of sleep.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Fri, 19 Feb 2016 08:11:38 -0500
 
