@@ -1,4 +1,3 @@
-Tests: neutron-server python-neutron
- ml2-plugin neutron-agents
+Tests: neutron-server python-neutron neutron-agents
 Depends: neutron-server, rabbitmq-server, mysql-server
 Restrictions: needs-root allow-stderr
