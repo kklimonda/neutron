@@ -1,5 +1,5 @@
 [Unit]
-Description=Openstack Neutron Linux Bridge Plugin Agent
+Description=Openstack Neutron Linux Bridge Agent
 After=mysql.service postgresql.service rabbitmq-server.service keystone.service
 Requires=neutron-linuxbridge-cleanup.service
 
@@ -10,7 +10,7 @@ WorkingDirectory=/var/lib/neutron
 PermissionsStartOnly=true
 ExecStartPre=/bin/mkdir -p /var/lock/neutron /var/log/neutron /var/lib/neutron
 ExecStartPre=/bin/chown neutron:neutron /var/lock/neutron /var/log/neutron /var/lib/neutron
-ExecStart=/etc/init.d/neutron-plugin-linuxbridge-agent systemd-start
+ExecStart=/etc/init.d/neutron-linuxbridge-agent systemd-start
 Restart=on-failure
 LimitNOFILE=65535
 
