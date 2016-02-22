@@ -8,6 +8,8 @@ neutron (2:8.0.0~b2-0ubuntu5) UNRELEASED; urgency=medium
   * d/control,neutron-{plugin-}linuxbridge-agent.*: Rename
     neutron-plugin-linuxbridge-agent -> neutron-linuxbridge-agent inline with
     other agent packages (LP: #1548244).
+  * d/control: Add dependency on conntrack for openvswitch and linuxbridge
+    packages (LP: #1514731).
 
  -- James Page <james.page@ubuntu.com>  Mon, 22 Feb 2016 09:07:26 +0000
 
