@@ -10,6 +10,9 @@ neutron (2:8.0.0~b2-0ubuntu5) UNRELEASED; urgency=medium
     other agent packages (LP: #1548244).
   * d/control: Add dependency on conntrack for openvswitch and linuxbridge
     packages (LP: #1514731).
+  * d/control,*.install,*.init.in,*.service.in,*.update.in: Re-jig locations
+    of ml2 plugin and associated agent files so that openvswitch, linuxbridge
+    and sriov agents no longer need to include ml2_conf.ini (LP: #1527005).
   * d/tests/*: Refactor and reduce tests; ML2 is the only plugin now in neutron
     core, so no need to continue to carry infrastructure for testing other
     plugins.

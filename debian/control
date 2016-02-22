@@ -261,13 +261,15 @@ Description: Neutron is a virtual network service for Openstack - ML2 plugin
 Package: neutron-openvswitch-agent
 Architecture: all
 Depends: conntrack,
-         neutron-plugin-ml2 (= ${source:Version}),
+         neutron-common (= ${source:Version}),
          openvswitch-switch,
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},
-Breaks: neutron-plugin-openvswitch-agent ( << 2:8.0.0~b2-0ubuntu1~ ),
-Replaces: neutron-plugin-openvswitch-agent ( << 2:8.0.0~b2-0ubuntu1~ ),
+Breaks: neutron-plugin-ml2 ( << 2:8.0.0~b2-0ubuntu5~ ),
+        neutron-plugin-openvswitch-agent ( << 2:8.0.0~b2-0ubuntu1~ ),
+Replaces: neutron-plugin-ml2 ( << 2:8.0.0~b2-0ubuntu5~ ),
+          neutron-plugin-openvswitch-agent ( << 2:8.0.0~b2-0ubuntu1~ ),
 Description: Neutron is a virtual network service for Openstack - Open vSwitch plugin agent
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
@@ -302,12 +304,14 @@ Architecture: all
 Depends: bridge-utils,
          conntrack,
          ebtables,
-         neutron-plugin-ml2 (= ${source:Version}),
+         neutron-common (= ${source:Version}),
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},
 Breaks: neutron-plugin-linuxbirdge-agent ( << 2:8.0.0~b2-0ubuntu5~ ),
+        neutron-plugin-ml2 ( << 2:8.0.0~b2-0ubuntu5~ ),
 Replaces: neutron-plugin-linuxbridge-agent ( << 2:8.0.0~b2-0ubuntu5~ ),
+          neutron-plugin-ml2 ( << 2:8.0.0~b2-0ubuntu5~ ),
 Description: Neutron is a virtual network service for Openstack - linuxbridge agent
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
@@ -359,10 +363,12 @@ Description: Neutron is a virtual network service for Openstack - metering agent
 
 Package: neutron-plugin-sriov-agent
 Architecture: all
-Depends: neutron-plugin-ml2 (= ${source:Version}),
+Depends: neutron-common (= ${source:Version}),
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},
+Breaks: neutron-plugin-ml2 ( << 2:8.0.0~b2-0ubuntu5~ ),
+Replaces: neutron-plugin-ml2 ( << 2:8.0.0~b2-0ubuntu5~ ),
 Description: Neutron is a virtual network service for Openstack - IBM agent
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
