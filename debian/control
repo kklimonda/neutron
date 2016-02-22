@@ -294,6 +294,23 @@ Description: Neutron is a virtual network service for Openstack - Open vSwitch p
  .
  This package provides the Open vSwitch plugin agent.
 
+Package: neutron-plugin-openvswitch-agent
+Architecture: all
+Depends: neutron-openvswitch-agent (= ${source:Version}),
+         ${misc:Depends},
+         ${python:Depends},
+Description: Transitional package for neutron-openvswitch-agent
+ Neutron is a virtual network service for Openstack, and a part of
+ Netstack. Just like OpenStack Nova provides an API to dynamically
+ request and configure virtual servers, Neutron provides an API to
+ dynamically request and configure virtual networks. These networks
+ connect "interfaces" from other OpenStack services (e.g., virtual NICs
+ from Nova VMs). The Neutron API supports extensions to provide
+ advanced network capabilities (e.g., QoS, ACLs, network monitoring,
+ etc.)
+ .
+ This package is a transitional package and can be safely removed.
+
 Package: neutron-plugin-linuxbridge-agent
 Architecture: all
 Depends: bridge-utils,
