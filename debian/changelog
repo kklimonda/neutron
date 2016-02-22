@@ -13,6 +13,7 @@ neutron (2:8.0.0~b2-0ubuntu5) UNRELEASED; urgency=medium
   * d/tests/*: Refactor and reduce tests; ML2 is the only plugin now in neutron
     core, so no need to continue to carry infrastructure for testing other
     plugins.
+  * d/control: Drop old Breaks/Replaces on quantum-* packages.
 
  -- James Page <james.page@ubuntu.com>  Mon, 22 Feb 2016 09:07:26 +0000
 

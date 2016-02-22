@@ -80,8 +80,6 @@ Depends: adduser,
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},
-Breaks: quantum-server (<< 1:2013.2~b2-0ubuntu1~),
-Replaces: quantum-server (<< 1:2013.2~b2-0ubuntu1~),
 Recommends: neutron-plugin-ml2,
 Description: Neutron is a virtual network service for Openstack - server
  Neutron is a virtual network service for Openstack, and a part of
@@ -105,10 +103,8 @@ Depends: adduser,
          ${python:Depends},
 Breaks: neutron-l3-agent (<< 1:2014.1~rc2-0ubuntu3~),
         neutron-vpn-agent (<< 1:2014.1~rc2-0ubuntu3~),
-        quantum-common ( << 1:2013.2~b2-0ubuntu1~ ),
 Replaces: neutron-l3-agent (<< 1:2014.1~rc2-0ubuntu3~),
           neutron-vpn-agent (<< 1:2014.1~rc2-0ubuntu3~),
-          quantum-common ( << 1:2013.2~b2-0ubuntu1~ ),
 Description: Neutron is a virtual network service for Openstack - common
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
@@ -134,8 +130,6 @@ Depends: conntrack,
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},
-Breaks: quantum-l3-agent ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: quantum-l3-agent ( << 1:2013.2~b2-0ubuntu1~ ),
 Description: Neutron is a virtual network service for Openstack - l3 agent
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
@@ -157,8 +151,6 @@ Depends: dnsmasq-base,
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},
-Breaks: quantum-dhcp-agent ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: quantum-dhcp-agent ( << 1:2013.2~b2-0ubuntu1~ ),
 Description: Neutron is a virtual network service for Openstack - DHCP agent
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
@@ -177,8 +169,6 @@ Depends: neutron-common (= ${source:Version}),
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},
-Breaks: quantum-metadata-agent ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: quantum-metadata-agent ( << 1:2013.2~b2-0ubuntu1~ ),
 Description: Neutron is a virtual network service for Openstack - metadata agent
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
@@ -237,8 +227,6 @@ Depends: alembic (>= 0.8.0),
 Suggests: python-ryu (>= 3.23.2),
 Provides: ${python:Provides},
 XB-Python-Version: ${python:Versions}
-Breaks: python-quantum ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: python-quantum ( << 1:2013.2~b2-0ubuntu1~ ),
 Description: Neutron is a virtual network service for Openstack - Python library
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
