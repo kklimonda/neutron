@@ -1,4 +1,4 @@
-neutron (2:8.0.0~b2-0ubuntu5) UNRELEASED; urgency=medium
+neutron (2:8.0.0~b2-0ubuntu5) xenial; urgency=medium
 
   * d/control,neutron-plugin-openvswitch-agent.*: Add transitional package for
     upgrades, ensure that old init and upstart configurations are removed
@@ -21,7 +21,7 @@ neutron (2:8.0.0~b2-0ubuntu5) UNRELEASED; urgency=medium
     plugins.
   * d/control: Drop old Breaks/Replaces on quantum-* packages.
 
- -- James Page <james.page@ubuntu.com>  Mon, 22 Feb 2016 09:07:26 +0000
+ -- James Page <james.page@ubuntu.com>  Mon, 22 Feb 2016 13:47:02 +0000
 
 neutron (2:8.0.0~b2-0ubuntu4) xenial; urgency=medium
 
