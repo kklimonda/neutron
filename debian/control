@@ -283,6 +283,8 @@ Description: Neutron is a virtual network service for Openstack - Open vSwitch p
  This package provides the Open vSwitch plugin agent.
 
 Package: neutron-plugin-openvswitch-agent
+Section: oldlibs
+Priority: extra
 Architecture: all
 Depends: neutron-openvswitch-agent (= ${source:Version}),
          ${misc:Depends},
@@ -326,6 +328,8 @@ Description: Neutron is a virtual network service for Openstack - linuxbridge ag
 
 Package: neutron-plugin-linuxbridge-agent
 Architecture: all
+Section: oldlibs
+Priority: extra
 Depends: neutron-linuxbridge-agent (= ${source:Version}),
          ${misc:Depends},
          ${python:Depends},
@@ -382,6 +386,8 @@ Description: Neutron is a virtual network service for Openstack - SR-IOV agent
  This package provides the Mellanox SR-IOV agent.
 
 Package: neutron-plugin-sriov-agent
+Section: oldlibs
+Priority: extra
 Architecture: all
 Depends: neutron-sriov-agent (= ${source:Version}),
          ${misc:Depends},
