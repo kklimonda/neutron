@@ -1,4 +1,4 @@
 Tests: neutron-server python-neutron
- linuxbridge-plugin ovs-plugin neutron-agents
+ ml2-plugin neutron-agents
 Depends: neutron-server, rabbitmq-server, mysql-server
 Restrictions: needs-root allow-stderr

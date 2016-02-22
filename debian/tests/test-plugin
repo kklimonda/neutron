@@ -7,12 +7,11 @@ set -e
 pkg=$1
 conf=$2
 plugin=$3
-etc_default_file=$4
 
 apt-get -y install $pkg
 
 # update plugin path and config
-sed -i "s|NEUTRON_PLUGIN_CONFIG.*|NEUTRON_PLUGIN_CONFIG=\"$conf\"|g" /etc/default/$etc_default_file
+sed -i "s|NEUTRON_PLUGIN_CONFIG.*|NEUTRON_PLUGIN_CONFIG=\"$conf\"|g" /etc/default/neutron-server
 sed -i "s/core_plugin = .*/core_plugin = $plugin/g" /etc/neutron/neutron.conf
 
 service neutron-server restart > /dev/null 2>&1
