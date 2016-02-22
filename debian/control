@@ -331,7 +331,7 @@ Description: Neutron is a virtual network service for Openstack - linuxbridge ag
  .
  This package provides the linuxbridge plugin agent.
 
-Package: neutron-plugin-openvswitch-agent
+Package: neutron-plugin-linuxbridge-agent
 Architecture: all
 Depends: neutron-linuxbridge-agent (= ${source:Version}),
          ${misc:Depends},
