@@ -308,7 +308,8 @@ Description: Transitional package for neutron-openvswitch-agent
  .
  This package is a transitional package and can be safely removed.
 
-Package: neutron-plugin-linuxbridge-agent
+
+Package: neutron-linuxbridge-agent
 Architecture: all
 Depends: bridge-utils,
          ebtables,
@@ -316,9 +317,9 @@ Depends: bridge-utils,
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends},
-Breaks: quantum-plugin-linuxbirdge-agent ( << 1:2013.2~b2-0ubuntu1~ ),
-Replaces: quantum-plugin-linuxbridge-agent ( << 1:2013.2~b2-0ubuntu1~ ),
-Description: Neutron is a virtual network service for Openstack - linuxbridge plugin agent
+Breaks: neutron-plugin-linuxbirdge-agent ( << 2:8.0.0~b2-0ubuntu5~ ),
+Replaces: neutron-plugin-linuxbridge-agent ( << 2:8.0.0~b2-0ubuntu5~ ),
+Description: Neutron is a virtual network service for Openstack - linuxbridge agent
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
  request and configure virtual servers, Neutron provides an API to
@@ -329,6 +330,23 @@ Description: Neutron is a virtual network service for Openstack - linuxbridge pl
  etc.)
  .
  This package provides the linuxbridge plugin agent.
+
+Package: neutron-plugin-openvswitch-agent
+Architecture: all
+Depends: neutron-linuxbridge-agent (= ${source:Version}),
+         ${misc:Depends},
+         ${python:Depends},
+Description: Transitional package for neutron-linuxbridge-agent
+ Neutron is a virtual network service for Openstack, and a part of
+ Netstack. Just like OpenStack Nova provides an API to dynamically
+ request and configure virtual servers, Neutron provides an API to
+ dynamically request and configure virtual networks. These networks
+ connect "interfaces" from other OpenStack services (e.g., virtual NICs
+ from Nova VMs). The Neutron API supports extensions to provide
+ advanced network capabilities (e.g., QoS, ACLs, network monitoring,
+ etc.)
+ .
+ This package is a transitional package and can be safely removed.
 
 Package: neutron-metering-agent
 Architecture: all

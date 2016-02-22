@@ -1,9 +1,13 @@
 neutron (2:8.0.0~b2-0ubuntu5) UNRELEASED; urgency=medium
 
   * d/control,neutron-plugin-openvswitch-agent.*: Add transitional package for
-    upgrades, ensure that old init and upstart configurations are removed.
+    upgrades, ensure that old init and upstart configurations are removed
+    (LP: #1548242).
   * d/*.default,neutron-server.init.in: Revert commits which mistakenly
-    tied ovs or linuxbridge agents to the neutron-server package.
+    tied ovs or linuxbridge agents to the neutron-server package (LP: #1548245).
+  * d/control,neutron-{plugin-}linuxbridge-agent.*: Rename
+    neutron-plugin-linuxbridge-agent -> neutron-linuxbridge-agent inline with
+    other agent packages (LP: #1548244).
 
  -- James Page <james.page@ubuntu.com>  Mon, 22 Feb 2016 09:07:26 +0000
 

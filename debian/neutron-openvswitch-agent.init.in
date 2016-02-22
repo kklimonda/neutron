@@ -13,7 +13,7 @@
 
 # Authors: Julien Danjou <acid@debian.org>, Thomas Goirand <zigo@debian.org>
 
-DESC="Openstack Neutron Open vSwitch Plugin Agent"
+DESC="Openstack Neutron Open vSwitch Agent"
 PROJECT_NAME=neutron
 NAME=${PROJECT_NAME}-openvswitch-agent
 DAEMON=/usr/bin/neutron-openvswitch-agent
