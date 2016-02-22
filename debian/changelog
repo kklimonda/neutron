@@ -13,10 +13,14 @@ neutron (2:8.0.0~b2-0ubuntu5) UNRELEASED; urgency=medium
   * d/control,*.install,*.init.in,*.service.in,*.update.in: Re-jig locations
     of ml2 plugin and associated agent files so that openvswitch, linuxbridge
     and sriov agents no longer need to include ml2_conf.ini (LP: #1527005).
+  * d/control,neutron-{plugin-}sriov-agent.*: Rename
+    neutron-plugin-sriov-agent -> neutron-sriov-agent inline with
+    other agent packages (LP: #1548244).
   * d/tests/*: Refactor and reduce tests; ML2 is the only plugin now in neutron
     core, so no need to continue to carry infrastructure for testing other
     plugins.
   * d/control: Drop old Breaks/Replaces on quantum-* packages.
+
 
  -- James Page <james.page@ubuntu.com>  Mon, 22 Feb 2016 09:07:26 +0000
 

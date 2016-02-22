@@ -361,7 +361,7 @@ Description: Neutron is a virtual network service for Openstack - metering agent
  .
  This package provides the metering agent.
 
-Package: neutron-plugin-sriov-agent
+Package: neutron-sriov-agent
 Architecture: all
 Depends: neutron-common (= ${source:Version}),
          ${misc:Depends},
@@ -369,7 +369,7 @@ Depends: neutron-common (= ${source:Version}),
          ${shlibs:Depends},
 Breaks: neutron-plugin-ml2 ( << 2:8.0.0~b2-0ubuntu5~ ),
 Replaces: neutron-plugin-ml2 ( << 2:8.0.0~b2-0ubuntu5~ ),
-Description: Neutron is a virtual network service for Openstack - IBM agent
+Description: Neutron is a virtual network service for Openstack - SR-IOV agent
  Neutron is a virtual network service for Openstack, and a part of
  Netstack. Just like OpenStack Nova provides an API to dynamically
  request and configure virtual servers, Neutron provides an API to
@@ -380,3 +380,20 @@ Description: Neutron is a virtual network service for Openstack - IBM agent
  etc.)
  .
  This package provides the Mellanox SR-IOV agent.
+
+Package: neutron-plugin-sriov-agent
+Architecture: all
+Depends: neutron-sriov-agent (= ${source:Version}),
+         ${misc:Depends},
+         ${python:Depends},
+Description: Transitional package for neutron-sriov-agent
+ Neutron is a virtual network service for Openstack, and a part of
+ Netstack. Just like OpenStack Nova provides an API to dynamically
+ request and configure virtual servers, Neutron provides an API to
+ dynamically request and configure virtual networks. These networks
+ connect "interfaces" from other OpenStack services (e.g., virtual NICs
+ from Nova VMs). The Neutron API supports extensions to provide
+ advanced network capabilities (e.g., QoS, ACLs, network monitoring,
+ etc.)
+ .
+ This package is a transitional package and can be safely removed.

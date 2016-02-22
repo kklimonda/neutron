@@ -1,6 +1,6 @@
 #!/bin/sh
 ### BEGIN INIT INFO
-# Provides:          neutron-plugin-sriov-agent
+# Provides:          neutron-sriov-agent
 # Required-Start:    $network $local_fs $remote_fs $syslog
 # Required-Stop:     $remote_fs
 # Should-Start:      mysql postgresql rabbitmq-server keystone
@@ -15,7 +15,7 @@
 
 DESC="OpenStack Neutron SRIOV Plugin Agent"
 PROJECT_NAME=neutron
-NAME=${PROJECT_NAME}-plugin-sriov-agent
+NAME=${PROJECT_NAME}-sriov-agent
 DAEMON=/usr/bin/neutron-sriov-nic-agent
 # --config-file=/etc/neutron/neutron.conf will be happened
 # to DAEMON_ARGS later by openstack-pkg-tools
