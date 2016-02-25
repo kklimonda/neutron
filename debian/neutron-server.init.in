@@ -14,4 +14,5 @@
 DESC="OpenStack Neutron Server"
 PROJECT_NAME=neutron
 NAME=${PROJECT_NAME}-server
+[ -r /etc/default/neutron-server ] && . /etc/default/neutron-server
 [ -n "$NEUTRON_PLUGIN_CONFIG" ] && DAEMON_ARGS="--config-file=$NEUTRON_PLUGIN_CONFIG"

@@ -1,3 +1,11 @@
+neutron (2:8.0.0~b2-0ubuntu6) xenial; urgency=medium
+
+  * d/neutron-server.init.in: Restore missing source of
+    /e/d/neutron-server prior to trying to configure daemon arguments
+    (LP: #1549919).
+
+ -- James Page <james.page@ubuntu.com>  Thu, 25 Feb 2016 18:12:27 +0000
+
 neutron (2:8.0.0~b2-0ubuntu5) xenial; urgency=medium
 
   * d/control,neutron-plugin-openvswitch-agent.*: Add transitional package for
