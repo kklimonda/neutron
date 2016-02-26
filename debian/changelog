@@ -2,9 +2,6 @@ neutron (2:8.0.0~b2-0ubuntu7) UNRELEASED; urgency=medium
 
   * d/rules: Ensure that neutron-linuxbridge-cleanup init configurations
     are installed in the correct package (LP: #1550004).
-  * d/control: Update version of openstack-pkg-tools to ensure consistent
-    setting of OSLO_LOCK_PATH in generated init.d and systemd units
-    (LP: #1550188).
 
  -- James Page <james.page@ubuntu.com>  Fri, 26 Feb 2016 08:03:10 +0000
 
