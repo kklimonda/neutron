@@ -5,8 +5,12 @@ author "James Page <james.page@ubuntu.com>"
 start on started openvswitch-switch
 stop on runlevel [!2345]
 
+env OSLO_LOCK_PATH=/var/lock/neutron
+
 pre-start script
-  [ ! -x /usr/bin/neutron-ovs-cleanup ] && exit 0 
+  [ ! -x /usr/bin/neutron-ovs-cleanup ] && exit 0
+  mkdir -p /var/run/neutron /var/lock/neutron
+  chown neutron:root /var/run/neutron /var/lock/neutron
   start-stop-daemon --start --chuid neutron --exec /usr/bin/neutron-ovs-cleanup -- \
     --log-file /var/log/neutron/ovs-cleanup.log \
     --config-file /etc/neutron/neutron.conf --verbose

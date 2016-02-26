@@ -7,11 +7,13 @@ stop on runlevel [!2345]
 
 respawn
 
+env OSLO_LOCK_PATH=/var/lock/neutron
+
 chdir /var/run
 
 pre-start script
-  mkdir -p /var/run/neutron
-  chown neutron:root /var/run/neutron
+  mkdir -p /var/run/neutron /var/lock/neutron
+  chown neutron:root /var/run/neutron /var/lock/neutron
 end script
 
 script
