@@ -7,13 +7,11 @@ stop on runlevel [!2345]
 
 respawn
 
-env OSLO_LOCK_PATH=/var/lock/neutron
-
 chdir /var/run
 
 pre-start script
-  mkdir -p /var/run/neutron /var/lock/neutron
-  chown neutron:root /var/run/neutron /var/lock/neutron
+  mkdir -p /var/run/neutron
+  chown neutron:root /var/run/neutron
 end script
 
 exec start-stop-daemon --start --chuid neutron --exec /usr/bin/neutron-openvswitch-agent -- --config-file=/etc/neutron/neutron.conf --config-file=/etc/neutron/plugins/ml2/openvswitch_agent.ini --log-file=/var/log/neutron/openvswitch-agent.log

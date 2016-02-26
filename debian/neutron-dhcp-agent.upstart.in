@@ -7,13 +7,11 @@ stop on runlevel [!2345]
 
 respawn
 
-env OSLO_LOCK_PATH=/var/lock/neutron
-
 chdir /var/run
 
 pre-start script
-  mkdir -p /var/run/neutron /var/lock/neutron
-  chown neutron:root /var/run/neutron /var/lock/neutron
+  mkdir -p /var/run/neutron
+  chown neutron:root /var/run/neutron
   # Check to see if openvswitch plugin in use by checking
   # status of cleanup upstart configuration
   if status neutron-ovs-cleanup; then
