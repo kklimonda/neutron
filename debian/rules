@@ -19,14 +19,14 @@ override_dh_install:
 override_dh_systemd_enable:
 	dh_systemd_enable -pneutron-openvswitch-agent --name=neutron-ovs-cleanup \
 		neutron-ovs-cleanup.service
-	dh_systemd_enable -pneutron-plugin-linuxbridge-agent --name=neutron-linuxbridge-cleanup \
+	dh_systemd_enable -pneutron-linuxbridge-agent --name=neutron-linuxbridge-cleanup \
 		neutron-linuxbridge-cleanup.service
 	dh_systemd_enable
 
 override_dh_installinit:
 	dh_installinit -pneutron-openvswitch-agent --no-start \
         --name=neutron-ovs-cleanup
-	dh_installinit -pneutron-plugin-linuxbridge-agent --no-start \
+	dh_installinit -pneutron-linuxbridge-agent --no-start \
         --name=neutron-linuxbridge-cleanup
 	dh_installinit --error-handler=true
 
