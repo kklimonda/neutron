@@ -147,7 +147,7 @@ class TestAsyncProcess(base.BaseTestCase):
     def test__iter_queue_returns_empty_list_for_empty_queue(self):
         result = list(self.proc._iter_queue(eventlet.queue.LightQueue(),
                                             False))
-        self.assertEqual(result, [])
+        self.assertEqual([], result)
 
     def test__iter_queue_returns_queued_data(self):
         queue = eventlet.queue.LightQueue()
@@ -291,4 +291,7 @@ class TestFailingAsyncProcess(base.BaseTestCase):
                 as handle_error_mock:
             self.process.start()
             self.process._process.wait()
+            # Wait for the monitor process to complete
+            for thread in self.process._watchers:
+                thread.wait()
             self.assertEqual(1, handle_error_mock.call_count)

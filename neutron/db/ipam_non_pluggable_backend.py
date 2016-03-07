@@ -20,6 +20,7 @@ from sqlalchemy import and_
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
 
+from neutron._i18n import _
 from neutron.api.v2 import attributes
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
@@ -273,7 +274,7 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     not is_auto_addr_subnet):
                     fixed_ip_set.append({'subnet_id': subnet['id']})
 
-        self._validate_max_ips_per_port(fixed_ip_set)
+        self._validate_max_ips_per_port(fixed_ip_set, device_owner)
         return fixed_ip_set
 
     def _allocate_fixed_ips(self, context, fixed_ips, mac_address):
@@ -404,6 +405,7 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                 and_(models_v2.Port.network_id == network_id,
                      ~models_v2.Port.device_owner.in_(
                          constants.ROUTER_INTERFACE_OWNERS_SNAT)))
+            updated_ports = []
             for port in ports:
                 ip_address = self._calculate_ipv6_eui64_addr(
                     context, subnet, port['mac_address'])
@@ -418,9 +420,11 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     # the corresponding port has been deleted.
                     with context.session.begin_nested():
                         context.session.add(allocated)
+                    updated_ports.append(port['id'])
                 except db_exc.DBReferenceError:
                     LOG.debug("Port %s was deleted while updating it with an "
                               "IPv6 auto-address. Ignoring.", port['id'])
+            return updated_ports
 
     def _calculate_ipv6_eui64_addr(self, context, subnet, mac_addr):
         prefix = subnet['cidr']

@@ -14,8 +14,9 @@
 #    under the License.
 
 import collections
-import mock
 import uuid
+
+import mock
 
 from neutron.agent.common import ovs_lib
 from neutron.agent.linux import ip_lib
@@ -92,8 +93,8 @@ class OVSBridgeTestCase(OVSBridgeTestBase):
         self.assertEqual(tag, self.ovs.db_get_val('Port', port_name, 'tag'))
         self.assertEqual(tag, self.br.get_port_tag_dict()[port_name])
         self.ovs.clear_db_attribute('Port', port_name, 'tag')
-        self.assertEqual(self.ovs.db_get_val('Port', port_name, 'tag'), [])
-        self.assertEqual(self.br.get_port_tag_dict()[port_name], [])
+        self.assertEqual([], self.ovs.db_get_val('Port', port_name, 'tag'))
+        self.assertEqual([], self.br.get_port_tag_dict()[port_name])
 
     def test_get_bridge_external_bridge_id(self):
         self.ovs.set_db_attribute('Bridge', self.br.br_name,

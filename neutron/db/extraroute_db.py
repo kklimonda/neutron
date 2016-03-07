@@ -19,6 +19,7 @@ from oslo_log import log as logging
 import sqlalchemy as sa
 from sqlalchemy import orm
 
+from neutron._i18n import _
 from neutron.common import utils
 from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
@@ -33,7 +34,7 @@ LOG = logging.getLogger(__name__)
 extra_route_opts = [
     #TODO(nati): use quota framework when it support quota for attributes
     cfg.IntOpt('max_routes', default=30,
-               help=_("Maximum number of routes")),
+               help=_("Maximum number of routes per router")),
 ]
 
 cfg.CONF.register_opts(extra_route_opts)
@@ -103,7 +104,7 @@ class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
                 quota=cfg.CONF.max_routes)
 
         filters = {'device_id': [router_id]}
-        ports = self._core_plugin.get_ports(context, filters)
+        ports = self._core_plugin.get_ports(context.elevated(), filters)
         cidrs = []
         ips = []
         for port in ports:

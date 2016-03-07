@@ -16,6 +16,7 @@ import abc
 
 import six
 
+from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes
 from neutron.common import constants
@@ -79,10 +80,6 @@ class Dvr(extensions.ExtensionDescriptor):
 
 @six.add_metaclass(abc.ABCMeta)
 class DVRMacAddressPluginBase(object):
-
-    @abc.abstractmethod
-    def delete_dvr_mac_address(self, context, host):
-        pass
 
     @abc.abstractmethod
     def get_dvr_mac_address_list(self, context):

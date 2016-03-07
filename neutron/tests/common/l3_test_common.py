@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Openstack Foundation
+# Copyright (c) 2015 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -13,6 +13,7 @@
 #    under the License.
 
 import copy
+
 import netaddr
 from oslo_utils import uuidutils
 from six import moves
@@ -31,7 +32,7 @@ def get_ha_interface(ip='169.254.192.1', mac='12:34:56:78:2b:5d'):
     subnet_id = _uuid()
     return {'admin_state_up': True,
             'device_id': _uuid(),
-            'device_owner': 'network:router_ha_interface',
+            'device_owner': l3_constants.DEVICE_OWNER_ROUTER_HA_INTF,
             'fixed_ips': [{'ip_address': ip,
                            'prefixlen': 18,
                            'subnet_id': subnet_id}],
@@ -175,7 +176,8 @@ def router_append_interface(router, count=1, ip_version=4, ra_mode=None,
 
 
 def router_append_subnet(router, count=1, ip_version=4,
-                         ipv6_subnet_modes=None, interface_id=None):
+                         ipv6_subnet_modes=None, interface_id=None,
+                         dns_nameservers=None, network_mtu=0):
     if ip_version == 6:
         subnet_mode_none = {'ra_mode': None, 'address_mode': None}
         if not ipv6_subnet_modes:
@@ -222,6 +224,7 @@ def router_append_subnet(router, count=1, ip_version=4,
                 {'id': subnet_id,
                  'cidr': cidr_pool % (i + num_existing_subnets),
                  'gateway_ip': gw_pool % (i + num_existing_subnets),
+                 'dns_nameservers': dns_nameservers,
                  'ipv6_ra_mode': ipv6_subnet_modes[i]['ra_mode'],
                  'ipv6_address_mode': ipv6_subnet_modes[i]['address_mode']})
 
@@ -235,6 +238,7 @@ def router_append_subnet(router, count=1, ip_version=4,
         mac_address.dialect = netaddr.mac_unix
         interfaces.append(
             {'id': _uuid(),
+             'mtu': network_mtu,
              'network_id': _uuid(),
              'admin_state_up': True,
              'mac_address': str(mac_address),

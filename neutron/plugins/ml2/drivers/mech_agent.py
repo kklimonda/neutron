@@ -14,12 +14,12 @@
 #    under the License.
 
 import abc
-import six
 
 from oslo_log import log
+import six
 
+from neutron._i18n import _LW
 from neutron.extensions import portbindings
-from neutron.i18n import _LW
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
 

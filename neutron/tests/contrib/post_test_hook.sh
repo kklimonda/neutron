@@ -33,13 +33,18 @@ function generate_testr_results {
         sudo mv ./*.gz /opt/stack/logs/
     fi
 
-    if [ "$venv" == "dsvm-functional" ] || [ "$venv" == "dsvm-fullstack" ]
+    if [[ "$venv" == dsvm-functional* ]] || [[ "$venv" == dsvm-fullstack* ]]
     then
         generate_test_logs $log_dir
     fi
 }
 
-if [ "$venv" == "dsvm-functional" ] || [ "$venv" == "dsvm-fullstack" ]
+if [ "$venv" == "api-pecan" ]; then
+    # api-pecan is the same as the regular api job
+    venv='api'
+fi
+
+if [[ "$venv" == dsvm-functional* ]] || [[ "$venv" == dsvm-fullstack* ]]
 then
     owner=stack
     sudo_env=

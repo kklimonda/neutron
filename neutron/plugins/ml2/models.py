@@ -23,7 +23,7 @@ from neutron.extensions import portbindings
 BINDING_PROFILE_LEN = 4095
 
 
-class NetworkSegment(model_base.BASEV2, models_v2.HasId):
+class NetworkSegment(model_base.BASEV2, model_base.HasId):
     """Represent persistent state of a network segment.
 
     A network segment is a portion of a neutron network with a
@@ -127,5 +127,5 @@ class DVRPortBinding(model_base.BASEV2):
     port = orm.relationship(
         models_v2.Port,
         backref=orm.backref("dvr_port_binding",
-                            lazy='joined', uselist=False,
+                            lazy='joined',
                             cascade='delete'))

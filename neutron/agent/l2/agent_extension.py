@@ -46,14 +46,23 @@ class AgentCoreResourceExtension(object):
         code flow. Thus, it's this function's responsibility to check what
         actually changed.
 
-        :param context - rpc context
-        :param data - port data
+        :param context: rpc context
+        :param data: port data
         """
 
     @abc.abstractmethod
     def delete_port(self, context, data):
         """Delete port from agent extension.
 
-        :param context - rpc context
-        :param data - port data
+        :param context: rpc context
+        :param data: port data
+        """
+
+    def consume_api(self, agent_api):
+        """Consume the AgentAPI instance from the AgentExtensionsManager
+
+        This allows extensions to gain access to resources limited to the
+        NeutronAgent.
+
+        :param agent_api: An instance of an agent specific API
         """

@@ -16,13 +16,13 @@
 import socket
 
 import netaddr
-from tempest_lib.common.utils import data_utils
+from tempest.common import custom_matchers
+from tempest.lib.common.utils import data_utils
+from tempest import test
 
 from neutron.tests.api import base
 from neutron.tests.api import base_security_groups as sec_base
-from neutron.tests.tempest.common import custom_matchers
 from neutron.tests.tempest import config
-from neutron.tests.tempest import test
 
 CONF = config.CONF
 
@@ -49,7 +49,7 @@ class PortsTestJSON(sec_base.BaseSecGroupTest):
         self.client.delete_port(port_id)
         body = self.client.list_ports()
         ports_list = body['ports']
-        self.assertFalse(port_id in [n['id'] for n in ports_list])
+        self.assertNotIn(port_id, [n['id'] for n in ports_list])
 
     @test.attr(type='smoke')
     @test.idempotent_id('c72c1c0c-2193-4aca-aaa4-b1442640f51c')
@@ -317,9 +317,6 @@ class PortsAdminExtendedAttrsTestJSON(base.BaseAdminNetworkTest):
     @classmethod
     def resource_setup(cls):
         super(PortsAdminExtendedAttrsTestJSON, cls).resource_setup()
-        cls.identity_client = cls._get_identity_admin_client()
-        cls.tenant = cls.identity_client.get_tenant_by_name(
-            CONF.identity.tenant_name)
         cls.network = cls.create_network()
         cls.host_id = socket.gethostname()
 

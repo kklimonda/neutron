@@ -17,13 +17,13 @@ import collections
 import os
 
 import eventlet
-
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import loopingcall
 from oslo_utils import importutils
 
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import external_process
 from neutron.agent.metadata import driver as metadata_driver
@@ -34,7 +34,6 @@ from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
 from neutron import context
-from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
 
 LOG = logging.getLogger(__name__)
@@ -58,14 +57,15 @@ class DhcpAgent(manager.Manager):
         self.cache = NetworkCache()
         self.dhcp_driver_cls = importutils.import_class(self.conf.dhcp_driver)
         ctx = context.get_admin_context_without_session()
-        self.plugin_rpc = DhcpPluginApi(topics.PLUGIN,
-                                        ctx, self.conf.use_namespaces,
-                                        self.conf.host)
+        self.plugin_rpc = DhcpPluginApi(topics.PLUGIN, ctx, self.conf.host)
         # create dhcp dir to store dhcp info
         dhcp_dir = os.path.dirname("/%s/dhcp/" % self.conf.state_path)
         utils.ensure_dir(dhcp_dir)
         self.dhcp_version = self.dhcp_driver_cls.check_version()
         self._populate_networks_cache()
+        # keep track of mappings between networks and routers for
+        # metadata processing
+        self._metadata_routers = {}  # {network_id: router_id}
         self._process_monitor = external_process.ProcessMonitor(
             config=self.conf,
             resource_type='dhcp')
@@ -80,10 +80,7 @@ class DhcpAgent(manager.Manager):
                 self.conf
             )
             for net_id in existing_networks:
-                net = dhcp.NetModel(self.conf.use_namespaces,
-                                    {"id": net_id,
-                                     "subnets": [],
-                                     "ports": []})
+                net = dhcp.NetModel({"id": net_id, "subnets": [], "ports": []})
                 self.cache.put(net)
         except NotImplementedError:
             # just go ahead with an empty networks cache
@@ -155,6 +152,7 @@ class DhcpAgent(manager.Manager):
 
         try:
             active_networks = self.plugin_rpc.get_active_networks_info()
+            LOG.info(_LI('All active networks have been fetched through RPC.'))
             active_network_ids = set(network.id for network in active_networks)
             for deleted_id in known_network_ids - active_network_ids:
                 try:
@@ -220,7 +218,10 @@ class DhcpAgent(manager.Manager):
     @utils.exception_logger()
     def safe_configure_dhcp_for_network(self, network):
         try:
+            network_id = network.get('id')
+            LOG.info(_LI('Starting network %s dhcp configuration'), network_id)
             self.configure_dhcp_for_network(network)
+            LOG.info(_LI('Finished network %s dhcp configuration'), network_id)
         except (exceptions.NetworkNotFound, RuntimeError):
             LOG.warn(_LW('Network %s may have been deleted and its resources '
                          'may have already been disposed.'), network.id)
@@ -245,13 +246,18 @@ class DhcpAgent(manager.Manager):
                 if subnet.ip_version == 4 and subnet.enable_dhcp:
                     self.enable_isolated_metadata_proxy(network)
                     break
+        elif (not self.conf.force_metadata and
+              not self.conf.enable_isolated_metadata):
+            # In the case that the dhcp agent ran with metadata enabled,
+            # and dhcp agent now starts with metadata disabled, check and
+            # delete any metadata_proxy.
+            self.disable_isolated_metadata_proxy(network)
 
     def disable_dhcp_helper(self, network_id):
         """Disable DHCP for a network known to the agent."""
         network = self.cache.get_network_by_id(network_id)
         if network:
-            if (self.conf.use_namespaces and
-                self.conf.enable_isolated_metadata):
+            if self.conf.enable_isolated_metadata:
                 # NOTE(jschwarz): In the case where a network is deleted, all
                 # the subnets and ports are deleted before this function is
                 # called, so checking if 'should_enable_metadata' is True
@@ -328,6 +334,8 @@ class DhcpAgent(manager.Manager):
         updated_port = dhcp.DictModel(payload['port'])
         network = self.cache.get_network_by_id(updated_port.network_id)
         if network:
+            LOG.info(_LI("Trigger reload_allocations for port %s"),
+                     updated_port)
             driver_action = 'reload_allocations'
             if self._is_port_on_this_agent(updated_port):
                 orig = self.cache.get_port_by_id(updated_port['id'])
@@ -379,14 +387,24 @@ class DhcpAgent(manager.Manager):
                                  'port_id': router_ports[0].id,
                                  'router_id': router_ports[0].device_id})
                 kwargs = {'router_id': router_ports[0].device_id}
+                self._metadata_routers[network.id] = router_ports[0].device_id
 
         metadata_driver.MetadataDriver.spawn_monitored_metadata_proxy(
             self._process_monitor, network.namespace, dhcp.METADATA_PORT,
             self.conf, **kwargs)
 
     def disable_isolated_metadata_proxy(self, network):
+        if (self.conf.enable_metadata_network and
+            network.id in self._metadata_routers):
+            uuid = self._metadata_routers[network.id]
+            is_router_id = True
+        else:
+            uuid = network.id
+            is_router_id = False
         metadata_driver.MetadataDriver.destroy_monitored_metadata_proxy(
-            self._process_monitor, network.id, self.conf)
+            self._process_monitor, uuid, self.conf)
+        if is_router_id:
+            del self._metadata_routers[network.id]
 
 
 class DhcpPluginApi(object):
@@ -404,10 +422,9 @@ class DhcpPluginApi(object):
 
     """
 
-    def __init__(self, topic, context, use_namespaces, host):
+    def __init__(self, topic, context, host):
         self.context = context
         self.host = host
-        self.use_namespaces = use_namespaces
         target = oslo_messaging.Target(
                 topic=topic,
                 namespace=constants.RPC_NAMESPACE_DHCP_PLUGIN,
@@ -419,7 +436,7 @@ class DhcpPluginApi(object):
         cctxt = self.client.prepare(version='1.1')
         networks = cctxt.call(self.context, 'get_active_networks_info',
                               host=self.host)
-        return [dhcp.NetModel(self.use_namespaces, n) for n in networks]
+        return [dhcp.NetModel(n) for n in networks]
 
     def get_network_info(self, network_id):
         """Make a remote process call to retrieve network info."""
@@ -427,7 +444,7 @@ class DhcpPluginApi(object):
         network = cctxt.call(self.context, 'get_network_info',
                              network_id=network_id, host=self.host)
         if network:
-            return dhcp.NetModel(self.use_namespaces, network)
+            return dhcp.NetModel(network)
 
     def create_dhcp_port(self, port):
         """Make a remote process call to create the dhcp port."""
@@ -451,13 +468,6 @@ class DhcpPluginApi(object):
         return cctxt.call(self.context, 'release_dhcp_port',
                           network_id=network_id, device_id=device_id,
                           host=self.host)
-
-    def release_port_fixed_ip(self, network_id, device_id, subnet_id):
-        """Make a remote process call to release a fixed_ip on the port."""
-        cctxt = self.client.prepare()
-        return cctxt.call(self.context, 'release_port_fixed_ip',
-                          network_id=network_id, subnet_id=subnet_id,
-                          device_id=device_id, host=self.host)
 
 
 class NetworkCache(object):
@@ -544,14 +554,14 @@ class NetworkCache(object):
 class DhcpAgentWithStateReport(DhcpAgent):
     def __init__(self, host=None, conf=None):
         super(DhcpAgentWithStateReport, self).__init__(host=host, conf=conf)
-        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
         self.agent_state = {
             'binary': 'neutron-dhcp-agent',
             'host': host,
+            'availability_zone': self.conf.AGENT.availability_zone,
             'topic': topics.DHCP_AGENT,
             'configurations': {
                 'dhcp_driver': self.conf.dhcp_driver,
-                'use_namespaces': self.conf.use_namespaces,
                 'dhcp_lease_duration': self.conf.dhcp_lease_duration,
                 'log_agent_heartbeats': self.conf.AGENT.log_agent_heartbeats},
             'start_flag': True,

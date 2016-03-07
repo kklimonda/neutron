@@ -18,12 +18,12 @@ from oslo_log import log as logging
 from oslo_utils import importutils
 import six
 
+from neutron._i18n import _, _LE, _LI
 from neutron.agent.common import config
 from neutron.agent.linux import interface
 from neutron.agent.linux import iptables_manager
 from neutron.common import constants as constants
 from neutron.common import ipv6_utils
-from neutron.i18n import _LE, _LI
 from neutron.services.metering.drivers import abstract_driver
 
 
@@ -36,7 +36,6 @@ RULE = '-r-'
 LABEL = '-l-'
 
 config.register_interface_driver_opts_helper(cfg.CONF)
-config.register_use_namespaces_opts_helper(cfg.CONF)
 cfg.CONF.register_opts(interface.OPTS)
 
 
@@ -69,7 +68,8 @@ class RouterWithMetering(object):
         self.conf = conf
         self.id = router['id']
         self.router = router
-        self.ns_name = NS_PREFIX + self.id if conf.use_namespaces else None
+        # TODO(cbrandily): deduplicate ns_name generation in metering/l3
+        self.ns_name = NS_PREFIX + self.id
         self.iptables_manager = iptables_manager.IptablesManager(
             namespace=self.ns_name,
             binary_name=WRAP_NAME,
@@ -176,9 +176,9 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
     def _prepare_rule(self, ext_dev, rule, label_chain):
         remote_ip = rule['remote_ip_prefix']
         if rule['direction'] == 'egress':
-            dir_opt = '-o %s -s %s' % (ext_dev, remote_ip)
+            dir_opt = '-o %s -d %s' % (ext_dev, remote_ip)
         else:
-            dir_opt = '-i %s -d %s' % (ext_dev, remote_ip)
+            dir_opt = '-i %s -s %s' % (ext_dev, remote_ip)
 
         if rule['excluded']:
             ipt_rule = '%s -j RETURN' % dir_opt

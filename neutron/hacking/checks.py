@@ -30,6 +30,9 @@ import six
 #    neutron/tests/unit/hacking/test_checks.py
 
 _all_log_levels = {
+    'reserved': '_',  # this should never be used with a log unless
+                      # it is a variable used for a log message and
+                      # a exception
     'error': '_LE',
     'info': '_LI',
     'warn': '_LW',
@@ -38,6 +41,7 @@ _all_log_levels = {
     'exception': '_LE',
 }
 _all_hints = set(_all_log_levels.values())
+mutable_default_args = re.compile(r"^\s*def .+\((.+=\{\}|.+=\[\])")
 
 
 def _regex_for_level(level, hint):
@@ -111,12 +115,14 @@ def check_assert_called_once_with(logical_line, filename):
     #    assert_called_once
     #    assertCalledOnceWith
     #    assert_has_called
+    #    called_once_with
     if 'neutron/tests/' in filename:
         if '.assert_called_once_with(' in logical_line:
             return
         uncased_line = logical_line.lower().replace('_', '')
 
-        if '.assertcalledonce' in uncased_line:
+        check_calls = ['.assertcalledonce', '.calledoncewith']
+        if any(x for x in check_calls if x in uncased_line):
             msg = ("N322: Possible use of no-op mock method. "
                    "please use assert_called_once_with.")
             yield (0, msg)
@@ -174,6 +180,65 @@ def check_python3_no_iteritems(logical_line):
         yield(0, msg)
 
 
+def check_asserttrue(logical_line, filename):
+    if 'neutron/tests/' in filename:
+        if re.search(r"assertEqual\(\s*True,[^,]*(,[^,]*)?\)", logical_line):
+            msg = ("N328: Use assertTrue(observed) instead of "
+                   "assertEqual(True, observed)")
+            yield (0, msg)
+        if re.search(r"assertEqual\([^,]*,\s*True(,[^,]*)?\)", logical_line):
+            msg = ("N328: Use assertTrue(observed) instead of "
+                   "assertEqual(True, observed)")
+            yield (0, msg)
+
+
+def no_mutable_default_args(logical_line):
+    msg = "N329: Method's default argument shouldn't be mutable!"
+    if mutable_default_args.match(logical_line):
+        yield (0, msg)
+
+
+def check_assertfalse(logical_line, filename):
+    if 'neutron/tests/' in filename:
+        if re.search(r"assertEqual\(\s*False,[^,]*(,[^,]*)?\)", logical_line):
+            msg = ("N328: Use assertFalse(observed) instead of "
+                   "assertEqual(False, observed)")
+            yield (0, msg)
+        if re.search(r"assertEqual\([^,]*,\s*False(,[^,]*)?\)", logical_line):
+            msg = ("N328: Use assertFalse(observed) instead of "
+                   "assertEqual(False, observed)")
+            yield (0, msg)
+
+
+def check_assertempty(logical_line, filename):
+    if 'neutron/tests/' in filename:
+        msg = ("N330: Use assertEqual(*empty*, observed) instead of "
+               "assertEqual(observed, *empty*). *empty* contains "
+               "{}, [], (), set(), '', \"\"")
+        empties = r"(\[\s*\]|\{\s*\}|\(\s*\)|set\(\s*\)|'\s*'|\"\s*\")"
+        reg = r"assertEqual\(([^,]*,\s*)+?%s\)\s*$" % empties
+        if re.search(reg, logical_line):
+            yield (0, msg)
+
+
+def check_assertisinstance(logical_line, filename):
+    if 'neutron/tests/' in filename:
+        if re.search(r"assertTrue\(\s*isinstance\(\s*[^,]*,\s*[^,]*\)\)",
+                     logical_line):
+            msg = ("N331: Use assertIsInstance(observed, type) instead "
+                   "of assertTrue(isinstance(observed, type))")
+            yield (0, msg)
+
+
+def check_assertequal_for_httpcode(logical_line, filename):
+    msg = ("N332: Use assertEqual(expected_http_code, observed_http_code) "
+           "instead of assertEqual(observed_http_code, expected_http_code)")
+    if 'neutron/tests/' in filename:
+        if re.search(r"assertEqual\(\s*[^,]*,[^,]*HTTP[^\.]*\.code\s*\)",
+                     logical_line):
+            yield (0, msg)
+
+
 def factory(register):
     register(validate_log_translations)
     register(use_jsonutils)
@@ -184,3 +249,9 @@ def factory(register):
     register(check_python3_xrange)
     register(check_no_basestring)
     register(check_python3_no_iteritems)
+    register(check_asserttrue)
+    register(no_mutable_default_args)
+    register(check_assertfalse)
+    register(check_assertempty)
+    register(check_assertisinstance)
+    register(check_assertequal_for_httpcode)

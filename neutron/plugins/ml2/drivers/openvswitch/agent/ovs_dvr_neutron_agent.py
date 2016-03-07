@@ -20,9 +20,9 @@ from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
 
+from neutron._i18n import _LE, _LI, _LW
 from neutron.common import constants as n_const
 from neutron.common import utils as n_utils
-from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
 
@@ -36,7 +36,7 @@ cfg.CONF.import_group('AGENT', 'neutron.plugins.ml2.drivers.openvswitch.'
 # that subnet
 class LocalDVRSubnetMapping(object):
     def __init__(self, subnet, csnat_ofport=constants.OFPORT_INVALID):
-        # set of commpute ports on on this dvr subnet
+        # set of compute ports on this dvr subnet
         self.compute_ports = {}
         self.subnet = subnet
         self.csnat_ofport = csnat_ofport
@@ -377,8 +377,9 @@ class OVSDVRNeutronAgent(object):
             subnet_info = self.plugin_rpc.get_subnet_for_dvr(
                 self.context, subnet_uuid, fixed_ips=fixed_ips)
             if not subnet_info:
-                LOG.error(_LE("DVR: Unable to retrieve subnet information "
-                              "for subnet_id %s"), subnet_uuid)
+                LOG.warning(_LW("DVR: Unable to retrieve subnet information "
+                                "for subnet_id %s. The subnet or the gateway "
+                                "may have already been deleted"), subnet_uuid)
                 return
             LOG.debug("get_subnet_for_dvr for subnet %(uuid)s "
                       "returned with %(info)s",
@@ -402,9 +403,9 @@ class OVSDVRNeutronAgent(object):
                   "get_ports_on_host_by_subnet %s",
                   local_compute_ports)
         vif_by_id = self.int_br.get_vifs_by_ids(
-            [prt['id'] for prt in local_compute_ports])
-        for prt in local_compute_ports:
-            vif = vif_by_id.get(prt['id'])
+            [local_port['id'] for local_port in local_compute_ports])
+        for local_port in local_compute_ports:
+            vif = vif_by_id.get(local_port['id'])
             if not vif:
                 continue
             ldm.add_compute_ofport(vif.vif_id, vif.ofport)
@@ -418,7 +419,7 @@ class OVSDVRNeutronAgent(object):
                 # the compute port is discovered first here that its on
                 # a dvr routed subnet queue this subnet to that port
                 comp_ovsport = OVSPort(vif.vif_id, vif.ofport,
-                                  vif.vif_mac, prt['device_owner'])
+                                  vif.vif_mac, local_port['device_owner'])
                 comp_ovsport.add_subnet(subnet_uuid)
                 self.local_ports[vif.vif_id] = comp_ovsport
             # create rule for just this vm port
@@ -528,6 +529,14 @@ class OVSDVRNeutronAgent(object):
             # for this subnet
             subnet_info = self.plugin_rpc.get_subnet_for_dvr(
                 self.context, subnet_uuid, fixed_ips=fixed_ips)
+            if not subnet_info:
+                LOG.warning(_LW("DVR: Unable to retrieve subnet information "
+                                "for subnet_id %s. The subnet or the gateway "
+                                "may have already been deleted"), subnet_uuid)
+                return
+            LOG.debug("get_subnet_for_dvr for subnet %(uuid)s "
+                      "returned with %(info)s",
+                      {"uuid": subnet_uuid, "info": subnet_info})
             ldm = LocalDVRSubnetMapping(subnet_info, port.ofport)
             self.local_dvr_map[subnet_uuid] = ldm
         else:

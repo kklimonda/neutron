@@ -24,6 +24,7 @@ from oslo_utils import excutils
 import six
 import webob.exc
 
+from neutron._i18n import _, _LE, _LI
 from neutron.api import api_common
 from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
 from neutron.api.v2 import attributes
@@ -32,7 +33,6 @@ from neutron.common import constants as const
 from neutron.common import exceptions
 from neutron.common import rpc as n_rpc
 from neutron.db import api as db_api
-from neutron.i18n import _LE, _LI
 from neutron import policy
 from neutron import quota
 from neutron.quota import resource_registry
@@ -332,6 +332,7 @@ class Controller(object):
         if hasattr(self, '_nova_notifier'):
             self._nova_notifier.send_network_change(action, orig, returned)
 
+    @db_api.retry_db_errors
     def index(self, request, **kwargs):
         """Returns a list of the requested entity."""
         parent_id = kwargs.get(self._parent_id_name)
@@ -339,6 +340,7 @@ class Controller(object):
         policy.init()
         return self._items(request, True, parent_id)
 
+    @db_api.retry_db_errors
     def show(self, request, id, **kwargs):
         """Returns detailed information about the requested entity."""
         try:

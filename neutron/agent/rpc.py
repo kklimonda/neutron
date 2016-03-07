@@ -20,10 +20,10 @@ from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import uuidutils
 
+from neutron._i18n import _LW
 from neutron.common import constants
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
-from neutron.i18n import _LW
 
 
 LOG = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def create_consumers(endpoints, prefix, topic_details, start_listening=True):
     :returns: A common Connection.
     """
 
-    connection = n_rpc.create_connection(new=True)
+    connection = n_rpc.create_connection()
     for details in topic_details:
         topic, operation, node_name = itertools.islice(
             itertools.chain(details, [None]), 3)

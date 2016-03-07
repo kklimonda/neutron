@@ -1,5 +1,4 @@
 # Copyright 2011 OpenStack Foundation.
-# Copyright 2011 Justin Santa Barbara
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -21,15 +20,17 @@ import os
 
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_middleware import base
 import routes
 import six
 import webob.dec
 import webob.exc
 
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.common import exceptions
 import neutron.extensions
-from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
+from neutron.plugins.common import constants as const
 from neutron.services import provider_configuration
 from neutron import wsgi
 
@@ -66,34 +67,34 @@ class PluginInterface(object):
 class ExtensionDescriptor(object):
     """Base class that defines the contract for extensions."""
 
+    @abc.abstractmethod
     def get_name(self):
         """The name of the extension.
 
         e.g. 'Fox In Socks'
         """
-        raise NotImplementedError()
 
+    @abc.abstractmethod
     def get_alias(self):
         """The alias for the extension.
 
         e.g. 'FOXNSOX'
         """
-        raise NotImplementedError()
 
+    @abc.abstractmethod
     def get_description(self):
         """Friendly description for the extension.
 
         e.g. 'The Fox In Socks Extension'
         """
-        raise NotImplementedError()
 
+    @abc.abstractmethod
     def get_updated(self):
         """The timestamp when the extension was last updated.
 
         e.g. '2011-01-22T13:25:27-06:00'
         """
         # NOTE(justinsb): Not sure of the purpose of this is, vs the XML NS
-        raise NotImplementedError()
 
     def get_resources(self):
         """List of extensions.ResourceExtension extension objects.
@@ -143,6 +144,10 @@ class ExtensionDescriptor(object):
         Methods in this abstract class  should be decorated as abstractmethod
         """
         return None
+
+    def get_required_extensions(self):
+        """Returns a list of extensions to be processed before this one."""
+        return []
 
     def update_attributes_map(self, extended_attributes,
                               extension_attrs_map=None):
@@ -240,7 +245,7 @@ class ExtensionController(wsgi.Controller):
         raise webob.exc.HTTPNotFound(msg)
 
 
-class ExtensionMiddleware(wsgi.Middleware):
+class ExtensionMiddleware(base.ConfigurableMiddleware):
     """Extensions middleware for WSGI."""
 
     def __init__(self, application,
@@ -263,6 +268,16 @@ class ExtensionMiddleware(wsgi.Middleware):
             for action, method in six.iteritems(resource.collection_actions):
                 conditions = dict(method=[method])
                 path = "/%s/%s" % (resource.collection, action)
+                with mapper.submapper(controller=resource.controller,
+                                      action=action,
+                                      path_prefix=path_prefix,
+                                      conditions=conditions) as submap:
+                    submap.connect(path)
+                    submap.connect("%s.:(format)" % path)
+
+            for action, method in resource.collection_methods.items():
+                conditions = dict(method=[method])
+                path = "/%s" % resource.collection
                 with mapper.submapper(controller=resource.controller,
                                       action=action,
                                       path_prefix=path_prefix,
@@ -389,36 +404,21 @@ class ExtensionManager(object):
         resources.append(ResourceExtension('extensions',
                                            ExtensionController(self)))
         for ext in self.extensions.values():
-            try:
-                resources.extend(ext.get_resources())
-            except AttributeError:
-                # NOTE(dprince): Extension aren't required to have resource
-                # extensions
-                pass
+            resources.extend(ext.get_resources())
         return resources
 
     def get_actions(self):
         """Returns a list of ActionExtension objects."""
         actions = []
         for ext in self.extensions.values():
-            try:
-                actions.extend(ext.get_actions())
-            except AttributeError:
-                # NOTE(dprince): Extension aren't required to have action
-                # extensions
-                pass
+            actions.extend(ext.get_actions())
         return actions
 
     def get_request_extensions(self):
         """Returns a list of RequestExtension objects."""
         request_exts = []
         for ext in self.extensions.values():
-            try:
-                request_exts.extend(ext.get_request_extensions())
-            except AttributeError:
-                # NOTE(dprince): Extension aren't required to have request
-                # extensions
-                pass
+            request_exts.extend(ext.get_request_extensions())
         return request_exts
 
     def extend_resources(self, version, attr_map):
@@ -430,45 +430,42 @@ class ExtensionManager(object):
         After this function, we will extend the attr_map if an extension
         wants to extend this map.
         """
-        update_exts = []
-        processed_exts = set()
+        processed_exts = {}
         exts_to_process = self.extensions.copy()
         # Iterate until there are unprocessed extensions or if no progress
         # is made in a whole iteration
         while exts_to_process:
             processed_ext_count = len(processed_exts)
             for ext_name, ext in list(exts_to_process.items()):
-                if not hasattr(ext, 'get_extended_resources'):
-                    del exts_to_process[ext_name]
+                # Process extension only if all required extensions
+                # have been processed already
+                required_exts_set = set(ext.get_required_extensions())
+                if required_exts_set - set(processed_exts):
                     continue
-                if hasattr(ext, 'update_attributes_map'):
-                    update_exts.append(ext)
-                if hasattr(ext, 'get_required_extensions'):
-                    # Process extension only if all required extensions
-                    # have been processed already
-                    required_exts_set = set(ext.get_required_extensions())
-                    if required_exts_set - processed_exts:
-                        continue
-                try:
-                    extended_attrs = ext.get_extended_resources(version)
-                    for res, resource_attrs in six.iteritems(extended_attrs):
-                        attr_map.setdefault(res, {}).update(resource_attrs)
-                except AttributeError:
-                    LOG.exception(_LE("Error fetching extended attributes for "
-                                      "extension '%s'"), ext.get_name())
-                processed_exts.add(ext_name)
+                extended_attrs = ext.get_extended_resources(version)
+                for res, resource_attrs in six.iteritems(extended_attrs):
+                    attr_map.setdefault(res, {}).update(resource_attrs)
+                processed_exts[ext_name] = ext
                 del exts_to_process[ext_name]
             if len(processed_exts) == processed_ext_count:
                 # Exit loop as no progress was made
                 break
         if exts_to_process:
-            # NOTE(salv-orlando): Consider whether this error should be fatal
-            LOG.error(_LE("It was impossible to process the following "
-                          "extensions: %s because of missing requirements."),
-                      ','.join(exts_to_process.keys()))
+            unloadable_extensions = set(exts_to_process.keys())
+            LOG.error(_LE("Unable to process extensions (%s) because "
+                          "the configured plugins do not satisfy "
+                          "their requirements. Some features will not "
+                          "work as expected."),
+                      ', '.join(unloadable_extensions))
+            # Fail gracefully for default extensions, just in case some out
+            # of tree plugins are not entirely up to speed
+            default_extensions = set(const.DEFAULT_SERVICE_PLUGINS.values())
+            if not unloadable_extensions <= default_extensions:
+                raise exceptions.ExtensionsNotFound(
+                    extensions=list(unloadable_extensions))
 
         # Extending extensions' attributes map.
-        for ext in update_exts:
+        for ext in processed_exts.values():
             ext.update_attributes_map(attr_map)
 
     def _check_extension(self, extension):
@@ -478,11 +475,10 @@ class ExtensionManager(object):
             LOG.debug('Ext alias: %s', extension.get_alias())
             LOG.debug('Ext description: %s', extension.get_description())
             LOG.debug('Ext updated: %s', extension.get_updated())
-        except AttributeError as ex:
-            LOG.exception(_LE("Exception loading extension: %s"),
-                          six.text_type(ex))
+        except AttributeError:
+            LOG.exception(_LE("Exception loading extension"))
             return False
-        return True
+        return isinstance(extension, ExtensionDescriptor)
 
     def _load_all_extensions(self):
         """Load extensions from the configured path.
@@ -567,8 +563,7 @@ class PluginAwareExtensionManager(ExtensionManager):
         return supports_extension
 
     def _plugins_implement_interface(self, extension):
-        if(not hasattr(extension, "get_plugin_interface") or
-           extension.get_plugin_interface() is None):
+        if extension.get_plugin_interface() is None:
             return True
         for plugin in self.plugins.values():
             if isinstance(plugin, extension.get_plugin_interface()):
@@ -585,20 +580,26 @@ class PluginAwareExtensionManager(ExtensionManager):
                                 service_plugins)
         return cls._instance
 
+    def get_plugin_supported_extension_aliases(self, plugin):
+        """Return extension aliases supported by a given plugin"""
+        aliases = set()
+        # we also check all classes that the plugins inherit to see if they
+        # directly provide support for an extension
+        for item in [plugin] + plugin.__class__.mro():
+            try:
+                aliases |= set(
+                    getattr(item, "supported_extension_aliases", []))
+            except TypeError:
+                # we land here if a class has a @property decorator for
+                # supported extension aliases. They only work on objects.
+                pass
+        return aliases
+
     def get_supported_extension_aliases(self):
         """Gets extension aliases supported by all plugins."""
         aliases = set()
         for plugin in self.plugins.values():
-            # we also check all classes that the plugins inherit to see if they
-            # directly provide support for an extension
-            for item in [plugin] + plugin.__class__.mro():
-                try:
-                    aliases |= set(
-                        getattr(item, "supported_extension_aliases", []))
-                except TypeError:
-                    # we land here if a class has an @property decorator for
-                    # supported extension aliases. They only work on objects.
-                    pass
+            aliases |= self.get_plugin_supported_extension_aliases(plugin)
         return aliases
 
     @classmethod
@@ -641,11 +642,17 @@ class ResourceExtension(object):
     """Add top level resources to the OpenStack API in Neutron."""
 
     def __init__(self, collection, controller, parent=None, path_prefix="",
-                 collection_actions={}, member_actions={}, attr_map={}):
+                 collection_actions=None, member_actions=None, attr_map=None,
+                 collection_methods=None):
+        collection_actions = collection_actions or {}
+        collection_methods = collection_methods or {}
+        member_actions = member_actions or {}
+        attr_map = attr_map or {}
         self.collection = collection
         self.controller = controller
         self.parent = parent
         self.collection_actions = collection_actions
+        self.collection_methods = collection_methods
         self.member_actions = member_actions
         self.path_prefix = path_prefix
         self.attr_map = attr_map

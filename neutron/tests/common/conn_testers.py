@@ -15,8 +15,10 @@
 import functools
 
 import fixtures
+from oslo_utils import uuidutils
 
 from neutron.agent import firewall
+from neutron.common import constants
 from neutron.tests.common import machine_fixtures
 from neutron.tests.common import net_helpers
 
@@ -47,8 +49,8 @@ class ConnectionTester(fixtures.Fixture):
 
     UDP = net_helpers.NetcatTester.UDP
     TCP = net_helpers.NetcatTester.TCP
-    ICMP = 'icmp'
-    ARP = 'arp'
+    ICMP = constants.PROTO_NAME_ICMP
+    ARP = constants.ETHERTYPE_NAME_ARP
     INGRESS = firewall.INGRESS_DIRECTION
     EGRESS = firewall.EGRESS_DIRECTION
 
@@ -58,12 +60,15 @@ class ConnectionTester(fixtures.Fixture):
             self.TCP: self._test_transport_connectivity,
             self.ICMP: self._test_icmp_connectivity,
             self.ARP: self._test_arp_connectivity}
-        self._nc_testers = dict()
+        self._nc_testers = {}
+        self._pingers = {}
         self.addCleanup(self.cleanup)
 
     def cleanup(self):
         for nc in self._nc_testers.values():
             nc.stop_processes()
+        for pinger in self._pingers.values():
+            pinger.stop()
 
     @property
     def vm_namespace(self):
@@ -88,6 +93,14 @@ class ConnectionTester(fixtures.Fixture):
     @vm_mac_address.setter
     def vm_mac_address(self, mac_address):
         self._vm.mac_address = mac_address
+
+    @property
+    def peer_mac_address(self):
+        return self._peer.port.link.address
+
+    @peer_mac_address.setter
+    def peer_mac_address(self, mac_address):
+        self._peer.mac_address = mac_address
 
     @property
     def peer_namespace(self):
@@ -238,6 +251,79 @@ class ConnectionTester(fixtures.Fixture):
         self._nc_testers[nc_key] = nc_tester
         return nc_tester
 
+    def _get_pinger(self, direction):
+        try:
+            pinger = self._pingers[direction]
+        except KeyError:
+            src_namespace, dst_address = self._get_namespace_and_address(
+                direction)
+            pinger = net_helpers.Pinger(src_namespace, dst_address)
+            self._pingers[direction] = pinger
+        return pinger
+
+    def start_sending_icmp(self, direction):
+        pinger = self._get_pinger(direction)
+        pinger.start()
+
+    def stop_sending_icmp(self, direction):
+        pinger = self._get_pinger(direction)
+        pinger.stop()
+
+    def get_sent_icmp_packets(self, direction):
+        pinger = self._get_pinger(direction)
+        return pinger.sent
+
+    def get_received_icmp_packets(self, direction):
+        pinger = self._get_pinger(direction)
+        return pinger.received
+
+
+class OVSConnectionTester(ConnectionTester):
+    """Tester with OVS bridge in the middle
+
+    The endpoints are created as OVS ports attached to the OVS bridge.
+
+    NOTE: The OVS ports are connected from the namespace. This connection is
+    currently not supported in OVS and may lead to unpredicted behavior:
+    https://bugzilla.redhat.com/show_bug.cgi?id=1160340
+
+    """
+
+    def setUp(self):
+        super(OVSConnectionTester, self).setUp()
+        self.bridge = self.useFixture(net_helpers.OVSBridgeFixture()).bridge
+        self._peer, self._vm = self.useFixture(
+            machine_fixtures.PeerMachines(self.bridge)).machines
+        self._set_port_attrs(self._peer.port)
+        self._set_port_attrs(self._vm.port)
+
+    def _set_port_attrs(self, port):
+        port.id = uuidutils.generate_uuid()
+        attrs = [('type', 'internal'),
+                 ('external_ids', {
+                     'iface-id': port.id,
+                     'iface-status': 'active',
+                     'attached-mac': port.link.address})]
+        for column, value in attrs:
+            self.bridge.set_db_attribute('Interface', port.name, column, value)
+
+    @property
+    def peer_port_id(self):
+        return self._peer.port.id
+
+    @property
+    def vm_port_id(self):
+        return self._vm.port.id
+
+    def set_tag(self, port_name, tag):
+        self.bridge.set_db_attribute('Port', port_name, 'tag', tag)
+
+    def set_vm_tag(self, tag):
+        self.set_tag(self._vm.port.name, tag)
+
+    def set_peer_tag(self, tag):
+        self.set_tag(self._peer.port.name, tag)
+
 
 class LinuxBridgeConnectionTester(ConnectionTester):
     """Tester with linux bridge in the middle
@@ -249,18 +335,22 @@ class LinuxBridgeConnectionTester(ConnectionTester):
 
     def _setUp(self):
         super(LinuxBridgeConnectionTester, self)._setUp()
-        self._bridge = self.useFixture(net_helpers.LinuxBridgeFixture()).bridge
+        self.bridge = self.useFixture(net_helpers.LinuxBridgeFixture()).bridge
         self._peer, self._vm = self.useFixture(
-            machine_fixtures.PeerMachines(self._bridge)).machines
+            machine_fixtures.PeerMachines(self.bridge)).machines
 
     @property
     def bridge_namespace(self):
-        return self._bridge.namespace
+        return self.bridge.namespace
 
     @property
     def vm_port_id(self):
         return net_helpers.VethFixture.get_peer_name(self._vm.port.name)
 
+    @property
+    def peer_port_id(self):
+        return net_helpers.VethFixture.get_peer_name(self._peer.port.name)
+
     def flush_arp_tables(self):
-        self._bridge.neigh.flush(4, 'all')
+        self.bridge.neigh.flush(4, 'all')
         super(LinuxBridgeConnectionTester, self).flush_arp_tables()

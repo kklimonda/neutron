@@ -18,7 +18,6 @@ import os
 import mock
 import netaddr
 from oslo_config import cfg
-from oslo_log import log as logging
 
 from neutron.agent.common import config
 from neutron.agent.dhcp import config as dhcp_config
@@ -29,8 +28,7 @@ from neutron.common import constants
 from neutron.common import utils
 from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.tests import base
-
-LOG = logging.getLogger(__name__)
+from neutron.tests import tools
 
 
 class FakeIPAllocation(object):
@@ -71,7 +69,7 @@ class Dictable(object):
 class FakeDhcpPort(object):
     id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa'
     admin_state_up = True
-    device_owner = 'network:dhcp'
+    device_owner = constants.DEVICE_OWNER_DHCP
     fixed_ips = [FakeIPAllocation('192.168.0.1',
                                   'dddddddd-dddd-dddd-dddd-dddddddddddd')]
     mac_address = '00:00:80:aa:bb:ee'
@@ -83,7 +81,7 @@ class FakeDhcpPort(object):
 
 class FakeReservedPort(object):
     admin_state_up = True
-    device_owner = 'network:dhcp'
+    device_owner = constants.DEVICE_OWNER_DHCP
     fixed_ips = [FakeIPAllocation('192.168.0.6',
                                   'dddddddd-dddd-dddd-dddd-dddddddddddd')]
     mac_address = '00:00:80:aa:bb:ee'
@@ -805,7 +803,6 @@ class TestConfBase(base.BaseTestCase):
         self.conf.register_opts(dhcp_config.DNSMASQ_OPTS)
         self.conf.register_opts(external_process.OPTS)
         config.register_interface_driver_opts_helper(self.conf)
-        config.register_use_namespaces_opts_helper(self.conf)
 
 
 class TestBase(TestConfBase):
@@ -822,7 +819,7 @@ class TestBase(TestConfBase):
         self.config_parse(self.conf)
         self.conf.set_override('state_path', '')
 
-        self.replace_p = mock.patch('neutron.agent.linux.utils.replace_file')
+        self.replace_p = mock.patch('neutron.common.utils.replace_file')
         self.execute_p = mock.patch('neutron.agent.common.utils.execute')
         self.safe = self.replace_p.start()
         self.execute = self.execute_p.start()
@@ -949,25 +946,6 @@ class TestDhcpLocalProcess(TestBase):
             self._assert_disabled(lp)
 
     def test_disable(self):
-        self.conf.set_override('dhcp_delete_namespaces', False)
-        attrs_to_mock = dict([(a, mock.DEFAULT) for a in
-                              ['active', 'interface_name']])
-        network = FakeDualNetwork()
-        with mock.patch.multiple(LocalChild, **attrs_to_mock) as mocks:
-            mocks['active'].__get__ = mock.Mock(return_value=True)
-            mocks['interface_name'].__get__ = mock.Mock(return_value='tap0')
-            lp = LocalChild(self.conf, network)
-            with mock.patch('neutron.agent.linux.ip_lib.IPWrapper') as ip:
-                lp.disable()
-
-            self._assert_disabled(lp)
-
-        self.mock_mgr.assert_has_calls([mock.call(self.conf, None),
-                                        mock.call().destroy(network, 'tap0')])
-
-        self.assertEqual(ip.return_value.netns.delete.call_count, 0)
-
-    def test_disable_delete_ns(self):
         attrs_to_mock = {'active': mock.DEFAULT}
 
         with mock.patch.multiple(LocalChild, **attrs_to_mock) as mocks:
@@ -993,15 +971,14 @@ class TestDhcpLocalProcess(TestBase):
         parent.assert_has_calls(expected)
 
     def test_get_interface_name(self):
-        with mock.patch('six.moves.builtins.open') as mock_open:
-            mock_open.return_value.__enter__ = lambda s: s
-            mock_open.return_value.__exit__ = mock.Mock()
-            mock_open.return_value.read.return_value = 'tap0'
-            lp = LocalChild(self.conf, FakeDualNetwork())
-            self.assertEqual(lp.interface_name, 'tap0')
+        net = FakeDualNetwork()
+        path = '/dhcp/%s/interface' % net.id
+        self.useFixture(tools.OpenFixture(path, 'tap0'))
+        lp = LocalChild(self.conf, net)
+        self.assertEqual(lp.interface_name, 'tap0')
 
     def test_set_interface_name(self):
-        with mock.patch('neutron.agent.linux.utils.replace_file') as replace:
+        with mock.patch('neutron.common.utils.replace_file') as replace:
             lp = LocalChild(self.conf, FakeDualNetwork())
             with mock.patch.object(lp, 'get_conf_file_name') as conf_file:
                 conf_file.return_value = '/interface'
@@ -1019,7 +996,7 @@ class TestDnsmasq(TestBase):
 
     def _test_spawn(self, extra_options, network=FakeDualNetwork(),
                     max_leases=16777216, lease_duration=86400,
-                    has_static=True):
+                    has_static=True, no_resolv='--no-resolv'):
         def mock_get_conf_file_name(kind):
             return '/dhcp/%s/%s' % (network.id, kind)
 
@@ -1031,7 +1008,7 @@ class TestDnsmasq(TestBase):
         expected = [
             'dnsmasq',
             '--no-hosts',
-            '--no-resolv',
+            no_resolv,
             '--strict-order',
             '--except-interface=lo',
             '--pid-file=%s' % expected_pid_file,
@@ -1069,7 +1046,9 @@ class TestDnsmasq(TestBase):
                 possible_leases += netaddr.IPNetwork(s.cidr).size
 
         if cfg.CONF.advertise_mtu:
-            expected.append('--dhcp-option-force=option:mtu,%s' % network.mtu)
+            if hasattr(network, 'mtu'):
+                expected.append(
+                    '--dhcp-option-force=option:mtu,%s' % network.mtu)
 
         expected.append('--dhcp-lease-max=%d' % min(
             possible_leases, max_leases))
@@ -1159,6 +1138,21 @@ class TestDnsmasq(TestBase):
                           '--log-dhcp',
                           ('--log-facility=%s' % dhcp_dns_log)],
                          network)
+        self.makedirs.assert_called_with(os.path.join('/tmp', network.id))
+
+    def test_spawn_cfg_with_local_resolv(self):
+        self.conf.set_override('dnsmasq_local_resolv', True)
+
+        self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
+                         no_resolv='')
+
+    def test_spawn_cfg_with_local_resolv_overriden(self):
+        self.conf.set_override('dnsmasq_local_resolv', True)
+        self.conf.set_override('dnsmasq_dns_servers', ['8.8.8.8'])
+
+        self._test_spawn(['--conf-file=',
+                          '--server=8.8.8.8',
+                          '--domain=openstacklocal'])
 
     def test_spawn_max_leases_is_smaller_than_cap(self):
         self._test_spawn(
@@ -1175,6 +1169,12 @@ class TestDnsmasq(TestBase):
         cfg.CONF.set_override('advertise_mtu', True)
         network = FakeV4Network()
         network.mtu = 1500
+        self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
+                         network)
+
+    def test_spawn_cfg_advertise_mtu_plugin_doesnt_pass_mtu_value(self):
+        cfg.CONF.set_override('advertise_mtu', True)
+        network = FakeV4Network()
         self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
                          network)
 
@@ -1584,23 +1584,23 @@ class TestDnsmasq(TestBase):
          exp_addn_name, exp_addn_data,
          exp_opt_name, exp_opt_data,) = self._test_reload_allocation_data
 
-        with mock.patch('six.moves.builtins.open') as mock_open:
-            mock_open.return_value.__enter__ = lambda s: s
-            mock_open.return_value.__exit__ = mock.Mock()
-            mock_open.return_value.readline.return_value = None
+        net = FakeDualNetwork()
+        hpath = '/dhcp/%s/host' % net.id
+        ipath = '/dhcp/%s/interface' % net.id
+        self.useFixture(tools.OpenFixture(hpath))
+        self.useFixture(tools.OpenFixture(ipath))
+        test_pm = mock.Mock()
+        dm = self._get_dnsmasq(net, test_pm)
+        dm.reload_allocations()
+        self.assertTrue(test_pm.register.called)
+        self.external_process().enable.assert_called_once_with(
+            reload_cfg=True)
 
-            test_pm = mock.Mock()
-            dm = self._get_dnsmasq(FakeDualNetwork(), test_pm)
-            dm.reload_allocations()
-            self.assertTrue(test_pm.register.called)
-            self.external_process().enable.assert_called_once_with(
-                reload_cfg=True)
-
-            self.safe.assert_has_calls([
-                mock.call(exp_host_name, exp_host_data),
-                mock.call(exp_addn_name, exp_addn_data),
-                mock.call(exp_opt_name, exp_opt_data),
-            ])
+        self.safe.assert_has_calls([
+            mock.call(exp_host_name, exp_host_data),
+            mock.call(exp_addn_name, exp_addn_data),
+            mock.call(exp_opt_name, exp_opt_data),
+        ])
 
     def test_release_unused_leases(self):
         dnsmasq = self._get_dnsmasq(FakeDualNetwork())
@@ -1726,15 +1726,12 @@ class TestDnsmasq(TestBase):
 
     def test_read_hosts_file_leases(self):
         filename = '/path/to/file'
-        with mock.patch('six.moves.builtins.open') as mock_open:
-            mock_open.return_value.__enter__ = lambda s: s
-            mock_open.return_value.__exit__ = mock.Mock()
-            lines = ["00:00:80:aa:bb:cc,inst-name,192.168.0.1",
-                     "00:00:80:aa:bb:cc,inst-name,[fdca:3ba5:a17a::1]"]
-            mock_open.return_value.readlines.return_value = lines
-
-            dnsmasq = self._get_dnsmasq(FakeDualNetwork())
-            leases = dnsmasq._read_hosts_file_leases(filename)
+        lines = ["00:00:80:aa:bb:cc,inst-name,192.168.0.1",
+                 "00:00:80:aa:bb:cc,inst-name,[fdca:3ba5:a17a::1]"]
+        mock_open = self.useFixture(
+            tools.OpenFixture(filename, '\n'.join(lines))).mock_open
+        dnsmasq = self._get_dnsmasq(FakeDualNetwork())
+        leases = dnsmasq._read_hosts_file_leases(filename)
 
         self.assertEqual(set([("192.168.0.1", "00:00:80:aa:bb:cc", None),
                               ("fdca:3ba5:a17a::1", "00:00:80:aa:bb:cc",
@@ -1743,16 +1740,13 @@ class TestDnsmasq(TestBase):
 
     def test_read_hosts_file_leases_with_client_id(self):
         filename = '/path/to/file'
-        with mock.patch('six.moves.builtins.open') as mock_open:
-            mock_open.return_value.__enter__ = lambda s: s
-            mock_open.return_value.__exit__ = mock.Mock()
-            lines = ["00:00:80:aa:bb:cc,id:client1,inst-name,192.168.0.1",
-                     "00:00:80:aa:bb:cc,id:client2,inst-name,"
-                     "[fdca:3ba5:a17a::1]"]
-            mock_open.return_value.readlines.return_value = lines
-
-            dnsmasq = self._get_dnsmasq(FakeDualNetwork())
-            leases = dnsmasq._read_hosts_file_leases(filename)
+        lines = ["00:00:80:aa:bb:cc,id:client1,inst-name,192.168.0.1",
+                 "00:00:80:aa:bb:cc,id:client2,inst-name,"
+                 "[fdca:3ba5:a17a::1]"]
+        mock_open = self.useFixture(
+            tools.OpenFixture(filename, '\n'.join(lines))).mock_open
+        dnsmasq = self._get_dnsmasq(FakeDualNetwork())
+        leases = dnsmasq._read_hosts_file_leases(filename)
 
         self.assertEqual(set([("192.168.0.1", "00:00:80:aa:bb:cc", 'client1'),
                               ("fdca:3ba5:a17a::1", "00:00:80:aa:bb:cc",
@@ -1932,11 +1926,6 @@ class TestDnsmasq(TestBase):
         self.safe.assert_has_calls([mock.call(exp_host_name, exp_host_data),
                                     mock.call(exp_opt_name, exp_opt_data)])
 
-    def test_should_enable_metadata_namespaces_disabled_returns_false(self):
-        self.conf.set_override('use_namespaces', False)
-        self.assertFalse(dhcp.Dnsmasq.should_enable_metadata(self.conf,
-                                                             mock.ANY))
-
     def test_should_enable_metadata_isolated_network_returns_true(self):
         self.assertTrue(dhcp.Dnsmasq.should_enable_metadata(
             self.conf, FakeV4NetworkNoRouter()))
@@ -1992,158 +1981,178 @@ class TestDnsmasq(TestBase):
 
 
 class TestDeviceManager(TestConfBase):
-
-    @mock.patch('neutron.agent.linux.dhcp.ip_lib')
-    @mock.patch('neutron.agent.linux.dhcp.common_utils.load_interface_driver')
-    def test_setup(self, load_interface_driver, ip_lib):
-        """Test new and existing cases of DeviceManager's DHCP port setup
-        logic.
-        """
-        self._test_setup(load_interface_driver, ip_lib, False)
-
-    @mock.patch('neutron.agent.linux.dhcp.ip_lib')
-    @mock.patch('neutron.agent.linux.dhcp.common_utils.load_interface_driver')
-    def test_setup_gateway_ips(self, load_interface_driver, ip_lib):
-        """Test new and existing cases of DeviceManager's DHCP port setup
-        logic.
-        """
-        self._test_setup(load_interface_driver, ip_lib, True)
+    def setUp(self):
+        super(TestDeviceManager, self).setUp()
+        ip_lib_patcher = mock.patch('neutron.agent.linux.dhcp.ip_lib')
+        load_interface_driver_patcher = mock.patch(
+            'neutron.agent.linux.dhcp.agent_common_utils.'
+            'load_interface_driver')
+        self.mock_ip_lib = ip_lib_patcher.start()
+        self.mock_load_interface_driver = load_interface_driver_patcher.start()
 
     def _test_setup(self, load_interface_driver, ip_lib, use_gateway_ips):
-        # Create DeviceManager.
-        self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
-                                           default=False))
-        plugin = mock.Mock()
-        mgr = dhcp.DeviceManager(self.conf, plugin)
-        load_interface_driver.assert_called_with(self.conf)
+        with mock.patch.object(dhcp.ip_lib, 'IPDevice') as mock_IPDevice:
+            # Create DeviceManager.
+            self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
+                                               default=False))
+            plugin = mock.Mock()
+            device = mock.Mock()
+            mock_IPDevice.return_value = device
+            device.route.get_gateway.return_value = None
+            mgr = dhcp.DeviceManager(self.conf, plugin)
+            load_interface_driver.assert_called_with(self.conf)
 
-        # Setup with no existing DHCP port - expect a new DHCP port to
-        # be created.
-        network = FakeDeviceManagerNetwork()
-        network.tenant_id = 'Tenant A'
+            # Setup with no existing DHCP port - expect a new DHCP port to
+            # be created.
+            network = FakeDeviceManagerNetwork()
+            network.tenant_id = 'Tenant A'
 
-        def mock_create(dict):
-            port = dhcp.DictModel(dict['port'])
-            port.id = 'abcd-123456789'
-            port.mac_address = '00-12-34-56-78-90'
-            port.fixed_ips = [
-                dhcp.DictModel({'subnet_id': ip['subnet_id'],
-                                'ip_address': 'unique-IP-address'})
-                for ip in port.fixed_ips
-            ]
-            return port
+            def mock_create(dict):
+                port = dhcp.DictModel(dict['port'])
+                port.id = 'abcd-123456789'
+                port.mac_address = '00-12-34-56-78-90'
+                port.fixed_ips = [
+                    dhcp.DictModel({'subnet_id': ip['subnet_id'],
+                                    'ip_address': 'unique-IP-address'})
+                    for ip in port.fixed_ips
+                ]
+                return port
 
-        plugin.create_dhcp_port.side_effect = mock_create
-        mgr.driver.get_device_name.return_value = 'ns-XXX'
-        mgr.driver.use_gateway_ips = use_gateway_ips
-        ip_lib.ensure_device_is_ready.return_value = True
-        mgr.setup(network)
-        plugin.create_dhcp_port.assert_called_with(mock.ANY)
+            plugin.create_dhcp_port.side_effect = mock_create
+            mgr.driver.get_device_name.return_value = 'ns-XXX'
+            mgr.driver.use_gateway_ips = use_gateway_ips
+            ip_lib.ensure_device_is_ready.return_value = True
+            mgr.setup(network)
+            plugin.create_dhcp_port.assert_called_with(mock.ANY)
 
-        mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                              mock.ANY,
-                                              namespace='qdhcp-ns')
-        cidrs = set(mgr.driver.init_l3.call_args[0][1])
-        if use_gateway_ips:
-            self.assertEqual(cidrs, set(['%s/%s' % (s.gateway_ip,
-                                                    s.cidr.split('/')[1])
-                                         for s in network.subnets]))
-        else:
-            self.assertEqual(cidrs, set(['unique-IP-address/24',
+            mgr.driver.init_l3.assert_called_with('ns-XXX',
+                                                  mock.ANY,
+                                                  namespace='qdhcp-ns')
+            cidrs = set(mgr.driver.init_l3.call_args[0][1])
+            if use_gateway_ips:
+                self.assertEqual(cidrs, set(['%s/%s' % (s.gateway_ip,
+                                                        s.cidr.split('/')[1])
+                                             for s in network.subnets]))
+            else:
+                self.assertEqual(cidrs, set(['unique-IP-address/24',
                                          'unique-IP-address/64']))
 
-        # Now call setup again.  This time we go through the existing
-        # port code path, and the driver's init_l3 method is called
-        # again.
-        plugin.create_dhcp_port.reset_mock()
-        mgr.driver.init_l3.reset_mock()
-        mgr.setup(network)
-        mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                              mock.ANY,
-                                              namespace='qdhcp-ns')
-        cidrs = set(mgr.driver.init_l3.call_args[0][1])
-        if use_gateway_ips:
-            self.assertEqual(cidrs, set(['%s/%s' % (s.gateway_ip,
-                                                    s.cidr.split('/')[1])
-                                         for s in network.subnets]))
-        else:
-            self.assertEqual(cidrs, set(['unique-IP-address/24',
-                                         'unique-IP-address/64']))
-        self.assertFalse(plugin.create_dhcp_port.called)
+            # Now call setup again.  This time we go through the existing
+            # port code path, and the driver's init_l3 method is called
+            # again.
+            plugin.create_dhcp_port.reset_mock()
+            mgr.driver.init_l3.reset_mock()
+            mgr.setup(network)
+            mgr.driver.init_l3.assert_called_with('ns-XXX',
+                                                  mock.ANY,
+                                                  namespace='qdhcp-ns')
+            cidrs = set(mgr.driver.init_l3.call_args[0][1])
+            if use_gateway_ips:
+                self.assertEqual(cidrs, set(['%s/%s' % (s.gateway_ip,
+                                                        s.cidr.split('/')[1])
+                                             for s in network.subnets]))
+            else:
+                self.assertEqual(cidrs, set(['unique-IP-address/24',
+                                             'unique-IP-address/64']))
+            self.assertFalse(plugin.create_dhcp_port.called)
 
-    @mock.patch('neutron.agent.linux.dhcp.ip_lib')
-    @mock.patch('neutron.agent.linux.dhcp.common_utils.load_interface_driver')
-    def test_setup_reserved(self, load_interface_driver, ip_lib):
+    def test_setup_device_manager_dhcp_port_without_gateway_ips(self):
+        self._test_setup(self.mock_load_interface_driver,
+                         self.mock_ip_lib, use_gateway_ips=False)
+
+    def test_setup_device_manager_dhcp_port_with_gateway_ips(self):
+        self._test_setup(self.mock_load_interface_driver,
+                         self.mock_ip_lib, use_gateway_ips=True)
+
+    def test_setup_reserved(self):
         """Test reserved port case of DeviceManager's DHCP port setup
         logic.
         """
 
-        # Create DeviceManager.
-        self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
-                                           default=False))
-        plugin = mock.Mock()
-        mgr = dhcp.DeviceManager(self.conf, plugin)
-        load_interface_driver.assert_called_with(self.conf)
+        with mock.patch.object(dhcp.ip_lib, 'IPDevice') as mock_IPDevice:
+            # Create DeviceManager.
+            self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
+                                               default=False))
+            plugin = mock.Mock()
+            device = mock.Mock()
+            mock_IPDevice.return_value = device
+            device.route.get_gateway.return_value = None
+            mgr = dhcp.DeviceManager(self.conf, plugin)
+            self.mock_load_interface_driver.assert_called_with(self.conf)
 
-        # Setup with a reserved DHCP port.
-        network = FakeDualNetworkReserved()
-        network.tenant_id = 'Tenant A'
-        reserved_port = network.ports[-1]
+            # Setup with a reserved DHCP port.
+            network = FakeDualNetworkReserved()
+            network.tenant_id = 'Tenant A'
+            reserved_port = network.ports[-1]
 
-        def mock_update(port_id, dict):
-            port = reserved_port
-            port.network_id = dict['port']['network_id']
-            port.device_id = dict['port']['device_id']
-            return port
+            def mock_update(port_id, dict):
+                port = reserved_port
+                port.network_id = dict['port']['network_id']
+                port.device_id = dict['port']['device_id']
+                return port
 
-        plugin.update_dhcp_port.side_effect = mock_update
-        mgr.driver.get_device_name.return_value = 'ns-XXX'
-        mgr.driver.use_gateway_ips = False
-        ip_lib.ensure_device_is_ready.return_value = True
-        mgr.setup(network)
-        plugin.update_dhcp_port.assert_called_with(reserved_port.id, mock.ANY)
+            plugin.update_dhcp_port.side_effect = mock_update
+            mgr.driver.get_device_name.return_value = 'ns-XXX'
+            mgr.driver.use_gateway_ips = False
+            self.mock_ip_lib.ensure_device_is_ready.return_value = True
+            mgr.setup(network)
+            plugin.update_dhcp_port.assert_called_with(reserved_port.id,
+                                                       mock.ANY)
 
-        mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                              ['192.168.0.6/24'],
-                                              namespace='qdhcp-ns')
+            mgr.driver.init_l3.assert_called_with('ns-XXX',
+                                                  ['192.168.0.6/24'],
+                                                  namespace='qdhcp-ns')
 
-    @mock.patch('neutron.agent.linux.dhcp.ip_lib')
-    @mock.patch('neutron.agent.linux.dhcp.common_utils.load_interface_driver')
-    def test_setup_reserved_2(self, load_interface_driver, ip_lib):
+    def test_setup_reserved_2(self):
         """Test scenario where a network has two reserved ports, and
         update_dhcp_port fails for the first of those.
         """
 
-        # Create DeviceManager.
-        self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
-                                           default=False))
-        plugin = mock.Mock()
-        mgr = dhcp.DeviceManager(self.conf, plugin)
-        load_interface_driver.assert_called_with(self.conf)
+        with mock.patch.object(dhcp.ip_lib, 'IPDevice') as mock_IPDevice:
+            # Create DeviceManager.
+            self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
+                                               default=False))
+            plugin = mock.Mock()
+            device = mock.Mock()
+            mock_IPDevice.return_value = device
+            device.route.get_gateway.return_value = None
+            mgr = dhcp.DeviceManager(self.conf, plugin)
+            self.mock_load_interface_driver.assert_called_with(self.conf)
 
-        # Setup with a reserved DHCP port.
-        network = FakeDualNetworkReserved2()
-        network.tenant_id = 'Tenant A'
-        reserved_port_1 = network.ports[-2]
-        reserved_port_2 = network.ports[-1]
+            # Setup with a reserved DHCP port.
+            network = FakeDualNetworkReserved2()
+            network.tenant_id = 'Tenant A'
+            reserved_port_1 = network.ports[-2]
+            reserved_port_2 = network.ports[-1]
 
-        def mock_update(port_id, dict):
-            if port_id == reserved_port_1.id:
-                return None
+            def mock_update(port_id, dict):
+                if port_id == reserved_port_1.id:
+                    return None
 
-            port = reserved_port_2
-            port.network_id = dict['port']['network_id']
-            port.device_id = dict['port']['device_id']
-            return port
+                port = reserved_port_2
+                port.network_id = dict['port']['network_id']
+                port.device_id = dict['port']['device_id']
+                return port
 
-        plugin.update_dhcp_port.side_effect = mock_update
-        mgr.driver.get_device_name.return_value = 'ns-XXX'
-        mgr.driver.use_gateway_ips = False
-        ip_lib.ensure_device_is_ready.return_value = True
-        mgr.setup(network)
-        plugin.update_dhcp_port.assert_called_with(reserved_port_2.id,
-                                                   mock.ANY)
+            plugin.update_dhcp_port.side_effect = mock_update
+            mgr.driver.get_device_name.return_value = 'ns-XXX'
+            mgr.driver.use_gateway_ips = False
+            self.mock_ip_lib.ensure_device_is_ready.return_value = True
+            mgr.setup(network)
+            plugin.update_dhcp_port.assert_called_with(reserved_port_2.id,
+                                                       mock.ANY)
 
-        mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                              ['192.168.0.6/24'],
-                                              namespace='qdhcp-ns')
+            mgr.driver.init_l3.assert_called_with('ns-XXX',
+                                                  ['192.168.0.6/24'],
+                                                  namespace='qdhcp-ns')
+
+
+class TestDictModel(base.BaseTestCase):
+
+    def test_string_representation_port(self):
+        port = dhcp.DictModel({'id': 'id', 'network_id': 'net_id'})
+        self.assertEqual('id=id, network_id=net_id', str(port))
+
+    def test_string_representation_network(self):
+        net = dhcp.DictModel({'id': 'id', 'name': 'myname'})
+        self.assertEqual('id=id, name=myname', str(net))

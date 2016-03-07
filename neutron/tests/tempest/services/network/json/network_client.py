@@ -11,15 +11,12 @@
 #    under the License.
 
 import time
-import urllib
-
 
 from oslo_serialization import jsonutils as json
-from six.moves.urllib import parse
-from tempest_lib.common.utils import misc
-from tempest_lib import exceptions as lib_exc
+from six.moves.urllib import parse as urlparse
+from tempest.common import service_client
+from tempest.lib import exceptions as lib_exc
 
-from neutron.tests.tempest.common import service_client
 from neutron.tests.tempest import exceptions
 
 
@@ -46,23 +43,17 @@ class NetworkClientJSON(service_client.ServiceClient):
 
         # The following list represents resource names that do not require
         # changing underscore to a hyphen
-        hyphen_exceptions = ["health_monitors", "firewall_rules",
-                             "firewall_policies", "service_profiles"]
+        hyphen_exceptions = [
+            "firewall_rules", "firewall_policies", "service_profiles"]
         # the following map is used to construct proper URI
         # for the given neutron resource
         service_resource_prefix_map = {
+            'bgp-peers': '',
+            'bgp-speakers': '',
             'networks': '',
             'subnets': '',
             'subnetpools': '',
             'ports': '',
-            'pools': 'lb',
-            'vips': 'lb',
-            'health_monitors': 'lb',
-            'members': 'lb',
-            'ipsecpolicies': 'vpn',
-            'vpnservices': 'vpn',
-            'ikepolicies': 'vpn',
-            'ipsec-site-connections': 'vpn',
             'metering_labels': 'metering',
             'metering_label_rules': 'metering',
             'firewall_rules': 'fw',
@@ -92,9 +83,6 @@ class NetworkClientJSON(service_client.ServiceClient):
         resource_plural_map = {
             'security_groups': 'security_groups',
             'security_group_rules': 'security_group_rules',
-            'ipsecpolicy': 'ipsecpolicies',
-            'ikepolicy': 'ikepolicies',
-            'ipsec_site_connection': 'ipsec-site-connections',
             'quotas': 'quotas',
             'firewall_policy': 'firewall_policies',
             'qos_policy': 'policies',
@@ -106,7 +94,7 @@ class NetworkClientJSON(service_client.ServiceClient):
         def _list(**filters):
             uri = self.get_uri(plural_name)
             if filters:
-                uri += '?' + parse.urlencode(filters, doseq=1)
+                uri += '?' + urlparse.urlencode(filters, doseq=1)
             resp, body = self.get(uri)
             result = {plural_name: self.deserialize_list(body)}
             self.expected_success(200, resp.status)
@@ -132,7 +120,7 @@ class NetworkClientJSON(service_client.ServiceClient):
             plural = self.pluralize(resource_name)
             uri = '%s/%s' % (self.get_uri(plural), resource_id)
             if fields:
-                uri += '?' + parse.urlencode(fields, doseq=1)
+                uri += '?' + urlparse.urlencode(fields, doseq=1)
             resp, body = self.get(uri)
             body = self.deserialize_single(body)
             self.expected_success(200, resp.status)
@@ -178,7 +166,12 @@ class NetworkClientJSON(service_client.ServiceClient):
         raise AttributeError(name)
 
     # Subnetpool methods
-    def create_subnetpool(self, post_data):
+    def create_subnetpool(self, name, **kwargs):
+        subnetpool_data = {'name': name}
+        for arg in kwargs:
+           subnetpool_data[arg] = kwargs[arg]
+
+        post_data = {'subnetpool': subnetpool_data}
         body = self.serialize_list(post_data, "subnetpools", "subnetpool")
         uri = self.get_uri("subnetpools")
         resp, body = self.post(uri, body)
@@ -201,20 +194,130 @@ class NetworkClientJSON(service_client.ServiceClient):
         self.expected_success(204, resp.status)
         return service_client.ResponseBody(resp, body)
 
-    def list_subnetpools(self):
+    def list_subnetpools(self, **filters):
         uri = self.get_uri("subnetpools")
+        if filters:
+            uri = '?'.join([uri, urlparse.urlencode(filters)])
         resp, body = self.get(uri)
         body = {'subnetpools': self.deserialize_list(body)}
         self.expected_success(200, resp.status)
         return service_client.ResponseBody(resp, body)
 
-    def update_subnetpool(self, id, post_data):
+    def update_subnetpool(self, id, **kwargs):
+        subnetpool_data = {}
+        for arg in kwargs:
+           subnetpool_data[arg] = kwargs[arg]
+
+        post_data = {'subnetpool': subnetpool_data}
         body = self.serialize_list(post_data, "subnetpools", "subnetpool")
         uri = self.get_uri("subnetpools")
         subnetpool_uri = '%s/%s' % (uri, id)
         resp, body = self.put(subnetpool_uri, body)
         body = {'subnetpool': self.deserialize_list(body)}
         self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    # BGP speaker methods
+    def create_bgp_speaker(self, post_data):
+        body = self.serialize_list(post_data, "bgp-speakers", "bgp-speaker")
+        uri = self.get_uri("bgp-speakers")
+        resp, body = self.post(uri, body)
+        body = {'bgp-speaker': self.deserialize_list(body)}
+        self.expected_success(201, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def get_bgp_speaker(self, id):
+        uri = self.get_uri("bgp-speakers")
+        bgp_speaker_uri = '%s/%s' % (uri, id)
+        resp, body = self.get(bgp_speaker_uri)
+        body = {'bgp-speaker': self.deserialize_list(body)}
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def get_bgp_speakers(self):
+        uri = self.get_uri("bgp-speakers")
+        resp, body = self.get(uri)
+        body = {'bgp-speakers': self.deserialize_list(body)}
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def update_bgp_speaker(self, id, put_data):
+        body = self.serialize_list(put_data, "bgp-speakers", "bgp-speaker")
+        uri = self.get_uri("bgp-speakers")
+        bgp_speaker_uri = '%s/%s' % (uri, id)
+        resp, body = self.put(bgp_speaker_uri, body)
+        body = {'bgp-speaker': self.deserialize_list(body)}
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_bgp_speaker(self, id):
+        uri = self.get_uri("bgp-speakers")
+        bgp_speaker_uri = '%s/%s' % (uri, id)
+        resp, body = self.delete(bgp_speaker_uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def create_bgp_peer(self, post_data):
+        body = self.serialize_list(post_data, "bgp-peers", "bgp-peer")
+        uri = self.get_uri("bgp-peers")
+        resp, body = self.post(uri, body)
+        body = {'bgp-peer': self.deserialize_list(body)}
+        self.expected_success(201, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def get_bgp_peer(self, id):
+        uri = self.get_uri("bgp-peers")
+        bgp_speaker_uri = '%s/%s' % (uri, id)
+        resp, body = self.get(bgp_speaker_uri)
+        body = {'bgp-peer': self.deserialize_list(body)}
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_bgp_peer(self, id):
+        uri = self.get_uri("bgp-peers")
+        bgp_speaker_uri = '%s/%s' % (uri, id)
+        resp, body = self.delete(bgp_speaker_uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def add_bgp_peer_with_id(self, bgp_speaker_id, bgp_peer_id):
+        uri = '%s/bgp-speakers/%s/add_bgp_peer' % (self.uri_prefix,
+                                                   bgp_speaker_id)
+        update_body = {"bgp_peer_id": bgp_peer_id}
+        update_body = json.dumps(update_body)
+        resp, body = self.put(uri, update_body)
+        self.expected_success(200, resp.status)
+        body = json.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def remove_bgp_peer_with_id(self, bgp_speaker_id, bgp_peer_id):
+        uri = '%s/bgp-speakers/%s/remove_bgp_peer' % (self.uri_prefix,
+                                                      bgp_speaker_id)
+        update_body = {"bgp_peer_id": bgp_peer_id}
+        update_body = json.dumps(update_body)
+        resp, body = self.put(uri, update_body)
+        self.expected_success(200, resp.status)
+        body = json.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def add_bgp_gateway_network(self, bgp_speaker_id, network_id):
+        uri = '%s/bgp-speakers/%s/add_gateway_network' % (self.uri_prefix,
+                                                        bgp_speaker_id)
+        update_body = {"network_id": network_id}
+        update_body = json.dumps(update_body)
+        resp, body = self.put(uri, update_body)
+        self.expected_success(200, resp.status)
+        body = json.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def remove_bgp_gateway_network(self, bgp_speaker_id, network_id):
+        uri = '%s/bgp-speakers/%s/remove_gateway_network'
+        uri = uri % (self.uri_prefix, bgp_speaker_id)
+        update_body = {"network_id": network_id}
+        update_body = json.dumps(update_body)
+        resp, body = self.put(uri, update_body)
+        self.expected_success(200, resp.status)
+        body = json.loads(body)
         return service_client.ResponseBody(resp, body)
 
     # Common methods that are hard to automate
@@ -265,43 +368,6 @@ class NetworkClientJSON(service_client.ServiceClient):
         except lib_exc.NotFound:
             return True
         return False
-
-    def wait_for_resource_status(self, fetch, status, interval=None,
-                                 timeout=None):
-        """
-        @summary: Waits for a network resource to reach a status
-        @param fetch: the callable to be used to query the resource status
-        @type fecth: callable that takes no parameters and returns the resource
-        @param status: the status that the resource has to reach
-        @type status: String
-        @param interval: the number of seconds to wait between each status
-          query
-        @type interval: Integer
-        @param timeout: the maximum number of seconds to wait for the resource
-          to reach the desired status
-        @type timeout: Integer
-        """
-        if not interval:
-            interval = self.build_interval
-        if not timeout:
-            timeout = self.build_timeout
-        start_time = time.time()
-
-        while time.time() - start_time <= timeout:
-            resource = fetch()
-            if resource['status'] == status:
-                return
-            time.sleep(interval)
-
-        # At this point, the wait has timed out
-        message = 'Resource %s' % (str(resource))
-        message += ' failed to reach status %s' % status
-        message += ' (current: %s)' % resource['status']
-        message += ' within the required time %s' % timeout
-        caller = misc.find_test_caller()
-        if caller:
-            message = '(%s) %s' % (caller, message)
-        raise exceptions.TimeoutException(message)
 
     def deserialize_single(self, body):
         return json.loads(body)
@@ -434,29 +500,6 @@ class NetworkClientJSON(service_client.ServiceClient):
         body = json.loads(body)
         return service_client.ResponseBody(resp, body)
 
-    def associate_health_monitor_with_pool(self, health_monitor_id,
-                                           pool_id):
-        post_body = {
-            "health_monitor": {
-                "id": health_monitor_id,
-            }
-        }
-        body = json.dumps(post_body)
-        uri = '%s/lb/pools/%s/health_monitors' % (self.uri_prefix,
-                                                  pool_id)
-        resp, body = self.post(uri, body)
-        self.expected_success(201, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
-    def disassociate_health_monitor_with_pool(self, health_monitor_id,
-                                              pool_id):
-        uri = '%s/lb/pools/%s/health_monitors/%s' % (self.uri_prefix, pool_id,
-                                                     health_monitor_id)
-        resp, body = self.delete(uri)
-        self.expected_success(204, resp.status)
-        return service_client.ResponseBody(resp, body)
-
     def list_router_interfaces(self, uuid):
         uri = '%s/ports?device_id=%s' % (self.uri_prefix, uuid)
         resp, body = self.get(uri)
@@ -473,21 +516,6 @@ class NetworkClientJSON(service_client.ServiceClient):
         agent = {"agent": agent_info}
         body = json.dumps(agent)
         resp, body = self.put(uri, body)
-        self.expected_success(200, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
-    def list_pools_hosted_by_one_lbaas_agent(self, agent_id):
-        uri = '%s/agents/%s/loadbalancer-pools' % (self.uri_prefix, agent_id)
-        resp, body = self.get(uri)
-        self.expected_success(200, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
-    def show_lbaas_agent_hosting_pool(self, pool_id):
-        uri = ('%s/lb/pools/%s/loadbalancer-agent' %
-               (self.uri_prefix, pool_id))
-        resp, body = self.get(uri)
         self.expected_success(200, resp.status)
         body = json.loads(body)
         return service_client.ResponseBody(resp, body)
@@ -543,21 +571,6 @@ class NetworkClientJSON(service_client.ServiceClient):
         self.expected_success(204, resp.status)
         return service_client.ResponseBody(resp, body)
 
-    def create_ikepolicy(self, name, **kwargs):
-        post_body = {
-            "ikepolicy": {
-                "name": name,
-            }
-        }
-        for key, val in kwargs.items():
-            post_body['ikepolicy'][key] = val
-        body = json.dumps(post_body)
-        uri = '%s/vpn/ikepolicies' % (self.uri_prefix)
-        resp, body = self.post(uri, body)
-        self.expected_success(201, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
     def update_extra_routes(self, router_id, nexthop, destination):
         uri = '%s/routers/%s' % (self.uri_prefix, router_id)
         put_body = {
@@ -582,13 +595,6 @@ class NetworkClientJSON(service_client.ServiceClient):
         }
         body = json.dumps(put_body)
         resp, body = self.put(uri, body)
-        self.expected_success(200, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
-    def list_lb_pool_stats(self, pool_id):
-        uri = '%s/lb/pools/%s/stats' % (self.uri_prefix, pool_id)
-        resp, body = self.get(uri)
         self.expected_success(200, resp.status)
         body = json.loads(body)
         return service_client.ResponseBody(resp, body)
@@ -632,7 +638,7 @@ class NetworkClientJSON(service_client.ServiceClient):
     def list_qos_policies(self, **filters):
         if filters:
             uri = '%s/qos/policies?%s' % (self.uri_prefix,
-                                          urllib.urlencode(filters))
+                                          urlparse.urlencode(filters))
         else:
             uri = '%s/qos/policies' % self.uri_prefix
         resp, body = self.get(uri)
@@ -709,6 +715,13 @@ class NetworkClientJSON(service_client.ServiceClient):
 
     def list_qos_rule_types(self):
         uri = '%s/qos/rule-types' % self.uri_prefix
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = json.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def get_auto_allocated_topology(self, tenant_id=None):
+        uri = '%s/auto-allocated-topology/%s' % (self.uri_prefix, tenant_id)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
         body = json.loads(body)

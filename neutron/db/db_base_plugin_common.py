@@ -145,12 +145,15 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                'default_prefixlen': default_prefixlen,
                'min_prefixlen': min_prefixlen,
                'max_prefixlen': max_prefixlen,
+               'is_default': subnetpool['is_default'],
                'shared': subnetpool['shared'],
                'prefixes': [prefix['cidr']
                             for prefix in subnetpool['prefixes']],
                'ip_version': subnetpool['ip_version'],
                'default_quota': subnetpool['default_quota'],
                'address_scope_id': subnetpool['address_scope_id']}
+        self._apply_dict_extend_functions(attributes.SUBNETPOOLS, res,
+                                          subnetpool)
         return self._fields(res, fields)
 
     def _make_port_dict(self, port, fields=None,
@@ -269,12 +272,6 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                'subnets': [subnet['id']
                            for subnet in network['subnets']]}
         res['shared'] = self._is_network_shared(context, network)
-        # TODO(pritesh): Move vlan_transparent to the extension module.
-        # vlan_transparent here is only added if the vlantransparent
-        # extension is enabled.
-        if ('vlan_transparent' in network and network['vlan_transparent'] !=
-            attributes.ATTR_NOT_SPECIFIED):
-            res['vlan_transparent'] = network['vlan_transparent']
         # Call auxiliary extend functions, if any
         if process_extensions:
             self._apply_dict_extend_functions(

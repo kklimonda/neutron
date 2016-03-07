@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import itertools
 import re
 import time
 
@@ -20,6 +21,7 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
 
+from neutron._i18n import _, _LE
 from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
 from neutron.agent.dhcp import config as dhcp_config
@@ -32,17 +34,15 @@ from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.api.v2 import attributes
 from neutron.common import config
-from neutron.i18n import _LE
 
 
 LOG = logging.getLogger(__name__)
 LB_NS_PREFIX = 'qlbaas-'
-NS_MANGLING_PATTERN = ('(%s|%s|%s|%s|%s)' % (dhcp.NS_PREFIX,
-                                          l3_agent.NS_PREFIX,
-                                          dvr.SNAT_NS_PREFIX,
-                                          dvr_fip_ns.FIP_NS_PREFIX,
-                                          LB_NS_PREFIX) +
-                       attributes.UUID_PATTERN)
+NS_PREFIXES = {
+    'dhcp': [dhcp.NS_PREFIX],
+    'l3': [l3_agent.NS_PREFIX, dvr.SNAT_NS_PREFIX, dvr_fip_ns.FIP_NS_PREFIX],
+    'lbaas': [LB_NS_PREFIX],
+}
 
 
 class FakeDhcpPlugin(object):
@@ -64,12 +64,14 @@ def setup_conf():
         cfg.BoolOpt('force',
                     default=False,
                     help=_('Delete the namespace by removing all devices.')),
+        cfg.StrOpt('agent-type',
+                   choices=['dhcp', 'l3', 'lbaas'],
+                   help=_('Cleanup resources of a specific agent type only.')),
     ]
 
     conf = cfg.CONF
     conf.register_cli_opts(cli_opts)
     agent_config.register_interface_driver_opts_helper(conf)
-    agent_config.register_use_namespaces_opts_helper(conf)
     conf.register_opts(dhcp_config.DHCP_AGENT_OPTS)
     conf.register_opts(dhcp_config.DHCP_OPTS)
     conf.register_opts(dhcp_config.DNSMASQ_OPTS)
@@ -90,7 +92,7 @@ def kill_dhcp(conf, namespace):
         conf.dhcp_driver,
         conf=conf,
         process_monitor=_get_dhcp_process_monitor(conf),
-        network=dhcp.NetModel(conf.use_namespaces, {'id': network_id}),
+        network=dhcp.NetModel({'id': network_id}),
         plugin=FakeDhcpPlugin())
 
     if dhcp_driver.active:
@@ -104,8 +106,15 @@ def eligible_for_deletion(conf, namespace, force=False):
     is passed as a parameter.
     """
 
+    if conf.agent_type:
+        prefixes = NS_PREFIXES.get(conf.agent_type)
+    else:
+        prefixes = itertools.chain(*NS_PREFIXES.values())
+    ns_mangling_pattern = '(%s%s)' % ('|'.join(prefixes),
+                                      attributes.UUID_PATTERN)
+
     # filter out namespaces without UUID as the name
-    if not re.match(NS_MANGLING_PATTERN, namespace):
+    if not re.match(ns_mangling_pattern, namespace):
         return False
 
     ip = ip_lib.IPWrapper(namespace=namespace)
@@ -113,9 +122,12 @@ def eligible_for_deletion(conf, namespace, force=False):
 
 
 def unplug_device(conf, device):
+    orig_log_fail_as_error = device.get_log_fail_as_error()
+    device.set_log_fail_as_error(False)
     try:
         device.link.delete()
     except RuntimeError:
+        device.set_log_fail_as_error(orig_log_fail_as_error)
         # Maybe the device is OVS port, so try to delete
         ovs = ovs_lib.BaseOVS()
         bridge_name = ovs.get_bridge_for_iface(device.name)
@@ -124,6 +136,8 @@ def unplug_device(conf, device):
             bridge.delete_port(device.name)
         else:
             LOG.debug('Unable to find bridge for device: %s', device.name)
+    finally:
+        device.set_log_fail_as_error(orig_log_fail_as_error)
 
 
 def destroy_namespace(conf, namespace, force=False):

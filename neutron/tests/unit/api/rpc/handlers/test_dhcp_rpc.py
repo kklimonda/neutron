@@ -20,6 +20,7 @@ from neutron.api.rpc.handlers import dhcp_rpc
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
+from neutron.extensions import portbindings
 from neutron.tests import base
 
 
@@ -169,7 +170,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
                 }
         expected_port = {'port': {'network_id': 'foo_network_id',
                                   'device_owner': constants.DEVICE_OWNER_DHCP,
-                                  'binding:host_id': 'foo_host',
+                                  portbindings.HOST_ID: 'foo_host',
                                   'fixed_ips': [{'subnet_id': 'foo_subnet_id'}]
                                   },
                          'id': 'foo_port_id'
@@ -193,7 +194,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
                 }
         expected_port = {'port': {'network_id': 'foo_network_id',
                                   'device_owner': constants.DEVICE_OWNER_DHCP,
-                                  'binding:host_id': 'foo_host',
+                                  portbindings.HOST_ID: 'foo_host',
                                   'fixed_ips': [{'subnet_id': 'foo_subnet_id'}]
                                   },
                          'id': 'foo_port_id'
@@ -225,7 +226,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
                 }
         expected_port = {'port': {'network_id': 'foo_network_id',
                                   'device_owner': constants.DEVICE_OWNER_DHCP,
-                                  'binding:host_id': 'foo_host',
+                                  portbindings.HOST_ID: 'foo_host',
                                   'fixed_ips': [{'subnet_id': 'foo_subnet_id'}]
                                   },
                          'id': 'foo_port_id'
@@ -248,17 +249,3 @@ class TestDhcpRpcCallback(base.BaseTestCase):
 
         self.plugin.assert_has_calls([
             mock.call.delete_ports_by_device_id(mock.ANY, 'devid', 'netid')])
-
-    def test_release_port_fixed_ip(self):
-        port_retval = dict(id='port_id', fixed_ips=[dict(subnet_id='a')])
-        port_update = dict(id='port_id', fixed_ips=[])
-        self.plugin.get_ports.return_value = [port_retval]
-
-        self.callbacks.release_port_fixed_ip(mock.ANY, network_id='netid',
-                                             device_id='devid', subnet_id='a')
-
-        self.plugin.assert_has_calls([
-            mock.call.get_ports(mock.ANY, filters=dict(network_id=['netid'],
-                                                       device_id=['devid'])),
-            mock.call.update_port(mock.ANY, 'port_id',
-                                  dict(port=port_update))])

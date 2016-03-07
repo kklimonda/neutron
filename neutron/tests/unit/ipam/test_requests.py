@@ -43,8 +43,8 @@ class TestIpamSubnetRequests(IpamSubnetRequestTestCase):
                                   self.subnet_id)
         self.assertEqual(self.tenant_id, pool.tenant_id)
         self.assertEqual(self.subnet_id, pool.subnet_id)
-        self.assertEqual(None, pool.gateway_ip)
-        self.assertEqual(None, pool.allocation_pools)
+        self.assertIsNone(pool.gateway_ip)
+        self.assertIsNone(pool.allocation_pools)
 
     def test_subnet_request_gateway(self):
         request = ipam_req.SubnetRequest(self.tenant_id,
@@ -133,6 +133,7 @@ class TestIpamAnySubnetRequest(IpamSubnetRequestTestCase):
                           129)
 
     def test_subnet_request_bad_gateway(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', True)
         self.assertRaises(ValueError,
                           ipam_req.AnySubnetRequest,
                           self.tenant_id,
@@ -140,6 +141,15 @@ class TestIpamAnySubnetRequest(IpamSubnetRequestTestCase):
                           constants.IPv6,
                           64,
                           gateway_ip='2000::1')
+
+    def test_subnet_request_good_gateway(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', False)
+        request = ipam_req.AnySubnetRequest(self.tenant_id,
+                                            self.subnet_id,
+                                            constants.IPv6,
+                                            64,
+                                            gateway_ip='2000::1')
+        self.assertEqual(netaddr.IPAddress('2000::1'), request.gateway_ip)
 
     def test_subnet_request_allocation_pool_wrong_version(self):
         pools = [netaddr.IPRange('0.0.0.4', '0.0.0.5')]
@@ -174,12 +184,21 @@ class TestIpamSpecificSubnetRequest(IpamSubnetRequestTestCase):
         self.assertEqual(netaddr.IPNetwork('1.2.3.0/24'), request.subnet_cidr)
 
     def test_subnet_request_bad_gateway(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', True)
         self.assertRaises(ValueError,
                           ipam_req.SpecificSubnetRequest,
                           self.tenant_id,
                           self.subnet_id,
                           '2001::1',
                           gateway_ip='2000::1')
+
+    def test_subnet_request_good_gateway(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', False)
+        request = ipam_req.SpecificSubnetRequest(self.tenant_id,
+                                                 self.subnet_id,
+                                                 '2001::1',
+                                                 gateway_ip='2000::1')
+        self.assertEqual(netaddr.IPAddress('2000::1'), request.gateway_ip)
 
 
 class TestAddressRequest(base.BaseTestCase):
@@ -364,8 +383,8 @@ class TestSubnetRequestFactory(IpamSubnetRequestTestCase):
                               ipam_req.SpecificSubnetRequest)
         self.assertEqual(self.tenant_id, request.tenant_id)
         self.assertEqual(self.subnet_id, request.subnet_id)
-        self.assertEqual(None, request.gateway_ip)
-        self.assertEqual(None, request.allocation_pools)
+        self.assertIsNone(request.gateway_ip)
+        self.assertIsNone(request.allocation_pools)
 
 
 class TestGetRequestFactory(base.BaseTestCase):

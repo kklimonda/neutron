@@ -12,17 +12,18 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+
 import itertools
 
 import netaddr
 import six
-from tempest_lib.common.utils import data_utils
-from tempest_lib import exceptions as lib_exc
+from tempest.common import custom_matchers
+from tempest.lib.common.utils import data_utils
+from tempest.lib import exceptions as lib_exc
+from tempest import test
 
 from neutron.tests.api import base
-from neutron.tests.tempest.common import custom_matchers
 from neutron.tests.tempest import config
-from neutron.tests.tempest import test
 
 CONF = config.CONF
 
@@ -206,14 +207,19 @@ class NetworksTestJSON(base.BaseNetworkTest):
         # Verify the details of a network
         body = self.client.show_network(self.network['id'])
         network = body['network']
-        for key in ['id', 'name', 'mtu']:
+        fields = ['id', 'name']
+        if test.is_extension_enabled('net-mtu', 'network'):
+            fields.append('mtu')
+        for key in fields:
             self.assertEqual(network[key], self.network[key])
 
     @test.attr(type='smoke')
     @test.idempotent_id('867819bb-c4b6-45f7-acf9-90edcf70aa5e')
     def test_show_network_fields(self):
         # Verify specific fields of a network
-        fields = ['id', 'name', 'mtu']
+        fields = ['id', 'name']
+        if test.is_extension_enabled('net-mtu', 'network'):
+            fields.append('mtu')
         body = self.client.show_network(self.network['id'],
                                         fields=fields)
         network = body['network']
@@ -234,7 +240,9 @@ class NetworksTestJSON(base.BaseNetworkTest):
     @test.idempotent_id('6ae6d24f-9194-4869-9c85-c313cb20e080')
     def test_list_networks_fields(self):
         # Verify specific fields of the networks
-        fields = ['id', 'name', 'mtu']
+        fields = ['id', 'name']
+        if test.is_extension_enabled('net-mtu', 'network'):
+            fields.append('mtu')
         body = self.client.list_networks(fields=fields)
         networks = body['networks']
         self.assertNotEmpty(networks, "Network list returned is empty")
@@ -591,7 +599,7 @@ class NetworksIpV6TestJSON(NetworksTestJSON):
         # Verifies Subnet GW is set in IPv6
         self.assertEqual(subnet1['gateway_ip'], ipv6_gateway)
         # Verifies Subnet GW is None in IPv4
-        self.assertEqual(subnet2['gateway_ip'], None)
+        self.assertIsNone(subnet2['gateway_ip'])
         # Verifies all 2 subnets in the same network
         body = self.client.list_subnets()
         subnets = [sub['id'] for sub in body['subnets']

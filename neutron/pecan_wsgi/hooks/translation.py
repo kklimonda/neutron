@@ -17,6 +17,7 @@ from oslo_log import log as logging
 from pecan import hooks
 import webob.exc
 
+from neutron._i18n import _, _LE
 from neutron.api.v2 import base as v2base
 
 
@@ -33,6 +34,6 @@ class ExceptionTranslationHook(hooks.PecanHook):
                 raise to_class(getattr(e, 'msg', e.message))
         # leaked unexpected exception, convert to boring old 500 error and
         # hide message from user in case it contained sensitive details
-        LOG.exception(_("An unexpected exception was caught: %s") % e)
+        LOG.exception(_LE("An unexpected exception was caught: %s"), e)
         raise webob.exc.HTTPInternalServerError(
             _("An unexpected internal error occurred."))

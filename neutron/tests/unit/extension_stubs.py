@@ -19,7 +19,7 @@ from neutron.api import extensions
 from neutron import wsgi
 
 
-class StubExtension(object):
+class StubExtension(extensions.ExtensionDescriptor):
 
     def __init__(self, alias="stub_extension"):
         self.alias = alias
@@ -37,9 +37,16 @@ class StubExtension(object):
         return ""
 
 
+class StubExtensionWithReqs(StubExtension):
+
+    def get_required_extensions(self):
+        return ["foo"]
+
+
 class StubPlugin(object):
 
-    def __init__(self, supported_extensions=[]):
+    def __init__(self, supported_extensions=None):
+        supported_extensions = supported_extensions or []
         self.supported_extension_aliases = supported_extensions
 
 
