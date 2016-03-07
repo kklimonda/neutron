@@ -1,0 +1,41 @@
+Description: Skip ryu tests.
+ It supports an alternative ovs driver implementation; its
+ not the default, so skipping the tests for now.
+Author: Corey Bryant <corey.bryant@canonical.com>
+Forwarded: not-needed
+
+--- a/neutron/tests/unit/services/bgp/driver/ryu/test_driver.py
++++ b/neutron/tests/unit/services/bgp/driver/ryu/test_driver.py
+@@ -14,13 +14,21 @@
+ # limitations under the License.
+ 
+ import mock
++import testtools
+ from oslo_config import cfg
+-from ryu.services.protocols.bgp import bgpspeaker
+-from ryu.services.protocols.bgp.rtconf.neighbors import CONNECT_MODE_ACTIVE
++try:
++    from ryu.services.protocols.bgp import bgpspeaker
++    from ryu.services.protocols.bgp.rtconf.neighbors import CONNECT_MODE_ACTIVE
++except ImportError:
++    bgpspeaker = None
++    CONNECT_MODE_ACTIVE = None
+ 
+ from neutron.services.bgp.agent import config as bgp_config
+ from neutron.services.bgp.driver import exceptions as bgp_driver_exc
+-from neutron.services.bgp.driver.ryu import driver as ryu_driver
++try:
++    from neutron.services.bgp.driver.ryu import driver as ryu_driver
++except ImportError:
++    ryu_driver = None
+ from neutron.tests import base
+ 
+ # Test variables for BGP Speaker
+@@ -41,6 +49,7 @@
+ 
+ class TestRyuBgpDriver(base.BaseTestCase):
+ 
++    @testtools.skipIf(not bgpspeaker, "Skipped by Ubuntu")
+     def setUp(self):
+         super(TestRyuBgpDriver, self).setUp()
+         cfg.CONF.register_opts(bgp_config.BGP_PROTO_CONFIG_OPTS, 'BGP')

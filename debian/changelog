@@ -4,6 +4,7 @@ neutron (2:8.0.0~b3-0ubuntu1) UNRELEASED; urgency=medium
   * d/control: Align (Build-)Depends with upstream.
   * d/p/ensure-tunnels-fully-reset.patch: Dropped. Fixed upstream.
   * d/p/*: Rebased.
+  * d/p/skip-ryu-tests.patch: Skip ryu tests.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Mon, 07 Mar 2016 15:11:31 -0500
 
