@@ -1,18 +1,291 @@
 CHANGES
 =======
 
+8.0.0.0b3
+---------
+
+* Allow auto-allocate's dry-run API call to work for regular users
+* make/update_subnetpool_dict call _dict_extend
+* Make run_ofctl check for socket error
+* unbreak unit test caused by c5fa665de3173f3ad82cc3e7624b5968bc52c08d
+* Add filter for resource tag
+* Add tag mechanism for network resources
+* Make API framework more flexible for various extensions
+* Add support for QoS for LinuxBridge agent
+* RPC Callback rolling upgrades reporting, and integration
+* Set veth_mtu default to 9000
+* Provide dry-run flag to validate deployment requirements
+* Use network RBAC feature for external access
+* Deprecate network_device_mtu
+* Catch DBDuplicateEntry errors in RBAC code
+* Make agent interface plugging utilize network MTU
+* Removed static reference to LinuxBridge in logging
+* Add API extension for reporting IP availability usage statistics
+* Updated from global requirements
+* Filter HA routers without HA interface and state
+* Translations: use neutron._18n instead of neutron.18n
+* Collect details on ARP spoof functional failures
+* Revert "Functional test for address scope"
+* Remove effectively empty directories
+* Added agent specific API support to L2 extensions
+* Qos policy RBAC DB setup and migration
+* macvtap: Macvtap L2 Agent
+* ML2: Increase segment_mtu from 0 to 1500 bytes
+* Switch to using in-tree tempest lib
+* Catch DBReferenceError in HA router race conditions
+* Catch PortNotFound after HA router race condition
+* Fix test_get_device_id() failure on OSX
+* Make __table_args__ declarative in RBACColumns
+* Fix tox -e docs
+* Override addOnException to catch exceptions
+* BGP Dynamic Routing: introduce BgpDriver
+* Update default gateway in the fip namespace after subnet-update
+* Update docstring in test/tools.py
+* Pecan: filter items need type conversion
+* Pecan: use reservations in quota enforcement hook
+* Add use_default_subnetpool to subnet create requests
+* Ensure DVR unit tests use '/tmp' directory
+* API test for get-me-network
+* ovs-fw: Enhance port ranges with masks
+* Fix sanity check --no* BoolOpts
+* Correlate address scope with network
+* Fix generate_records_for_existing in migrations
+* Revert "tests: Collect info on failure of conn_tester"
+* Updated from global requirements
+* Revert the unused code for address scope
+* Deprecate 'force_gateway_on_subnet' configuration option
+* Fix 'TypeError: format requires a mapping' in OVS agent
+* Allow non-admins to define "external" extra-routes
+* Don't assume simplejson in pecan exception catch
+* IPAM: add missing translation
+* Functional test for address scope
+* deprecated: Raise message
+* Allow address pairs to be cleared with None
+* Document the ability to load service plugins at startup
+* .testr.conf: revert workaround of testtools bug
+* Add fullstack resources for linuxbridge agent
+* Pecan: get rid of member action hook
+* Pecan: replace dashes with underscores on controller lookup
+* Fix for adding gateway with IP outside subnet
+* Allow other extensions to extend Securitygroup resources
+* Adopt Grafana to plot Neutron Failure Rates
+* BGP Dynamic Routing: introduce BgpDrAgent
+* Add missing character
+* stadium: revise the introduction to the document
+* stadium: Add a guideline about contributor overlap
+* Security group: use correct logging format
+* Update devstack hooks to work with pecan jobs
+* Fix typo error for wrong msg format when CallbackFailure
+* Stop using non-existent method of Mock
+* Fix GROUP BY usage for PostgreSQL in migrations
+* Add bug tag for auto allocated topology
+* macvtap: ML2 mech driver for macvtap network attachments
+* Don't disable Nagle algorithm in HttpProtocol
+* Preserve subnet_create behavior in presence of subnet pools
+* Open vSwitch conntrack based firewall driver
+* Add VLAN tag info to port before applying SG initial setup
+* QOS: get rid of warnings for unit tests
+* Remove NEC plugin tables
+* DHCP: release DHCP port if not enough memory
+* Cleanup unused conf variables
+* Deprecate ARP spoofing protection option
+* tests: Use constants for icmp and arp in conn_testers
+* Add to the neutron bug deputy directions
+* L3 agent: log traceback on floating ip setup failure
+* Add the rebinding chance in _bind_port_if_needed
+* Pecan: implement DHCP notifications in NotifierHook
+* Pecan: Always associate plugins with resource
+* Remove deprecation warnings
+* Get rid of UnionModel for RBAC
+* Add necessary executable permission
+* Updated from global requirements
+* Add precommit_XXX event for security group and rules
+* Give the qos extension a friendly name
+* tests: Collect info on failure of conn_tester
+* Address masking issue during auto-allocation failure
+* Fix typo 'indepedent' in alembic_migration.rst
+* BGP Dynamic Routing: introduce BgpDrScheduler model
+* macvtap: Common functions and constants
+* Fix typo of dnsmasq
+* add arp_responder flag to linuxbridge agent
+* Switch "dsvm-functional:" into same pattern as constraints
+* Add BGP Dynamic Routing DB Model and Basic CRUD
+* fullstack: Gracefully stop neutron-server process
+* Remove VPN installation plumbing
+* Remove vpnaas tests from the Neutron API tree
+* Make netns_cleanup to purge resources of selected agent only
+* Add extension requirement in port-security api test
+* ML2: delete_port on deadlock during binding
+* Start using neutron-lib for shared constants and exceptions
+* Remove fwaas tests from the Neutron API tree
+* Remove office-hours from Polcies docs index
+* Add the ability to load a set of service plugins on startup
+* ML2: Configure path_mtu to default to 1500 bytes
+* Support MTU advertisement using IPv6 RAs
+* Pecan: wrap PUT response with resource name
+* Pecan: Controller and test refactor
+* stadium: Add a guideline related to project scope
+* stadium: Propose kuryr as an independent project
+* stadium: Separate proprietary interface projects
+* stadium: Add python-neutron-pd-driver
+* stadium: Group lbaas repos together
+* Remove PTL office hours
+* Bring back dvr routers autoscheduling
+* Fix getting agent id in linuxbridge agent
+* RPC Callback rolling upgrades logic
+* OVO common enum class for IPv6 modes
+* Move check_dvr_serviceable_ports_on_host() to dvr scheduler
+* L3: enable plugin to decide if subnet is mandatory
+* Implement 'get-me-a-network' API building block
+* Test helpers to facilitate testing BGP dynamic routing
+* Fix logging error for Guru Meditation Report
+* HA for DVR - Neutron Server side code changes
+* IP_LIB: fix indentations
+* idlutils: add in missing translations
+* sub_project_guidelines: Document the procedure to make a branch EOL
+* sub_project_guidelines: Remove "add tarball to launchpad" step
+* sub_project_guidelines: Update after direct-release default
+* Only restrict gateway_ip change for router ports
+* Make add_tap_interface resillient to removal
+* Updated from global requirements
+* Remove flavors from the list of extensions provided by core plugin
+* Log warning message if get_subnet_for_dvr fails
+* devstack: Fix check for blank prefix arg
+* ML2: Call _dict_extend in create_(net|port) ops
+* Pecan: add tenant_id to quota resource
+* Prevent binding IPv6 addresses to Neutron interfaces
+* Moving Common Agent into separate module
+* Add hacking check for assertEqual HTTP code
+* Pecan: Fix association of plugins with resources
+* Add missing periods
+* Postpone heavy policy check for ports to later
+* LB agent: Downgrade network not available message
+* Imported Translations from Zanata
+* Call Ryu's clean up function when ovs_neutron_agent.main terminates
+* Protect 'show' and 'index' with Retry decorator
+* Update related router when subnetpool change scope
+* Only ensure admin state on ports that exist
+* stadium: Update list of Neutron sub-projects
+* ML2: Update help text for path_mtu
+* Correct dev documentation for has_offline_migrations command
+* Reno note regarding OVS DVR agent failure on startup
+* Fix regression in routers auto scheduling logic
+* Compile OVS for functional tests
+* Trigger dhcp port_update for new auto_address subnets
+* Correction of spelling
+* Get tempest via zuul-cloner if needed and it is available
+* Fix typo in SecurityGroup HTTP error message
+* DHCP: fix regression with DNS nameservers
+* Add address scopes support to the L3 agent
+* Get rid of marshall_fdb_entries
+* Correct insufficient name for external process in manager log
+* Fix port relationship for DVRPortBinding
+* Fix params order in assertEqual
+* Address i18n related deprecation warnings
+* nova-notifier: Change warning to debug
+* Warn about a gotcha in the sub-project process
+* ML2: update port's status to DOWN if its binding info has changed
+* Fix remove_router_from_l3_agent for 'dvr' mode agent
+* DHCP: add in missing space at the end of the line
+* Fix bug when enable configuration named dnsmasq_base_log_dir
+* DVR: avoid race on dvr serviceable port deletion
+* Remove bindings of DVR routers to L3 agents on compute nodes
+* Only prevent l3 port deletion if router exists
+* Unmarshall portinfo on update_fdb_entries calls
+* Remove dead method delete_dvr_port_binding
+* SR-IOV: Agent remove listen to network delete event
+* Use a thinner try/except in _build_cmdline_callback
+* Fail if required extensions are missing
+* Add UniqueConstraint in L3HARouterAgentPortBinding
+* Delete Tempest fork, import from tempest and tempest_lib
+* Add relationship between port and floating ip
+* Update translation setup for neutron subprojects
+* Fix required extensions mix-up
+* Uniquely identify tunnel interfaces for fullstack tests
+* DVR: Remove unwanted call to _get_routers while arp update
+* lb: ml2-agt: Separate AgentLoop from LinuxBridge specific impl
+* item allocator should return same value for same key
+* Set default value for dnsmasq_local_resolv to False
+* Improve autonested_transaction
+* Rename confusing dvr_deletens_if_no_port
+* Bump AgentExtRpcCallback version to 1.1
+* Raise RetryRequest on policy parent not found
+* create_object should not add an ID if not present in the DB model
+* Add generated port id to port dict
+* Updated from global requirements
+* Support api_workers option when using pecan
+* Elevate context for router lookups during floating IP association
+* Update alembic migration documentation
+* Add separate transport for notifications
+* Neutron review tool use message instead of topics for bugs
+* Increase default IPv6 router advertisement interval
+* Updated from global requirements
+* l3_db: Check dns-integration extension
+* Add dns_db to models/head.py
+* devref: Fix a typo in i18n.rst
+* Replace exit() by sys.exit()
+* Add missing index entry for external dns integration
+* l2pop rpc: Add a unit test for dualstacked port
+* Pecan: remove deprecated warning
+* RPC worker support for pecan server
+* Don't decide web_framework before config parse
+* Remove unwanted NOTE from dvr_local_router
+* DVR: Fix Duplicate IPtables rule detected warning message in l3agent
+* Make advertisement intervals for radvd configurable
+* Fix module's import order
+* neutron-db-manage: add has_offline_migrations command
+* Add popular IP protocols for security group
+* Decorate methods in ExtensionDescriptor with abstractmethod
+* Updated from global requirements
+* Remove obsolete plugin stuff
+* External DNS driver reference implementation
+* Move helper methods to create resorces to test_base
+* db_api: handle db objects that don't have 'id' as primary key
+* Introduce new queries to return DVR routers for a host
+* Refactor remove_router_interface() for DVR
+* sriov-mech: Introduce a new VIF type for PF vnic type
+* Ensure that tunnels are fully reset on ovs restart
+* OVS agent should fail if it can't get DVR mac address
+* Python3: Fix using dictionary keys() as list
+* Add network_update RPC into SR-IOV agent
+* Add L3 Notifications To Enable BGP Dynamic Routing
+* Fix check in _validate_ip_address() to fail on OSX
+* Remove floatingip address only when the address has been configured
+* Use tools_path/venv environment variables in install_venv
+* fix _validate_shared_update for dvr router ports
+* Rename new_network to new_network_id
+* DVR: Add action specific functions for arp_entry_update
+* Fixed qos devstack service name (should be q-qos) for -plus gate hook
+* bump the min tox version to 2.3.1
+* Updated from global requirements
+
 8.0.0.0b2
 ---------
 
+* Add more log when dhcp agent sync_state
+* Imported Translations from Zanata
+* Fix docstring for check_dvr_serviceable_ports_on_host
+* Fixes typos Openstack -> OpenStack
+* Add tests for RPC methods/classes
+* OVS agent set max number of attempts to sync failed devices
+* Don't sync all devices when some fail
+* Make Neutron attempt to advertise MTUs by default
+* Optimize get_ports_on_host_by_subnet() dvr rpc handler
+* Do not remove router from dvr_snat agents on dvr port deletion
+* Make object creation methods in l3_hamode_db atomic
 * Remove dead method _get_router_ids
 * DVR: Optimize getting arp entry info
 * Add support for neutron-full and api jobs using pecan to gate_hook
 * Updated from global requirements
 * Move L2populationDbMixin to module-level functions
+* Fix L3 HA with IPv6
 * Fix the duplicated references
 * Add opnfv tag to the list of auto-complete tags
 * Refactor router delete processing
 * Revert "Change function call order in ovs_neutron_agent."
+* Remove LinuxBridge manager get_local_ip_device arg
+* devref: added more details on rolling upgrade for notifications
+* Filter by device_owner instead of iterating by all subnet ports
 * Make security_groups_provider_updated work with Kilo agents
 * Introduce new query to return all hosts for DVR router
 * fix get_ha_sync_data_for_host for non-dvr agent
@@ -22,6 +295,7 @@ CHANGES
 * Make neutron pecan server an option instead of binary
 * DVR: when updating port's fixed_ips, update arp
 * Fix Linux bridge test_report_state_revived failure on OSX
+* Prevent PD subnets with incorrect IPv6 modes
 * Added Keystone and RequestID headers to CORS middleware
 * Unify exceptions for assign router to dvr agent
 * Unify using assertIsInstance
@@ -30,9 +304,11 @@ CHANGES
 * Do not prohibit VXLAN over IPv6
 * Updated from global requirements
 * tests: stop validating neutronclient in neutron-debug tests
+* Remove 'validate' key in 'type:dict_or_nodata' type
 * ML2: verify if required extension drivers are loaded
 * Add --dry-run mode to code review abandon tool
 * Fix typo in test path in Testing.rst
+* Fix floatingip status for an HA router
 * Fix URLs for pep8, and unit tests jobs
 * Static routes not added to qrouter namespace for DVR
 * Pass environment variables of proxy to tox
@@ -43,6 +319,7 @@ CHANGES
 * Add 'ovs' to requirements.txt
 * Fix params order in assertEqual
 * Use admin context when removing DVR router on vm port deletion
+* eliminate retries inside of _ensure_default_security_group
 * Register RA and PD config options in l3-agent
 * Provide kwargs for callback abort
 * Pecan controller loads service plugins
@@ -76,6 +353,7 @@ CHANGES
 * Utils: Add missing translation to exception
 * Unify assertEqual for empty usages
 * SR-IOV: Fix macvtap assigned vf check when kernel < 3.13
+* Delete metadata_proxy for network if it is not needed
 * Remove references to model_base through models_v2
 * Allow get_unused_ip method to skip v6 and fix iter
 * Revert "Revert "Revert "Remove TEMPEST_CONFIG_DIR in the api tox env"""
@@ -91,6 +369,8 @@ CHANGES
 * Avoid duplicating tenant check when creating resources
 * Add extension_manager and support for extensions in linuxbridge agent
 * Fix API tests
+* Rule, member updates are missed with enhanced rpc
+* radvd prefix configuration for DHCPV6_Stateful RA
 * DVR: Rename dvr_update_router_addvm function
 * Support rootwrap sysctl and conntrack commands for non-l3 nodes
 * Remove openstack.common._i18n from Neutron
@@ -308,6 +588,7 @@ CHANGES
 * Updated from global requirements
 * Fix the end point test for client
 * IPAM: fix 'enable-dhcp' with internal driver
+* Update HA router state if agent is not active
 * Send 50% less debug information when executing cmd
 * Fix alignment in message
 * Datapath on L2pop only for agents with tunneling-ip
