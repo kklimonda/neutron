@@ -1,0 +1,29 @@
+From 2bcedf27a12c37c152eec1b11c991e28fb31c91e Mon Sep 17 00:00:00 2001
+From: Andreas Scheuring <andreas.scheuring@de.ibm.com>
+Date: Thu, 3 Mar 2016 16:11:18 +0100
+Subject: [PATCH] Autogenerate macvtap agent config file
+
+Enable autogeneration of /etc/neutron/ config file for macvtap agent.
+
+Change-Id: I3637d16e3ab53248ba9b84eeb8b7d979af0ecaae
+Closes-Bug: #1552742
+---
+ etc/oslo-config-generator/macvtap_agent.ini | 6 ++++++
+ 1 file changed, 6 insertions(+)
+ create mode 100644 etc/oslo-config-generator/macvtap_agent.ini
+
+diff --git a/etc/oslo-config-generator/macvtap_agent.ini b/etc/oslo-config-generator/macvtap_agent.ini
+new file mode 100644
+index 0000000..efddc58
+--- /dev/null
++++ b/etc/oslo-config-generator/macvtap_agent.ini
+@@ -0,0 +1,6 @@
++[DEFAULT]
++output_file = etc/neutron/plugins/ml2/macvtap_agent.ini.sample
++wrap_width = 79
++
++namespace = neutron.ml2.macvtap.agent
++namespace = oslo.log
+-- 
+2.7.0
+

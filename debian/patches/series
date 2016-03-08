@@ -1,3 +1,4 @@
 skip-ryu-tests.patch
 skip-iptest.patch
 drop-ryu-dep.patch
+autogenerate-macvtap-agent-config-file.patch

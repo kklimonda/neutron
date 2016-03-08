@@ -9,6 +9,8 @@ neutron (2:8.0.0~b3-0ubuntu1) UNRELEASED; urgency=medium
     files for BGP Dynamic Routing agent.
   * d/control, d/neutron-macvtap-agent.*: Add new binary package and install/init
     files for Macvtap L2 Agent.
+  * d/p/autogenerate-macvtap-agent-config-file.patch: Cherry-picked from upstream
+    master to generate config file for Macvtap L2 Agent.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Mon, 07 Mar 2016 15:11:31 -0500
 
