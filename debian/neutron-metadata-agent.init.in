@@ -18,6 +18,6 @@ PATH=/sbin:/usr/sbin:/bin:/usr/bin
 DESC="OpenStack Neutron Metadata Agent"
 PROJECT_NAME=neutron
 NAME=${PROJECT_NAME}-metadata-agent
-# --config-file=/etc/neutron/neutron.conf will be happened 
+# --config-file=/etc/neutron/neutron.conf will be appended
 # to DAEMON_ARGS later by openstack-pkg-tools
 DAEMON_ARGS="--config-file=/etc/neutron/metadata_agent.ini"

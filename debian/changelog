@@ -5,6 +5,8 @@ neutron (2:8.0.0~b3-0ubuntu1) UNRELEASED; urgency=medium
   * d/p/ensure-tunnels-fully-reset.patch: Dropped. Fixed upstream.
   * d/p/*: Rebased.
   * d/p/skip-ryu-tests.patch: Skip ryu tests.
+  * d/control, d/neutron-bgp-dhagent.*: Add new binary package and install/init
+    files for BGP Dynamic Routing agent.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Mon, 07 Mar 2016 15:11:31 -0500
 
