@@ -424,3 +424,21 @@ Description: Neutron is a virtual network service for Openstack - BGP Dynamic Ro
  etc.)
  .
  This package provides the BGP Dynamic Routing agent.
+
+Package: neutron-macvtap-agent
+Architecture: all
+Depends: neutron-common (= ${source:Version}),
+         ${misc:Depends},
+         ${python:Depends},
+         ${shlibs:Depends},
+Description: Neutron is a virtual network service for Openstack - Macvtap L2 Agent
+ Neutron is a virtual network service for Openstack, and a part of
+ Netstack. Just like OpenStack Nova provides an API to dynamically
+ request and configure virtual servers, Neutron provides an API to
+ dynamically request and configure virtual networks. These networks
+ connect "interfaces" from other OpenStack services (e.g., virtual NICs
+ from Nova VMs). The Neutron API supports extensions to provide
+ advanced network capabilities (e.g., QoS, ACLs, network monitoring,
+ etc.)
+ .
+ This package provides the Macvtap L2 Agent.
