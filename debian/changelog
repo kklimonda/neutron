@@ -1,3 +1,9 @@
+neutron (2:8.0.0~rc1-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream release candidate for OpenStack Mitaka.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 24 Mar 2016 08:31:46 -0400
+
 neutron (2:8.0.0~b3-0ubuntu1) xenial; urgency=medium
 
   * New upstream milestone for OpenStack Mitaka.
