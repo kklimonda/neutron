@@ -1,16 +1,121 @@
 CHANGES
 =======
 
+8.0.0.0rc1
+----------
+
+* tests: register all objects before validating their hash versions
+* Prevent all primary keys in Neutron OVOs from being updated
+* De-dup conntrack deletions before running them
+* Imported Translations from Zanata
+* Fix auto_allocated_topology migration with PostgreSQL
+* Fix add_is_default_to_subnetpool migration
+* Add custom SQLAlchemy type for MACAddress
+* Improve release notes for dvr fixes
+* Add custom SQLAlchemy type for CIDR
+* Add custom SQLAlchemy type for IP addresses
+* Fixes "OVS Agent doesn't start on Windows"
+* RBAC: Fix port query and deletion for network owner
+* DVR: Agent side change for live migration with floatingip
+* DVR:Pro-active router creation with live migration
+* Reset RNG seed with current time and pid for each test started
+* Create a hook in base object to modify the fields before DB operations
+* SG PRECOMMIT_CREATE should be triggered only once
+* Extend dicts with original model in create/update
+* Imported Translations from Zanata
+* Update network object in DHCP agent with router interface changes
+* Block delete_(network|subnet) transactioned calls
+* Imported Translations from Zanata
+* ADD API tests for network ip availability
+* Pecan: Allow unauthenticated version listing
+* L3HA: Do not wrap create/delete in transaction
+* Add metrics notifier to Pecan
+* Fix latest doc errors that crept in
+* Add remote vs local FAQ for callbacks
+* Revise deputy instructions to include deprecation warnings
+* Add deprecation tag
+* register the config generator default hook with the right name
+* Stops update_network handling updates it shouldn't
+* Fix PUT tag failure
+* Remove unused pngmath Sphinx extension
+* fullstack: increase test timeout
+* DHCP: Downgrade 'network has been deleted' logs
+* Fix the context passed to get_subnets in _validate_routes
+* Add reno for deprecation of max_fixed_ips_per_port
+* ML2: Downgrade 'no bound segment' warning
+* Delete 118~ API tests from Neutron
+* Using LOG.warning replace LOG.warn
+* policies: add an official 'l3-bgp' bug tag
+* Check tap bridge timestamps to detect local changes
+* Remove unused Tempest AdminManager
+* Construct exceptions before passing to retryrequest
+* Copy tempest.common.tempest_fixtures in to Neutron
+* Queries for DVR-aware floating IP next-hop lookups
+* Adds unit tests for external DNS integration
+* Fixes external DNS driver failure with Python 3.4
+* Updates external DNS service if IP address changes
+* Add logging statements to help debug L3 sync
+* Only clear dns_name when user specifies parameter
+* Catch DB reference errors in binding DVR ports
+* Add BGP Callback and agent RPC notifcation implementations
+* Set DEFAULT_NETWORK_MTU to 1500 and use it
+* Downgrade network not found log in DHCP RPC
+* Downgrade "device not found" log message
+* Add global_physnet_mtu and deprecate segment_mtu
+* Ensures DNS_DRIVER is loaded before it is checked
+* Add Nova notifier hook calls to pecan
+* Add fip nat rules even if router disables shared snat
+* Add timestamp changed-since for core resources
+* Security groups: ensure correct ID is passed to exception
+* Pecan routing for agent schedulers
+* Use testscenarios for OVS flow tests
+* Tag the alembic migration revisions for Mitaka
+* Remove unused -constraints tox targets
+* constraints: fixed typo in tox_install.sh
+* security-groups: Add ipv6 support to ovs firewall
+* Fix tempest lib import in API tests
+* Delay description association proxy construction
+* Release notes: fix broken release notes
+* Fix API test for external subnet visibility
+* Release notes: prelude items should not have a - (aka bullet)
+* Use floating IP to connect different address scopes
+* Add a description field to all standard resources
+* Add timestamp for neutron core resources
+* Skip racey BGP tests
+* Continue the fwaas decoupling and cleanup
+* Remove obsolete todo
+* Nit: Occurances of OpenStack
+* Make all tox targets constrained
+* reno: Fix bad yaml in reno that ruins html output
+* Mock out database access for QoS policy object interface tests
+* Fix branch order when upgrading to alembic milestone
+* Fix pecan collection->plugin map for extensions
+* Autogenerate macvtap agent config file
+* Updates to Bug Deputy section of Bugs DevRef
+* hacking: remove oslo.* import check
+* devref: added details on the new l2 agent API mechanism
+* Revert "Revert "Functional test for address scope""
+* Correct Pecan extensions test
+
 8.0.0.0b3
 ---------
 
+* Add Queries For BGP Route Lookups
+* Fix docs tox target for local runs
+* Improve logging for port binding
 * Allow auto-allocate's dry-run API call to work for regular users
+* Make OVS agent tunnel configuration logging less scary
 * make/update_subnetpool_dict call _dict_extend
+* Check if plugin supports starting rpc listeners
 * Make run_ofctl check for socket error
 * unbreak unit test caused by c5fa665de3173f3ad82cc3e7624b5968bc52c08d
 * Add filter for resource tag
 * Add tag mechanism for network resources
 * Make API framework more flexible for various extensions
+* Moved CORS middleware configuration into oslo-config-generator
+* Objects DB api: added composite key to handle multiple primary key
+* IP Availability: remove unused imports
+* BGP: remove unnecessary configuration setting
 * Add support for QoS for LinuxBridge agent
 * RPC Callback rolling upgrades reporting, and integration
 * Set veth_mtu default to 9000
@@ -18,6 +123,7 @@ CHANGES
 * Use network RBAC feature for external access
 * Deprecate network_device_mtu
 * Catch DBDuplicateEntry errors in RBAC code
+* DVR:Remove unwanted check in _get_dvr_service_port_hostid
 * Make agent interface plugging utilize network MTU
 * Removed static reference to LinuxBridge in logging
 * Add API extension for reporting IP availability usage statistics
@@ -34,6 +140,7 @@ CHANGES
 * Switch to using in-tree tempest lib
 * Catch DBReferenceError in HA router race conditions
 * Catch PortNotFound after HA router race condition
+* Change the exception type from ValueError to IpamValueInvalid
 * Fix test_get_device_id() failure on OSX
 * Make __table_args__ declarative in RBACColumns
 * Fix tox -e docs
@@ -481,6 +588,7 @@ CHANGES
 * Use _ from neutron._i18n
 * Using substitution for Python String
 * Tox: Remove fullstack env, keep only dsvm-fullstack
+* Fix some inconsistency in docstrings
 * Set timetable for removal of oslo.messaging.notify.drivers
 * Delete stale neutron-server manual
 * Final decomposition of the nuage plugin

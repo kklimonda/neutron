@@ -103,6 +103,7 @@ neutron.services.vpn.plugin.VPNDriverPlugin = neutron_vpnaas.services.vpn.plugin
 qos = neutron.services.qos.qos_plugin:QoSPlugin
 router = neutron.services.l3_router.l3_router_plugin:L3RouterPlugin
 tag = neutron.services.tag.tag_plugin:TagPlugin
+timestamp_core = neutron.services.timestamp.timestamp_plugin:TimeStampPlugin
 vpnaas = neutron_vpnaas.services.vpn.plugin:VPNDriverPlugin
 
 [neutron.services.external_dns_drivers]
@@ -127,6 +128,9 @@ neutron.ml2.sriov = neutron.opts:list_ml2_conf_sriov_opts
 neutron.ml2.sriov.agent = neutron.opts:list_sriov_agent_opts
 neutron.qos = neutron.opts:list_qos_opts
 nova.auth = neutron.opts:list_auth_opts
+
+[oslo.config.opts.defaults]
+neutron = neutron.common.config:set_cors_middleware_defaults
 
 [oslo.messaging.notify.drivers]
 neutron.openstack.common.notifier.log_notifier = oslo_messaging.notify._impl_log:LogDriver
