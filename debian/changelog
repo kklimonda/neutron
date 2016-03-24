@@ -1,6 +1,7 @@
 neutron (2:8.0.0~rc1-0ubuntu1) UNRELEASED; urgency=medium
 
   * New upstream release candidate for OpenStack Mitaka.
+  * d/p/autogenerate-macvtap-agent-config-file.patch: Dropped. Fixed upstream.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Thu, 24 Mar 2016 08:31:46 -0400
 
