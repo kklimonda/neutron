@@ -147,6 +147,7 @@ neutron/agent/securitygroups_rpc.py
 neutron/agent/common/__init__.py
 neutron/agent/common/base_polling.py
 neutron/agent/common/config.py
+neutron/agent/common/ip_lib.py
 neutron/agent/common/ovs_lib.py
 neutron/agent/common/polling.py
 neutron/agent/common/utils.py
@@ -222,6 +223,7 @@ neutron/agent/ovsdb/native/connection.py
 neutron/agent/ovsdb/native/helpers.py
 neutron/agent/ovsdb/native/idlutils.py
 neutron/agent/windows/__init__.py
+neutron/agent/windows/ip_lib.py
 neutron/agent/windows/polling.py
 neutron/agent/windows/utils.py
 neutron/api/__init__.py
@@ -513,6 +515,9 @@ neutron/locale/es/LC_MESSAGES/neutron.po
 neutron/locale/fr/LC_MESSAGES/neutron.po
 neutron/locale/it/LC_MESSAGES/neutron.po
 neutron/locale/ja/LC_MESSAGES/neutron.po
+neutron/locale/ko_KR/LC_MESSAGES/neutron-log-error.po
+neutron/locale/ko_KR/LC_MESSAGES/neutron-log-info.po
+neutron/locale/ko_KR/LC_MESSAGES/neutron-log-warning.po
 neutron/locale/ko_KR/LC_MESSAGES/neutron.po
 neutron/locale/pt_BR/LC_MESSAGES/neutron.po
 neutron/locale/ru/LC_MESSAGES/neutron.po
@@ -871,6 +876,8 @@ neutron/tests/functional/agent/linux/test_tc_lib.py
 neutron/tests/functional/agent/linux/test_utils.py
 neutron/tests/functional/agent/linux/bin/__init__.py
 neutron/tests/functional/agent/linux/bin/ipt_binname.py
+neutron/tests/functional/agent/windows/__init__.py
+neutron/tests/functional/agent/windows/test_ip_lib.py
 neutron/tests/functional/api/__init__.py
 neutron/tests/functional/api/test_policies.py
 neutron/tests/functional/cmd/__init__.py
@@ -990,6 +997,8 @@ neutron/tests/unit/agent/metadata/test_namespace_proxy.py
 neutron/tests/unit/agent/ovsdb/__init__.py
 neutron/tests/unit/agent/ovsdb/native/__init__.py
 neutron/tests/unit/agent/ovsdb/native/test_helpers.py
+neutron/tests/unit/agent/windows/__init__.py
+neutron/tests/unit/agent/windows/test_ip_lib.py
 neutron/tests/unit/api/__init__.py
 neutron/tests/unit/api/test_api_common.py
 neutron/tests/unit/api/test_extensions.py

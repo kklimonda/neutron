@@ -1,6 +1,37 @@
 CHANGES
 =======
 
+8.0.0
+-----
+
+* Support Routes==2.3
+* Constraint requirements using mitaka upper-constraints.txt file
+* Imported Translations from Zanata
+* Imported Translations from Zanata
+* Imported Translations from Zanata
+* api tests: Check correct extensions
+
+8.0.0.0rc2
+----------
+
+* Imported Translations from Zanata
+* Fix setting peer to bridge interfaces
+* Updated from global requirements
+* Skip fullstack L3 HA test
+* Imported Translations from Zanata
+* Fix reference to uninitialized iptables manager
+* conn_testers: Bump timeout for ICMPv6 echo tests
+* Imported Translations from Zanata
+* Imported Translations from Zanata
+* Ovs agent can't start on Windows because of validate_local_ip
+* Imported Translations from Zanata
+* Accept icmpv6 as protocol of SG rule for backward compatibility
+* Outerjoin to networks for port ownership filter
+* Imported Translations from Zanata
+* Update devstack plugin for dependent packages
+* Remove test_external_network_visibility
+* Update .gitreview for stable/mitaka
+
 8.0.0.0rc1
 ----------
 
