@@ -93,10 +93,9 @@ class PluginClientFixture(AbstractClientFixture):
 
     def create_network(self, **kwargs):
         # Supply defaults that are expected to be set by the api
-        # framework
+        # framwork
         kwargs.setdefault('admin_state_up', True)
         kwargs.setdefault('shared', False)
-        kwargs.setdefault('tenant_id', self.ctx.tenant_id)
         data = dict(network=kwargs)
         result = self.plugin.create_network(self.ctx, data)
         return base.AttributeDict(result)

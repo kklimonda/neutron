@@ -8,9 +8,9 @@
 # OpenStack Infra <zanata@openstack.org>, 2015. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: neutron 8.0.0.0b4.dev134\n"
+"Project-Id-Version: neutron 7.0.2.dev74\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2016-03-12 03:37+0000\n"
+"POT-Creation-Date: 2016-01-13 20:56+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -77,11 +77,21 @@ msgstr "Ajan SIGHUP yakaladı, sıfırlanıyor."
 msgid "Agent caught SIGTERM, quitting daemon loop."
 msgstr "Ajan SIGTERM yakaladı, artalan işlemi döngüsünden çıkılıyor."
 
+msgid "Agent initialised successfully, now running... "
+msgstr "Ajan başarıyla ilklendirildi, şimdi çalıştırılıyor... "
+
 msgid "Agent initialized successfully, now running... "
 msgstr "Ajan başarıyla ilklendirildi, şimdi çalıştırılıyor... "
 
 msgid "Agent out of sync with plugin!"
 msgstr "Ajan ve eklenti uyumsuz!"
+
+msgid "Agent tunnel out of sync with plugin!"
+msgstr "Ajan tüneli eklentiyle uyumsuz!"
+
+#, python-format
+msgid "Allocated vlan (%d) from the pool"
+msgstr "Havuzdan vlan (%d) ayrıldı"
 
 msgid ""
 "Allow sorting is enabled because native pagination requires native sorting"
@@ -157,6 +167,10 @@ msgid ""
 msgstr ""
 "Yüklenen eklenti 'quotas' tablosunu desteklemediğinden ConfDriver "
 "quota_driver olarak kullanılıyor."
+
+#, python-format
+msgid "Config paste file: %s"
+msgstr "Yapılandırma yapıştırma dosyası: %s"
 
 #, python-format
 msgid "Configured extension driver names: %s"
@@ -264,6 +278,9 @@ msgstr "IPset temizliği başarıyla tamamlandı"
 msgid "IPv6 is not enabled on this system."
 msgstr "IPv6 bu sistemde etkin değil."
 
+msgid "Initializing CRD client... "
+msgstr "CRD istemcisi ilklendiriliyor... "
+
 #, python-format
 msgid "Initializing driver for type '%s'"
 msgstr "'%s' türü için sürücü ilklendiriliyor"
@@ -289,6 +306,9 @@ msgstr "L2 Ajanı %s MAC'i ile DVR Kipinde çalışıyor"
 
 msgid "L3 agent started"
 msgstr "L3 ajanı başlatıldı"
+
+msgid "LinuxBridge Agent RPC Daemon Started!"
+msgstr "LinuxBridge Ajanı RPC Artalan İşlemleri Başlatıldı!"
 
 #, python-format
 msgid "Loaded extension driver names: %s"
@@ -342,6 +362,9 @@ msgstr "Fiziksel ağ %(physical_network)s %(bridge)s köprüsüne eşleştiriliy
 msgid "Modular L2 Plugin initialization complete"
 msgstr "Modüler L2 Eklentisi ilklendirme tamamlandı"
 
+msgid "NVSD Agent initialized successfully, now running... "
+msgstr "NVSD Ajanı başarıyla ilklendirildi, şimdi çalıştırılıyor... "
+
 #, python-format
 msgid "Network VLAN ranges: %s"
 msgstr "Ağ VLAN aralığı: %s"
@@ -353,6 +376,9 @@ msgstr "Neutron servisi başlatıldı, %(host)s:%(port)s üzerinde dinliyor"
 #, python-format
 msgid "No device with MAC %s defined on agent."
 msgstr "Ajanda %s MAC'ine sahip bir aygıt tanımlanmamış."
+
+msgid "No ip allocation set"
+msgstr "Ip ayırma ayarlanmamış"
 
 msgid "No ports here to refresh firewall"
 msgstr "Burda güvenlik duvarını tazelemek için bağlantı noktası yok"
@@ -468,6 +494,9 @@ msgstr ""
 "%s yönlendiricisi bu ajan tarafından yönetilmiyor. Muhtemelen eş zamanlı "
 "olarak silindi."
 
+msgid "SNAT already bound to a service node."
+msgstr "SNAT zaten bir servis düğümüne bağlı."
+
 #, python-format
 msgid "SNAT interface port list does not exist, so create one: %s"
 msgstr ""
@@ -528,6 +557,9 @@ msgstr "Bağlantı noktası %s atlanıyor çünkü üzerinde yapılandırılmı�
 
 msgid "Specified IP addresses do not match the subnet IP version"
 msgstr "Belirtilen IP adresleri alt ağ IP sürümüyle eşleşmiyor"
+
+msgid "Stopping linuxbridge agent."
+msgstr "Linuxbridge ajanı durduruluyor."
 
 #, python-format
 msgid "Subnet %s was deleted concurrently"

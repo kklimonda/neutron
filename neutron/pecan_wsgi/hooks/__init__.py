@@ -13,8 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.pecan_wsgi.hooks import body_validation
+from neutron.pecan_wsgi.hooks import attribute_population
 from neutron.pecan_wsgi.hooks import context
+from neutron.pecan_wsgi.hooks import member_action
 from neutron.pecan_wsgi.hooks import notifier
 from neutron.pecan_wsgi.hooks import ownership_validation
 from neutron.pecan_wsgi.hooks import policy_enforcement
@@ -24,7 +25,8 @@ from neutron.pecan_wsgi.hooks import translation
 
 ExceptionTranslationHook = translation.ExceptionTranslationHook
 ContextHook = context.ContextHook
-BodyValidationHook = body_validation.BodyValidationHook
+MemberActionHook = member_action.MemberActionHook
+AttributePopulationHook = attribute_population.AttributePopulationHook
 OwnershipValidationHook = ownership_validation.OwnershipValidationHook
 PolicyHook = policy_enforcement.PolicyHook
 QuotaEnforcementHook = quota_enforcement.QuotaEnforcementHook

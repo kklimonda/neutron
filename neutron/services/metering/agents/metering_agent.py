@@ -23,7 +23,6 @@ from oslo_service import periodic_task
 from oslo_service import service
 from oslo_utils import importutils
 
-from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.common import config
 from neutron.agent import rpc as agent_rpc
 from neutron.common import config as common_config
@@ -32,6 +31,7 @@ from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
 from neutron import context
+from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
 from neutron import service as neutron_service
 
@@ -248,7 +248,7 @@ class MeteringAgentWithStateReport(MeteringAgent):
     def __init__(self, host, conf=None):
         super(MeteringAgentWithStateReport, self).__init__(host=host,
                                                            conf=conf)
-        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
         self.agent_state = {
             'binary': 'neutron-metering-agent',
             'host': host,
@@ -276,8 +276,8 @@ class MeteringAgentWithStateReport(MeteringAgent):
             self.use_call = False
         except AttributeError:
             # This means the server does not support report_state
-            LOG.warning(_LW("Neutron server does not support state report. "
-                            "State report for this agent will be disabled."))
+            LOG.warn(_LW("Neutron server does not support state report."
+                         " State report for this agent will be disabled."))
             self.heartbeat.stop()
             return
         except Exception:

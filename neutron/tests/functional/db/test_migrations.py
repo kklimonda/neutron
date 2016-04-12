@@ -12,16 +12,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import six
+
 from alembic import script as alembic_script
 from contextlib import contextmanager
+import mock
 from oslo_config import cfg
 from oslo_config import fixture as config_fixture
 from oslo_db.sqlalchemy import test_base
 from oslo_db.sqlalchemy import test_migrations
-import six
 import sqlalchemy
 from sqlalchemy import event
-import sqlalchemy.types as types
 
 import neutron.db.migration as migration_help
 from neutron.db.migration.alembic_migrations import external
@@ -100,6 +101,11 @@ class _TestModelsMigrations(test_migrations.ModelsMigrationsSync):
     '''
 
     def setUp(self):
+        patch = mock.patch.dict('sys.modules', {
+            'heleosapi': mock.MagicMock(),
+        })
+        patch.start()
+        self.addCleanup(patch.stop)
         super(_TestModelsMigrations, self).setUp()
         self.cfg = self.useFixture(config_fixture.Config())
         self.cfg.config(core_plugin=CORE_PLUGIN)
@@ -126,24 +132,6 @@ class _TestModelsMigrations(test_migrations.ModelsMigrationsSync):
 
     def filter_metadata_diff(self, diff):
         return list(filter(self.remove_unrelated_errors, diff))
-
-    # TODO(akamyshikova): remove this method as soon as comparison with Variant
-    # will be implemented in oslo.db or alembic
-    def compare_type(self, ctxt, insp_col, meta_col, insp_type, meta_type):
-        if isinstance(meta_type, types.Variant):
-            orig_type = meta_col.type
-            meta_col.type = meta_type.impl
-            try:
-                return self.compare_type(ctxt, insp_col, meta_col, insp_type,
-                                         meta_type.impl)
-            finally:
-                meta_col.type = orig_type
-        else:
-            ret = super(_TestModelsMigrations, self).compare_type(
-                ctxt, insp_col, meta_col, insp_type, meta_type)
-            if ret is not None:
-                return ret
-            return ctxt.impl.compare_type(insp_col, meta_col)
 
     # Remove some difference that are not mistakes just specific of
     # dialects, etc
@@ -268,7 +256,7 @@ class TestModelsMigrationsMysql(_TestModelsMigrations,
             migration.do_alembic_command(self.alembic_config, 'upgrade',
                                          'heads')
             insp = sqlalchemy.engine.reflection.Inspector.from_engine(engine)
-            # Test that table creation on MySQL only builds InnoDB tables
+            # Test that table creation on mysql only builds InnoDB tables
             tables = insp.get_table_names()
             self.assertTrue(len(tables) > 0,
                             "No tables found. Wrong schema?")
@@ -276,20 +264,6 @@ class TestModelsMigrationsMysql(_TestModelsMigrations,
                    insp.get_table_options(table)['mysql_engine'] != 'InnoDB'
                    and table != 'alembic_version']
             self.assertEqual(0, len(res), "%s non InnoDB tables created" % res)
-
-    def _test_has_offline_migrations(self, revision, expected):
-        engine = self.get_engine()
-        cfg.CONF.set_override('connection', engine.url, group='database')
-        migration.do_alembic_command(self.alembic_config, 'upgrade', revision)
-        self.assertEqual(expected,
-                         migration.has_offline_migrations(self.alembic_config,
-                                                          'unused'))
-
-    def test_has_offline_migrations_pending_contract_scripts(self):
-        self._test_has_offline_migrations('kilo', True)
-
-    def test_has_offline_migrations_all_heads_upgraded(self):
-        self._test_has_offline_migrations('heads', False)
 
 
 class TestModelsMigrationsPsql(_TestModelsMigrations,
@@ -304,25 +278,24 @@ class TestSanityCheck(test_base.DbTestCase):
         self.alembic_config = migration.get_neutron_config()
         self.alembic_config.neutron_config = cfg.CONF
 
-    def test_check_sanity_1df244e556f5(self):
-        ha_router_agent_port_bindings = sqlalchemy.Table(
-            'ha_router_agent_port_bindings', sqlalchemy.MetaData(),
-            sqlalchemy.Column('port_id', sqlalchemy.String(36)),
-            sqlalchemy.Column('router_id', sqlalchemy.String(36)),
-            sqlalchemy.Column('l3_agent_id', sqlalchemy.String(36)))
+    def test_check_sanity_14be42f3d0a5(self):
+        SecurityGroup = sqlalchemy.Table(
+            'securitygroups', sqlalchemy.MetaData(),
+            sqlalchemy.Column('id', sqlalchemy.String(length=36),
+                              nullable=False),
+            sqlalchemy.Column('name', sqlalchemy.String(255)),
+            sqlalchemy.Column('tenant_id', sqlalchemy.String(255)))
 
         with self.engine.connect() as conn:
-            ha_router_agent_port_bindings.create(conn)
-            conn.execute(ha_router_agent_port_bindings.insert(), [
-                {'port_id': '1234', 'router_id': '12345',
-                 'l3_agent_id': '123'},
-                {'port_id': '12343', 'router_id': '12345',
-                 'l3_agent_id': '123'}
+            SecurityGroup.create(conn)
+            conn.execute(SecurityGroup.insert(), [
+                {'id': '123d4s', 'tenant_id': 'sssda1', 'name': 'default'},
+                {'id': '123d4', 'tenant_id': 'sssda1', 'name': 'default'}
             ])
             script_dir = alembic_script.ScriptDirectory.from_config(
                 self.alembic_config)
-            script = script_dir.get_revision("1df244e556f5").module
-            self.assertRaises(script.DuplicateL3HARouterAgentPortBinding,
+            script = script_dir.get_revision("14be42f3d0a5").module
+            self.assertRaises(script.DuplicateSecurityGroupsNamedDefault,
                               script.check_sanity, conn)
 
 

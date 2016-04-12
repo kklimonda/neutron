@@ -12,10 +12,14 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from tempest.lib.common.utils import data_utils
-from tempest import test
+from oslo_log import log as logging
+from tempest_lib.common.utils import data_utils
 
 from neutron.tests.api import base
+from neutron.tests.tempest import test
+
+
+LOG = logging.getLogger(__name__)
 
 
 class MeteringTestJSON(base.BaseAdminNetworkTest):

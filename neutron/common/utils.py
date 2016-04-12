@@ -24,36 +24,27 @@ import decimal
 import errno
 import functools
 import hashlib
-import math
 import multiprocessing
+import netaddr
 import os
 import random
 import signal
 import socket
-import sys
 import tempfile
 import uuid
 
-import debtcollector
 from eventlet.green import subprocess
-import netaddr
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
-from oslo_utils import importutils
-from oslo_utils import reflection
 import six
-from stevedore import driver
 
-from neutron._i18n import _, _LE
 from neutron.common import constants as n_const
 
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 LOG = logging.getLogger(__name__)
 SYNCHRONIZED_PREFIX = 'neutron-'
-# Unsigned 16 bit MAX.
-MAX_UINT16 = 0xffff
 
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
 
@@ -68,11 +59,9 @@ class cache_method_results(object):
         self._not_cached = object()
 
     def _get_from_cache(self, target_self, *args, **kwargs):
-        target_self_cls_name = reflection.get_class_name(target_self,
-                                                         fully_qualified=False)
         func_name = "%(module)s.%(class)s.%(func_name)s" % {
             'module': target_self.__module__,
-            'class': target_self_cls_name,
+            'class': target_self.__class__.__name__,
             'func_name': self.func.__name__,
         }
         key = (func_name,) + args
@@ -96,21 +85,19 @@ class cache_method_results(object):
         return item
 
     def __call__(self, target_self, *args, **kwargs):
-        target_self_cls_name = reflection.get_class_name(target_self,
-                                                         fully_qualified=False)
         if not hasattr(target_self, '_cache'):
             raise NotImplementedError(
-                _("Instance of class %(module)s.%(class)s must contain _cache "
-                  "attribute") % {
+                "Instance of class %(module)s.%(class)s must contain _cache "
+                "attribute" % {
                     'module': target_self.__module__,
-                    'class': target_self_cls_name})
+                    'class': target_self.__class__.__name__})
         if not target_self._cache:
             if self._first_call:
                 LOG.debug("Instance of class %(module)s.%(class)s doesn't "
                           "contain attribute _cache therefore results "
                           "cannot be cached for %(func_name)s.",
                           {'module': target_self.__module__,
-                           'class': target_self_cls_name,
+                           'class': target_self.__class__.__name__,
                            'func_name': self.func.__name__})
                 self._first_call = False
             return self.func(target_self, *args, **kwargs)
@@ -120,7 +107,6 @@ class cache_method_results(object):
         return functools.partial(self.__call__, obj)
 
 
-@debtcollector.removals.remove(message="This will removed in the N cycle.")
 def read_cached_file(filename, cache_info, reload_func=None):
     """Read from a file if it has been modified.
 
@@ -142,7 +128,6 @@ def read_cached_file(filename, cache_info, reload_func=None):
     return cache_info['data']
 
 
-@debtcollector.removals.remove(message="This will removed in the N cycle.")
 def find_config_file(options, config_file):
     """Return the first config file found.
 
@@ -335,7 +320,7 @@ def get_random_string(length):
 
 def get_dhcp_agent_device_id(network_id, host):
     # Split host so as to always use only the hostname and
-    # not the domain name. This will guarantee consistency
+    # not the domain name. This will guarantee consistentcy
     # whether a local hostname or an fqdn is passed in.
     local_hostname = host.split('.')[0]
     host_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, str(local_hostname))
@@ -395,11 +380,10 @@ def is_dvr_serviced(device_owner):
     if they are required for DVR or any service directly or
     indirectly associated with DVR.
     """
-    return (device_owner.startswith(n_const.DEVICE_OWNER_COMPUTE_PREFIX) or
+    return (device_owner.startswith('compute:') or
             device_owner in get_other_dvr_serviced_device_owners())
 
 
-@debtcollector.removals.remove(message="This will removed in the N cycle.")
 def get_keystone_url(conf):
     if conf.auth_uri:
         auth_uri = conf.auth_uri.rstrip('/')
@@ -465,7 +449,7 @@ def is_port_trusted(port):
     Trust is currently based on the device_owner field starting with 'network:'
     since we restrict who can use that in the default policy.json file.
     """
-    return port['device_owner'].startswith(n_const.DEVICE_OWNER_NETWORK_PREFIX)
+    return port['device_owner'].startswith('network:')
 
 
 class DelayedStringRenderer(object):
@@ -496,7 +480,7 @@ def round_val(val):
                                              rounding=decimal.ROUND_HALF_UP))
 
 
-def replace_file(file_name, data, file_mode=0o644):
+def replace_file(file_name, data):
     """Replaces the contents of file_name with data in a safe manner.
 
     First write to a temp file and then rename. Since POSIX renames are
@@ -510,138 +494,5 @@ def replace_file(file_name, data, file_mode=0o644):
                                      dir=base_dir,
                                      delete=False) as tmp_file:
         tmp_file.write(data)
-    os.chmod(tmp_file.name, file_mode)
+    os.chmod(tmp_file.name, 0o644)
     os.rename(tmp_file.name, file_name)
-
-
-def load_class_by_alias_or_classname(namespace, name):
-    """Load class using stevedore alias or the class name
-    :param namespace: namespace where the alias is defined
-    :param name: alias or class name of the class to be loaded
-    :returns class if calls can be loaded
-    :raises ImportError if class cannot be loaded
-    """
-
-    if not name:
-        LOG.error(_LE("Alias or class name is not set"))
-        raise ImportError(_("Class not found."))
-    try:
-        # Try to resolve class by alias
-        mgr = driver.DriverManager(namespace, name)
-        class_to_load = mgr.driver
-    except RuntimeError:
-        e1_info = sys.exc_info()
-        # Fallback to class name
-        try:
-            class_to_load = importutils.import_class(name)
-        except (ImportError, ValueError):
-            LOG.error(_LE("Error loading class by alias"),
-                      exc_info=e1_info)
-            LOG.error(_LE("Error loading class by class name"),
-                      exc_info=True)
-            raise ImportError(_("Class not found."))
-    return class_to_load
-
-
-def safe_decode_utf8(s):
-    if six.PY3 and isinstance(s, bytes):
-        return s.decode('utf-8', 'surrogateescape')
-    return s
-
-
-#TODO(jlibosva): Move this to neutron-lib and reuse in networking-ovs-dpdk
-def _create_mask(lsb_mask):
-    return (MAX_UINT16 << int(math.floor(math.log(lsb_mask, 2)))) \
-           & MAX_UINT16
-
-
-def _reduce_mask(mask, step=1):
-    mask <<= step
-    return mask & MAX_UINT16
-
-
-def _increase_mask(mask, step=1):
-    for index in range(step):
-        mask >>= 1
-        mask |= 0x8000
-    return mask
-
-
-def _hex_format(number):
-    return format(number, '#06x')
-
-
-def port_rule_masking(port_min, port_max):
-    # Check port_max >= port_min.
-    if port_max < port_min:
-        raise ValueError(_("'port_max' is smaller than 'port_min'"))
-
-    # Rules to be added to OVS.
-    rules = []
-
-    # Loop from the lower part. Increment port_min.
-    bit_right = 1
-    mask = MAX_UINT16
-    t_port_min = port_min
-    while True:
-        # Obtain last significative bit.
-        bit_min = port_min & bit_right
-        # Take care of first bit.
-        if bit_right == 1:
-            if bit_min > 0:
-                rules.append("%s" % (_hex_format(t_port_min)))
-            else:
-                mask = _create_mask(2)
-                rules.append("%s/%s" % (_hex_format(t_port_min & mask),
-                                        _hex_format(mask)))
-        elif bit_min == 0:
-            mask = _create_mask(bit_right)
-            t_port_min += bit_right
-            # If the temporal variable we are using exceeds the
-            # port_max value, exit the loop.
-            if t_port_min > port_max:
-                break
-            rules.append("%s/%s" % (_hex_format(t_port_min & mask),
-                                    _hex_format(mask)))
-
-        # If the temporal variable we are using exceeds the
-        # port_max value, exit the loop.
-        if t_port_min > port_max:
-            break
-        bit_right <<= 1
-
-    # Loop from the higher part.
-    bit_position = int(round(math.log(port_max, 2)))
-    bit_left = 1 << bit_position
-    mask = MAX_UINT16
-    mask = _reduce_mask(mask, bit_position)
-    # Find the most significative bit of port_max, higher
-    # than the most significative bit of port_min.
-    while mask < MAX_UINT16:
-        bit_max = port_max & bit_left
-        bit_min = port_min & bit_left
-        if bit_max > bit_min:
-            # Difference found.
-            break
-        # Rotate bit_left to the right and increase mask.
-        bit_left >>= 1
-        mask = _increase_mask(mask)
-
-    while bit_left > 1:
-        # Obtain next most significative bit.
-        bit_left >>= 1
-        bit_max = port_max & bit_left
-        if bit_left == 1:
-            if bit_max == 0:
-                rules.append("%s" % (_hex_format(port_max)))
-            else:
-                mask = _create_mask(2)
-                rules.append("%s/%s" % (_hex_format(port_max & mask),
-                                        _hex_format(mask)))
-        elif bit_max > 0:
-            t_port_max = port_max - bit_max
-            mask = _create_mask(bit_left)
-            rules.append("%s/%s" % (_hex_format(t_port_max),
-                                    _hex_format(mask)))
-
-    return rules

@@ -12,24 +12,37 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from tempest.lib.common.utils import data_utils
-from tempest.lib import exceptions as lib_exc
-from tempest import test
+from tempest_lib.common.utils import data_utils
+from tempest_lib import exceptions as lib_exc
 
 from neutron.tests.api import base
+from neutron.tests.api import clients
+from neutron.tests.tempest import config
+from neutron.tests.tempest import test
 
-
+CONF = config.CONF
 ADDRESS_SCOPE_NAME = 'smoke-address-scope'
 
 
-class AddressScopeTestBase(base.BaseAdminNetworkTest):
+class AddressScopeTestBase(base.BaseNetworkTest):
+
+    @classmethod
+    def skip_checks(cls):
+        super(AddressScopeTestBase, cls).skip_checks()
+        msg = "Address-Scope extension not enabled."
+        raise cls.skipException(msg)
 
     @classmethod
     def resource_setup(cls):
         super(AddressScopeTestBase, cls).resource_setup()
-        if not test.is_extension_enabled('address-scope', 'network'):
-            msg = "address-scope extension not enabled."
+        try:
+            creds = cls.isolated_creds.get_admin_creds()
+            cls.os_adm = clients.Manager(credentials=creds)
+        except NotImplementedError:
+            msg = ("Missing Administrative Network API credentials "
+                   "in configuration.")
             raise cls.skipException(msg)
+        cls.admin_client = cls.os_adm.network_client
 
     def _create_address_scope(self, is_admin=False, **kwargs):
         name = data_utils.rand_name(ADDRESS_SCOPE_NAME)
@@ -37,8 +50,7 @@ class AddressScopeTestBase(base.BaseAdminNetworkTest):
                                          **kwargs)
 
     def _test_update_address_scope_helper(self, is_admin=False, shared=None):
-        address_scope = self._create_address_scope(is_admin=is_admin,
-                                                   ip_version=4)
+        address_scope = self._create_address_scope(is_admin=is_admin)
 
         if is_admin:
             client = self.admin_client
@@ -61,7 +73,7 @@ class AddressScopeTest(AddressScopeTestBase):
     @test.attr(type='smoke')
     @test.idempotent_id('045f9294-8b1a-4848-b6a8-edf1b41e9d06')
     def test_tenant_create_list_address_scope(self):
-        address_scope = self._create_address_scope(ip_version=4)
+        address_scope = self._create_address_scope()
         body = self.client.list_address_scopes()
         returned_address_scopes = body['address_scopes']
         self.assertIn(address_scope['id'],
@@ -74,7 +86,7 @@ class AddressScopeTest(AddressScopeTestBase):
     @test.attr(type='smoke')
     @test.idempotent_id('85e0326b-4c75-4b92-bd6e-7c7de6aaf05c')
     def test_show_address_scope(self):
-        address_scope = self._create_address_scope(ip_version=4)
+        address_scope = self._create_address_scope()
         body = self.client.show_address_scope(
             address_scope['id'])
         returned_address_scope = body['address_scope']
@@ -91,7 +103,7 @@ class AddressScopeTest(AddressScopeTestBase):
     @test.attr(type='smoke')
     @test.idempotent_id('22b3b600-72a8-4b60-bc94-0f29dd6271df')
     def test_delete_address_scope(self):
-        address_scope = self._create_address_scope(ip_version=4)
+        address_scope = self._create_address_scope()
         self.client.delete_address_scope(address_scope['id'])
         self.assertRaises(lib_exc.NotFound, self.client.show_address_scope,
                           address_scope['id'])
@@ -99,8 +111,7 @@ class AddressScopeTest(AddressScopeTestBase):
     @test.attr(type='smoke')
     @test.idempotent_id('5a06c287-8036-4d04-9d78-def8e06d43df')
     def test_admin_create_shared_address_scope(self):
-        address_scope = self._create_address_scope(is_admin=True, shared=True,
-                                                   ip_version=4)
+        address_scope = self._create_address_scope(is_admin=True, shared=True)
         body = self.admin_client.show_address_scope(
             address_scope['id'])
         returned_address_scope = body['address_scope']

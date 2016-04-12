@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_log import log as logging
 import sqlalchemy as sa
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
@@ -19,6 +20,8 @@ from sqlalchemy.orm import exc
 from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.extensions import portsecurity as psec
+
+LOG = logging.getLogger(__name__)
 
 
 class PortSecurityBinding(model_base.BASEV2):

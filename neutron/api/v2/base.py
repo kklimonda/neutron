@@ -24,7 +24,6 @@ from oslo_utils import excutils
 import six
 import webob.exc
 
-from neutron._i18n import _, _LE, _LI
 from neutron.api import api_common
 from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
 from neutron.api.v2 import attributes
@@ -33,6 +32,7 @@ from neutron.common import constants as const
 from neutron.common import exceptions
 from neutron.common import rpc as n_rpc
 from neutron.db import api as db_api
+from neutron.i18n import _LE, _LI
 from neutron import policy
 from neutron import quota
 from neutron.quota import resource_registry
@@ -707,10 +707,12 @@ class Controller(object):
         network_owner = network['tenant_id']
 
         if network_owner != resource_item['tenant_id']:
-            # NOTE(kevinbenton): we raise a 404 to hide the existence of the
-            # network from the tenant since they don't have access to it.
-            msg = _('The resource could not be found.')
-            raise webob.exc.HTTPNotFound(msg)
+            msg = _("Tenant %(tenant_id)s not allowed to "
+                    "create %(resource)s on this network")
+            raise webob.exc.HTTPForbidden(msg % {
+                "tenant_id": resource_item['tenant_id'],
+                "resource": self._resource,
+            })
 
 
 def create_resource(collection, resource, plugin, params, allow_bulk=False,

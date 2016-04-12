@@ -13,11 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from tempest.lib import exceptions as lib_exc
-from tempest import test
-
 from neutron.tests.api import base
 from neutron.tests.api import base_security_groups as base_security
+from neutron.tests.tempest import test
+from tempest_lib import exceptions as lib_exc
 
 
 class PortSecurityAdminTests(base_security.BaseSecGroupTest,

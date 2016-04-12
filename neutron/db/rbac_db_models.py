@@ -16,18 +16,10 @@
 import abc
 
 import sqlalchemy as sa
-from sqlalchemy.ext import declarative
 from sqlalchemy.orm import validates
 
-from neutron._i18n import _
-from neutron.api.v2 import attributes as attr
 from neutron.common import exceptions as n_exc
 from neutron.db import model_base
-from neutron import manager
-
-
-ACCESS_SHARED = 'access_as_shared'
-ACCESS_EXTERNAL = 'access_as_external'
 
 
 class InvalidActionForType(n_exc.InvalidInput):
@@ -46,8 +38,7 @@ class RBACColumns(model_base.HasId, model_base.HasTenant):
     # the target_tenant is the subject that the policy will affect. this may
     # also be a wildcard '*' to indicate all tenants or it may be a role if
     # neutron gets better integration with keystone
-    target_tenant = sa.Column(sa.String(attr.TENANT_ID_MAX_LEN),
-                              nullable=False)
+    target_tenant = sa.Column(sa.String(255), nullable=False)
 
     action = sa.Column(sa.String(255), nullable=False)
 
@@ -57,12 +48,10 @@ class RBACColumns(model_base.HasId, model_base.HasTenant):
         # to reference the type. sub-classes should set their own
         pass
 
-    @declarative.declared_attr
-    def __table_args__(cls):
-        return (
-            sa.UniqueConstraint('target_tenant', 'object_id', 'action'),
-            model_base.BASEV2.__table_args__
-        )
+    __table_args__ = (
+        sa.UniqueConstraint('target_tenant', 'object_id', 'action'),
+        model_base.BASEV2.__table_args__
+    )
 
     @validates('action')
     def _validate_action(self, key, action):
@@ -83,31 +72,13 @@ def get_type_model_map():
     return {table.object_type: table for table in RBACColumns.__subclasses__()}
 
 
-def _object_id_column(foreign_key):
-    return sa.Column(sa.String(36),
-                     sa.ForeignKey(foreign_key, ondelete="CASCADE"),
-                     nullable=False)
-
-
 class NetworkRBAC(RBACColumns, model_base.BASEV2):
     """RBAC table for networks."""
 
-    object_id = _object_id_column('networks.id')
+    object_id = sa.Column(sa.String(36),
+                          sa.ForeignKey('networks.id', ondelete="CASCADE"),
+                          nullable=False)
     object_type = 'network'
 
     def get_valid_actions(self):
-        actions = (ACCESS_SHARED,)
-        pl = manager.NeutronManager.get_plugin()
-        if 'external-net' in pl.supported_extension_aliases:
-            actions += (ACCESS_EXTERNAL,)
-        return actions
-
-
-class QosPolicyRBAC(RBACColumns, model_base.BASEV2):
-    """RBAC table for qos policies."""
-
-    object_id = _object_id_column('qos_policies.id')
-    object_type = 'qos_policy'
-
-    def get_valid_actions(self):
-        return (ACCESS_SHARED,)
+        return ('access_as_shared',)

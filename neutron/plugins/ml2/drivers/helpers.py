@@ -21,7 +21,6 @@ from oslo_log import log
 
 from neutron.common import exceptions as exc
 from neutron.common import utils
-from neutron.plugins.common import utils as p_utils
 from neutron.plugins.ml2 import driver_api as api
 
 
@@ -42,7 +41,7 @@ class BaseTypeDriver(api.TypeDriver):
             self.physnet_mtus = []
 
     def get_mtu(self, physical_network=None):
-        return p_utils.get_deployment_physnet_mtu()
+        return cfg.CONF.ml2.segment_mtu
 
 
 class SegmentTypeDriver(BaseTypeDriver):

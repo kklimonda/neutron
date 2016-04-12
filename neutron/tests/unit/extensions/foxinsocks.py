@@ -34,7 +34,7 @@ class FoxInSocksPluginInterface(extensions.PluginInterface):
         pass
 
 
-class Foxinsocks(extensions.ExtensionDescriptor):
+class Foxinsocks(object):
 
     def __init__(self):
         pass

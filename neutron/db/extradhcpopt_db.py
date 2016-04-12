@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_log import log as logging
 import sqlalchemy as sa
 from sqlalchemy import orm
 
@@ -23,7 +24,10 @@ from neutron.db import models_v2
 from neutron.extensions import extra_dhcp_opt as edo_ext
 
 
-class ExtraDhcpOpt(model_base.BASEV2, model_base.HasId):
+LOG = logging.getLogger(__name__)
+
+
+class ExtraDhcpOpt(model_base.BASEV2, models_v2.HasId):
     """Represent a generic concept of extra options associated to a port.
 
     Each port may have none to many dhcp opts associated to it that can
@@ -55,26 +59,13 @@ class ExtraDhcpOptMixin(object):
     """Mixin class to add extra options to the DHCP opts file
     and associate them to a port.
     """
-
-    def _is_valid_opt_value(self, opt_name, opt_value):
-
-        # If the dhcp opt is blank-able, it shouldn't be saved to the DB in
-        # case that the value is None
-        if opt_name in edo_ext.VALID_BLANK_EXTRA_DHCP_OPTS:
-            return opt_value is not None
-
-        # Otherwise, it shouldn't be saved to the DB in case that the value
-        # is None or empty
-        return bool(opt_value)
-
     def _process_port_create_extra_dhcp_opts(self, context, port,
                                              extra_dhcp_opts):
         if not extra_dhcp_opts:
             return port
         with context.session.begin(subtransactions=True):
             for dopt in extra_dhcp_opts:
-                if self._is_valid_opt_value(dopt['opt_name'],
-                                            dopt['opt_value']):
+                if dopt['opt_value']:
                     ip_version = dopt.get('ip_version', 4)
                     db = ExtraDhcpOpt(
                         port_id=port['id'],
@@ -116,18 +107,12 @@ class ExtraDhcpOptMixin(object):
                             if upd_rec['opt_value'] is None:
                                 context.session.delete(opt)
                             else:
-                                if (self._is_valid_opt_value(
-                                        opt['opt_name'],
-                                        upd_rec['opt_value']) and
-                                        opt['opt_value'] !=
-                                        upd_rec['opt_value']):
+                                if opt['opt_value'] != upd_rec['opt_value']:
                                     opt.update(
                                         {'opt_value': upd_rec['opt_value']})
                             break
                     else:
-                        if self._is_valid_opt_value(
-                                upd_rec['opt_name'],
-                                upd_rec['opt_value']):
+                        if upd_rec['opt_value'] is not None:
                             ip_version = upd_rec.get('ip_version', 4)
                             db = ExtraDhcpOpt(
                                 port_id=id,

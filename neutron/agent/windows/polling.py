@@ -22,9 +22,3 @@ from neutron.agent.common import base_polling
 def get_polling_manager(minimize_polling, ovsdb_monitor_respawn_interval):
     pm = base_polling.AlwaysPoll()
     yield pm
-
-
-# TODO(atuvenie): make this manager inherit from
-# that fully fledged polling manager interface
-class InterfacePollingMinimizer(object):
-    pass

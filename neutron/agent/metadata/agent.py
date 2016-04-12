@@ -16,6 +16,7 @@ import hashlib
 import hmac
 
 import httplib2
+from neutronclient.v2_0 import client
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -24,7 +25,6 @@ import six
 import six.moves.urllib.parse as urlparse
 import webob
 
-from neutron._i18n import _, _LE, _LW
 from neutron.agent.linux import utils as agent_utils
 from neutron.agent.metadata import config
 from neutron.agent import rpc as agent_rpc
@@ -33,6 +33,7 @@ from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
 from neutron import context
+from neutron.i18n import _LE, _LW
 from neutron.openstack.common.cache import cache
 
 LOG = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ class MetadataProxyHandler(object):
 
     def __init__(self, conf):
         self.conf = conf
+        self.auth_info = {}
         if self.conf.cache_url:
             self._cache = cache.get_cache(self.conf.cache_url)
         else:
@@ -81,6 +83,28 @@ class MetadataProxyHandler(object):
 
         self.plugin_rpc = MetadataPluginAPI(topics.PLUGIN)
         self.context = context.get_admin_context_without_session()
+        # Use RPC by default
+        self.use_rpc = True
+
+    def _get_neutron_client(self):
+        params = {
+            'username': self.conf.admin_user,
+            'password': self.conf.admin_password,
+            'tenant_name': self.conf.admin_tenant_name,
+            'auth_url': self.conf.auth_url,
+            'auth_strategy': self.conf.auth_strategy,
+            'region_name': self.conf.auth_region,
+            'token': self.auth_info.get('auth_token'),
+            'insecure': self.conf.auth_insecure,
+            'ca_cert': self.conf.auth_ca_cert,
+        }
+        if self.conf.endpoint_url:
+            params['endpoint_url'] = self.conf.endpoint_url
+        else:
+            params['endpoint_url'] = self.auth_info.get('endpoint_url')
+            params['endpoint_type'] = self.conf.endpoint_type
+
+        return client.Client(**params)
 
     @webob.dec.wsgify(RequestClass=webob.Request)
     def __call__(self, req):
@@ -102,9 +126,19 @@ class MetadataProxyHandler(object):
 
     def _get_ports_from_server(self, router_id=None, ip_address=None,
                                networks=None):
-        """Get ports from server."""
+        """Either get ports from server by RPC or fallback to neutron client"""
         filters = self._get_port_filters(router_id, ip_address, networks)
-        return self.plugin_rpc.get_ports(self.context, filters)
+        if self.use_rpc:
+            try:
+                return self.plugin_rpc.get_ports(self.context, filters)
+            except (oslo_messaging.MessagingException, AttributeError):
+                # TODO(obondarev): remove fallback once RPC is proven
+                # to work fine with metadata agent (K or L release at most)
+                LOG.warning(_LW('Server does not support metadata RPC, '
+                                'fallback to using neutron client'))
+                self.use_rpc = False
+
+        return self._get_ports_using_client(filters)
 
     def _get_port_filters(self, router_id=None, ip_address=None,
                           networks=None):
@@ -136,6 +170,19 @@ class MetadataProxyHandler(object):
         """
         return self._get_ports_from_server(networks=networks,
                                            ip_address=remote_address)
+
+    def _get_ports_using_client(self, filters):
+        # reformat filters for neutron client
+        if 'device_id' in filters:
+            filters['device_id'] = filters['device_id'][0]
+        if 'fixed_ips' in filters:
+            filters['fixed_ips'] = [
+                'ip_address=%s' % filters['fixed_ips']['ip_address'][0]]
+
+        client = self._get_neutron_client()
+        ports = client.list_ports(**filters)
+        self.auth_info = client.get_auth_info()
+        return ports['ports']
 
     def _get_ports(self, remote_address, network_id=None, router_id=None):
         """Search for all ports that contain passed ip address and belongs to
@@ -200,7 +247,7 @@ class MetadataProxyHandler(object):
             req.response.body = content
             return req.response
         elif resp.status == 403:
-            LOG.warning(_LW(
+            LOG.warn(_LW(
                 'The remote metadata server responded with Forbidden. This '
                 'response usually occurs when shared secrets do not match.'
             ))
@@ -215,7 +262,7 @@ class MetadataProxyHandler(object):
             msg = _(
                 'Remote metadata server experienced an internal server error.'
             )
-            LOG.warning(msg)
+            LOG.warn(msg)
             explanation = six.text_type(msg)
             return webob.exc.HTTPInternalServerError(explanation=explanation)
         else:
@@ -240,7 +287,7 @@ class UnixDomainMetadataProxy(object):
 
     def _init_state_reporting(self):
         self.context = context.get_admin_context_without_session()
-        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
         self.agent_state = {
             'binary': 'neutron-metadata-agent',
             'host': cfg.CONF.host,
@@ -267,8 +314,8 @@ class UnixDomainMetadataProxy(object):
                 use_call=self.agent_state.get('start_flag'))
         except AttributeError:
             # This means the server does not support report_state
-            LOG.warning(_LW('Neutron server does not support state report.'
-                            ' State report for this agent will be disabled.'))
+            LOG.warn(_LW('Neutron server does not support state report.'
+                         ' State report for this agent will be disabled.'))
             self.heartbeat.stop()
             return
         except Exception:

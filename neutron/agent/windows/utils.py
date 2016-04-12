@@ -20,7 +20,6 @@ from eventlet import greenthread
 from oslo_log import log as logging
 import six
 
-from neutron._i18n import _
 from neutron.common import utils
 
 LOG = logging.getLogger(__name__)
@@ -58,8 +57,17 @@ def execute(cmd, process_input=None, addl_env=None,
         obj, cmd = create_process(cmd, addl_env=addl_env)
         _stdout, _stderr = obj.communicate(_process_input)
         obj.stdin.close()
-        _stdout = utils.safe_decode_utf8(_stdout)
-        _stderr = utils.safe_decode_utf8(_stderr)
+        if six.PY3:
+            if isinstance(_stdout, bytes):
+                try:
+                    _stdout = _stdout.decode(encoding='utf-8')
+                except UnicodeError:
+                    pass
+            if isinstance(_stderr, bytes):
+                try:
+                    _stderr = _stderr.decode(encoding='utf-8')
+                except UnicodeError:
+                    pass
 
         m = _("\nCommand: %(cmd)s\nExit code: %(code)s\nStdin: %(stdin)s\n"
               "Stdout: %(stdout)s\nStderr: %(stderr)s") % \
@@ -73,11 +81,10 @@ def execute(cmd, process_input=None, addl_env=None,
         if obj.returncode and obj.returncode in extra_ok_codes:
             obj.returncode = None
 
-        log_msg = m.strip().replace('\n', '; ')
         if obj.returncode and log_fail_as_error:
-            LOG.error(log_msg)
+            LOG.error(m)
         else:
-            LOG.debug(log_msg)
+            LOG.debug(m)
 
         if obj.returncode and check_exit_code:
             raise RuntimeError(m)

@@ -60,7 +60,7 @@ class PSExtDriverTestCase(test_plugin.Ml2PluginV2TestCase,
                                                   'port_security_enabled'),
                                         security_groups=[],
                                         port_security_enabled=False)
-                self.assertEqual(201, res.status_int)
+                self.assertEqual(res.status_int, 201)
                 port = self.deserialize('json', res)
                 self.assertFalse(port['port'][psec.PORTSECURITY])
-                self.assertEqual([], port['port']['security_groups'])
+                self.assertEqual(port['port']['security_groups'], [])

@@ -27,14 +27,13 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
     def setUp(self):
         super(OVSIntegrationBridgeTest, self).setUp()
         self.setup_bridge_mock('br-int', self.br_int_cls)
-        self.stamp = self.br.default_cookie
 
     def test_setup_default_table(self):
         self.br.setup_default_table()
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionActions(
                         ofp.OFPIT_APPLY_ACTIONS, [
@@ -45,13 +44,13 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
                 priority=0,
                 table_id=0)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0,
                 table_id=23)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0,
@@ -68,7 +67,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionSetField(
@@ -93,7 +92,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionPushVlan(),
@@ -150,7 +149,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionPopVlan(),
@@ -196,7 +195,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionPopVlan(),
@@ -235,7 +234,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionGotoTable(table_id=2),
                 ],
@@ -263,7 +262,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionGotoTable(table_id=1),
                 ],
@@ -291,7 +290,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionOutput(ofp.OFPP_NORMAL, 0),
@@ -307,7 +306,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
                 priority=2,
                 table_id=24)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionOutput(ofp.OFPP_NORMAL, 0),
@@ -323,7 +322,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
                 priority=2,
                 table_id=24)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionGotoTable(table_id=24),
                 ],
@@ -345,7 +344,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionOutput(ofp.OFPP_NORMAL, 0),
@@ -359,7 +358,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
                 priority=2,
                 table_id=24)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionOutput(ofp.OFPP_NORMAL, 0),
@@ -373,7 +372,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
                 priority=2,
                 table_id=24)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=self.stamp,
+                cookie=0,
                 instructions=[
                     ofpp.OFPInstructionGotoTable(table_id=24),
                 ],

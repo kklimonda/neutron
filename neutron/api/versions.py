@@ -14,18 +14,21 @@
 #    under the License.
 
 import oslo_i18n
+from oslo_log import log as logging
 import webob.dec
 
-from neutron._i18n import _
 from neutron.api.views import versions as versions_view
 from neutron import wsgi
+
+
+LOG = logging.getLogger(__name__)
 
 
 class Versions(object):
 
     @classmethod
     def factory(cls, global_config, **local_config):
-        return cls(app=None)
+        return cls()
 
     @webob.dec.wsgify(RequestClass=wsgi.Request)
     def __call__(self, req):
@@ -38,8 +41,6 @@ class Versions(object):
         ]
 
         if req.path != '/':
-            if self.app:
-                return req.get_response(self.app)
             language = req.best_match_language()
             msg = _('Unknown API version specified')
             msg = oslo_i18n.translate(msg, language)
@@ -59,6 +60,3 @@ class Versions(object):
         response.body = wsgi.encode_body(body)
 
         return response
-
-    def __init__(self, app):
-        self.app = app

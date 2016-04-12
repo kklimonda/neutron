@@ -15,10 +15,10 @@
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LI
 from neutron.api import extensions
 from neutron.api.v2 import attributes
 from neutron.common import exceptions as nexception
+from neutron.i18n import _LI
 
 LOG = logging.getLogger(__name__)
 
@@ -44,13 +44,6 @@ def disable_extension_by_config(aliases):
         if 'vlan-transparent' in aliases:
             aliases.remove('vlan-transparent')
         LOG.info(_LI('Disabled vlantransparent extension.'))
-
-
-def get_vlan_transparent(network):
-    return (network['vlan_transparent']
-            if ('vlan_transparent' in network and
-                attributes.is_attr_set(network['vlan_transparent']))
-            else False)
 
 
 class Vlantransparent(extensions.ExtensionDescriptor):

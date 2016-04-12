@@ -20,7 +20,6 @@ from sqlalchemy import and_
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
 
-from neutron._i18n import _
 from neutron.api.v2 import attributes
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
@@ -274,7 +273,7 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     not is_auto_addr_subnet):
                     fixed_ip_set.append({'subnet_id': subnet['id']})
 
-        self._validate_max_ips_per_port(fixed_ip_set, device_owner)
+        self._validate_max_ips_per_port(fixed_ip_set)
         return fixed_ip_set
 
     def _allocate_fixed_ips(self, context, fixed_ips, mac_address):

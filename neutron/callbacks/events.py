@@ -16,10 +16,6 @@ BEFORE_READ = 'before_read'
 BEFORE_UPDATE = 'before_update'
 BEFORE_DELETE = 'before_delete'
 
-PRECOMMIT_CREATE = 'precommit_create'
-PRECOMMIT_UPDATE = 'precommit_update'
-PRECOMMIT_DELETE = 'precommit_delete'
-
 AFTER_CREATE = 'after_create'
 AFTER_READ = 'after_read'
 AFTER_UPDATE = 'after_update'
@@ -32,4 +28,3 @@ ABORT_DELETE = 'abort_delete'
 
 ABORT = 'abort_'
 BEFORE = 'before_'
-PRECOMMIT = 'precommit_'

@@ -14,12 +14,14 @@
 #    under the License.
 
 import ddt
-from tempest.lib import exceptions as lib_exc
-from tempest import test
 
 from neutron.tests.api import base
 from neutron.tests.api import base_security_groups as base_security
+from neutron.tests.tempest import config
+from neutron.tests.tempest import test
+from tempest_lib import exceptions as lib_exc
 
+CONF = config.CONF
 FAKE_IP = '10.0.0.1'
 FAKE_MAC = '00:25:64:e8:19:dd'
 

@@ -21,13 +21,14 @@
 import eventlet
 from oslo_log import log
 
-from neutron._i18n import _LI
+from neutron.i18n import _LI
+from neutron import server
 from neutron import service
 
 LOG = log.getLogger(__name__)
 
 
-def eventlet_rpc_server():
+def _eventlet_rpc_server():
     pool = eventlet.GreenPool()
     LOG.info(_LI("Eventlet based AMQP RPC server starting..."))
     try:
@@ -38,3 +39,7 @@ def eventlet_rpc_server():
     else:
         pool.spawn(neutron_rpc.wait)
     pool.waitall()
+
+
+def main():
+    server.boot_server(_eventlet_rpc_server)

@@ -12,11 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from tempest.lib.common.utils import data_utils
-from tempest.lib import exceptions as lib_exc
-from tempest import test
+from tempest_lib.common.utils import data_utils
+from tempest_lib import exceptions as lib_exc
 
 from neutron.tests.api import test_address_scopes
+from neutron.tests.tempest import test
 
 
 class AddressScopeTestNegative(test_address_scopes.AddressScopeTestBase):
@@ -25,7 +25,7 @@ class AddressScopeTestNegative(test_address_scopes.AddressScopeTestBase):
     @test.idempotent_id('9c92ec34-0c50-4104-aa47-9ce98d5088df')
     def test_tenant_create_shared_address_scope(self):
         self.assertRaises(lib_exc.Forbidden, self._create_address_scope,
-                          shared=True, ip_version=4)
+                          shared=True)
 
     @test.attr(type=['negative', 'smoke'])
     @test.idempotent_id('a857b61e-bf53-4fab-b21a-b0daaf81b5bd')
@@ -49,8 +49,7 @@ class AddressScopeTestNegative(test_address_scopes.AddressScopeTestBase):
     @test.attr(type=['negative', 'smoke'])
     @test.idempotent_id('ef213552-f2da-487d-bf4a-e1705d115ff1')
     def test_tenant_get_not_shared_admin_address_scope(self):
-        address_scope = self._create_address_scope(is_admin=True,
-                                                   ip_version=4)
+        address_scope = self._create_address_scope(is_admin=True)
         # None-shared admin address scope cannot be retrieved by tenant user.
         self.assertRaises(lib_exc.NotFound, self.client.show_address_scope,
                           address_scope['id'])
@@ -72,8 +71,7 @@ class AddressScopeTestNegative(test_address_scopes.AddressScopeTestBase):
     @test.attr(type=['negative', 'smoke'])
     @test.idempotent_id('702d0515-82cb-4207-b0d9-703336e54665')
     def test_update_shared_address_scope_to_unshare(self):
-        address_scope = self._create_address_scope(is_admin=True, shared=True,
-                                                   ip_version=4)
+        address_scope = self._create_address_scope(is_admin=True, shared=True)
         self.assertRaises(lib_exc.BadRequest,
                           self.admin_client.update_address_scope,
                           address_scope['id'], name='new-name', shared=False)
@@ -81,12 +79,14 @@ class AddressScopeTestNegative(test_address_scopes.AddressScopeTestBase):
     @test.attr(type=['negative', 'smoke'])
     @test.idempotent_id('1e471e5c-6f9c-437a-9257-fd9bc4b6f0fb')
     def test_delete_address_scope_associated_with_subnetpool(self):
-        address_scope = self._create_address_scope(ip_version=4)
+        address_scope = self._create_address_scope()
         prefixes = [u'10.11.12.0/24']
-        subnetpool_data = {
+        subnetpool_data = {'subnetpool': {
             'name': 'foo-subnetpool',
             'min_prefixlen': '29', 'prefixes': prefixes,
-            'address_scope_id': address_scope['id']}
-        self.create_subnetpool(**subnetpool_data)
+            'address_scope_id': address_scope['id']}}
+        body = self.client.create_subnetpool(subnetpool_data)
+        subnetpool = body['subnetpool']
+        self.addCleanup(self.client.delete_subnetpool, subnetpool['id'])
         self.assertRaises(lib_exc.Conflict, self.client.delete_address_scope,
                           address_scope['id'])

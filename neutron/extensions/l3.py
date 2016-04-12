@@ -17,12 +17,10 @@ import abc
 
 from oslo_config import cfg
 
-from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import resource_helper
 from neutron.common import exceptions as nexception
-from neutron.pecan_wsgi import controllers
 from neutron.plugins.common import constants
 
 
@@ -79,10 +77,7 @@ class RouterExternalGatewayInUseByFloatingIp(nexception.InUse):
                 "more floating IPs.")
 
 ROUTERS = 'routers'
-FLOATINGIP = 'floatingip'
-FLOATINGIPS = '%ss' % FLOATINGIP
 EXTERNAL_GW_INFO = 'external_gateway_info'
-FLOATINGIPS = 'floatingips'
 
 RESOURCE_ATTRIBUTE_MAP = {
     ROUTERS: {
@@ -120,7 +115,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                                }
                            }}
     },
-    FLOATINGIPS: {
+    'floatingips': {
         'id': {'allow_post': False, 'allow_put': False,
                'validate': {'type:uuid': None},
                'is_visible': True,
@@ -206,12 +201,6 @@ class L3(extensions.ExtensionDescriptor):
     def update_attributes_map(self, attributes):
         super(L3, self).update_attributes_map(
             attributes, extension_attrs_map=RESOURCE_ATTRIBUTE_MAP)
-
-    @classmethod
-    def get_pecan_controllers(cls):
-        return ((ROUTERS, controllers.RoutersController()),
-                (FLOATINGIPS, controllers.CollectionsController(FLOATINGIPS,
-                                                                FLOATINGIP)))
 
     def get_extended_resources(self, version):
         if version == "2.0":

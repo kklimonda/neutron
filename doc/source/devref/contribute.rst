@@ -24,6 +24,13 @@
 Contributing new extensions to Neutron
 ======================================
 
+.. note:: **Third-party plugins/drivers which do not start decomposition in
+  Liberty will be marked as deprecated and removed before the Mitaka-3
+  milestone.**
+
+  Read on for details ...
+
+
 Introduction
 ------------
 
@@ -321,81 +328,31 @@ be the bare minimum you have to complete in order to get you off the ground.
   <http://docs.openstack.org/infra/system-config/third_party.html>`_ to get
   one.
 
-Internationalization support
-----------------------------
-
-OpenStack is committed to broad international support.
-Internationalization (I18n) is one of important areas to make OpenStack ubiquitous.
-Each project is recommended to support i18n.
-
-This section describes how to set up translation support.
-The description in this section uses the following variables.
-
-* repository : ``openstack/${REPOSITORY}`` (e.g., ``openstack/networking-foo``)
-* top level python path : ``${MODULE_NAME}`` (e.g., ``networking_foo``)
-
-oslo.i18n
-~~~~~~~~~
-
-* Each subproject repository should have its own oslo.i18n integration
-  wrapper module ``${MODULE_NAME}/_i18n.py``. The detail is found at
-  http://docs.openstack.org/developer/oslo.i18n/usage.html.
-
-  .. note::
-
-     **DOMAIN** name should match your **module** name ``${MODULE_NAME}``.
-
-* Import ``_()`` from your ``${MODULE_NAME}/_i18n.py``.
-
-  .. warning::
-
-     Do not use ``_()`` in the builtins namespace which is
-     registered by **gettext.install()** in ``neutron/__init__.py``.
-     It is now deprecated as described in oslo.18n documentation.
-
-Setting up translation support
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-You need to create or edit the following files to start translation support:
-
-* setup.cfg
-* babel.cfg
-
-We have a good example for an oslo project at
-https://review.openstack.org/#/c/98248/.
-
-Add the following to ``setup.cfg``::
-
-    [extract_messages]
-    keywords = _ gettext ngettext l_ lazy_gettext
-    mapping_file = babel.cfg
-    output_file = ${MODULE_NAME}/locale/${MODULE_NAME}.pot
-
-    [compile_catalog]
-    directory = ${MODULE_NAME}/locale
-    domain = ${MODULE_NAME}
-
-    [update_catalog]
-    domain = ${MODULE_NAME}
-    output_dir = ${MODULE_NAME}/locale
-    input_file = ${MODULE_NAME}/locale/${MODULE_NAME}.pot
-
-Note that ``${MODULE_NAME}`` is used in all names.
-
-Create ``babel.cfg`` with the following contents::
-
-    [python: **.py]
-
-Enable Translation
-~~~~~~~~~~~~~~~~~~
-
-To update and import translations, you need to make a change in project-config.
-A good example is found at https://review.openstack.org/#/c/224222/.
-After doing this, the necessary jobs will be run and push/pull a
-message catalog to/from the translation infrastructure.
 
 Integrating with the Neutron system
 -----------------------------------
+
+(This section currently describes the goals and progress of the completion of
+the decomposition work during the Liberty development cycle. The content here
+will be updated as the work progresses. In its final form this section will be
+merged with the previous section. When all existing plugins/drivers are fully
+decomposed, this document will be a recipe for how to add a new Neutron plugin
+or driver completely out-of-tree.)
+
+For the Liberty cycle we aim to move all the existing third-party code out of
+the Neutron tree. Each category of code and its removal plan is described
+below.
+
+
+Existing Shims
+~~~~~~~~~~~~~~
+
+Liberty Steps
++++++++++++++
+
+The existing shims shall now be moved out of tree, together with any test
+code. The entry points shall be moved as described below in `Entry Points`_.
+
 
 Configuration Files
 ~~~~~~~~~~~~~~~~~~~
@@ -410,19 +367,12 @@ section of the third-party repo's own ``setup.cfg`` file.
   config files, duplicate settings will collide. It is therefore recommended to
   prefix section names with a third-party string, e.g. [vendor_foo].
 
-Since Mitaka, configuration files are not maintained in the git repository but
-should be generated as follows::
+Liberty Steps
++++++++++++++
 
-``tox -e genconfig``
-
-If a 'tox' environment is unavailable, then you can run the following script
-instead to generate the configuration files::
-
-./tools/generate_config_file_samples.sh
-
-It is advised that subprojects do not keep their configuration files in their
-respective trees and instead generate them using a similar approach as Neutron
-does.
+Third-party configuration files still in the neutron tree have no dependencies
+and can simply be moved. The maintainers should add their configuration file(s)
+to their repo and then remove them from neutron.
 
 **ToDo: Inclusion in OpenStack documentation?**
     Is there a recommended way to have third-party config options listed in the
@@ -437,12 +387,11 @@ these tables are in the Neutron database, they are independently managed
 entirely within the third-party code. Third-party code shall **never** modify
 neutron core tables in any way.
 
-Each repo has its own *expand* and *contract* `alembic migration branches
-<alembic_migrations.html#migration-branches>`_. A third-party repo's alembic
-migration branches may operate only on tables that are owned by the repo.
+Each repo has its own alembic migration branch that adds, removes and modifies
+its own tables in the neutron database schema.
 
 * Note: Care should be taken when adding new tables. To prevent collision of
-  table names it is **required** to prefix them with a vendor/plugin string.
+  table names it is recommended to prefix them with a vendor/plugin string.
 
 * Note: A third-party maintainer may opt to use a separate database for their
   tables. This may complicate cases where there are foreign key constraints
@@ -478,6 +427,22 @@ directory as an entrypoint in the ``neutron.db.alembic_migrations`` group::
     neutron.db.alembic_migrations =
         networking-foo = networking_foo.db.migration:alembic_migrations
 
+Liberty Steps
++++++++++++++
+
+Each decomposed plugin/driver that has its own tables in the neutron database
+should take these steps to move the models for the tables out of tree.
+
+#. Add the models to the external repo.
+#. Create a start migration for the repo's alembic branch. Note: it is
+   recommended to keep the migration file(s) in the same location in the
+   third-party repo as is done in the neutron repo,
+   i.e. ``networking_foo/db/migration/alembic_migrations/versions/*.py``
+#. Remove the models from the neutron repo.
+#. Add the names of the removed tables to ``REPO_FOO_TABLES`` in
+   ``neutron/db/migration/alembic_migrations/external.py`` (this is used for
+   testing, see below).
+
 **ToDo: neutron-db-manage autogenerate**
     The alembic autogenerate command needs to support branches in external
     repos. Bug #1471333 has been filed for this.
@@ -491,6 +456,14 @@ Here is a `template functional test
 maintainers can use to develop tests for model-vs-migration sync in their
 repos. It is recommended that each third-party CI sets up such a test, and runs
 it regularly against Neutron master.
+
+Liberty Steps
++++++++++++++
+
+The model_sync test will be updated to ignore the models that have been moved
+out of tree. ``REPO_FOO_TABLES`` lists will be maintained in
+``neutron/db/migration/alembic_migrations/external.py``.
+
 
 Entry Points
 ~~~~~~~~~~~~
@@ -617,3 +590,9 @@ Other repo-split items
   driver for Neutron. Possibly something for the networking guide, and/or a
   template that plugin/driver maintainers can modify and include with their
   package.
+
+
+Decomposition Phase II Progress Chart
+-------------------------------------
+
+TBD.

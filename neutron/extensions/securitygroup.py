@@ -14,13 +14,12 @@
 #    under the License.
 
 import abc
-
 import netaddr
+
 from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
 
-from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
@@ -93,7 +92,7 @@ class SecurityGroupRemoteGroupAndRemoteIpPrefix(nexception.InvalidInput):
 
 
 class SecurityGroupProtocolRequiredWithPorts(nexception.InvalidInput):
-    message = _("Must also specify protocol if port range is given.")
+    message = _("Must also specifiy protocol if port range is given.")
 
 
 class SecurityGroupNotSingleGroupRules(nexception.InvalidInput):
@@ -114,7 +113,7 @@ class DuplicateSecurityGroupRuleInPost(nexception.InUse):
 
 
 class SecurityGroupRuleExists(nexception.InUse):
-    message = _("Security group rule already exists. Rule id is %(rule_id)s.")
+    message = _("Security group rule already exists. Rule id is %(id)s.")
 
 
 class SecurityGroupRuleInUse(nexception.InUse):
@@ -132,11 +131,6 @@ class SecurityGroupRuleParameterConflict(nexception.InvalidInput):
 
 class SecurityGroupConflict(nexception.Conflict):
     message = _("Error %(reason)s while attempting the operation.")
-
-
-class SecurityGroupRuleInvalidEtherType(nexception.InvalidInput):
-    message = _("Security group rule for ethertype '%(ethertype)s' not "
-                "supported. Allowed values are %(values)s.")
 
 
 def convert_protocol(value):
@@ -166,8 +160,6 @@ def convert_ethertype_to_case_insensitive(value):
         for ethertype in sg_supported_ethertypes:
             if ethertype.lower() == value.lower():
                 return ethertype
-    raise SecurityGroupRuleInvalidEtherType(
-        ethertype=value, values=sg_supported_ethertypes)
 
 
 def convert_validate_port_value(port):
@@ -211,19 +203,13 @@ def _validate_name_not_default(data, valid_values=None):
 
 attr.validators['type:name_not_default'] = _validate_name_not_default
 
-# TODO(amotoki): const.IP_PROTOCOL_MAP now comes from neutron-lib,
-# so we cannot add PROTO_NAME_IPV6_ICMP_LEGACY to const.IP_PROTOCOL_MAP
-# in neutron.common.constants. IP_PROTOCOL_MAP in neutron-lib should
-# be updated and neutron should consume it once Mitaka backport is done.
-sg_supported_protocols = ([None] + list(const.IP_PROTOCOL_MAP.keys()) +
-                          list(const.IP_PROTOCOL_NAME_ALIASES.keys()))
+sg_supported_protocols = [None, const.PROTO_NAME_TCP, const.PROTO_NAME_UDP,
+                          const.PROTO_NAME_ICMP, const.PROTO_NAME_ICMP_V6]
 sg_supported_ethertypes = ['IPv4', 'IPv6']
-SECURITYGROUPS = 'security_groups'
-SECURITYGROUPRULES = 'security_group_rules'
 
 # Attribute Map
 RESOURCE_ATTRIBUTE_MAP = {
-    SECURITYGROUPS: {
+    'security_groups': {
         'id': {'allow_post': False, 'allow_put': False,
                'validate': {'type:uuid': None},
                'is_visible': True,
@@ -238,10 +224,10 @@ RESOURCE_ATTRIBUTE_MAP = {
                       'required_by_policy': True,
                       'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
-        SECURITYGROUPRULES: {'allow_post': False, 'allow_put': False,
-                             'is_visible': True},
+        'security_group_rules': {'allow_post': False, 'allow_put': False,
+                                 'is_visible': True},
     },
-    SECURITYGROUPRULES: {
+    'security_group_rules': {
         'id': {'allow_post': False, 'allow_put': False,
                'validate': {'type:uuid': None},
                'is_visible': True,
@@ -277,6 +263,7 @@ RESOURCE_ATTRIBUTE_MAP = {
 }
 
 
+SECURITYGROUPS = 'security_groups'
 EXTENDED_ATTRIBUTES_2_0 = {
     'ports': {SECURITYGROUPS: {'allow_post': True,
                                'allow_put': True,
@@ -338,10 +325,6 @@ class Securitygroup(extensions.ExtensionDescriptor):
             exts.append(ex)
 
         return exts
-
-    def update_attributes_map(self, attributes):
-        super(Securitygroup, self).update_attributes_map(
-            attributes, extension_attrs_map=RESOURCE_ATTRIBUTE_MAP)
 
     def get_extended_resources(self, version):
         if version == "2.0":

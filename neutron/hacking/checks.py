@@ -30,17 +30,14 @@ import six
 #    neutron/tests/unit/hacking/test_checks.py
 
 _all_log_levels = {
-    'reserved': '_',  # this should never be used with a log unless
-                      # it is a variable used for a log message and
-                      # a exception
     'error': '_LE',
     'info': '_LI',
+    'warn': '_LW',
     'warning': '_LW',
     'critical': '_LC',
     'exception': '_LE',
 }
 _all_hints = set(_all_log_levels.values())
-mutable_default_args = re.compile(r"^\s*def .+\((.+=\{\}|.+=\[\])")
 
 
 def _regex_for_level(level, hint):
@@ -54,8 +51,9 @@ log_translation_hint = re.compile(
     '|'.join('(?:%s)' % _regex_for_level(level, hint)
              for level, hint in six.iteritems(_all_log_levels)))
 
-log_warn = re.compile(
-    r"(.)*LOG\.(warn)\(\s*('|\"|_)")
+oslo_namespace_imports_dot = re.compile(r"import[\s]+oslo[.][^\s]+")
+oslo_namespace_imports_from_dot = re.compile(r"from[\s]+oslo[.]")
+oslo_namespace_imports_from_root = re.compile(r"from[\s]+oslo[\s]+import[\s]+")
 contextlib_nested = re.compile(r"^with (contextlib\.)?nested\(")
 
 
@@ -113,14 +111,12 @@ def check_assert_called_once_with(logical_line, filename):
     #    assert_called_once
     #    assertCalledOnceWith
     #    assert_has_called
-    #    called_once_with
     if 'neutron/tests/' in filename:
         if '.assert_called_once_with(' in logical_line:
             return
         uncased_line = logical_line.lower().replace('_', '')
 
-        check_calls = ['.assertcalledonce', '.calledoncewith']
-        if any(x for x in check_calls if x in uncased_line):
+        if '.assertcalledonce' in uncased_line:
             msg = ("N322: Possible use of no-op mock method. "
                    "please use assert_called_once_with.")
             yield (0, msg)
@@ -129,6 +125,24 @@ def check_assert_called_once_with(logical_line, filename):
             msg = ("N322: Possible use of no-op mock method. "
                    "please use assert_has_calls.")
             yield (0, msg)
+
+
+def check_oslo_namespace_imports(logical_line):
+    if re.match(oslo_namespace_imports_from_dot, logical_line):
+        msg = ("N323: '%s' must be used instead of '%s'.") % (
+               logical_line.replace('oslo.', 'oslo_'),
+               logical_line)
+        yield(0, msg)
+    elif re.match(oslo_namespace_imports_from_root, logical_line):
+        msg = ("N323: '%s' must be used instead of '%s'.") % (
+               logical_line.replace('from oslo import ', 'import oslo_'),
+               logical_line)
+        yield(0, msg)
+    elif re.match(oslo_namespace_imports_dot, logical_line):
+        msg = ("N323: '%s' must be used instead of '%s'.") % (
+               logical_line.replace('import', 'from').replace('.', ' import '),
+               logical_line)
+        yield(0, msg)
 
 
 def check_no_contextlib_nested(logical_line, filename):
@@ -160,84 +174,13 @@ def check_python3_no_iteritems(logical_line):
         yield(0, msg)
 
 
-def check_asserttrue(logical_line, filename):
-    if 'neutron/tests/' in filename:
-        if re.search(r"assertEqual\(\s*True,[^,]*(,[^,]*)?\)", logical_line):
-            msg = ("N328: Use assertTrue(observed) instead of "
-                   "assertEqual(True, observed)")
-            yield (0, msg)
-        if re.search(r"assertEqual\([^,]*,\s*True(,[^,]*)?\)", logical_line):
-            msg = ("N328: Use assertTrue(observed) instead of "
-                   "assertEqual(True, observed)")
-            yield (0, msg)
-
-
-def no_mutable_default_args(logical_line):
-    msg = "N329: Method's default argument shouldn't be mutable!"
-    if mutable_default_args.match(logical_line):
-        yield (0, msg)
-
-
-def check_assertfalse(logical_line, filename):
-    if 'neutron/tests/' in filename:
-        if re.search(r"assertEqual\(\s*False,[^,]*(,[^,]*)?\)", logical_line):
-            msg = ("N328: Use assertFalse(observed) instead of "
-                   "assertEqual(False, observed)")
-            yield (0, msg)
-        if re.search(r"assertEqual\([^,]*,\s*False(,[^,]*)?\)", logical_line):
-            msg = ("N328: Use assertFalse(observed) instead of "
-                   "assertEqual(False, observed)")
-            yield (0, msg)
-
-
-def check_assertempty(logical_line, filename):
-    if 'neutron/tests/' in filename:
-        msg = ("N330: Use assertEqual(*empty*, observed) instead of "
-               "assertEqual(observed, *empty*). *empty* contains "
-               "{}, [], (), set(), '', \"\"")
-        empties = r"(\[\s*\]|\{\s*\}|\(\s*\)|set\(\s*\)|'\s*'|\"\s*\")"
-        reg = r"assertEqual\(([^,]*,\s*)+?%s\)\s*$" % empties
-        if re.search(reg, logical_line):
-            yield (0, msg)
-
-
-def check_assertisinstance(logical_line, filename):
-    if 'neutron/tests/' in filename:
-        if re.search(r"assertTrue\(\s*isinstance\(\s*[^,]*,\s*[^,]*\)\)",
-                     logical_line):
-            msg = ("N331: Use assertIsInstance(observed, type) instead "
-                   "of assertTrue(isinstance(observed, type))")
-            yield (0, msg)
-
-
-def check_assertequal_for_httpcode(logical_line, filename):
-    msg = ("N332: Use assertEqual(expected_http_code, observed_http_code) "
-           "instead of assertEqual(observed_http_code, expected_http_code)")
-    if 'neutron/tests/' in filename:
-        if re.search(r"assertEqual\(\s*[^,]*,[^,]*HTTP[^\.]*\.code\s*\)",
-                     logical_line):
-            yield (0, msg)
-
-
-def check_log_warn_deprecated(logical_line, filename):
-    msg = "N333: Use LOG.warning due to compatibility with py3"
-    if log_warn.match(logical_line):
-        yield (0, msg)
-
-
 def factory(register):
     register(validate_log_translations)
     register(use_jsonutils)
     register(check_assert_called_once_with)
     register(no_translate_debug_logs)
+    register(check_oslo_namespace_imports)
     register(check_no_contextlib_nested)
     register(check_python3_xrange)
     register(check_no_basestring)
     register(check_python3_no_iteritems)
-    register(check_asserttrue)
-    register(no_mutable_default_args)
-    register(check_assertfalse)
-    register(check_assertempty)
-    register(check_assertisinstance)
-    register(check_assertequal_for_httpcode)
-    register(check_log_warn_deprecated)

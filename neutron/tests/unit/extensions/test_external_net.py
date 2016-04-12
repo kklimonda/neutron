@@ -14,11 +14,11 @@
 #    under the License.
 
 import mock
+from oslo_log import log as logging
 from oslo_utils import uuidutils
 import testtools
 from webob import exc
 
-from neutron.common import constants
 from neutron import context
 from neutron.db import models_v2
 from neutron.extensions import external_net as external_net
@@ -26,6 +26,8 @@ from neutron import manager
 from neutron.tests.unit.api.v2 import test_base
 from neutron.tests.unit.db import test_db_base_plugin_v2
 
+
+LOG = logging.getLogger(__name__)
 
 _uuid = uuidutils.generate_uuid
 _get_path = test_base._get_path
@@ -69,17 +71,17 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             self._set_net_external(n1['network']['id'])
             with self.network():
                 body = self._list('networks')
-                self.assertEqual(2, len(body['networks']))
+                self.assertEqual(len(body['networks']), 2)
 
                 body = self._list('networks',
                                   query_params="%s=True" %
                                                external_net.EXTERNAL)
-                self.assertEqual(1, len(body['networks']))
+                self.assertEqual(len(body['networks']), 1)
 
                 body = self._list('networks',
                                   query_params="%s=False" %
                                                external_net.EXTERNAL)
-                self.assertEqual(1, len(body['networks']))
+                self.assertEqual(len(body['networks']), 1)
 
     def test_list_nets_external_pagination(self):
         if self._skip_native_pagination:
@@ -99,7 +101,7 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         plugin = manager.NeutronManager.get_plugin()
         ctx = context.Context(None, None, is_admin=True)
         result = plugin.get_networks(ctx, filters=None)
-        self.assertEqual([], result)
+        self.assertEqual(result, [])
 
     def test_update_network_set_external_non_admin_fails(self):
         # Assert that a non-admin user cannot update the
@@ -113,45 +115,23 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             res = req.get_response(self.api)
             self.assertEqual(exc.HTTPForbidden.code, res.status_int)
 
-    def test_update_network_external_net_with_ports_set_not_shared(self):
-        with self.network(router__external=True, shared=True) as ext_net,\
-                self.subnet(network=ext_net) as ext_subnet, \
-                self.port(subnet=ext_subnet,
-                          tenant_id='',
-                          device_owner=constants.DEVICE_OWNER_ROUTER_SNAT):
-            data = {'network': {'shared': False}}
-            req = self.new_update_request('networks',
-                                          data,
-                                          ext_net['network']['id'])
-            res = req.get_response(self.api)
-            self.assertEqual(exc.HTTPOk.code, res.status_int)
-            ctx = context.Context(None, None, is_admin=True)
-            plugin = manager.NeutronManager.get_plugin()
-            result = plugin.get_networks(ctx)
-            self.assertFalse(result[0]['shared'])
-
     def test_network_filter_hook_admin_context(self):
         plugin = manager.NeutronManager.get_plugin()
         ctx = context.Context(None, None, is_admin=True)
         model = models_v2.Network
         conditions = plugin._network_filter_hook(ctx, model, [])
-        self.assertEqual([], conditions)
+        self.assertEqual(conditions, [])
 
     def test_network_filter_hook_nonadmin_context(self):
         plugin = manager.NeutronManager.get_plugin()
         ctx = context.Context('edinson', 'cavani')
         model = models_v2.Network
-        txt = ("networkrbacs.action = :action_1 AND "
-               "networkrbacs.target_tenant = :target_tenant_1 OR "
-               "networkrbacs.target_tenant = :target_tenant_2")
+        txt = "externalnetworks.network_id IS NOT NULL"
         conditions = plugin._network_filter_hook(ctx, model, [])
         self.assertEqual(conditions.__str__(), txt)
         # Try to concatenate conditions
-        txt2 = (txt.replace('tenant_1', 'tenant_3').
-                replace('tenant_2', 'tenant_4').
-                replace('action_1', 'action_2'))
         conditions = plugin._network_filter_hook(ctx, model, conditions)
-        self.assertEqual(conditions.__str__(), "%s OR %s" % (txt, txt2))
+        self.assertEqual(conditions.__str__(), "%s OR %s" % (txt, txt))
 
     def test_create_port_external_network_non_admin_fails(self):
         with self.network(router__external=True) as ext_net:
@@ -162,7 +142,7 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                                    set_context='True',
                                    tenant_id='noadmin'):
                         pass
-                    self.assertEqual(403, ctx_manager.exception.code)
+                    self.assertEqual(ctx_manager.exception.code, 403)
 
     def test_create_port_external_network_admin_succeeds(self):
         with self.network(router__external=True) as ext_net:
@@ -177,11 +157,12 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                               set_context='True',
                               tenant_id='noadmin'):
                 pass
-            self.assertEqual(403, ctx_manager.exception.code)
+            self.assertEqual(ctx_manager.exception.code, 403)
 
     def test_create_external_network_admin_succeeds(self):
         with self.network(router__external=True) as ext_net:
-            self.assertTrue(ext_net['network'][external_net.EXTERNAL])
+            self.assertEqual(ext_net['network'][external_net.EXTERNAL],
+                             True)
 
     def test_delete_network_check_disassociated_floatingips(self):
         with mock.patch.object(manager.NeutronManager,
@@ -191,6 +172,6 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             with self.network() as net:
                 req = self.new_delete_request('networks', net['network']['id'])
                 res = req.get_response(self.api)
-                self.assertEqual(exc.HTTPNoContent.code, res.status_int)
+                self.assertEqual(res.status_int, exc.HTTPNoContent.code)
                 (l3_mock.delete_disassociated_floatingips
                  .assert_called_once_with(mock.ANY, net['network']['id']))
