@@ -1069,7 +1069,9 @@ class TestDnsmasq(TestBase):
                 possible_leases += netaddr.IPNetwork(s.cidr).size
 
         if cfg.CONF.advertise_mtu:
-            expected.append('--dhcp-option-force=option:mtu,%s' % network.mtu)
+            if hasattr(network, 'mtu'):
+                expected.append(
+                    '--dhcp-option-force=option:mtu,%s' % network.mtu)
 
         expected.append('--dhcp-lease-max=%d' % min(
             possible_leases, max_leases))
@@ -1159,6 +1161,7 @@ class TestDnsmasq(TestBase):
                           '--log-dhcp',
                           ('--log-facility=%s' % dhcp_dns_log)],
                          network)
+        self.makedirs.assert_called_with(os.path.join('/tmp', network.id))
 
     def test_spawn_max_leases_is_smaller_than_cap(self):
         self._test_spawn(
@@ -1175,6 +1178,12 @@ class TestDnsmasq(TestBase):
         cfg.CONF.set_override('advertise_mtu', True)
         network = FakeV4Network()
         network.mtu = 1500
+        self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
+                         network)
+
+    def test_spawn_cfg_advertise_mtu_plugin_doesnt_pass_mtu_value(self):
+        cfg.CONF.set_override('advertise_mtu', True)
+        network = FakeV4Network()
         self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
                          network)
 
@@ -2010,66 +2019,70 @@ class TestDeviceManager(TestConfBase):
         self._test_setup(load_interface_driver, ip_lib, True)
 
     def _test_setup(self, load_interface_driver, ip_lib, use_gateway_ips):
-        # Create DeviceManager.
-        self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
-                                           default=False))
-        plugin = mock.Mock()
-        mgr = dhcp.DeviceManager(self.conf, plugin)
-        load_interface_driver.assert_called_with(self.conf)
+        with mock.patch.object(dhcp.ip_lib, 'IPDevice') as mock_IPDevice:
+            # Create DeviceManager.
+            self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
+                                               default=False))
+            plugin = mock.Mock()
+            device = mock.Mock()
+            mock_IPDevice.return_value = device
+            device.route.get_gateway.return_value = None
+            mgr = dhcp.DeviceManager(self.conf, plugin)
+            load_interface_driver.assert_called_with(self.conf)
 
-        # Setup with no existing DHCP port - expect a new DHCP port to
-        # be created.
-        network = FakeDeviceManagerNetwork()
-        network.tenant_id = 'Tenant A'
+            # Setup with no existing DHCP port - expect a new DHCP port to
+            # be created.
+            network = FakeDeviceManagerNetwork()
+            network.tenant_id = 'Tenant A'
 
-        def mock_create(dict):
-            port = dhcp.DictModel(dict['port'])
-            port.id = 'abcd-123456789'
-            port.mac_address = '00-12-34-56-78-90'
-            port.fixed_ips = [
-                dhcp.DictModel({'subnet_id': ip['subnet_id'],
-                                'ip_address': 'unique-IP-address'})
-                for ip in port.fixed_ips
-            ]
-            return port
+            def mock_create(dict):
+                port = dhcp.DictModel(dict['port'])
+                port.id = 'abcd-123456789'
+                port.mac_address = '00-12-34-56-78-90'
+                port.fixed_ips = [
+                    dhcp.DictModel({'subnet_id': ip['subnet_id'],
+                                    'ip_address': 'unique-IP-address'})
+                    for ip in port.fixed_ips
+                ]
+                return port
 
-        plugin.create_dhcp_port.side_effect = mock_create
-        mgr.driver.get_device_name.return_value = 'ns-XXX'
-        mgr.driver.use_gateway_ips = use_gateway_ips
-        ip_lib.ensure_device_is_ready.return_value = True
-        mgr.setup(network)
-        plugin.create_dhcp_port.assert_called_with(mock.ANY)
+            plugin.create_dhcp_port.side_effect = mock_create
+            mgr.driver.get_device_name.return_value = 'ns-XXX'
+            mgr.driver.use_gateway_ips = use_gateway_ips
+            ip_lib.ensure_device_is_ready.return_value = True
+            mgr.setup(network)
+            plugin.create_dhcp_port.assert_called_with(mock.ANY)
 
-        mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                              mock.ANY,
-                                              namespace='qdhcp-ns')
-        cidrs = set(mgr.driver.init_l3.call_args[0][1])
-        if use_gateway_ips:
-            self.assertEqual(cidrs, set(['%s/%s' % (s.gateway_ip,
-                                                    s.cidr.split('/')[1])
-                                         for s in network.subnets]))
-        else:
-            self.assertEqual(cidrs, set(['unique-IP-address/24',
+            mgr.driver.init_l3.assert_called_with('ns-XXX',
+                                                  mock.ANY,
+                                                  namespace='qdhcp-ns')
+            cidrs = set(mgr.driver.init_l3.call_args[0][1])
+            if use_gateway_ips:
+                self.assertEqual(cidrs, set(['%s/%s' % (s.gateway_ip,
+                                                        s.cidr.split('/')[1])
+                                             for s in network.subnets]))
+            else:
+                self.assertEqual(cidrs, set(['unique-IP-address/24',
                                          'unique-IP-address/64']))
 
-        # Now call setup again.  This time we go through the existing
-        # port code path, and the driver's init_l3 method is called
-        # again.
-        plugin.create_dhcp_port.reset_mock()
-        mgr.driver.init_l3.reset_mock()
-        mgr.setup(network)
-        mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                              mock.ANY,
-                                              namespace='qdhcp-ns')
-        cidrs = set(mgr.driver.init_l3.call_args[0][1])
-        if use_gateway_ips:
-            self.assertEqual(cidrs, set(['%s/%s' % (s.gateway_ip,
-                                                    s.cidr.split('/')[1])
-                                         for s in network.subnets]))
-        else:
-            self.assertEqual(cidrs, set(['unique-IP-address/24',
-                                         'unique-IP-address/64']))
-        self.assertFalse(plugin.create_dhcp_port.called)
+            # Now call setup again.  This time we go through the existing
+            # port code path, and the driver's init_l3 method is called
+            # again.
+            plugin.create_dhcp_port.reset_mock()
+            mgr.driver.init_l3.reset_mock()
+            mgr.setup(network)
+            mgr.driver.init_l3.assert_called_with('ns-XXX',
+                                                  mock.ANY,
+                                                  namespace='qdhcp-ns')
+            cidrs = set(mgr.driver.init_l3.call_args[0][1])
+            if use_gateway_ips:
+                self.assertEqual(cidrs, set(['%s/%s' % (s.gateway_ip,
+                                                        s.cidr.split('/')[1])
+                                             for s in network.subnets]))
+            else:
+                self.assertEqual(cidrs, set(['unique-IP-address/24',
+                                             'unique-IP-address/64']))
+            self.assertFalse(plugin.create_dhcp_port.called)
 
     @mock.patch('neutron.agent.linux.dhcp.ip_lib')
     @mock.patch('neutron.agent.linux.dhcp.common_utils.load_interface_driver')
@@ -2077,35 +2090,39 @@ class TestDeviceManager(TestConfBase):
         """Test reserved port case of DeviceManager's DHCP port setup
         logic.
         """
+        with mock.patch.object(dhcp.ip_lib, 'IPDevice') as mock_IPDevice:
+            # Create DeviceManager.
+            self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
+                                               default=False))
+            plugin = mock.Mock()
+            device = mock.Mock()
+            mock_IPDevice.return_value = device
+            device.route.get_gateway.return_value = None
+            mgr = dhcp.DeviceManager(self.conf, plugin)
+            load_interface_driver.assert_called_with(self.conf)
 
-        # Create DeviceManager.
-        self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
-                                           default=False))
-        plugin = mock.Mock()
-        mgr = dhcp.DeviceManager(self.conf, plugin)
-        load_interface_driver.assert_called_with(self.conf)
+            # Setup with a reserved DHCP port.
+            network = FakeDualNetworkReserved()
+            network.tenant_id = 'Tenant A'
+            reserved_port = network.ports[-1]
 
-        # Setup with a reserved DHCP port.
-        network = FakeDualNetworkReserved()
-        network.tenant_id = 'Tenant A'
-        reserved_port = network.ports[-1]
+            def mock_update(port_id, dict):
+                port = reserved_port
+                port.network_id = dict['port']['network_id']
+                port.device_id = dict['port']['device_id']
+                return port
 
-        def mock_update(port_id, dict):
-            port = reserved_port
-            port.network_id = dict['port']['network_id']
-            port.device_id = dict['port']['device_id']
-            return port
+            plugin.update_dhcp_port.side_effect = mock_update
+            mgr.driver.get_device_name.return_value = 'ns-XXX'
+            mgr.driver.use_gateway_ips = False
+            ip_lib.ensure_device_is_ready.return_value = True
+            mgr.setup(network)
+            plugin.update_dhcp_port.assert_called_with(reserved_port.id,
+                                                       mock.ANY)
 
-        plugin.update_dhcp_port.side_effect = mock_update
-        mgr.driver.get_device_name.return_value = 'ns-XXX'
-        mgr.driver.use_gateway_ips = False
-        ip_lib.ensure_device_is_ready.return_value = True
-        mgr.setup(network)
-        plugin.update_dhcp_port.assert_called_with(reserved_port.id, mock.ANY)
-
-        mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                              ['192.168.0.6/24'],
-                                              namespace='qdhcp-ns')
+            mgr.driver.init_l3.assert_called_with('ns-XXX',
+                                                  ['192.168.0.6/24'],
+                                                  namespace='qdhcp-ns')
 
     @mock.patch('neutron.agent.linux.dhcp.ip_lib')
     @mock.patch('neutron.agent.linux.dhcp.common_utils.load_interface_driver')
@@ -2113,37 +2130,40 @@ class TestDeviceManager(TestConfBase):
         """Test scenario where a network has two reserved ports, and
         update_dhcp_port fails for the first of those.
         """
+        with mock.patch.object(dhcp.ip_lib, 'IPDevice') as mock_IPDevice:
+            # Create DeviceManager.
+            self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
+                                               default=False))
+            plugin = mock.Mock()
+            device = mock.Mock()
+            mock_IPDevice.return_value = device
+            device.route.get_gateway.return_value = None
+            mgr = dhcp.DeviceManager(self.conf, plugin)
+            load_interface_driver.assert_called_with(self.conf)
 
-        # Create DeviceManager.
-        self.conf.register_opt(cfg.BoolOpt('enable_isolated_metadata',
-                                           default=False))
-        plugin = mock.Mock()
-        mgr = dhcp.DeviceManager(self.conf, plugin)
-        load_interface_driver.assert_called_with(self.conf)
+            # Setup with a reserved DHCP port.
+            network = FakeDualNetworkReserved2()
+            network.tenant_id = 'Tenant A'
+            reserved_port_1 = network.ports[-2]
+            reserved_port_2 = network.ports[-1]
 
-        # Setup with a reserved DHCP port.
-        network = FakeDualNetworkReserved2()
-        network.tenant_id = 'Tenant A'
-        reserved_port_1 = network.ports[-2]
-        reserved_port_2 = network.ports[-1]
+            def mock_update(port_id, dict):
+                if port_id == reserved_port_1.id:
+                    return None
 
-        def mock_update(port_id, dict):
-            if port_id == reserved_port_1.id:
-                return None
+                port = reserved_port_2
+                port.network_id = dict['port']['network_id']
+                port.device_id = dict['port']['device_id']
+                return port
 
-            port = reserved_port_2
-            port.network_id = dict['port']['network_id']
-            port.device_id = dict['port']['device_id']
-            return port
+            plugin.update_dhcp_port.side_effect = mock_update
+            mgr.driver.get_device_name.return_value = 'ns-XXX'
+            mgr.driver.use_gateway_ips = False
+            ip_lib.ensure_device_is_ready.return_value = True
+            mgr.setup(network)
+            plugin.update_dhcp_port.assert_called_with(reserved_port_2.id,
+                                                       mock.ANY)
 
-        plugin.update_dhcp_port.side_effect = mock_update
-        mgr.driver.get_device_name.return_value = 'ns-XXX'
-        mgr.driver.use_gateway_ips = False
-        ip_lib.ensure_device_is_ready.return_value = True
-        mgr.setup(network)
-        plugin.update_dhcp_port.assert_called_with(reserved_port_2.id,
-                                                   mock.ANY)
-
-        mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                              ['192.168.0.6/24'],
-                                              namespace='qdhcp-ns')
+            mgr.driver.init_l3.assert_called_with('ns-XXX',
+                                                  ['192.168.0.6/24'],
+                                                  namespace='qdhcp-ns')

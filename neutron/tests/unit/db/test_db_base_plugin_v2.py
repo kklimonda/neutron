@@ -3451,12 +3451,40 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                                  ipv6_address_mode=constants.IPV6_SLAAC)
 
     def test_create_subnet_gw_outside_cidr_returns_400(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', True)
         with self.network() as network:
             self._create_subnet(self.fmt,
                                 network['network']['id'],
                                 '10.0.0.0/24',
                                 webob.exc.HTTPClientError.code,
                                 gateway_ip='100.0.0.1')
+
+    def test_create_subnet_gw_outside_cidr_returns_201(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', False)
+        with self.network() as network:
+            self._create_subnet(self.fmt,
+                                network['network']['id'],
+                                '10.0.0.0/24',
+                                webob.exc.HTTPCreated.code,
+                                gateway_ip='100.0.0.1')
+
+    def test_create_subnet_gw_is_nw_addr_returns_400(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', False)
+        with self.network() as network:
+            self._create_subnet(self.fmt,
+                                network['network']['id'],
+                                '10.0.0.0/24',
+                                webob.exc.HTTPClientError.code,
+                                gateway_ip='10.0.0.0')
+
+    def test_create_subnet_gw_is_broadcast_addr_returns_400(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', False)
+        with self.network() as network:
+            self._create_subnet(self.fmt,
+                                network['network']['id'],
+                                '10.0.0.0/24',
+                                webob.exc.HTTPClientError.code,
+                                gateway_ip='10.0.0.255')
 
     def test_create_subnet_gw_of_network_returns_400(self):
         with self.network() as network:
@@ -3807,18 +3835,67 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                 ipv6_ra_mode=ra_mode,
                 ipv6_address_mode=addr_mode)
 
-    def test_create_subnet_ipv6_out_of_cidr_global(self):
+    def test_create_subnet_ipv6_out_of_cidr_global_returns_400(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', True)
         gateway_ip = '2000::1'
         cidr = '2001::/64'
 
         with testlib_api.ExpectedException(
             webob.exc.HTTPClientError) as ctx_manager:
             self._test_create_subnet(
-                gateway_ip=gateway_ip, cidr=cidr, ip_version=6,
+                gateway_ip=gateway_ip, cidr=cidr,
+                ip_version=constants.IP_VERSION_6,
+                ipv6_ra_mode=constants.DHCPV6_STATEFUL,
+                ipv6_address_mode=constants.DHCPV6_STATEFUL)
+        self.assertEqual(webob.exc.HTTPClientError.code,
+                         ctx_manager.exception.code)
+
+    def test_create_subnet_ipv6_out_of_cidr_global(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', False)
+        gateway_ip = '2000::1'
+        cidr = '2001::/64'
+        subnet = self._test_create_subnet(
+            gateway_ip=gateway_ip, cidr=cidr,
+            ip_version=constants.IP_VERSION_6,
+            ipv6_ra_mode=constants.DHCPV6_STATEFUL,
+            ipv6_address_mode=constants.DHCPV6_STATEFUL)
+        self.assertEqual(constants.IP_VERSION_6,
+                         subnet['subnet']['ip_version'])
+        self.assertEqual(gateway_ip,
+                         subnet['subnet']['gateway_ip'])
+        self.assertEqual(cidr,
+                         subnet['subnet']['cidr'])
+
+    def test_create_subnet_ipv6_gw_is_nw_addr_returns_400(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', False)
+        gateway_ip = '2001::0'
+        cidr = '2001::/64'
+
+        with testlib_api.ExpectedException(
+            webob.exc.HTTPClientError) as ctx_manager:
+            self._test_create_subnet(
+                gateway_ip=gateway_ip, cidr=cidr,
+                ip_version=constants.IP_VERSION_6,
                 ipv6_ra_mode=constants.DHCPV6_STATEFUL,
                 ipv6_address_mode=constants.DHCPV6_STATEFUL)
         self.assertEqual(ctx_manager.exception.code,
                          webob.exc.HTTPClientError.code)
+
+    def test_create_subnet_ipv6_gw_is_nw_end_addr_returns_201(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', False)
+        gateway_ip = '2001::ffff'
+        cidr = '2001::/112'
+        subnet = self._test_create_subnet(
+            gateway_ip=gateway_ip, cidr=cidr,
+            ip_version=constants.IP_VERSION_6,
+            ipv6_ra_mode=constants.DHCPV6_STATEFUL,
+            ipv6_address_mode=constants.DHCPV6_STATEFUL)
+        self.assertEqual(constants.IP_VERSION_6,
+                         subnet['subnet']['ip_version'])
+        self.assertEqual(gateway_ip,
+                         subnet['subnet']['gateway_ip'])
+        self.assertEqual(cidr,
+                         subnet['subnet']['cidr'])
 
     def test_create_subnet_ipv6_out_of_cidr_lla(self):
         gateway_ip = 'fe80::1'
@@ -3910,10 +3987,12 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                                   '_get_subnet',
                                   return_value=mock.Mock()).start()
             # Add an IPv6 auto-address subnet to the network
-            v6_subnet = self._make_subnet(self.fmt, network, 'fe80::1',
-                                          'fe80::/64', ip_version=6,
-                                          ipv6_ra_mode=addr_mode,
-                                          ipv6_address_mode=addr_mode)
+            with mock.patch.object(manager.NeutronManager.get_plugin(),
+                                   'update_port') as mock_updated_port:
+                v6_subnet = self._make_subnet(self.fmt, network, 'fe80::1',
+                                              'fe80::/64', ip_version=6,
+                                              ipv6_ra_mode=addr_mode,
+                                              ipv6_address_mode=addr_mode)
             if (insert_db_reference_error
                 or device_owner == constants.DEVICE_OWNER_ROUTER_SNAT
                 or device_owner in constants.ROUTER_INTERFACE_OWNERS):
@@ -3923,6 +4002,9 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
             else:
                 # Confirm that the port has been updated with an address
                 # from the new auto-address subnet
+                mock_updated_port.assert_called_with(mock.ANY,
+                                                     port['port']['id'],
+                                                     mock.ANY)
                 req = self.new_show_request('ports', port['port']['id'],
                                             self.fmt)
                 sport = self.deserialize(self.fmt, req.get_response(self.api))
@@ -4023,6 +4105,7 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                                  webob.exc.HTTPClientError.code)
 
     def test_update_subnet_gw_outside_cidr_returns_400(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', True)
         with self.network() as network:
             with self.subnet(network=network) as subnet:
                 data = {'subnet': {'gateway_ip': '100.0.0.1'}}
@@ -4031,6 +4114,17 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                 res = req.get_response(self.api)
                 self.assertEqual(res.status_int,
                                  webob.exc.HTTPClientError.code)
+
+    def test_update_subnet_gw_outside_cidr_returns_200(self):
+        cfg.CONF.set_override('force_gateway_on_subnet', False)
+        with self.network() as network:
+            with self.subnet(network=network) as subnet:
+                data = {'subnet': {'gateway_ip': '100.0.0.1'}}
+                req = self.new_update_request('subnets', data,
+                                              subnet['subnet']['id'])
+                res = req.get_response(self.api)
+                self.assertEqual(webob.exc.HTTPOk.code,
+                                 res.status_int)
 
     def test_update_subnet_gw_ip_in_use_returns_409(self):
         with self.network() as network:

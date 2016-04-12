@@ -25,6 +25,7 @@ from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
 from neutron.i18n import _LW
+from neutron.ipam import utils as ipam_utils
 
 LOG = logging.getLogger(__name__)
 INTERNAL_DEV_PREFIX = namespaces.INTERNAL_DEV_PREFIX
@@ -116,15 +117,10 @@ class RouterInfo(object):
         ip_wrapper = ip_lib.IPWrapper(namespace=namespace)
         ip_wrapper.netns.execute(cmd, check_exit_code=False)
 
-    def update_routing_table(self, operation, route, namespace=None):
-        if namespace is None:
-            namespace = self.ns_name
-        self._update_routing_table(operation, route, namespace)
+    def update_routing_table(self, operation, route):
+        self._update_routing_table(operation, route, self.ns_name)
 
-    def routes_updated(self):
-        new_routes = self.router['routes']
-
-        old_routes = self.routes
+    def routes_updated(self, old_routes, new_routes):
         adds, removes = common_utils.diff_list_of_dict(old_routes,
                                                        new_routes)
         for route in adds:
@@ -138,7 +134,6 @@ class RouterInfo(object):
         for route in removes:
             LOG.debug("Removed route entry is '%s'", route)
             self.update_routing_table('delete', route)
-        self.routes = new_routes
 
     def get_ex_gw_port(self):
         return self.router.get('gw_port')
@@ -488,6 +483,20 @@ class RouterInfo(object):
                 gateway_ips.append(self.agent_conf.ipv6_gateway)
         return gateway_ips
 
+    def _add_route_to_gw(self, ex_gw_port, device_name,
+                         namespace, preserve_ips):
+        # Note: ipv6_gateway is an ipv6 LLA
+        # and so doesn't need a special route
+        for subnet in ex_gw_port.get('subnets', []):
+            is_gateway_not_in_subnet = (subnet['gateway_ip'] and
+                                        not ipam_utils.check_subnet_ip(
+                                                subnet['cidr'],
+                                                subnet['gateway_ip']))
+            if is_gateway_not_in_subnet:
+                preserve_ips.append(subnet['gateway_ip'])
+                device = ip_lib.IPDevice(device_name, namespace=namespace)
+                device.route.add_route(subnet['gateway_ip'], scope='link')
+
     def _external_gateway_added(self, ex_gw_port, interface_name,
                                 ns_name, preserve_ips):
         LOG.debug("External gateway added: port(%s), interface(%s), ns(%s)",
@@ -504,6 +513,8 @@ class RouterInfo(object):
             # There is no IPv6 gw_ip, use RouterAdvt for default route.
             enable_ra_on_gw = True
 
+        self._add_route_to_gw(ex_gw_port, device_name=interface_name,
+                              namespace=ns_name, preserve_ips=preserve_ips)
         self.driver.init_router_port(
             interface_name,
             ip_cidrs,
@@ -692,7 +703,8 @@ class RouterInfo(object):
         agent.pd.sync_router(self.router['id'])
         self.process_external(agent)
         # Process static routes for router
-        self.routes_updated()
+        self.routes_updated(self.routes, self.router['routes'])
+        self.routes = self.router['routes']
 
         # Update ex_gw_port and enable_snat on the router info cache
         self.ex_gw_port = self.get_ex_gw_port()

@@ -370,6 +370,31 @@ class L3HATestCase(L3HATestFramework):
         self._create_router()
         self.assertTrue(self.notif_m.called)
 
+    def test_allocating_router_hidden_from_sync(self):
+        self.plugin.supported_extension_aliases = [
+            constants.L3_HA_MODE_EXT_ALIAS]
+        # simulate a router that is being allocated during
+        # the agent's synchronization
+        r1, r2 = self._create_router(), self._create_router()
+        self.plugin._delete_ha_interfaces(self.admin_ctx, r1['id'])
+        # store shorter name for readability
+        get_method = self.plugin._get_active_l3_agent_routers_sync_data
+        # r1 should be hidden
+        self.assertEqual([r2['id']],
+                         [r['id'] for r in get_method(self.admin_ctx,
+                                                      None, self.agent1,
+                                                      [r1['id'], r2['id']])])
+        # but once it transitions back, all is well in the world again!
+        rdb = self.plugin._get_router(self.admin_ctx, r1['id'])
+        self.plugin._create_ha_interfaces(
+            self.admin_ctx, rdb, self.plugin.get_ha_network(
+                self.admin_ctx, rdb.tenant_id))
+        # just compare ids since python3 won't let us sort dicts
+        expected = sorted([r1['id'], r2['id']])
+        result = sorted([r['id'] for r in get_method(
+              self.admin_ctx, None, self.agent1, [r1['id'], r2['id']])])
+        self.assertEqual(expected, result)
+
     def test_update_router_to_ha_notifies_agent(self):
         router = self._create_router(ha=False)
         self.notif_m.reset_mock()
@@ -578,6 +603,19 @@ class L3HATestCase(L3HATestFramework):
                                                         self.agent1['host'])
         self.assertEqual('active', routers[0][constants.HA_ROUTER_STATE_KEY])
 
+    def test_update_routers_states_port_not_found(self):
+        router1 = self._create_router()
+        self._bind_router(router1['id'])
+        port = {'id': 'foo', 'device_id': router1['id']}
+        with mock.patch.object(self.core_plugin, 'get_ports',
+                               return_value=[port]):
+            with mock.patch.object(
+                    self.core_plugin, 'update_port',
+                    side_effect=n_exc.PortNotFound(port_id='foo')):
+                states = {router1['id']: 'active'}
+                self.plugin.update_routers_states(
+                    self.admin_ctx, states, self.agent1['host'])
+
     def test_exclude_dvr_agents_for_ha_candidates(self):
         """Test dvr agents are not counted in the ha candidates.
 
@@ -697,6 +735,17 @@ class L3HATestCase(L3HATestFramework):
             self.assertEqual(nets_before, nets_after)
             self.assertNotIn('HA network tenant %s' % tenant_id,
                              nets_after)
+
+    def test_update_port_status_port_bingding_deleted_concurrently(self):
+        router1 = self._create_router()
+        self._bind_router(router1['id'])
+        states = {router1['id']: 'active'}
+        with mock.patch.object(self.plugin, 'get_ha_router_port_bindings'):
+            (self.admin_ctx.session.query(
+                 l3_hamode_db.L3HARouterAgentPortBinding).
+             filter_by(router_id=router1['id']).delete())
+            self.plugin.update_routers_states(
+                self.admin_ctx, states, self.agent1['host'])
 
 
 class L3HAModeDbTestCase(L3HATestFramework):

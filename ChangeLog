@@ -1,10 +1,43 @@
 CHANGES
 =======
 
+7.0.4
+-----
+
+* Add option for nova endpoint type
+* Update devstack plugin for dependent packages
+* De-dup conntrack deletions before running them
+* Unmarshall portinfo on update_fdb_entries calls
+* Avoid DuplicateOptError in functional tests
+* Retry port create/update on duplicate db records
+* Catch PortNotFound after HA router race condition
+* Documenting network_device_mtu in agents config files
+* Make all tox targets constrained
+* Filter HA routers without HA interface and state
+* Correct return values for bridge sysctl calls
+* Add tests for RPC methods/classes
+* Fix sanity check --no* BoolOpts
+* Add extension requirement in port-security api test
+* Fix for adding gateway with IP outside subnet
+* Add the rebinding chance in _bind_port_if_needed
+* DHCP: release DHCP port if not enough memory
+* Disable IPv6 on bridge devices in LinuxBridgeManager
+* ML2: delete_port on deadlock during binding
+* Postpone heavy policy check for ports to later
+* Static routes not added to qrouter namespace for DVR
+* Make add_tap_interface resillient to removal
+* Fix bug when enable configuration named dnsmasq_base_log_dir
+
 7.0.3
 -----
 
+* Wait for the watch process in test case
+* Trigger dhcp port_update for new auto_address subnets
 * DHCP: fix regression with DNS nameservers
+* Add generated port id to port dict
+* Protect 'show' and 'index' with Retry decorator
+* Add unit test cases for linuxbridge agent when prevent_arp_spoofing is True
+* Rule, member updates are missed with enhanced rpc
 * Add relationship between port and floating ip
 * OVS agent should fail if it can't get DVR mac address
 * DVR: optimize check_ports_exist_on_l3_agent()
@@ -28,9 +61,11 @@ CHANGES
 * Cache the ARP entries in L3 Agent for DVR
 * Cleanup veth-pairs in default netns for functional tests
 * Do not prohibit VXLAN over IPv6
+* Remove 'validate' key in 'type:dict_or_nodata' type
 * Fix get_subnet_for_dvr() to return correct gateway mac
 * Check missed ip6tables utility
 * SR-IOV: Fix macvtap assigned vf check when kernel < 3.13
+* dhcp: handle advertise_mtu=True when plugin does not set mtu values
 * Make security_groups_provider_updated work with Kilo agents
 * Imported Translations from Zanata
 * Revert "Change function call order in ovs_neutron_agent."

@@ -24,6 +24,7 @@ import netaddr
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
+from oslo_utils import excutils
 from oslo_utils import uuidutils
 import six
 
@@ -38,6 +39,7 @@ from neutron.common import ipv6_utils
 from neutron.common import utils as commonutils
 from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.i18n import _LI, _LW, _LE
+from neutron.ipam import utils as ipam_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -368,7 +370,7 @@ class Dnsmasq(DhcpLocalProcess):
                 possible_leases += cidr.size
 
         if cfg.CONF.advertise_mtu:
-            mtu = self.network.mtu
+            mtu = getattr(self.network, 'mtu', 0)
             # Do not advertise unknown mtu
             if mtu > 0:
                 cmd.append('--dhcp-option-force=option:mtu,%d' % mtu)
@@ -391,18 +393,19 @@ class Dnsmasq(DhcpLocalProcess):
             cmd.append('--dhcp-broadcast')
 
         if self.conf.dnsmasq_base_log_dir:
+            log_dir = os.path.join(
+                self.conf.dnsmasq_base_log_dir,
+                self.network.id)
             try:
-                if not os.path.exists(self.conf.dnsmasq_base_log_dir):
-                    os.makedirs(self.conf.dnsmasq_base_log_dir)
-                log_filename = os.path.join(
-                    self.conf.dnsmasq_base_log_dir,
-                    self.network.id, 'dhcp_dns_log')
+                if not os.path.exists(log_dir):
+                    os.makedirs(log_dir)
+                log_filename = os.path.join(log_dir, 'dhcp_dns_log')
                 cmd.append('--log-queries')
                 cmd.append('--log-dhcp')
                 cmd.append('--log-facility=%s' % log_filename)
             except OSError:
                 LOG.error(_LE('Error while create dnsmasq base log dir: %s'),
-                    self.conf.dnsmasq_base_log_dir)
+                    log_dir)
 
         return cmd
 
@@ -1018,6 +1021,27 @@ class DeviceManager(object):
                           '%(ip)s',
                           {'n': network.id, 'ip': subnet.gateway_ip})
 
+                # Check for and remove the on-link route for the old
+                # gateway being replaced, if it is outside the subnet
+                is_old_gateway_not_in_subnet = (gateway and
+                                                not ipam_utils.check_subnet_ip(
+                                                        subnet.cidr, gateway))
+                if is_old_gateway_not_in_subnet:
+                    v4_onlink = device.route.list_onlink_routes(
+                        constants.IP_VERSION_4)
+                    v6_onlink = device.route.list_onlink_routes(
+                        constants.IP_VERSION_6)
+                    existing_onlink_routes = set(
+                        r['cidr'] for r in v4_onlink + v6_onlink)
+                    if gateway in existing_onlink_routes:
+                        device.route.delete_route(gateway, scope='link')
+
+                is_new_gateway_not_in_subnet = (subnet.gateway_ip and
+                                                not ipam_utils.check_subnet_ip(
+                                                        subnet.cidr,
+                                                        subnet.gateway_ip))
+                if is_new_gateway_not_in_subnet:
+                    device.route.add_route(subnet.gateway_ip, scope='link')
                 device.route.add_gateway(subnet.gateway_ip)
 
             return
@@ -1193,11 +1217,19 @@ class DeviceManager(object):
                                          namespace=network.namespace):
             LOG.debug('Reusing existing device: %s.', interface_name)
         else:
-            self.driver.plug(network.id,
-                             port.id,
-                             interface_name,
-                             port.mac_address,
-                             namespace=network.namespace)
+            try:
+                self.driver.plug(network.id,
+                                 port.id,
+                                 interface_name,
+                                 port.mac_address,
+                                 namespace=network.namespace)
+            except Exception:
+                with excutils.save_and_reraise_exception():
+                    LOG.exception(_LE('Unable to plug DHCP port for '
+                                      'network %s. Releasing port.'),
+                                  network.id)
+                    self.plugin.release_dhcp_port(network.id, port.device_id)
+
             self.fill_dhcp_udp_checksums(namespace=network.namespace)
         ip_cidrs = []
         for fixed_ip in port.fixed_ips:

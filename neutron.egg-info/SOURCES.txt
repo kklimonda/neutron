@@ -906,6 +906,9 @@ neutron/tests/functional/db/test_models.py
 neutron/tests/functional/pecan_wsgi/__init__.py
 neutron/tests/functional/pecan_wsgi/config.py
 neutron/tests/functional/pecan_wsgi/test_functional.py
+neutron/tests/functional/plugins/__init__.py
+neutron/tests/functional/plugins/ml2/__init__.py
+neutron/tests/functional/plugins/ml2/test_plugin.py
 neutron/tests/functional/sanity/__init__.py
 neutron/tests/functional/sanity/test_sanity.py
 neutron/tests/functional/scheduler/__init__.py
@@ -1010,6 +1013,7 @@ neutron/tests/unit/agent/linux/test_daemon.py
 neutron/tests/unit/agent/linux/test_dhcp.py
 neutron/tests/unit/agent/linux/test_external_process.py
 neutron/tests/unit/agent/linux/test_interface.py
+neutron/tests/unit/agent/linux/test_ip_conntrack.py
 neutron/tests/unit/agent/linux/test_ip_lib.py
 neutron/tests/unit/agent/linux/test_ip_link_support.py
 neutron/tests/unit/agent/linux/test_ip_monitor.py
@@ -1068,6 +1072,7 @@ neutron/tests/unit/db/__init__.py
 neutron/tests/unit/db/test_agents_db.py
 neutron/tests/unit/db/test_agentschedulers_db.py
 neutron/tests/unit/db/test_allowedaddresspairs_db.py
+neutron/tests/unit/db/test_api.py
 neutron/tests/unit/db/test_common_db_mixin.py
 neutron/tests/unit/db/test_db_base_plugin_common.py
 neutron/tests/unit/db/test_db_base_plugin_v2.py
@@ -1258,6 +1263,7 @@ rally-jobs/extra/README.rst
 rally-jobs/plugins/README.rst
 rally-jobs/plugins/__init__.py
 releasenotes/notes/713a5eb2833311e5-start-using-reno.yaml
+releasenotes/notes/add-port-rebinding-chance-33178b9abacf5804.yaml
 releasenotes/notes/agent-scheduling-3404da3fbe863366.yaml
 releasenotes/notes/deprecated-features-96c51d46f3498fad.yaml
 releasenotes/notes/deprecated-plugins-and-drivers-292865277ee1d182.yaml

@@ -394,6 +394,8 @@ class LinuxBridgeManager(object):
                 return
             if bridge_device.disable_stp():
                 return
+            if bridge_device.disable_ipv6():
+                return
             if bridge_device.link.set_up():
                 return
             LOG.debug("Done starting bridge %(bridge_name)s for "
@@ -457,6 +459,22 @@ class LinuxBridgeManager(object):
                                              network_id: network_id})
 
     def add_tap_interface(self, network_id, network_type, physical_network,
+                          segmentation_id, tap_device_name):
+        """Add tap interface and handle interface missing exeptions."""
+        try:
+            return self._add_tap_interface(network_id, network_type,
+                                           physical_network, segmentation_id,
+                                           tap_device_name)
+        except Exception:
+            with excutils.save_and_reraise_exception() as ctx:
+                if not ip_lib.device_exists(tap_device_name):
+                    # the exception was likely a side effect of the tap device
+                    # being removed during handling so we just return false
+                    # like we would if it didn't exist to begin with.
+                    ctx.reraise = False
+                    return False
+
+    def _add_tap_interface(self, network_id, network_type, physical_network,
                           segmentation_id, tap_device_name):
         """Add tap interface.
 
