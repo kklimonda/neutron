@@ -1,3 +1,9 @@
+neutron (2:7.0.4-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream point release (LP: #1569502).
+
+ -- David Della Vecchia <ddv@canonical.com>  Tue, 12 Apr 2016 14:17:33 -0400
+
 neutron (2:7.0.3-0ubuntu1) wily; urgency=medium
 
   * New upstream point release (LP: #1544568):
