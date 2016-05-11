@@ -97,22 +97,29 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         cutoff = self.get_cutoff_time(agent_dead_limit)
 
         context = n_ctx.get_admin_context()
-        down_bindings = (
-            context.session.query(RouterL3AgentBinding).
-            join(agents_db.Agent).
-            filter(agents_db.Agent.heartbeat_timestamp < cutoff,
-                   agents_db.Agent.admin_state_up).
-            outerjoin(l3_attrs_db.RouterExtraAttributes,
-                      l3_attrs_db.RouterExtraAttributes.router_id ==
-                      RouterL3AgentBinding.router_id).
-            filter(sa.or_(l3_attrs_db.RouterExtraAttributes.ha == sql.false(),
-                          l3_attrs_db.RouterExtraAttributes.ha == sql.null())))
         try:
+            down_bindings = (
+                context.session.query(RouterL3AgentBinding).
+                join(agents_db.Agent).
+                filter(agents_db.Agent.heartbeat_timestamp < cutoff,
+                       agents_db.Agent.admin_state_up).
+                outerjoin(l3_attrs_db.RouterExtraAttributes,
+                          l3_attrs_db.RouterExtraAttributes.router_id ==
+                          RouterL3AgentBinding.router_id).
+                filter(sa.or_(l3_attrs_db.RouterExtraAttributes.ha ==
+                              sql.false(),
+                              l3_attrs_db.RouterExtraAttributes.ha ==
+                              sql.null())))
+
             agents_back_online = set()
             for binding in down_bindings:
                 if binding.l3_agent_id in agents_back_online:
                     continue
                 else:
+                    # we need new context to make sure we use different DB
+                    # transaction - otherwise we may fetch same agent record
+                    # each time due to REPEATABLE_READ isolation level
+                    context = n_ctx.get_admin_context()
                     agent = self._get_agent(context, binding.l3_agent_id)
                     if agent.is_active:
                         agents_back_online.add(binding.l3_agent_id)
@@ -340,11 +347,13 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
                                                router_ids):
         if n_utils.is_extension_supported(self,
                                           constants.L3_HA_MODE_EXT_ALIAS):
-            return self.get_ha_sync_data_for_host(context, host, agent,
-                                                  router_ids=router_ids,
-                                                  active=True)
-
-        return self.get_sync_data(context, router_ids=router_ids, active=True)
+            routers = self.get_ha_sync_data_for_host(context, host, agent,
+                                                     router_ids=router_ids,
+                                                     active=True)
+        else:
+            routers = self.get_sync_data(context, router_ids=router_ids,
+                                         active=True)
+        return self.filter_allocating_and_missing_routers(context, routers)
 
     def list_router_ids_on_host(self, context, host, router_ids=None):
         agent = self._get_agent_by_type_and_host(

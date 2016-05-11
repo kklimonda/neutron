@@ -765,6 +765,7 @@ neutron/tests/api/base.py
 neutron/tests/api/base_routers.py
 neutron/tests/api/base_security_groups.py
 neutron/tests/api/clients.py
+neutron/tests/api/requirements.txt
 neutron/tests/api/test_address_scopes.py
 neutron/tests/api/test_address_scopes_negative.py
 neutron/tests/api/test_allowed_address_pair.py
@@ -1056,6 +1057,8 @@ neutron/tests/unit/db/test_l3_db.py
 neutron/tests/unit/db/test_l3_dvr_db.py
 neutron/tests/unit/db/test_l3_hamode_db.py
 neutron/tests/unit/db/test_migration.py
+neutron/tests/unit/db/test_portsecurity_db.py
+neutron/tests/unit/db/test_portsecurity_db_common.py
 neutron/tests/unit/db/test_securitygroups_db.py
 neutron/tests/unit/db/test_sqlalchemytypes.py
 neutron/tests/unit/db/metering/__init__.py
@@ -1275,6 +1278,7 @@ releasenotes/notes/allow-non-admins-to-define-external-extra-routes-0d541fc356a5
 releasenotes/notes/bgp-support-ef361825ca63f28b.yaml
 releasenotes/notes/clear-allowed-address-pairs-with-none-4757bcca78076c9e.yaml
 releasenotes/notes/config-file-generation-2eafc6602d57178e.yaml
+releasenotes/notes/config-wsgi-pool-size-a4c06753b79fee6d.yaml
 releasenotes/notes/correlate-address-scope-with-network-ea16e16b0154ac21.yaml
 releasenotes/notes/default-local-dns-a1c3fa1451f228fa.yaml
 releasenotes/notes/default-subnetpool-semantics-1cdc5cdde2be88c2.yaml
@@ -1302,6 +1306,7 @@ releasenotes/notes/oslo-reports-166a169037bf64f2.yaml
 releasenotes/notes/ovs-ct-firewall-driver-52a70a6a16d06f59.yaml
 releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml
 releasenotes/notes/segment_mtu_to_global_physnet_mtu-9cee5ff09557edeb.yaml
+releasenotes/notes/sriov_allow_use_many_nics_for_one_physnet-3570aa67a60ce6c4.yaml
 releasenotes/notes/sriov_show_l2_agent_extensions-ca852e155a529e99.yaml
 releasenotes/notes/use-keystoneauth-24f309566001a16b.yaml
 releasenotes/source/README.rst
