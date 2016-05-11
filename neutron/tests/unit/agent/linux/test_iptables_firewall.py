@@ -158,10 +158,15 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=ic.PAIR_DROP),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 68 -m udp --dport 67 -j RETURN',
+                     '-s 0.0.0.0/32 -d 255.255.255.255/32 -p udp -m udp '
+                     '--sport 68 --dport 67 -j RETURN',
                      comment=None),
                  mock.call.add_rule('ofake_dev', '-j $sfake_dev',
                                     comment=None),
+                 mock.call.add_rule(
+                     'ofake_dev',
+                     '-p udp -m udp --sport 68 --dport 67 -j RETURN',
+                     comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
                      '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
@@ -940,7 +945,8 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         filter_inst = self.v4filter_inst
         dhcp_rule = [mock.call.add_rule(
             'ofake_dev',
-            '-p udp -m udp --sport 68 -m udp --dport 67 -j RETURN',
+            '-s 0.0.0.0/32 -d 255.255.255.255/32 -p udp -m udp '
+            '--sport 68 --dport 67 -j RETURN',
             comment=None)]
 
         if ethertype == 'IPv6':
@@ -1027,6 +1033,10 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         calls.append(mock.call.add_rule('ofake_dev', '-j $sfake_dev',
                                         comment=None))
         if ethertype == 'IPv4':
+            calls.append(mock.call.add_rule(
+                'ofake_dev',
+                '-p udp -m udp --sport 68 --dport 67 -j RETURN',
+                comment=None))
             calls.append(mock.call.add_rule(
                 'ofake_dev',
                 '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
@@ -1195,10 +1205,15 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=ic.PAIR_DROP),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 68 -m udp --dport 67 -j RETURN',
+                     '-s 0.0.0.0/32 -d 255.255.255.255/32 -p udp -m udp '
+                     '--sport 68 --dport 67 -j RETURN',
                      comment=None),
                  mock.call.add_rule('ofake_dev', '-j $sfake_dev',
                                     comment=None),
+                 mock.call.add_rule(
+                     'ofake_dev',
+                     '-p udp -m udp --sport 68 --dport 67 -j RETURN',
+                     comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
                      '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
@@ -1267,10 +1282,15 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=ic.PAIR_DROP),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 68 -m udp --dport 67 -j RETURN',
+                     '-s 0.0.0.0/32 -d 255.255.255.255/32 -p udp -m udp '
+                     '--sport 68 --dport 67 -j RETURN',
                      comment=None),
                  mock.call.add_rule('ofake_dev', '-j $sfake_dev',
                                     comment=None),
+                 mock.call.add_rule(
+                     'ofake_dev',
+                     '-p udp -m udp --sport 68 --dport 67 -j RETURN',
+                     comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
                      '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
@@ -1299,7 +1319,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
     def test_remove_unknown_port(self):
         port = self._fake_port()
         self.firewall.remove_port_filter(port)
-        # checking no exception occures
+        # checking no exception occurs
         self.assertFalse(self.v4filter_inst.called)
 
     def test_defer_apply(self):
@@ -1442,10 +1462,15 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=ic.PAIR_DROP),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 68 -m udp --dport 67 -j RETURN',
+                     '-s 0.0.0.0/32 -d 255.255.255.255/32 -p udp -m udp '
+                     '--sport 68 --dport 67 -j RETURN',
                      comment=None),
                  mock.call.add_rule('ofake_dev', '-j $sfake_dev',
                                     comment=None),
+                 mock.call.add_rule(
+                     'ofake_dev',
+                     '-p udp -m udp --sport 68 --dport 67 -j RETURN',
+                     comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
                      '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
@@ -1516,10 +1541,15 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=ic.PAIR_DROP),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 68 -m udp --dport 67 -j RETURN',
+                     '-s 0.0.0.0/32 -d 255.255.255.255/32 -p udp -m udp '
+                     '--sport 68 --dport 67 -j RETURN',
                      comment=None),
                  mock.call.add_rule('ofake_dev', '-j $sfake_dev',
                                     comment=None),
+                 mock.call.add_rule(
+                     'ofake_dev',
+                     '-p udp -m udp --sport 68 --dport 67 -j RETURN',
+                     comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
                      '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
@@ -1544,7 +1574,7 @@ class IptablesFirewallEnhancedIpsetTestCase(BaseIptablesFirewallTestCase):
         self.firewall.ipset = mock.Mock()
         self.firewall.ipset.get_name.side_effect = (
             ipset_manager.IpsetManager.get_name)
-        self.firewall.ipset.set_exists.return_value = True
+        self.firewall.ipset.set_name_exists.return_value = True
 
     def _fake_port(self, sg_id=FAKE_SGID):
         return {'device': 'tapfake_dev',
@@ -1757,9 +1787,9 @@ class IptablesFirewallEnhancedIpsetTestCase(BaseIptablesFirewallTestCase):
             mock.call.set_members('fake_sgid', 'IPv4', ['10.0.0.1']),
             mock.call.set_members('fake_sgid', 'IPv6', ['fe80::1']),
             mock.call.get_name('fake_sgid', 'IPv4'),
-            mock.call.set_exists('fake_sgid', 'IPv4'),
+            mock.call.set_name_exists('NIPv4fake_sgid'),
             mock.call.get_name('fake_sgid', 'IPv6'),
-            mock.call.set_exists('fake_sgid', 'IPv6'),
+            mock.call.set_name_exists('NIPv6fake_sgid'),
             mock.call.destroy('fake_sgid', 'IPv4'),
             mock.call.destroy('fake_sgid', 'IPv6')]
 
@@ -1857,7 +1887,7 @@ class OVSHybridIptablesFirewallTestCase(BaseIptablesFirewallTestCase):
     def setUp(self):
         super(OVSHybridIptablesFirewallTestCase, self).setUp()
         self.firewall = iptables_firewall.OVSHybridIptablesFirewallDriver()
-        # inital data has 1, 2, and 9 in use, see RAW_TABLE_OUTPUT above.
+        # initial data has 1, 2, and 9 in use, see RAW_TABLE_OUTPUT above.
         self._dev_zone_map = {'61634509-31': 2, '8f46cf18-12': 9,
                               '95c24827-02': 2, 'e804433b-61': 1}
 
@@ -1865,7 +1895,7 @@ class OVSHybridIptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         self.assertEqual(self._dev_zone_map, self.firewall._device_zone_map)
 
     def test__generate_device_zone(self):
-        # inital data has 1, 2, and 9 in use.
+        # initial data has 1, 2, and 9 in use.
         # we fill from top up first.
         self.assertEqual(10, self.firewall._generate_device_zone('test'))
 

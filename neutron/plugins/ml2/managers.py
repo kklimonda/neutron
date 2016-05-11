@@ -19,6 +19,7 @@ from oslo_utils import excutils
 import six
 import stevedore
 
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.api.v2 import attributes
 from neutron.common import exceptions as exc
 from neutron.extensions import external_net
@@ -26,7 +27,6 @@ from neutron.extensions import multiprovidernet as mpnet
 from neutron.extensions import portbindings
 from neutron.extensions import providernet as provider
 from neutron.extensions import vlantransparent
-from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
@@ -352,7 +352,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                 else:
                     # at least one of drivers does not support QoS, meaning
                     # there are no rule types supported by all of them
-                    LOG.warn(
+                    LOG.warning(
                         _LW("%s does not support QoS; "
                             "no rule types available"),
                         driver.name)
@@ -379,10 +379,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         VlanTransparencyDriverError if any mechanism driver doesn't
         support vlan transparency.
         """
-        if context.current['vlan_transparent'] is None:
-            return
-
-        if context.current['vlan_transparent']:
+        if context.current.get('vlan_transparent'):
             for driver in self.ordered_mech_drivers:
                 if not driver.obj.check_vlan_transparency(context):
                     raise vlantransparent.VlanTransparencyDriverError()
@@ -690,9 +687,13 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if not self._bind_port_level(context, 0,
                                      context.network.network_segments):
             binding.vif_type = portbindings.VIF_TYPE_BINDING_FAILED
-            LOG.error(_LE("Failed to bind port %(port)s on host %(host)s"),
+            LOG.error(_LE("Failed to bind port %(port)s on host %(host)s "
+                          "for vnic_type %(vnic_type)s using segments "
+                          "%(segments)s"),
                       {'port': context.current['id'],
-                       'host': context.host})
+                       'host': context.host,
+                       'vnic_type': binding.vnic_type,
+                       'segments': context.network.network_segments})
 
     def _bind_port_level(self, context, level, segments_to_bind):
         binding = context._binding
@@ -733,6 +734,11 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                                                  next_segments):
                             return True
                         else:
+                            LOG.warning(_LW("Failed to bind port %(port)s on "
+                                            "host %(host)s at level %(lvl)s"),
+                                        {'port': context.current['id'],
+                                         'host': context.host,
+                                         'lvl': level + 1})
                             context._pop_binding_level()
                     else:
                         # Binding complete.
@@ -751,15 +757,12 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                 LOG.exception(_LE("Mechanism driver %s failed in "
                                   "bind_port"),
                               driver.name)
-        LOG.error(_LE("Failed to bind port %(port)s on host %(host)s"),
-                  {'port': context.current['id'],
-                   'host': binding.host})
 
     def _check_driver_to_bind(self, driver, segments_to_bind, binding_levels):
         # To prevent a possible binding loop, don't try to bind with
         # this driver if the same driver has already bound at a higher
         # level to one of the segments we are currently trying to
-        # bind. Note that is is OK for the same driver to bind at
+        # bind. Note that it is OK for the same driver to bind at
         # multiple levels using different segments.
         for level in binding_levels:
             if (level.driver == driver and

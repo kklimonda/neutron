@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from oslo_config import cfg
-from oslo_log import log as logging
+from oslo_service import wsgi as base_wsgi
 import routes as routes_mapper
 import six
 import six.moves.urllib.parse as urlparse
@@ -30,8 +30,6 @@ from neutron import policy
 from neutron.quota import resource_registry
 from neutron import wsgi
 
-
-LOG = logging.getLogger(__name__)
 
 RESOURCES = {'network': 'networks',
              'subnet': 'subnets',
@@ -66,7 +64,7 @@ class Index(wsgi.Application):
         return webob.Response(body=body, content_type=content_type)
 
 
-class APIRouter(wsgi.Router):
+class APIRouter(base_wsgi.Router):
 
     @classmethod
     def factory(cls, global_config, **local_config):

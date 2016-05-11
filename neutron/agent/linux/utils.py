@@ -24,22 +24,21 @@ import struct
 import tempfile
 import threading
 
-from debtcollector import removals
+import debtcollector
 import eventlet
 from eventlet.green import subprocess
 from eventlet import greenthread
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_log import loggers
 from oslo_rootwrap import client
 from oslo_utils import excutils
 import six
 from six.moves import http_client as httplib
 
+from neutron._i18n import _, _LE
 from neutron.agent.common import config
 from neutron.common import constants
 from neutron.common import utils
-from neutron.i18n import _LE
 from neutron import wsgi
 
 
@@ -121,42 +120,27 @@ def execute(cmd, process_input=None, addl_env=None,
             _stdout, _stderr = obj.communicate(_process_input)
             returncode = obj.returncode
             obj.stdin.close()
-        if six.PY3:
-            if isinstance(_stdout, bytes):
-                try:
-                    _stdout = _stdout.decode(encoding='utf-8')
-                except UnicodeError:
-                    pass
-            if isinstance(_stderr, bytes):
-                try:
-                    _stderr = _stderr.decode(encoding='utf-8')
-                except UnicodeError:
-                    pass
-
-        command_str = {
-            'cmd': cmd,
-            'code': returncode
-        }
-        m = _("\nCommand: %(cmd)s"
-              "\nExit code: %(code)d\n") % command_str
+        _stdout = utils.safe_decode_utf8(_stdout)
+        _stderr = utils.safe_decode_utf8(_stderr)
 
         extra_ok_codes = extra_ok_codes or []
-        if returncode and returncode in extra_ok_codes:
-            returncode = None
+        if returncode and returncode not in extra_ok_codes:
+            msg = _("Exit code: %(returncode)d; "
+                    "Stdin: %(stdin)s; "
+                    "Stdout: %(stdout)s; "
+                    "Stderr: %(stderr)s") % {
+                        'returncode': returncode,
+                        'stdin': process_input or '',
+                        'stdout': _stdout,
+                        'stderr': _stderr}
 
-        if returncode and log_fail_as_error:
-            command_str['stdin'] = process_input or ''
-            command_str['stdout'] = _stdout
-            command_str['stderr'] = _stderr
-            m += _("Stdin: %(stdin)s\n"
-                  "Stdout: %(stdout)s\n"
-                  "Stderr: %(stderr)s") % command_str
-            LOG.error(m)
+            if log_fail_as_error:
+                LOG.error(msg)
+            if check_exit_code:
+                raise RuntimeError(msg)
         else:
-            LOG.debug(m)
+            LOG.debug("Exit code: %d", returncode)
 
-        if returncode and check_exit_code:
-            raise RuntimeError(m)
     finally:
         # NOTE(termie): this appears to be necessary to let the subprocess
         #               call clean something up in between calls, without
@@ -178,6 +162,7 @@ def get_interface_mac(interface):
                     for char in info[MAC_START:MAC_END]])[:-1]
 
 
+@debtcollector.removals.remove(message="Redundant in Mitaka release.")
 def replace_file(file_name, data, file_mode=0o644):
     """Replaces the contents of file_name with data in a safe manner.
 
@@ -210,11 +195,6 @@ def find_child_pids(pid):
                 ctxt.reraise = False
                 return []
     return [x.strip() for x in raw_pids.split('\n') if x.strip()]
-
-
-@removals.remove(message='Use neutron.common.utils.ensure_dir instead.')
-def ensure_dir(*args, **kwargs):
-    return utils.ensure_dir(*args, **kwargs)
 
 
 def _get_conf_base(cfg_root, uuid, ensure_conf_dir):
@@ -393,6 +373,12 @@ class UnixDomainHTTPConnection(httplib.HTTPConnection):
 
 
 class UnixDomainHttpProtocol(eventlet.wsgi.HttpProtocol):
+    # TODO(jlibosva): This is just a workaround not to set TCP_NODELAY on
+    # socket due to 40714b1ffadd47b315ca07f9b85009448f0fe63d evenlet change
+    # This should be removed once
+    # https://github.com/eventlet/eventlet/issues/301 is fixed
+    disable_nagle_algorithm = False
+
     def __init__(self, request, client_address, server):
         if client_address == '':
             client_address = ('<local>', 0)
@@ -406,7 +392,7 @@ class UnixDomainWSGIServer(wsgi.Server):
         self._socket = None
         self._launcher = None
         self._server = None
-        super(UnixDomainWSGIServer, self).__init__(name)
+        super(UnixDomainWSGIServer, self).__init__(name, disable_ssl=True)
 
     def start(self, application, file_socket, workers, backlog, mode=None):
         self._socket = eventlet.listen(file_socket,
@@ -424,4 +410,4 @@ class UnixDomainWSGIServer(wsgi.Server):
                              application,
                              max_size=self.num_threads,
                              protocol=UnixDomainHttpProtocol,
-                             log=loggers.WritableLogger(logger))
+                             log=logger)

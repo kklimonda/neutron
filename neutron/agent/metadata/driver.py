@@ -15,9 +15,8 @@
 
 import os
 
-from oslo_log import log as logging
-
 from neutron.agent.common import config
+from neutron.agent.l3 import ha_router
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import external_process
 from neutron.agent.linux import utils
@@ -27,7 +26,6 @@ from neutron.callbacks import resources
 from neutron.common import constants
 from neutron.common import exceptions
 
-LOG = logging.getLogger(__name__)
 
 # Access with redirection to metadata proxy iptables mark mask
 METADATA_SERVICE_NAME = 'metadata-proxy'
@@ -65,7 +63,7 @@ class MetadataDriver(object):
         return [('PREROUTING', '-d 169.254.169.254/32 '
                  '-i %(interface_name)s '
                  '-p tcp -m tcp --dport 80 -j REDIRECT '
-                 '--to-port %(port)s' %
+                 '--to-ports %(port)s' %
                  {'interface_name': namespaces.INTERNAL_DEV_PREFIX + '+',
                   'port': port})]
 
@@ -154,7 +152,7 @@ def after_router_added(resource, event, l3_agent, **kwargs):
         router.iptables_manager.ipv4['nat'].add_rule(c, r)
     router.iptables_manager.apply()
 
-    if not router.is_ha:
+    if not isinstance(router, ha_router.HaRouter):
         proxy.spawn_monitored_metadata_proxy(
             l3_agent.process_monitor,
             router.ns_name,
@@ -166,14 +164,6 @@ def after_router_added(resource, event, l3_agent, **kwargs):
 def before_router_removed(resource, event, l3_agent, **kwargs):
     router = kwargs['router']
     proxy = l3_agent.metadata_driver
-    for c, r in proxy.metadata_filter_rules(proxy.metadata_port,
-                                           proxy.metadata_access_mark):
-        router.iptables_manager.ipv4['filter'].remove_rule(c, r)
-    for c, r in proxy.metadata_mangle_rules(proxy.metadata_access_mark):
-        router.iptables_manager.ipv4['mangle'].remove_rule(c, r)
-    for c, r in proxy.metadata_nat_rules(proxy.metadata_port):
-        router.iptables_manager.ipv4['nat'].remove_rule(c, r)
-    router.iptables_manager.apply()
 
     proxy.destroy_monitored_metadata_proxy(l3_agent.process_monitor,
                                           router.router['id'],

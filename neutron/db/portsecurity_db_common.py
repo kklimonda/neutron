@@ -12,7 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_log import log as logging
 import sqlalchemy as sa
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
@@ -20,8 +19,6 @@ from sqlalchemy.orm import exc
 from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.extensions import portsecurity as psec
-
-LOG = logging.getLogger(__name__)
 
 
 class PortSecurityBinding(model_base.BASEV2):
@@ -56,6 +53,13 @@ class NetworkSecurityBinding(model_base.BASEV2):
 class PortSecurityDbCommon(object):
     """Mixin class to add port security."""
 
+    def _extend_port_security_dict(self, response_data, db_data):
+        if db_data.get('port_security') is None:
+            response_data[psec.PORTSECURITY] = psec.DEFAULT_PORT_SECURITY
+        else:
+            response_data[psec.PORTSECURITY] = (
+                                db_data['port_security'][psec.PORTSECURITY])
+
     def _process_network_port_security_create(
         self, context, network_req, network_res):
         with context.session.begin(subtransactions=True):
@@ -81,52 +85,58 @@ class PortSecurityDbCommon(object):
             query = self._model_query(context, NetworkSecurityBinding)
             binding = query.filter(
                 NetworkSecurityBinding.network_id == network_id).one()
+            return binding.port_security_enabled
         except exc.NoResultFound:
-            raise psec.PortSecurityBindingNotFound()
-        return binding.port_security_enabled
+            # NOTE(ihrachys) the resource may have been created before port
+            # security extension was enabled; return default value
+            return psec.DEFAULT_PORT_SECURITY
 
     def _get_port_security_binding(self, context, port_id):
         try:
             query = self._model_query(context, PortSecurityBinding)
             binding = query.filter(
                 PortSecurityBinding.port_id == port_id).one()
+            return binding.port_security_enabled
         except exc.NoResultFound:
-            raise psec.PortSecurityBindingNotFound()
-        return binding.port_security_enabled
+            # NOTE(ihrachys) the resource may have been created before port
+            # security extension was enabled; return default value
+            return psec.DEFAULT_PORT_SECURITY
 
     def _process_port_port_security_update(
         self, context, port_req, port_res):
-        if psec.PORTSECURITY in port_req:
-            port_security_enabled = port_req[psec.PORTSECURITY]
-        else:
+        if psec.PORTSECURITY not in port_req:
             return
+        port_security_enabled = port_req[psec.PORTSECURITY]
         try:
             query = self._model_query(context, PortSecurityBinding)
             port_id = port_res['id']
             binding = query.filter(
                 PortSecurityBinding.port_id == port_id).one()
-
             binding.port_security_enabled = port_security_enabled
             port_res[psec.PORTSECURITY] = port_security_enabled
         except exc.NoResultFound:
-            raise psec.PortSecurityBindingNotFound()
+            # NOTE(ihrachys) the resource may have been created before port
+            # security extension was enabled; create the binding model
+            self._process_port_port_security_create(
+                context, port_req, port_res)
 
     def _process_network_port_security_update(
         self, context, network_req, network_res):
-        if psec.PORTSECURITY in network_req:
-            port_security_enabled = network_req[psec.PORTSECURITY]
-        else:
+        if psec.PORTSECURITY not in network_req:
             return
+        port_security_enabled = network_req[psec.PORTSECURITY]
         try:
             query = self._model_query(context, NetworkSecurityBinding)
             network_id = network_res['id']
             binding = query.filter(
                 NetworkSecurityBinding.network_id == network_id).one()
-
             binding.port_security_enabled = port_security_enabled
             network_res[psec.PORTSECURITY] = port_security_enabled
         except exc.NoResultFound:
-            raise psec.PortSecurityBindingNotFound()
+            # NOTE(ihrachys) the resource may have been created before port
+            # security extension was enabled; create the binding model
+            self._process_network_port_security_create(
+                context, network_req, network_res)
 
     def _make_network_port_security_dict(self, port_security, fields=None):
         res = {'network_id': port_security['network_id'],

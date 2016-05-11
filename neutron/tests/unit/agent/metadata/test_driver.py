@@ -34,7 +34,7 @@ class TestMetadataDriverRules(base.BaseTestCase):
 
     def test_metadata_nat_rules(self):
         rules = ('PREROUTING', '-d 169.254.169.254/32 -i qr-+ '
-                 '-p tcp -m tcp --dport 80 -j REDIRECT --to-port 8775')
+                 '-p tcp -m tcp --dport 80 -j REDIRECT --to-ports 8775')
         self.assertEqual(
             [rules],
             metadata_driver.MetadataDriver.metadata_nat_rules(8775))
@@ -69,7 +69,6 @@ class TestMetadataDriverProcess(base.BaseTestCase):
         agent_config.register_interface_driver_opts_helper(cfg.CONF)
         cfg.CONF.set_override('interface_driver',
                               'neutron.agent.linux.interface.NullDriver')
-        agent_config.register_use_namespaces_opts_helper(cfg.CONF)
 
         mock.patch('neutron.agent.l3.agent.L3PluginApi').start()
         mock.patch('neutron.agent.l3.ha.AgentMixin'

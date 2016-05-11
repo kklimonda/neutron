@@ -23,9 +23,9 @@ from oslo_utils import importutils
 import six
 import webob
 
+from neutron._i18n import _, _LI, _LW
 from neutron.common import exceptions
 from neutron.db.quota import api as quota_api
-from neutron.i18n import _LI, _LW
 from neutron.quota import resource_registry
 
 
@@ -110,7 +110,7 @@ class ConfDriver(object):
         nothing.
 
         :param context: The request context, for access checks.
-        :param tennant_id: The tenant_id to check quota.
+        :param tenant_id: The tenant_id to check quota.
         :param resources: A dictionary of the registered resources.
         :param values: A dictionary of the values to check against the
                        quota.
@@ -175,10 +175,10 @@ class ConfDriver(object):
         return quota_api.ReservationInfo('fake', None, None, None)
 
     def commit_reservation(self, context, reservation_id):
-        """Tnis is a noop as this driver does not support reservations."""
+        """This is a noop as this driver does not support reservations."""
 
     def cancel_reservation(self, context, reservation_id):
-        """Tnis is a noop as this driver does not support reservations."""
+        """This is a noop as this driver does not support reservations."""
 
 
 class QuotaEngine(object):

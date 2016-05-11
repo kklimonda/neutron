@@ -1,4 +1,26 @@
-==================
+..
+      Licensed under the Apache License, Version 2.0 (the "License"); you may
+      not use this file except in compliance with the License. You may obtain
+      a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+      Unless required by applicable law or agreed to in writing, software
+      distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+      WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+      License for the specific language governing permissions and limitations
+      under the License.
+
+
+      Convention for heading levels in Neutron devref:
+      =======  Heading 0 (reserved for the title in a document)
+      -------  Heading 1
+      ~~~~~~~  Heading 2
+      +++++++  Heading 3
+      '''''''  Heading 4
+      (Avoid deeper levels because they do not render well.)
+
+
 Quality of Service
 ==================
 
@@ -13,7 +35,8 @@ Details about the DB models, API extension, and use cases can be found here: `qo
 .
 
 Service side design
-===================
+-------------------
+
 * neutron.extensions.qos:
   base extension + API controller definition. Note that rules are subattributes
   of policies and hence embedded into their URIs.
@@ -54,12 +77,12 @@ Service side design
 
 
 Supported QoS rule types
-------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 Any plugin or Ml2 mechanism driver can claim support for some QoS rule types by
 providing a plugin/driver class property called 'supported_qos_rule_types' that
 should return a list of strings that correspond to QoS rule types (for the list
-of all rule types, see: neutron.extensions.qos.VALID_RULE_TYPES).
+of all rule types, see: neutron.services.qos.qos_consts.VALID_RULE_TYPES).
 
 In the most simple case, the property can be represented by a simple Python
 list defined on the class.
@@ -74,7 +97,7 @@ for QoS (at the moment of writing, linuxbridge is such a driver).
 
 
 Database models
----------------
+~~~~~~~~~~~~~~~
 
 QoS design defines the following two conceptual resources to apply QoS rules
 for a port or a network:
@@ -107,7 +130,7 @@ All database models are defined under:
 
 
 QoS versioned objects
----------------------
+~~~~~~~~~~~~~~~~~~~~~
 
 There is a long history of passing database dictionaries directly into business
 logic of Neutron. This path is not the one we wanted to take for QoS effort, so
@@ -121,7 +144,7 @@ effort.
 
 Every NeutronObject supports the following operations:
 
-* get_by_id: returns specific object that is represented by the id passed as an
+* get_object: returns specific object that is represented by the id passed as an
   argument.
 * get_objects: returns all objects of the type, potentially with a filter
   applied.
@@ -167,7 +190,7 @@ Note that rules are loaded in a non lazy way, meaning they are all fetched from
 the database on policy fetch.
 
 For Qos<type>Rule objects, an extendable approach was taken to allow easy
-addition of objects for new rule types. To accomodate this, fields common to
+addition of objects for new rule types. To accommodate this, fields common to
 all types are put into a base class called QosRule that is then inherited into
 type-specific rule implementations that, ideally, only define additional fields
 and some other minor things.
@@ -185,7 +208,8 @@ QoS objects rely on some primitive database API functions that are added in:
 
 
 RPC communication
------------------
+~~~~~~~~~~~~~~~~~
+
 Details on RPC communication implemented in reference backend driver are
 discussed in `a separate page <rpc_callbacks.html>`_.
 
@@ -230,22 +254,10 @@ The flow of updates is as follows:
 
 
 Agent side design
-=================
+-----------------
 
-To ease code reusability between agents and to avoid the need to patch an agent
-for each new core resource extension, pluggable L2 agent extensions were
-introduced. They can be especially interesting to third parties that don't want
-to maintain their code in Neutron tree.
-
-Extensions are meant to receive handle_port events, and do whatever they need
-with them.
-
-* neutron.agent.l2.agent_extension:
-  This module defines an abstract extension interface.
-
-* neutron.agent.l2.extensions.manager:
-  This module contains a manager that allows to register multiple extensions,
-  and passes handle_port events down to all enabled extensions.
+Reference agents implement QoS functionality using an `L2 agent extension
+<l2_agent_extensions>`_.
 
 * neutron.agent.l2.extensions.qos
   defines QoS L2 agent extension. It receives handle_port and delete_port
@@ -257,19 +269,21 @@ with them.
 
 
 Agent backends
---------------
+~~~~~~~~~~~~~~
 
-At the moment, QoS is supported by Open vSwitch and SR-IOV ml2 drivers.
+At the moment, QoS is supported by Open vSwitch, SR-IOV and Linux bridge
+ml2 drivers.
 
 Each agent backend defines a QoS driver that implements the QosAgentDriver
 interface:
 
 * Open vSwitch (QosOVSAgentDriver);
-* SR-IOV (QosSRIOVAgentDriver).
+* SR-IOV (QosSRIOVAgentDriver);
+* Linux bridge (QosLinuxbridgeAgentDriver).
 
 
 Open vSwitch
-~~~~~~~~~~~~
+++++++++++++
 
 Open vSwitch implementation relies on the new ovs_lib OVSBridge functions:
 
@@ -286,7 +300,7 @@ which we may explore in the future, but which will need to be used in
 combination with openflow rules.
 
 SR-IOV
-~~~~~~
+++++++
 
 SR-IOV bandwidth limit implementation relies on the new pci_lib function:
 
@@ -302,9 +316,25 @@ to 1 Mbps only. If the limit is set to something that does not divide to 1000
 kbps chunks, then the effective limit is rounded to the nearest integer Mbps
 value.
 
+Linux bridge
+~~~~~~~~~~~~
+
+The Linux bridge implementation relies on the new tc_lib functions:
+
+* set_bw_limit
+* update_bw_limit
+* delete_bw_limit
+
+The ingress bandwidth limit is configured on the tap port by setting a simple
+`tc-tbf <http://linux.die.net/man/8/tc-tbf>`_ queueing discipline (qdisc) on the
+port. It requires a value of HZ parameter configured in kernel on the host.
+This value is neccessary to calculate the minimal burst value which is set in
+tc. Details about how it is calculated can be found in
+`here <http://unix.stackexchange.com/a/100797>`_. This solution is similar to Open
+vSwitch implementation.
 
 Configuration
-=============
+-------------
 
 To enable the service, the following steps should be followed:
 
@@ -320,14 +350,14 @@ On agent side (OVS):
 
 
 Testing strategy
-================
+----------------
 
 All the code added or extended as part of the effort got reasonable unit test
 coverage.
 
 
 Neutron objects
----------------
+~~~~~~~~~~~~~~~
 
 Base unit test classes to validate neutron objects were implemented in a way
 that allows code reuse when introducing a new object type.
@@ -348,15 +378,20 @@ object implementations on top of base semantics common to all neutron objects).
 
 
 Functional tests
-----------------
+~~~~~~~~~~~~~~~~
 
 Additions to ovs_lib to set bandwidth limits on ports are covered in:
 
 * neutron.tests.functional.agent.test_ovs_lib
 
 
+New functional tests for tc_lib to set bandwidth limits on ports are in:
+
+* neutron.tests.functional.agent.linux.test_tc_lib
+
+
 API tests
----------
+~~~~~~~~~
 
 API tests for basic CRUD operations for ports, networks, policies, and rules were added in:
 

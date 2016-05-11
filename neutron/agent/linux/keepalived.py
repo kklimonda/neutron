@@ -20,8 +20,8 @@ import netaddr
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from neutron._i18n import _, _LE
 from neutron.agent.linux import external_process
-from neutron.agent.linux import utils
 from neutron.common import exceptions
 from neutron.common import utils as common_utils
 
@@ -30,7 +30,7 @@ VALID_AUTH_TYPES = ['AH', 'PASS']
 HA_DEFAULT_PRIORITY = 50
 PRIMARY_VIP_RANGE_SIZE = 24
 # TODO(amuller): Use L3 agent constant when new constants module is introduced.
-FIP_LL_SUBNET = '169.254.30.0/23'
+FIP_LL_SUBNET = '169.254.64.0/18'
 KEEPALIVED_SERVICE_NAME = 'keepalived'
 GARP_MASTER_DELAY = 60
 
@@ -76,17 +76,6 @@ class InvalidAuthenticationTypeException(exceptions.NeutronException):
         if 'valid_auth_types' not in kwargs:
             kwargs['valid_auth_types'] = ', '.join(VALID_AUTH_TYPES)
         super(InvalidAuthenticationTypeException, self).__init__(**kwargs)
-
-
-class VIPDuplicateAddressException(exceptions.NeutronException):
-    message = _('Attempted to add duplicate VIP address, '
-                'existing vips are: %(existing_vips)s, '
-                'duplicate vip is: %(duplicate_vip)s')
-
-    def __init__(self, **kwargs):
-        kwargs['existing_vips'] = ', '.join(str(vip) for vip in
-                                            kwargs['existing_vips'])
-        super(VIPDuplicateAddressException, self).__init__(**kwargs)
 
 
 class KeepalivedVipAddress(object):
@@ -201,10 +190,10 @@ class KeepalivedInstance(object):
 
     def add_vip(self, ip_cidr, interface_name, scope):
         vip = KeepalivedVipAddress(ip_cidr, interface_name, scope)
-        if vip in self.vips:
-            raise VIPDuplicateAddressException(existing_vips=self.vips,
-                                               duplicate_vip=vip)
-        self.vips.append(vip)
+        if vip not in self.vips:
+            self.vips.append(vip)
+        else:
+            LOG.debug('VIP %s already present in %s', vip, self.vips)
 
     def remove_vips_vroutes_by_interface(self, interface_name):
         self.vips = [vip for vip in self.vips
@@ -374,9 +363,21 @@ class KeepalivedManager(object):
     def _output_config_file(self):
         config_str = self.config.get_config_str()
         config_path = self.get_full_config_file_path('keepalived.conf')
-        utils.replace_file(config_path, config_str)
+        common_utils.replace_file(config_path, config_str)
 
         return config_path
+
+    @staticmethod
+    def _safe_remove_pid_file(pid_file):
+        try:
+            os.remove(pid_file)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                LOG.error(_LE("Could not delete file %s, keepalived can "
+                              "refuse to start."), pid_file)
+
+    def get_vrrp_pid_file_name(self, base_pid_file):
+        return '%s-vrrp' % base_pid_file
 
     def get_conf_on_disk(self):
         config_path = self.get_full_config_file_path('keepalived.conf')
@@ -392,7 +393,7 @@ class KeepalivedManager(object):
 
         keepalived_pm = self.get_process()
         vrrp_pm = self._get_vrrp_process(
-            '%s-vrrp' % keepalived_pm.get_pid_file_name())
+            self.get_vrrp_pid_file_name(keepalived_pm.get_pid_file_name()))
 
         keepalived_pm.default_cmd_callback = (
             self._get_keepalived_process_callback(vrrp_pm, config_path))
@@ -412,13 +413,12 @@ class KeepalivedManager(object):
         pm = self.get_process()
         pm.disable(sig='15')
 
-    def get_process(self, callback=None):
+    def get_process(self):
         return external_process.ProcessManager(
             cfg.CONF,
             self.resource_id,
             self.namespace,
-            pids_path=self.conf_path,
-            default_cmd_callback=callback)
+            pids_path=self.conf_path)
 
     def _get_vrrp_process(self, pid_file):
         return external_process.ProcessManager(
@@ -436,10 +436,14 @@ class KeepalivedManager(object):
             # and spawn keepalived successfully.
             if vrrp_pm.active:
                 vrrp_pm.disable()
+
+            self._safe_remove_pid_file(pid_file)
+            self._safe_remove_pid_file(self.get_vrrp_pid_file_name(pid_file))
+
             cmd = ['keepalived', '-P',
                    '-f', config_path,
                    '-p', pid_file,
-                   '-r', '%s-vrrp' % pid_file]
+                   '-r', self.get_vrrp_pid_file_name(pid_file)]
             return cmd
 
         return callback

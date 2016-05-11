@@ -65,6 +65,9 @@ class ItemAllocator(object):
         allocations to free the pool.  This final desperate step will not
         happen often in practice.
         """
+        if key in self.allocations:
+            return self.allocations[key]
+
         if key in self.remembered:
             self.allocations[key] = self.remembered.pop(key)
             return self.allocations[key]
@@ -74,7 +77,9 @@ class ItemAllocator(object):
             self.pool.update(self.remembered.values())
             self.remembered.clear()
             if not self.pool:
-                # More than 256 routers on a compute node!
+                # The number of address pairs allocated from the
+                # pool depends upon the prefix length specified
+                # in FIP_LL_SUBNET
                 raise RuntimeError("Cannot allocate item of type:"
                                    " %s from pool using file %s"
                                    % (self.ItemClass, self.state_file))

@@ -13,10 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-"""
-Policy engine for neutron.  Largely copied from nova.
-"""
-
 import collections
 import re
 
@@ -28,10 +24,10 @@ from oslo_utils import excutils
 from oslo_utils import importutils
 import six
 
+from neutron._i18n import _, _LE, _LW
 from neutron.api.v2 import attributes
 from neutron.common import constants as const
 from neutron.common import exceptions
-from neutron.i18n import _LE, _LW
 
 
 LOG = logging.getLogger(__name__)
@@ -64,10 +60,13 @@ def refresh(policy_file=None):
 
 
 def get_resource_and_action(action, pluralized=None):
-    """Extract resource and action (write, read) from api operation."""
+    """Return resource and enforce_attr_based_check(boolean) per
+       resource and action extracted from api operation.
+    """
     data = action.split(':', 1)[0].split('_', 1)
     resource = pluralized or ("%ss" % data[-1])
-    return (resource, data[0] != 'get')
+    enforce_attr_based_check = data[0] not in ('get', 'delete')
+    return (resource, enforce_attr_based_check)
 
 
 def set_rules(policies, overwrite=True):
@@ -113,8 +112,9 @@ def _build_subattr_match_rule(attr_name, attr, action, target):
     validate = attr['validate']
     key = list(filter(lambda k: k.startswith('type:dict'), validate.keys()))
     if not key:
-        LOG.warn(_LW("Unable to find data type descriptor for attribute %s"),
-                 attr_name)
+        LOG.warning(_LW("Unable to find data type descriptor "
+                        "for attribute %s"),
+                    attr_name)
         return
     data = validate[key[0]]
     if not isinstance(data, dict):
@@ -153,9 +153,9 @@ def _build_match_rule(action, target, pluralized):
        (e.g.: create_router:external_gateway_info:network_id)
     """
     match_rule = policy.RuleCheck('rule', action)
-    resource, is_write = get_resource_and_action(action, pluralized)
-    # Attribute-based checks shall not be enforced on GETs
-    if is_write:
+    resource, enforce_attr_based_check = get_resource_and_action(
+        action, pluralized)
+    if enforce_attr_based_check:
         # assigning to variable with short name for improving readability
         res_map = attributes.RESOURCE_ATTRIBUTE_MAP
         if resource in res_map:
@@ -422,13 +422,3 @@ def check_is_advsvc(context):
     if ADVSVC_CTX_POLICY not in _ENFORCER.rules:
         return False
     return _ENFORCER.enforce(ADVSVC_CTX_POLICY, credentials, credentials)
-
-
-def _extract_roles(rule, roles):
-    if isinstance(rule, policy.RoleCheck):
-        roles.append(rule.match.lower())
-    elif isinstance(rule, policy.RuleCheck):
-        _extract_roles(_ENFORCER.rules[rule.match], roles)
-    elif hasattr(rule, 'rules'):
-        for rule in rule.rules:
-            _extract_roles(rule, roles)

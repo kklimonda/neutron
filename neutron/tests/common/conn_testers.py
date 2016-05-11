@@ -15,10 +15,23 @@
 import functools
 
 import fixtures
+from neutron_lib import constants as n_consts
+from oslo_utils import uuidutils
 
 from neutron.agent import firewall
+from neutron.agent.linux import ip_lib
+from neutron.common import constants
 from neutron.tests.common import machine_fixtures
 from neutron.tests.common import net_helpers
+
+# NOTE: IPv6 uses NDP for obtaining destination endpoints link address that
+# extends round-trip packet time in ICMP tests. The timeout value should be
+# sufficient for correct scenarios but not too high because of negative
+# tests.
+ICMP_VERSION_TIMEOUTS = {
+    n_consts.IP_VERSION_4: 1,
+    n_consts.IP_VERSION_6: 2,
+}
 
 
 class ConnectionTesterException(Exception):
@@ -47,10 +60,13 @@ class ConnectionTester(fixtures.Fixture):
 
     UDP = net_helpers.NetcatTester.UDP
     TCP = net_helpers.NetcatTester.TCP
-    ICMP = 'icmp'
-    ARP = 'arp'
+    ICMP = constants.PROTO_NAME_ICMP
+    ARP = constants.ETHERTYPE_NAME_ARP
     INGRESS = firewall.INGRESS_DIRECTION
     EGRESS = firewall.EGRESS_DIRECTION
+
+    def __init__(self, ip_cidr):
+        self.ip_cidr = ip_cidr
 
     def _setUp(self):
         self._protocol_to_method = {
@@ -58,12 +74,15 @@ class ConnectionTester(fixtures.Fixture):
             self.TCP: self._test_transport_connectivity,
             self.ICMP: self._test_icmp_connectivity,
             self.ARP: self._test_arp_connectivity}
-        self._nc_testers = dict()
+        self._nc_testers = {}
+        self._pingers = {}
         self.addCleanup(self.cleanup)
 
     def cleanup(self):
         for nc in self._nc_testers.values():
             nc.stop_processes()
+        for pinger in self._pingers.values():
+            pinger.stop()
 
     @property
     def vm_namespace(self):
@@ -90,12 +109,23 @@ class ConnectionTester(fixtures.Fixture):
         self._vm.mac_address = mac_address
 
     @property
+    def peer_mac_address(self):
+        return self._peer.port.link.address
+
+    @peer_mac_address.setter
+    def peer_mac_address(self, mac_address):
+        self._peer.mac_address = mac_address
+
+    @property
     def peer_namespace(self):
         return self._peer.namespace
 
     @property
     def peer_ip_address(self):
         return self._peer.ip
+
+    def set_vm_default_gateway(self, default_gw):
+        self._vm.set_default_gateway(default_gw)
 
     def flush_arp_tables(self):
         """Flush arptables in all used namespaces"""
@@ -109,6 +139,7 @@ class ConnectionTester(fixtures.Fixture):
         try:
             nc_tester.test_connectivity()
         except RuntimeError as exc:
+            nc_tester.stop_processes()
             raise ConnectionTesterException(
                 "%s connection over %s protocol with %s source port and "
                 "%s destination port can't be established: %s" % (
@@ -122,8 +153,11 @@ class ConnectionTester(fixtures.Fixture):
 
     def _test_icmp_connectivity(self, direction, protocol, src_port, dst_port):
         src_namespace, ip_address = self._get_namespace_and_address(direction)
+        ip_version = ip_lib.get_ip_version(ip_address)
+        icmp_timeout = ICMP_VERSION_TIMEOUTS[ip_version]
         try:
-            net_helpers.assert_ping(src_namespace, ip_address)
+            net_helpers.assert_ping(src_namespace, ip_address,
+                                    timeout=icmp_timeout)
         except RuntimeError:
             raise ConnectionTesterException(
                 "ICMP packets can't get from %s namespace to %s address" % (
@@ -171,8 +205,15 @@ class ConnectionTester(fixtures.Fixture):
         nc_tester = self._nc_testers.get(nc_params)
         if nc_tester:
             if nc_tester.is_established:
-                nc_tester.test_connectivity()
+                try:
+                    nc_tester.test_connectivity()
+                except RuntimeError:
+                    raise ConnectionTesterException(
+                        "Established %s connection with protocol %s, source "
+                        "port %s and destination port %s can no longer "
+                        "communicate")
             else:
+                nc_tester.stop_processes()
                 raise ConnectionTesterException(
                     '%s connection with protocol %s, source port %s and '
                     'destination port %s is not established' % nc_params)
@@ -238,6 +279,96 @@ class ConnectionTester(fixtures.Fixture):
         self._nc_testers[nc_key] = nc_tester
         return nc_tester
 
+    def _get_pinger(self, direction):
+        try:
+            pinger = self._pingers[direction]
+        except KeyError:
+            src_namespace, dst_address = self._get_namespace_and_address(
+                direction)
+            pinger = net_helpers.Pinger(src_namespace, dst_address)
+            self._pingers[direction] = pinger
+        return pinger
+
+    def start_sending_icmp(self, direction):
+        pinger = self._get_pinger(direction)
+        pinger.start()
+
+    def stop_sending_icmp(self, direction):
+        pinger = self._get_pinger(direction)
+        pinger.stop()
+
+    def get_sent_icmp_packets(self, direction):
+        pinger = self._get_pinger(direction)
+        return pinger.sent
+
+    def get_received_icmp_packets(self, direction):
+        pinger = self._get_pinger(direction)
+        return pinger.received
+
+    def assert_net_unreachable(self, direction, destination):
+        src_namespace, dst_address = self._get_namespace_and_address(
+            direction)
+        pinger = net_helpers.Pinger(src_namespace, destination, count=5)
+        pinger.start()
+        pinger.wait()
+        if not pinger.destination_unreachable:
+            raise ConnectionTesterException(
+                'No Host Destination Unreachable packets were received when '
+                'sending icmp packets to %s' % destination)
+
+
+class OVSConnectionTester(ConnectionTester):
+    """Tester with OVS bridge in the middle
+
+    The endpoints are created as OVS ports attached to the OVS bridge.
+
+    NOTE: The OVS ports are connected from the namespace. This connection is
+    currently not supported in OVS and may lead to unpredicted behavior:
+    https://bugzilla.redhat.com/show_bug.cgi?id=1160340
+
+    """
+
+    def _setUp(self):
+        super(OVSConnectionTester, self)._setUp()
+        self.bridge = self.useFixture(net_helpers.OVSBridgeFixture()).bridge
+        self._peer, self._vm = self.useFixture(
+            machine_fixtures.PeerMachines(
+                self.bridge, self.ip_cidr)).machines
+        self._set_port_attrs(self._peer.port)
+        self._set_port_attrs(self._vm.port)
+
+    def _set_port_attrs(self, port):
+        port.id = uuidutils.generate_uuid()
+        attrs = [('type', 'internal'),
+                 ('external_ids', {
+                     'iface-id': port.id,
+                     'iface-status': 'active',
+                     'attached-mac': port.link.address})]
+        for column, value in attrs:
+            self.bridge.set_db_attribute('Interface', port.name, column, value)
+
+    @property
+    def peer_port_id(self):
+        return self._peer.port.id
+
+    @property
+    def vm_port_id(self):
+        return self._vm.port.id
+
+    def set_tag(self, port_name, tag):
+        self.bridge.set_db_attribute('Port', port_name, 'tag', tag)
+        other_config = self.bridge.db_get_val(
+            'Port', port_name, 'other_config')
+        other_config['tag'] = tag
+        self.bridge.set_db_attribute(
+            'Port', port_name, 'other_config', other_config)
+
+    def set_vm_tag(self, tag):
+        self.set_tag(self._vm.port.name, tag)
+
+    def set_peer_tag(self, tag):
+        self.set_tag(self._peer.port.name, tag)
+
 
 class LinuxBridgeConnectionTester(ConnectionTester):
     """Tester with linux bridge in the middle
@@ -249,18 +380,23 @@ class LinuxBridgeConnectionTester(ConnectionTester):
 
     def _setUp(self):
         super(LinuxBridgeConnectionTester, self)._setUp()
-        self._bridge = self.useFixture(net_helpers.LinuxBridgeFixture()).bridge
+        self.bridge = self.useFixture(net_helpers.LinuxBridgeFixture()).bridge
         self._peer, self._vm = self.useFixture(
-            machine_fixtures.PeerMachines(self._bridge)).machines
+            machine_fixtures.PeerMachines(
+                self.bridge, self.ip_cidr)).machines
 
     @property
     def bridge_namespace(self):
-        return self._bridge.namespace
+        return self.bridge.namespace
 
     @property
     def vm_port_id(self):
         return net_helpers.VethFixture.get_peer_name(self._vm.port.name)
 
+    @property
+    def peer_port_id(self):
+        return net_helpers.VethFixture.get_peer_name(self._peer.port.name)
+
     def flush_arp_tables(self):
-        self._bridge.neigh.flush(4, 'all')
+        self.bridge.neigh.flush(4, 'all')
         super(LinuxBridgeConnectionTester, self).flush_arp_tables()

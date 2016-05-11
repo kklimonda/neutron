@@ -27,8 +27,8 @@ import six
 import webob.dec
 import webob.exc
 
+from neutron._i18n import _, _LE, _LI
 from neutron.common import exceptions
-from neutron.i18n import _LE, _LI
 from neutron import wsgi
 
 
@@ -39,14 +39,15 @@ class Request(wsgi.Request):
     pass
 
 
-def Resource(controller, faults=None, deserializers=None, serializers=None):
+def Resource(controller, faults=None, deserializers=None, serializers=None,
+             action_status=None):
     """Represents an API entity resource and the associated serialization and
     deserialization logic
     """
     default_deserializers = {'application/json': wsgi.JSONDeserializer()}
     default_serializers = {'application/json': wsgi.JSONDictSerializer()}
     format_types = {'json': 'application/json'}
-    action_status = dict(create=201, delete=204)
+    action_status = action_status or dict(create=201, delete=204)
 
     default_deserializers.update(deserializers or {})
     default_serializers.update(serializers or {})
@@ -147,6 +148,11 @@ def Resource(controller, faults=None, deserializers=None, serializers=None):
         return webob.Response(request=request, status=status,
                               content_type=content_type,
                               body=body)
+    # NOTE(blogan): this is something that is needed for the transition to
+    # pecan.  This will allow the pecan code to have a handle on the controller
+    # for an extension so it can reuse the code instead of forcing every
+    # extension to rewrite the code for use with pecan.
+    setattr(resource, 'controller', controller)
     return resource
 
 

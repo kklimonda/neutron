@@ -14,6 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from debtcollector import removals
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -28,6 +29,7 @@ LOG = logging.getLogger(__name__)
 
 
 TRANSPORT = None
+NOTIFICATION_TRANSPORT = None
 NOTIFIER = None
 
 ALLOWED_EXMODS = [
@@ -55,21 +57,26 @@ RPC_DISABLED = False
 
 
 def init(conf):
-    global TRANSPORT, NOTIFIER
+    global TRANSPORT, NOTIFICATION_TRANSPORT, NOTIFIER
     exmods = get_allowed_exmods()
     TRANSPORT = oslo_messaging.get_transport(conf,
                                              allowed_remote_exmods=exmods,
                                              aliases=TRANSPORT_ALIASES)
+    NOTIFICATION_TRANSPORT = oslo_messaging.get_notification_transport(
+        conf, allowed_remote_exmods=exmods, aliases=TRANSPORT_ALIASES)
     serializer = RequestContextSerializer()
-    NOTIFIER = oslo_messaging.Notifier(TRANSPORT, serializer=serializer)
+    NOTIFIER = oslo_messaging.Notifier(NOTIFICATION_TRANSPORT,
+                                       serializer=serializer)
 
 
 def cleanup():
-    global TRANSPORT, NOTIFIER
+    global TRANSPORT, NOTIFICATION_TRANSPORT, NOTIFIER
     assert TRANSPORT is not None
+    assert NOTIFICATION_TRANSPORT is not None
     assert NOTIFIER is not None
     TRANSPORT.cleanup()
-    TRANSPORT = NOTIFIER = None
+    NOTIFICATION_TRANSPORT.cleanup()
+    TRANSPORT = NOTIFICATION_TRANSPORT = NOTIFIER = None
 
 
 def add_extra_exmods(*args):
@@ -157,7 +164,7 @@ class Service(service.Service):
     def start(self):
         super(Service, self).start()
 
-        self.conn = create_connection(new=True)
+        self.conn = create_connection()
         LOG.debug("Creating Consumer connection for Service %s",
                   self.topic)
 
@@ -220,8 +227,9 @@ class VoidConnection(object):
 
 
 # functions
+@removals.removed_kwarg('new')
 def create_connection(new=True):
-    # NOTE(salv-orlando): This is a clever interpreation of the factory design
+    # NOTE(salv-orlando): This is a clever interpretation of the factory design
     # patter aimed at preventing plugins from initializing RPC servers upon
     # initialization when they are running in the REST over HTTP API server.
     # The educated reader will perfectly be able that this a fairly dirty hack

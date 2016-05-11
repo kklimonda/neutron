@@ -22,6 +22,7 @@ import oslo_i18n
 
 from neutron.agent.linux import utils
 from neutron.tests import base
+from neutron.tests.common import helpers
 
 
 _marker = object()
@@ -60,7 +61,7 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
         self.mock_popen.return_value = ["", ""]
         stdout = utils.execute(["ls", self.test_file[:-1]],
                                check_exit_code=False)
-        self.assertEqual(stdout, "")
+        self.assertEqual("", stdout)
 
     def test_execute_raises(self):
         self.mock_popen.side_effect = RuntimeError
@@ -147,20 +148,15 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
         result = utils.execute(['ls', self.test_file], return_stderr=True)
         self.assertEqual((str_data, ''), result)
 
-    def test_raise_unicodeerror_in_decoding_out_data(self):
-        class m_bytes(bytes):
-            def decode(self, encoding=None):
-                raise UnicodeError
-
-        err_data = 'UnicodeError'
-        bytes_err_data = b'UnicodeError'
+    @helpers.requires_py3
+    def test_surrogateescape_in_decoding_out_data(self):
+        bytes_err_data = b'\xed\xa0\xbd'
+        err_data = bytes_err_data.decode('utf-8', 'surrogateescape')
         out_data = "%s\n" % self.test_file
-        bytes_out_data = m_bytes(out_data.encode(encoding='utf-8'))
-        if six.PY3:
-            self.mock_popen.return_value = [bytes_out_data, bytes_err_data]
-            result = utils.execute(['ls', self.test_file],
-                                   return_stderr=True)
-            self.assertEqual((bytes_out_data, err_data), result)
+        bytes_out_data = out_data.encode(encoding='utf-8')
+        self.mock_popen.return_value = [bytes_out_data, bytes_err_data]
+        result = utils.execute(['ls', self.test_file], return_stderr=True)
+        self.assertEqual((out_data, err_data), result)
 
 
 class AgentUtilsExecuteEncodeTest(base.BaseTestCase):
@@ -220,11 +216,11 @@ class TestFindChildPids(base.BaseTestCase):
     def test_returns_empty_list_for_exit_code_1(self):
         with mock.patch.object(utils, 'execute',
                                side_effect=RuntimeError('Exit code: 1')):
-            self.assertEqual(utils.find_child_pids(-1), [])
+            self.assertEqual([], utils.find_child_pids(-1))
 
     def test_returns_empty_list_for_no_output(self):
         with mock.patch.object(utils, 'execute', return_value=''):
-            self.assertEqual(utils.find_child_pids(-1), [])
+            self.assertEqual([], utils.find_child_pids(-1))
 
     def test_returns_list_of_child_process_ids_for_good_ouput(self):
         with mock.patch.object(utils, 'execute', return_value=' 123 \n 185\n'):

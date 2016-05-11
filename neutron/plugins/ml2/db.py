@@ -20,11 +20,11 @@ import six
 from sqlalchemy import or_
 from sqlalchemy.orm import exc
 
+from neutron._i18n import _LE, _LI
 from neutron.common import constants as n_const
 from neutron.db import models_v2
 from neutron.db import securitygroups_db as sg_db
 from neutron.extensions import portbindings
-from neutron.i18n import _LE, _LI
 from neutron import manager
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import models
@@ -219,13 +219,6 @@ def ensure_dvr_port_binding(session, port_id, host, router_id=None):
                 filter_by(port_id=port_id, host=host).one())
 
 
-def delete_dvr_port_binding(session, port_id, host):
-    with session.begin(subtransactions=True):
-        (session.query(models.DVRPortBinding).
-         filter_by(port_id=port_id, host=host).
-         delete(synchronize_session=False))
-
-
 def delete_dvr_port_binding_if_stale(session, binding):
     if not binding.router_id and binding.status == n_const.PORT_STATUS_DOWN:
         with session.begin(subtransactions=True):
@@ -234,7 +227,7 @@ def delete_dvr_port_binding_if_stale(session, binding):
 
 
 def get_port(session, port_id):
-    """Get port record for update within transcation."""
+    """Get port record for update within transaction."""
 
     with session.begin(subtransactions=True):
         try:

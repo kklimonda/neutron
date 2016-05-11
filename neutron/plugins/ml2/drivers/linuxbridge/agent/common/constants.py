@@ -19,3 +19,7 @@ LOCAL_VLAN_ID = -2
 VXLAN_NONE = 'not_supported'
 VXLAN_MCAST = 'multicast_flooding'
 VXLAN_UCAST = 'unicast_flooding'
+
+EXTENSION_DRIVER_TYPE = 'linuxbridge'
+
+RESOURCE_ID_LENGTH = 11

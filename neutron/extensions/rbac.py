@@ -14,6 +14,7 @@
 #    under the License.
 from oslo_config import cfg
 
+from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
@@ -30,6 +31,10 @@ class RbacPolicyNotFound(n_exc.NotFound):
 class RbacPolicyInUse(n_exc.Conflict):
     message = _("RBAC policy on object %(object_id)s cannot be removed "
                 "because other objects depend on it.\nDetails: %(details)s")
+
+
+class DuplicateRbacPolicy(n_exc.Conflict):
+    message = _("An RBAC policy already exists with those values.")
 
 
 def convert_valid_object_type(otype):
@@ -65,7 +70,10 @@ RESOURCE_ATTRIBUTE_MAP = {
                    # action depends on type so validation has to occur in
                    # the extension
                    'validate': {'type:string': attr.DESCRIPTION_MAX_LEN},
-                   'is_visible': True},
+                   # we set enforce_policy so operators can define policies
+                   # that restrict actions
+                   'is_visible': True, 'enforce_policy': True,
+                   'default': None},
     }
 }
 

@@ -13,14 +13,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_log import log as logging
+
+from neutron._i18n import _LI
 from neutron.api.v2 import attributes as attrs
 from neutron.common import utils
 from neutron.db import common_db_mixin
 from neutron.db import portsecurity_db_common as ps_db_common
 from neutron.extensions import portsecurity as psec
-from neutron.i18n import _LI
 from neutron.plugins.ml2 import driver_api as api
-from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 
@@ -40,8 +41,7 @@ class PortSecurityExtensionDriver(api.ExtensionDriver,
     def process_create_network(self, context, data, result):
         # Create the network extension attributes.
         if psec.PORTSECURITY not in data:
-            data[psec.PORTSECURITY] = (psec.EXTENDED_ATTRIBUTES_2_0['networks']
-                                       [psec.PORTSECURITY]['default'])
+            data[psec.PORTSECURITY] = psec.DEFAULT_PORT_SECURITY
         self._process_network_port_security_create(context, data, result)
 
     def process_update_network(self, context, data, result):
@@ -64,15 +64,6 @@ class PortSecurityExtensionDriver(api.ExtensionDriver,
 
     def extend_port_dict(self, session, db_data, result):
         self._extend_port_security_dict(result, db_data)
-
-    def _extend_port_security_dict(self, response_data, db_data):
-        if db_data.get('port_security') is None:
-            response_data[psec.PORTSECURITY] = (
-                psec.EXTENDED_ATTRIBUTES_2_0['networks']
-                [psec.PORTSECURITY]['default'])
-        else:
-            response_data[psec.PORTSECURITY] = (
-                                db_data['port_security'][psec.PORTSECURITY])
 
     def _determine_port_security(self, context, port):
         """Returns a boolean (port_security_enabled).

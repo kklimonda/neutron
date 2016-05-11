@@ -1,4 +1,4 @@
-# Copyright (c) 2014 Openstack Foundation
+# Copyright (c) 2014 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -14,12 +14,9 @@
 
 import weakref
 
-from oslo_log import log as logging
-
 from neutron.agent.l3 import dvr_fip_ns
 from neutron.agent.l3 import dvr_snat_ns
 
-LOG = logging.getLogger(__name__)
 
 # TODO(Carl) Following constants retained to increase SNR during refactoring
 SNAT_INT_DEV_PREFIX = dvr_snat_ns.SNAT_INT_DEV_PREFIX
@@ -52,8 +49,7 @@ class AgentMixin(object):
     def get_ports_by_subnet(self, subnet_id):
         return self.plugin_rpc.get_ports_by_subnet(self.context, subnet_id)
 
-    def add_arp_entry(self, context, payload):
-        """Add arp entry into router namespace.  Called from RPC."""
+    def _update_arp_entry(self, context, payload, action):
         router_id = payload['router_id']
         ri = self.router_info.get(router_id)
         if not ri:
@@ -63,17 +59,20 @@ class AgentMixin(object):
         ip = arp_table['ip_address']
         mac = arp_table['mac_address']
         subnet_id = arp_table['subnet_id']
-        ri._update_arp_entry(ip, mac, subnet_id, 'add')
+
+        ri._update_arp_entry(ip, mac, subnet_id, action)
+
+    def add_arp_entry(self, context, payload):
+        """Add arp entry into router namespace.  Called from RPC."""
+        self._update_arp_entry(context, payload, 'add')
 
     def del_arp_entry(self, context, payload):
         """Delete arp entry from router namespace.  Called from RPC."""
-        router_id = payload['router_id']
-        ri = self.router_info.get(router_id)
-        if not ri:
-            return
+        self._update_arp_entry(context, payload, 'delete')
 
-        arp_table = payload['arp_table']
-        ip = arp_table['ip_address']
-        mac = arp_table['mac_address']
-        subnet_id = arp_table['subnet_id']
-        ri._update_arp_entry(ip, mac, subnet_id, 'delete')
+    def fipnamespace_delete_on_ext_net(self, context, ext_net_id):
+        """Delete fip namespace after external network removed."""
+        fip_ns = self.get_fip_ns(ext_net_id)
+        if fip_ns.agent_gateway_port and not fip_ns.destroyed:
+            fip_ns.unsubscribe(ext_net_id)
+            fip_ns.delete()
