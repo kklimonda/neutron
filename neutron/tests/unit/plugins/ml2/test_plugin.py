@@ -22,6 +22,8 @@ import six
 import testtools
 import webob
 
+from neutron_lib import constants
+from neutron_lib import exceptions as exc
 from oslo_db import exception as db_exc
 from oslo_utils import uuidutils
 from sqlalchemy.orm import exc as sqla_exc
@@ -30,8 +32,6 @@ from neutron._i18n import _
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants
-from neutron.common import exceptions as exc
 from neutron.common import utils
 from neutron import context
 from neutron.db import agents_db
@@ -56,6 +56,7 @@ from neutron.plugins.ml2 import models
 from neutron.plugins.ml2 import plugin as ml2_plugin
 from neutron.services.qos import qos_consts
 from neutron.tests import base
+from neutron.tests.common import helpers
 from neutron.tests.unit import _test_extension_portbindings as test_bindings
 from neutron.tests.unit.agent import test_securitygroups_rpc as test_sg_rpc
 from neutron.tests.unit.db import test_allowedaddresspairs_db as test_pair
@@ -172,9 +173,10 @@ class TestMl2SupportedQosRuleTypes(Ml2PluginV2TestCase):
         # make sure both plugins have the same supported qos rule types
         for mock_ in mocks:
             mock_.return_value = qos_consts.VALID_RULE_TYPES
-        self.assertEqual(
-            qos_consts.VALID_RULE_TYPES,
-            self.driver.mechanism_manager.supported_qos_rule_types)
+        for rule in qos_consts.VALID_RULE_TYPES:
+            self.assertIn(
+                rule,
+                self.driver.mechanism_manager.supported_qos_rule_types)
 
     @mock.patch.object(mech_test.TestMechanismDriver,
                        'supported_qos_rule_types',
@@ -187,9 +189,10 @@ class TestMl2SupportedQosRuleTypes(Ml2PluginV2TestCase):
                        return_value=False)
     def test_rule_types_with_driver_that_does_not_implement_binding(self,
                                                                     *mocks):
-        self.assertEqual(
-            qos_consts.VALID_RULE_TYPES,
-            self.driver.mechanism_manager.supported_qos_rule_types)
+        for rule in qos_consts.VALID_RULE_TYPES:
+            self.assertIn(
+                rule,
+                self.driver.mechanism_manager.supported_qos_rule_types)
 
 
 class TestMl2BasicGet(test_plugin.TestBasicGet,
@@ -500,6 +503,43 @@ class TestMl2DbOperationBoundsTenant(TestMl2DbOperationBounds):
 
 class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
+    def test_create_router_port_and_fail_create_postcommit(self):
+
+        with mock.patch.object(mech_test.TestMechanismDriver,
+                               'create_port_postcommit',
+                               side_effect=ml2_exc.MechanismDriverError(
+                                   method='create_port_postcommit')):
+            l3_plugin = manager.NeutronManager.get_service_plugins().get(
+                            p_const.L3_ROUTER_NAT)
+            data = {'router': {'name': 'router', 'admin_state_up': True,
+                               'tenant_id': self.context.tenant_id}}
+            r = l3_plugin.create_router(self.context, data)
+            with self.subnet() as s:
+                data = {'subnet_id': s['subnet']['id']}
+                self.assertRaises(ml2_exc.MechanismDriverError,
+                                  l3_plugin.add_router_interface,
+                                  self.context, r['id'], data)
+                res_ports = self._list('ports')['ports']
+                self.assertEqual([], res_ports)
+
+    def test_create_router_port_and_fail_bind_port_if_needed(self):
+
+        with mock.patch.object(ml2_plugin.Ml2Plugin, '_bind_port_if_needed',
+                               side_effect=ml2_exc.MechanismDriverError(
+                                   method='_bind_port_if_needed')):
+            l3_plugin = manager.NeutronManager.get_service_plugins().get(
+                            p_const.L3_ROUTER_NAT)
+            data = {'router': {'name': 'router', 'admin_state_up': True,
+                               'tenant_id': self.context.tenant_id}}
+            r = l3_plugin.create_router(self.context, data)
+            with self.subnet() as s:
+                data = {'subnet_id': s['subnet']['id']}
+                self.assertRaises(ml2_exc.MechanismDriverError,
+                                  l3_plugin.add_router_interface,
+                                  self.context, r['id'], data)
+                res_ports = self._list('ports')['ports']
+                self.assertEqual([], res_ports)
+
     def test_update_port_status_build(self):
         with self.port() as port:
             self.assertEqual('DOWN', port['port']['status'])
@@ -798,7 +838,6 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
             self._test_operation_resillient_to_ipallocation_failure(do_request)
 
-    @testtools.skip('bug/1556178')
     def _test_operation_resillient_to_ipallocation_failure(self, func):
         from sqlalchemy import event
 
@@ -1564,6 +1603,65 @@ class TestMl2AllowedAddressPairs(Ml2PluginV2TestCase,
                                      group='ml2')
         super(test_pair.TestAllowedAddressPairs, self).setUp(
             plugin=PLUGIN_NAME)
+
+
+class TestMl2HostsNetworkAccess(Ml2PluginV2TestCase):
+    _mechanism_drivers = ['openvswitch', 'logger']
+
+    def setUp(self):
+        super(TestMl2HostsNetworkAccess, self).setUp()
+        helpers.register_ovs_agent(
+            host='host1', bridge_mappings={'physnet1': 'br-eth-1'})
+        helpers.register_ovs_agent(
+            host='host2', bridge_mappings={'physnet2': 'br-eth-2'})
+        helpers.register_ovs_agent(
+            host='host3', bridge_mappings={'physnet3': 'br-eth-3'})
+        self.dhcp_agent1 = helpers.register_dhcp_agent(
+            host='host1')
+        self.dhcp_agent2 = helpers.register_dhcp_agent(
+            host='host2')
+        self.dhcp_agent3 = helpers.register_dhcp_agent(
+            host='host3')
+        self.dhcp_hosts = {'host1', 'host2', 'host3'}
+
+    def test_filter_hosts_with_network_access(self):
+        net = self.driver.create_network(
+            self.context,
+            {'network': {'name': 'net1',
+                         pnet.NETWORK_TYPE: 'vlan',
+                         pnet.PHYSICAL_NETWORK: 'physnet1',
+                         pnet.SEGMENTATION_ID: 1,
+                         'tenant_id': 'tenant_one',
+                         'admin_state_up': True,
+                         'shared': True}})
+        observeds = self.driver.filter_hosts_with_network_access(
+            self.context, net['id'], self.dhcp_hosts)
+        self.assertEqual({self.dhcp_agent1.host}, observeds)
+
+    def test_filter_hosts_with_network_access_multi_segments(self):
+        net = self.driver.create_network(
+            self.context,
+            {'network': {'name': 'net1',
+                         mpnet.SEGMENTS: [
+                             {pnet.NETWORK_TYPE: 'vlan',
+                              pnet.PHYSICAL_NETWORK: 'physnet1',
+                              pnet.SEGMENTATION_ID: 1},
+                             {pnet.NETWORK_TYPE: 'vlan',
+                              pnet.PHYSICAL_NETWORK: 'physnet2',
+                              pnet.SEGMENTATION_ID: 2}],
+                         'tenant_id': 'tenant_one',
+                         'admin_state_up': True,
+                         'shared': True}})
+        expecteds = {self.dhcp_agent1.host, self.dhcp_agent2.host}
+        observeds = self.driver.filter_hosts_with_network_access(
+            self.context, net['id'], self.dhcp_hosts)
+        self.assertEqual(expecteds, observeds)
+
+    def test_filter_hosts_with_network_access_not_supported(self):
+        self.driver.mechanism_manager.host_filtering_supported = False
+        observeds = self.driver.filter_hosts_with_network_access(
+            self.context, 'fake_id', self.dhcp_hosts)
+        self.assertEqual(self.dhcp_hosts, observeds)
 
 
 class DHCPOptsTestCase(test_dhcpopts.TestExtraDhcpOpt):

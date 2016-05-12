@@ -20,6 +20,7 @@ Routines for configuring Neutron
 import sys
 
 from keystoneauth1 import loading as ks_loading
+from neutron_lib.api import validators
 from oslo_config import cfg
 from oslo_db import options as db_options
 from oslo_log import log as logging
@@ -28,7 +29,6 @@ from oslo_middleware import cors
 from oslo_service import wsgi
 
 from neutron._i18n import _, _LI
-from neutron.api.v2 import attributes
 from neutron.common import constants
 from neutron.common import utils
 from neutron import policy
@@ -145,13 +145,6 @@ core_opts = [
                       "services running on this machine. All the agents and "
                       "services running on this machine must use the same "
                       "host value.")),
-    cfg.BoolOpt('force_gateway_on_subnet', default=True,
-                deprecated_for_removal=True,
-                help=_("Ensure that configured gateway is on subnet. "
-                       "For IPv6, validate only if gateway is not a link "
-                       "local address. Deprecated, to be removed during the "
-                       "Newton release, at which point the gateway will not "
-                       "be forced on to subnet.")),
     cfg.BoolOpt('notify_nova_on_port_status_changes', default=True,
                 help=_("Send notification to nova when port status changes")),
     cfg.BoolOpt('notify_nova_on_port_data_changes', default=True,
@@ -248,8 +241,7 @@ def init(args, **kwargs):
     n_rpc.init(cfg.CONF)
 
     # Validate that the base_mac is of the correct format
-    msg = attributes._validate_regex(cfg.CONF.base_mac,
-                                     attributes.MAC_PATTERN)
+    msg = validators.validate_regex(cfg.CONF.base_mac, validators.MAC_PATTERN)
     if msg:
         msg = _("Base MAC: %s") % msg
         raise Exception(msg)
@@ -259,6 +251,9 @@ def setup_logging():
     """Sets up the logging options for a log with supplied name."""
     product_name = "neutron"
     logging.setup(cfg.CONF, product_name)
+    # We use the oslo.log default log levels and add only the extra levels
+    # that Neutron needs.
+    logging.set_defaults(default_log_levels=logging.get_default_log_levels())
     LOG.info(_LI("Logging enabled!"))
     LOG.info(_LI("%(prog)s version %(version)s"),
              {'prog': sys.argv[0],

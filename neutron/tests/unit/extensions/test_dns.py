@@ -15,6 +15,7 @@
 import math
 
 import netaddr
+from neutron_lib import constants as n_const
 from oslo_config import cfg
 
 from neutron.common import constants
@@ -86,7 +87,7 @@ class DnsExtensionTestCase(test_db_base_plugin_v2.TestNetworksV2):
                 data['port'][arg] = kwargs[arg]
         # create a dhcp port device id if one hasn't been supplied
         if ('device_owner' in kwargs and
-            kwargs['device_owner'] == constants.DEVICE_OWNER_DHCP and
+            kwargs['device_owner'] == n_const.DEVICE_OWNER_DHCP and
             'host' in kwargs and
             'device_id' not in kwargs):
             device_id = utils.get_dhcp_agent_device_id(net_id, kwargs['host'])
@@ -451,9 +452,10 @@ class DnsExtensionTestCase(test_db_base_plugin_v2.TestNetworksV2):
             res = self._create_port(self.fmt, net_id=network['network']['id'],
                                     dns_name=dns_name)
             self.assertEqual(400, res.status_code)
+            error_message = res.json['NeutronError']['message']
             is_expected_message = (
-                'cannot be converted to lowercase string' in res.text or
-                'not a valid PQDN or FQDN. Reason:' in res.text)
+                'cannot be converted to lowercase string' in error_message or
+                'not a valid PQDN or FQDN. Reason:' in error_message)
             self.assertTrue(is_expected_message)
 
     def test_api_extension_validation_with_good_dns_names(self):

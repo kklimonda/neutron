@@ -16,13 +16,16 @@
 import contextlib
 
 import mock
+from neutron_lib.api import validators
+from neutron_lib import constants as const
+from oslo_config import cfg
 import oslo_db.exception as exc
 import six
 import testtools
 import webob.exc
 
 from neutron.api.v2 import attributes as attr
-from neutron.common import constants as const
+from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import db_base_plugin_v2
@@ -179,7 +182,7 @@ class SecurityGroupTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
     def create_port(self, context, port):
         tenant_id = port['port']['tenant_id']
         default_sg = self._ensure_default_security_group(context, tenant_id)
-        if not attr.is_attr_set(port['port'].get(ext_sg.SECURITYGROUPS)):
+        if not validators.is_attr_set(port['port'].get(ext_sg.SECURITYGROUPS)):
             port['port'][ext_sg.SECURITYGROUPS] = [default_sg]
         session = context.session
         with session.begin(subtransactions=True):
@@ -842,7 +845,7 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
             direction = "ingress"
             ethertype = const.IPv6
             remote_ip_prefix = "2001::f401:56ff:fefe:d3dc/128"
-            protocol = const.PROTO_NAME_IPV6_ICMP_LEGACY
+            protocol = n_const.PROTO_NAME_IPV6_ICMP_LEGACY
             keys = [('remote_ip_prefix', remote_ip_prefix),
                     ('security_group_id', security_group_id),
                     ('direction', direction),
@@ -977,6 +980,40 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                 self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
                 self.assertIn(sgr['security_group_rule']['id'],
                               res.json['NeutronError']['message'])
+
+    def test_create_security_group_rule_duplicate_rules_proto_name_num(self):
+        name = 'webservers'
+        description = 'my webservers'
+        with self.security_group(name, description) as sg:
+            security_group_id = sg['security_group']['id']
+            with self.security_group_rule(security_group_id):
+                rule = self._build_security_group_rule(
+                    sg['security_group']['id'], 'ingress',
+                    const.PROTO_NAME_TCP, '22', '22')
+                self._create_security_group_rule(self.fmt, rule)
+                rule = self._build_security_group_rule(
+                    sg['security_group']['id'], 'ingress',
+                    const.PROTO_NUM_TCP, '22', '22')
+                res = self._create_security_group_rule(self.fmt, rule)
+                self.deserialize(self.fmt, res)
+                self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
+
+    def test_create_security_group_rule_duplicate_rules_proto_num_name(self):
+        name = 'webservers'
+        description = 'my webservers'
+        with self.security_group(name, description) as sg:
+            security_group_id = sg['security_group']['id']
+            with self.security_group_rule(security_group_id):
+                rule = self._build_security_group_rule(
+                    sg['security_group']['id'], 'ingress',
+                    const.PROTO_NUM_UDP, '50', '100')
+                self._create_security_group_rule(self.fmt, rule)
+                rule = self._build_security_group_rule(
+                    sg['security_group']['id'], 'ingress',
+                    const.PROTO_NAME_UDP, '50', '100')
+                res = self._create_security_group_rule(self.fmt, rule)
+                self.deserialize(self.fmt, res)
+                self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
 
     def test_create_security_group_rule_min_port_greater_max(self):
         name = 'webservers'
@@ -1470,6 +1507,36 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                 res = self._create_security_group_rule(self.fmt, rule)
                 self.deserialize(self.fmt, res)
                 self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
+
+    def test_create_security_groups_native_quotas(self):
+        quota = 1
+        cfg.CONF.set_override('quota_security_group', quota, group='QUOTAS')
+        name = 'quota_test'
+        description = 'quota_test'
+        res = self._create_security_group(self.fmt, name, description)
+        self.assertEqual(webob.exc.HTTPCreated.code, res.status_int)
+        res = self._create_security_group(self.fmt, name, description)
+        self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
+
+    def test_create_security_group_rules_native_quotas(self):
+        # avoid the number of default security group rules
+        quota = 7
+        cfg.CONF.set_override(
+            'quota_security_group_rule', quota, group='QUOTAS')
+        name = 'quota_test'
+        description = 'quota_test'
+        with self.security_group(name, description) as sg:
+            security_group_id = sg['security_group']['id']
+            rule = self._build_security_group_rule(
+                security_group_id, 'ingress',
+                const.PROTO_NAME_TCP, '22', '22')
+            res = self._create_security_group_rule(self.fmt, rule)
+            self.assertEqual(webob.exc.HTTPCreated.code, res.status_int)
+            rule = self._build_security_group_rule(
+                security_group_id, 'egress',
+                const.PROTO_NAME_TCP, '22', '22')
+            res = self._create_security_group_rule(self.fmt, rule)
+            self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
 
     def test_create_security_group_rule_different_security_group_ids(self):
         if self._skip_native_bulk:

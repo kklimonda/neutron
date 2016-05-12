@@ -19,6 +19,8 @@ import copy
 
 import mock
 import netaddr
+from neutron_lib import constants as l3_constants
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_utils import importutils
 from oslo_utils import uuidutils
@@ -31,8 +33,7 @@ from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants as l3_constants
-from neutron.common import exceptions as n_exc
+from neutron.common import constants as n_const
 from neutron import context
 from neutron.db import common_db_mixin
 from neutron.db import db_base_plugin_v2
@@ -678,6 +679,15 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
             )
             self.assertEqual(exc.HTTPForbidden.code, res.status_int)
 
+    def test_create_routers_native_quotas(self):
+        tenant_id = _uuid()
+        quota = 1
+        cfg.CONF.set_override('quota_router', quota, group='QUOTAS')
+        res = self._create_router(self.fmt, tenant_id)
+        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        res = self._create_router(self.fmt, tenant_id)
+        self.assertEqual(exc.HTTPConflict.code, res.status_int)
+
     def test_router_list(self):
         with self.router() as v1, self.router() as v2, self.router() as v3:
             routers = (v1, v2, v3)
@@ -919,8 +929,8 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                         self._create_subnet(self.fmt,
                             net_id=n['network']['id'],
                             ip_version=6, cidr='2001:db8:1::/64',
-                            ipv6_ra_mode=l3_constants.IPV6_SLAAC,
-                            ipv6_address_mode=l3_constants.IPV6_SLAAC))
+                            ipv6_ra_mode=n_const.IPV6_SLAAC,
+                            ipv6_address_mode=n_const.IPV6_SLAAC))
                 res3 = self._show('routers', r['router']['id'])
                 fips = (res3['router']['external_gateway_info']
                         ['external_fixed_ips'])
@@ -988,9 +998,9 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
         Verify the valid use-cases of an IPv6 subnet where we
         are allowed to associate to the Neutron Router are successful.
         """
-        slaac = l3_constants.IPV6_SLAAC
-        stateful = l3_constants.DHCPV6_STATEFUL
-        stateless = l3_constants.DHCPV6_STATELESS
+        slaac = n_const.IPV6_SLAAC
+        stateful = n_const.DHCPV6_STATEFUL
+        stateless = n_const.DHCPV6_STATELESS
         use_cases = [{'msg': 'IPv6 Subnet Modes (slaac, none)',
                       'ra_mode': slaac, 'address_mode': None},
                      {'msg': 'IPv6 Subnet Modes (none, none)',
@@ -1109,13 +1119,13 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
         """
         use_cases = [{'msg': 'IPv6 Subnet Modes (none, slaac)',
                       'ra_mode': None,
-                      'address_mode': l3_constants.IPV6_SLAAC},
+                      'address_mode': n_const.IPV6_SLAAC},
                      {'msg': 'IPv6 Subnet Modes (none, dhcpv6-stateful)',
                       'ra_mode': None,
-                      'address_mode': l3_constants.DHCPV6_STATEFUL},
+                      'address_mode': n_const.DHCPV6_STATEFUL},
                      {'msg': 'IPv6 Subnet Modes (none, dhcpv6-stateless)',
                       'ra_mode': None,
-                      'address_mode': l3_constants.DHCPV6_STATELESS}]
+                      'address_mode': n_const.DHCPV6_STATELESS}]
         for uc in use_cases:
             with self.router() as r, self.network() as n:
                 with self.subnet(network=n, cidr='fd00::1/64',
@@ -1349,40 +1359,49 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
 
     def test_router_add_interface_dup_subnet2_returns_400(self):
         with self.router() as r:
-            with self.subnet() as s:
-                with self.port(subnet=s) as p1:
-                    with self.port(subnet=s) as p2:
+            with self.subnet() as s1, self.subnet(cidr='1.0.0.0/24') as s2:
+                with self.port(subnet=s1) as p1, self.port(subnet=s2) as p2:
+                    with self.port(subnet=s1) as p3:
+                        for p in [p1, p2]:
+                            self._router_interface_action('add',
+                                                          r['router']['id'],
+                                                          None,
+                                                          p['port']['id'])
                         self._router_interface_action('add',
                                                       r['router']['id'],
                                                       None,
-                                                      p1['port']['id'])
-                        self._router_interface_action('add',
-                                                      r['router']['id'],
-                                                      None,
-                                                      p2['port']['id'],
+                                                      p3['port']['id'],
                                                       expected_code=exc.
                                                       HTTPBadRequest.code)
 
     def test_router_add_interface_overlapped_cidr_returns_400(self):
         with self.router() as r:
-            with self.subnet(cidr='10.0.1.0/24') as s1:
+            with self.subnet(cidr='10.0.1.0/24') as s1, self.subnet(
+                    cidr='10.0.2.0/24') as s2:
                 self._router_interface_action('add',
                                               r['router']['id'],
                                               s1['subnet']['id'],
                                               None)
+                self._router_interface_action('add',
+                                              r['router']['id'],
+                                              s2['subnet']['id'],
+                                              None)
 
                 def try_overlapped_cidr(cidr):
-                    with self.subnet(cidr=cidr) as s2:
+                    with self.subnet(cidr=cidr) as s3:
                         self._router_interface_action('add',
                                                       r['router']['id'],
-                                                      s2['subnet']['id'],
+                                                      s3['subnet']['id'],
                                                       None,
                                                       expected_code=exc.
                                                       HTTPBadRequest.code)
                 # another subnet with same cidr
                 try_overlapped_cidr('10.0.1.0/24')
+                try_overlapped_cidr('10.0.2.0/24')
                 # another subnet with overlapped cidr including s1
                 try_overlapped_cidr('10.0.0.0/16')
+                # another subnet with overlapped cidr including s2
+                try_overlapped_cidr('10.0.2.128/28')
 
     def test_router_add_interface_no_data_returns_400(self):
         with self.router() as r:
@@ -1448,18 +1467,18 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                  self.subnet(
                     cidr='2001:db8::/64', network=n,
                     ip_version=6,
-                    ipv6_ra_mode=l3_constants.IPV6_SLAAC,
-                    ipv6_address_mode=l3_constants.IPV6_SLAAC)) as s3, (
+                    ipv6_ra_mode=n_const.IPV6_SLAAC,
+                    ipv6_address_mode=n_const.IPV6_SLAAC)) as s3, (
                  self.subnet(
                     cidr='2001:db8:1::/64', network=n,
                     ip_version=6,
-                    ipv6_ra_mode=l3_constants.DHCPV6_STATEFUL,
-                    ipv6_address_mode=l3_constants.DHCPV6_STATEFUL)) as s4, (
+                    ipv6_ra_mode=n_const.DHCPV6_STATEFUL,
+                    ipv6_address_mode=n_const.DHCPV6_STATEFUL)) as s4, (
                  self.subnet(
                     cidr='2001:db8:2::/64', network=n,
                     ip_version=6,
-                    ipv6_ra_mode=l3_constants.DHCPV6_STATELESS,
-                    ipv6_address_mode=l3_constants.DHCPV6_STATELESS)) as s5:
+                    ipv6_ra_mode=n_const.DHCPV6_STATELESS,
+                    ipv6_address_mode=n_const.DHCPV6_STATELESS)) as s5:
                 self._set_net_external(n['network']['id'])
                 self._add_external_gateway_to_router(
                         r['router']['id'],
@@ -2555,12 +2574,12 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
 
     def test_router_delete_ipv6_slaac_subnet_inuse_returns_409(self):
         with self.router() as r:
-            with self._ipv6_subnet(l3_constants.IPV6_SLAAC) as s:
+            with self._ipv6_subnet(n_const.IPV6_SLAAC) as s:
                 self._test_router_delete_subnet_inuse_returns_409(r, s)
 
     def test_router_delete_dhcpv6_stateless_subnet_inuse_returns_409(self):
         with self.router() as r:
-            with self._ipv6_subnet(l3_constants.DHCPV6_STATELESS) as s:
+            with self._ipv6_subnet(n_const.DHCPV6_STATELESS) as s:
                 self._test_router_delete_subnet_inuse_returns_409(r, s)
 
     def test_delete_ext_net_with_disassociated_floating_ips(self):
@@ -2622,6 +2641,22 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
             self._make_floatingip(self.fmt, network_id,
                                   floating_ip='10.0.0.10',
                                   http_status=exc.HTTPConflict.code)
+
+    def test_create_floatingips_native_quotas(self):
+        quota = 1
+        cfg.CONF.set_override('quota_floatingip', quota, group='QUOTAS')
+        with self.subnet() as public_sub:
+            self._set_net_external(public_sub['subnet']['network_id'])
+            res = self._create_floatingip(
+                self.fmt,
+                public_sub['subnet']['network_id'],
+                subnet_id=public_sub['subnet']['id'])
+            self.assertEqual(exc.HTTPCreated.code, res.status_int)
+            res = self._create_floatingip(
+                self.fmt,
+                public_sub['subnet']['network_id'],
+                subnet_id=public_sub['subnet']['id'])
+            self.assertEqual(exc.HTTPConflict.code, res.status_int)
 
     def test_router_specify_id_backend(self):
         plugin = manager.NeutronManager.get_service_plugins()[

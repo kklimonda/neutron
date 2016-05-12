@@ -14,11 +14,13 @@
 # limitations under the License.
 
 import mock
+from neutron_lib import constants
+from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
 
 from neutron.api.rpc.handlers import dhcp_rpc
-from neutron.common import constants
-from neutron.common import exceptions as n_exc
+from neutron.common import constants as n_const
+from neutron.common import exceptions
 from neutron.common import utils
 from neutron.extensions import portbindings
 from neutron.tests import base
@@ -180,7 +182,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
             self.assertEqual(expected_port, port)
 
         self.plugin.get_port.return_value = {
-            'device_id': constants.DEVICE_ID_RESERVED_DHCP_PORT}
+            'device_id': n_const.DEVICE_ID_RESERVED_DHCP_PORT}
         self.callbacks._port_action = _fake_port_action
         self.callbacks.update_dhcp_port(mock.Mock(),
                                         host='foo_host',
@@ -212,7 +214,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
 
         self.plugin.get_port.return_value = {
             'device_id': 'other_id'}
-        self.assertRaises(n_exc.DhcpPortInUse,
+        self.assertRaises(exceptions.DhcpPortInUse,
                           self.callbacks.update_dhcp_port,
                           mock.Mock(),
                           host='foo_host',
@@ -232,7 +234,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
                          'id': 'foo_port_id'
                          }
         self.plugin.get_port.return_value = {
-            'device_id': constants.DEVICE_ID_RESERVED_DHCP_PORT}
+            'device_id': n_const.DEVICE_ID_RESERVED_DHCP_PORT}
         self.callbacks.update_dhcp_port(mock.Mock(),
                                         host='foo_host',
                                         port_id='foo_port_id',

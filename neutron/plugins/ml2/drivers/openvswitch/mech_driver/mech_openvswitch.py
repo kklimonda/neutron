@@ -15,10 +15,10 @@
 
 import os
 
+from neutron_lib import constants
 from oslo_config import cfg
 
 from neutron.agent import securitygroups_rpc
-from neutron.common import constants
 from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
@@ -41,12 +41,14 @@ class OpenvswitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
     network.
     """
 
-    supported_qos_rule_types = [qos_consts.RULE_TYPE_BANDWIDTH_LIMIT]
+    supported_qos_rule_types = [qos_consts.RULE_TYPE_BANDWIDTH_LIMIT,
+                                qos_consts.RULE_TYPE_DSCP_MARK]
 
     def __init__(self):
         sg_enabled = securitygroups_rpc.is_firewall_enabled()
-        hybrid_plug_required = (cfg.CONF.SECURITYGROUP.firewall_driver in (
-            IPTABLES_FW_DRIVER_FULL, 'iptables_hybrid')) and sg_enabled
+        hybrid_plug_required = (not cfg.CONF.SECURITYGROUP.firewall_driver or
+            cfg.CONF.SECURITYGROUP.firewall_driver in (
+                IPTABLES_FW_DRIVER_FULL, 'iptables_hybrid')) and sg_enabled
         vif_details = {portbindings.CAP_PORT_FILTER: sg_enabled,
                        portbindings.OVS_HYBRID_PLUG: hybrid_plug_required}
         super(OpenvswitchMechanismDriver, self).__init__(

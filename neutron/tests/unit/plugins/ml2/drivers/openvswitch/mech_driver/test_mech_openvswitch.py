@@ -13,9 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants
 from oslo_config import cfg
 
-from neutron.common import constants
 from neutron.extensions import portbindings
 from neutron.plugins.ml2.drivers.openvswitch.mech_driver \
     import mech_openvswitch
@@ -100,3 +100,19 @@ class OpenvswitchMechanismSGDisabledLocalTestCase(
     OpenvswitchMechanismSGDisabledBaseTestCase,
     base.AgentMechanismLocalTestCase):
     pass
+
+
+class OpenvswitchMechanismFirewallUndefinedTestCase(
+    OpenvswitchMechanismBaseTestCase, base.AgentMechanismLocalTestCase):
+
+    VIF_DETAILS = {portbindings.CAP_PORT_FILTER: True,
+                   portbindings.OVS_HYBRID_PLUG: True}
+
+    def setUp(self):
+        # this simple test case just ensures backward compatibility where
+        # the server has no firewall driver configured, which should result
+        # in hybrid plugging.
+        super(OpenvswitchMechanismFirewallUndefinedTestCase, self).setUp()
+        cfg.CONF.set_override('firewall_driver', '', 'SECURITYGROUP')
+        self.driver = mech_openvswitch.OpenvswitchMechanismDriver()
+        self.driver.initialize()
