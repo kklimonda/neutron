@@ -798,6 +798,13 @@ class TestIpAddrCommand(TestIPCmdBase):
                            'dev', 'tap0',
                            'brd', '192.168.45.255'))
 
+    def test_add_address_no_broadcast(self):
+        self.addr_cmd.add('192.168.45.100/24', add_broadcast=False)
+        self._assert_sudo([4],
+                          ('add', '192.168.45.100/24',
+                           'scope', 'global',
+                           'dev', 'tap0'))
+
     def test_del_address(self):
         self.addr_cmd.delete('192.168.45.100/24')
         self._assert_sudo([4],
@@ -958,42 +965,6 @@ class TestIpRouteCommand(TestIPCmdBase):
             self.parent._run = mock.Mock(return_value=test_case['sample'])
             self.assertEqual(self.route_cmd.get_gateway(),
                              test_case['expected'])
-
-    def test_pullup_route(self):
-        # NOTE(brian-haley) Currently we do not have any IPv6-specific usecase
-        # for pullup_route, hence skipping. Revisit, if required, in future.
-        if self.ip_version == 6:
-            return
-        # interface is not the first in the list - requires
-        # deleting and creating existing entries
-        output = [DEVICE_ROUTE_SAMPLE, SUBNET_SAMPLE1]
-
-        def pullup_side_effect(self, *args):
-            result = output.pop(0)
-            return result
-
-        self.parent._run = mock.Mock(side_effect=pullup_side_effect)
-        self.route_cmd.pullup_route('tap1d7888a7-10', ip_version=4)
-        self._assert_sudo([4], ('del', '10.0.0.0/24', 'dev', 'qr-23380d11-d2'))
-        self._assert_sudo([4], ('append', '10.0.0.0/24', 'proto', 'kernel',
-                                'src', '10.0.0.1', 'dev', 'qr-23380d11-d2'))
-
-    def test_pullup_route_first(self):
-        # NOTE(brian-haley) Currently we do not have any IPv6-specific usecase
-        # for pullup_route, hence skipping. Revisit, if required, in future.
-        if self.ip_version == 6:
-            return
-        # interface is first in the list - no changes
-        output = [DEVICE_ROUTE_SAMPLE, SUBNET_SAMPLE2]
-
-        def pullup_side_effect(self, *args):
-            result = output.pop(0)
-            return result
-
-        self.parent._run = mock.Mock(side_effect=pullup_side_effect)
-        self.route_cmd.pullup_route('tap1d7888a7-10', ip_version=4)
-        # Check two calls - device get and subnet get
-        self.assertEqual(len(self.parent._run.mock_calls), 2)
 
     def test_add_route(self):
         self.route_cmd.add_route(self.cidr, self.ip, self.table)
@@ -1177,12 +1148,6 @@ class TestIPRoute(TestIpRouteCommand):
         if not self.check_dev_args:
             args = self._remove_dev_args(args)
         super(TestIPRoute, self)._assert_sudo(options, args)
-
-    def test_pullup_route(self):
-        # This method gets the interface name passed to it as an argument.  So,
-        # don't remove it from the expected arguments.
-        self.check_dev_args = True
-        super(TestIPRoute, self).test_pullup_route()
 
     def test_del_gateway_cannot_find_device(self):
         # This test doesn't make sense for this case since dev won't be passed

@@ -44,10 +44,6 @@ class NetworkQosBindingNotFound(e.NotFound):
                 "could not be found.")
 
 
-class PolicyFileNotFound(e.NotFound):
-    message = _("Policy configuration policy.json could not be found.")
-
-
 class PolicyInitError(e.NeutronException):
     message = _("Failed to init policy %(policy)s because %(reason)s.")
 
@@ -79,11 +75,6 @@ class DNSNameServersExhausted(e.BadRequest):
     # NOTE(xchenum): probably make sense to use quota exceeded exception?
     message = _("Unable to complete operation for %(subnet_id)s. "
                 "The number of DNS nameservers exceeds the limit %(quota)s.")
-
-
-class InvalidIpForNetwork(e.BadRequest):
-    message = _("IP address %(ip_address)s is not a valid IP "
-                "for any of the subnets on the specified network.")
 
 
 class FlatNetworkInUse(e.InUse):
@@ -155,10 +146,6 @@ class InvalidExtensionEnv(e.BadRequest):
 
 class ExtensionsNotFound(e.NotFound):
     message = _("Extensions not found: %(extensions)s.")
-
-
-class InvalidContentType(e.NeutronException):
-    message = _("Invalid content type %(content_type)s.")
 
 
 class GatewayConflictWithAllocationPools(e.InUse):
@@ -238,18 +225,6 @@ class NetworkIdOrRouterIdRequiredError(e.NeutronException):
 
 class AbortSyncRouters(e.NeutronException):
     message = _("Aborting periodic_sync_routers_task due to an error.")
-
-
-# Shared *aas exceptions, pending them being refactored out of Neutron
-# proper.
-
-class FirewallInternalDriverError(e.NeutronException):
-    """Fwaas exception for all driver errors.
-
-    On any failure or exception in the driver, driver should log it and
-    raise this exception to the agent
-    """
-    message = _("%(driver)s: Internal driver error.")
 
 
 class MissingMinSubnetPoolPrefix(e.BadRequest):
@@ -336,6 +311,10 @@ class ObjectActionError(e.NeutronException):
 class CTZoneExhaustedError(e.NeutronException):
     message = _("IPtables conntrack zones exhausted, iptables rules cannot "
                 "be applied.")
+
+
+class TenantQuotaNotFound(e.NotFound):
+    message = _("Quota for tenant %(tenant_id)s could not be found.")
 
 
 # Neutron-lib migration shim. This will wrap any exceptionss that are moved

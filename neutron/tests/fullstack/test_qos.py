@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants
 from oslo_utils import uuidutils
 import testscenarios
 
@@ -19,7 +20,6 @@ from neutron.agent.common import ovs_lib
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import tc_lib
 from neutron.agent.linux import utils
-from neutron.common import constants
 from neutron.services.qos import qos_consts
 from neutron.tests.fullstack import base
 from neutron.tests.fullstack.resources import environment
@@ -55,7 +55,7 @@ def _wait_for_rule_applied_linuxbridge_agent(vm, limit, burst):
         namespace=vm.host.host_namespace
     )
     utils.wait_until_true(
-        lambda: tc.get_bw_limits() == (limit, burst))
+        lambda: tc.get_filters_bw_limits() == (limit, burst))
 
 
 def _wait_for_rule_applied(vm, limit, burst):
@@ -163,8 +163,16 @@ class TestQoSWithL2Agent(base.BaseFullStackTestCase):
 class TestQoSWithL2Population(base.BaseFullStackTestCase):
 
     def setUp(self):
+        # We limit this test to using the openvswitch mech driver, because DSCP
+        # is presently not implemented for Linux Bridge.  The 'rule_types' API
+        # call only returns rule types that are supported by all configured
+        # mech drivers.  So in a fullstack scenario, where both the OVS and the
+        # Linux Bridge mech drivers are configured, the DSCP rule type will be
+        # unavailable since it is not implemented in Linux Bridge.
+        mech_driver = 'openvswitch'
         host_desc = []  # No need to register agents for this test case
-        env_desc = environment.EnvironmentDescription(qos=True, l2_pop=True)
+        env_desc = environment.EnvironmentDescription(qos=True, l2_pop=True,
+                                                      mech_drivers=mech_driver)
         env = environment.Environment(env_desc, host_desc)
         super(TestQoSWithL2Population, self).setUp(env)
 

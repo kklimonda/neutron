@@ -24,6 +24,7 @@ import sys
 import time
 
 import eventlet.wsgi
+from neutron_lib import exceptions as exception
 from oslo_config import cfg
 import oslo_i18n
 from oslo_log import log as logging
@@ -32,6 +33,7 @@ from oslo_service import service as common_service
 from oslo_service import sslutils
 from oslo_service import systemd
 from oslo_service import wsgi
+from oslo_utils import encodeutils
 from oslo_utils import excutils
 import six
 import webob.dec
@@ -39,7 +41,7 @@ import webob.exc
 
 from neutron._i18n import _, _LE, _LI
 from neutron.common import config
-from neutron.common import exceptions as exception
+from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import api
 from neutron import worker
@@ -69,9 +71,7 @@ def encode_body(body):
 
     WebOb requires to encode unicode body used to update response body.
     """
-    if isinstance(body, six.text_type):
-        return body.encode('utf-8')
-    return body
+    return encodeutils.to_utf8(body)
 
 
 class WorkerService(worker.NeutronWorker):
@@ -389,7 +389,7 @@ class JSONDeserializer(TextDeserializer):
             return jsonutils.loads(datastring)
         except ValueError:
             msg = _("Cannot understand JSON")
-            raise exception.MalformedRequestBody(reason=msg)
+            raise n_exc.MalformedRequestBody(reason=msg)
 
     def default(self, datastring):
         return {'body': self._from_json(datastring)}
@@ -602,7 +602,7 @@ class Resource(Application):
             msg = _("Unsupported Content-Type")
             LOG.exception(_LE("InvalidContentType: %s"), msg)
             return Fault(webob.exc.HTTPBadRequest(explanation=msg))
-        except exception.MalformedRequestBody:
+        except n_exc.MalformedRequestBody:
             msg = _("Malformed request body")
             LOG.exception(_LE("MalformedRequestBody: %s"), msg)
             return Fault(webob.exc.HTTPBadRequest(explanation=msg))
@@ -635,7 +635,7 @@ class Resource(Application):
         return response
 
     def dispatch(self, request, action, action_args):
-        """Find action-spefic method on controller and call it."""
+        """Find action-specific method on controller and call it."""
 
         controller_method = getattr(self.controller, action)
         try:

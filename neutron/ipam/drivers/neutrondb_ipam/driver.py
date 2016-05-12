@@ -14,12 +14,12 @@
 #    under the License.
 
 import netaddr
+from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
 from oslo_log import log
 from oslo_utils import uuidutils
 
 from neutron._i18n import _, _LE
-from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.db import api as db_api
 from neutron.ipam import driver as ipam_base
@@ -374,7 +374,7 @@ class NeutronDbSubnet(ipam_base.Subnet):
         # Pools have already been validated in the subnet request object which
         # was sent to the subnet pool driver. Further validation should not be
         # required.
-        session = db_api.get_session()
+        session = self._context.session
         self.subnet_manager.delete_allocation_pools(session)
         self.create_allocation_pools(self.subnet_manager, session, pools, cidr)
         self._pools = pools

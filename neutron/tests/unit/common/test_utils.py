@@ -18,11 +18,12 @@ import re
 import eventlet
 import mock
 import netaddr
+from neutron_lib import constants
+from neutron_lib import exceptions as exc
 from oslo_log import log as logging
 import six
 import testtools
 
-from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.plugins.common import constants as p_const
@@ -103,12 +104,12 @@ class TestParseTunnelRangesMixin(object):
 
     def _check_range_invalid_ranges(self, bad_range, which):
         expected_msg = self._build_invalid_tunnel_range_msg(bad_range, which)
-        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
+        err = self.assertRaises(exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         self.assertEqual(expected_msg, str(err))
 
     def _check_range_reversed(self, bad_range):
-        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
+        err = self.assertRaises(exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         expected_msg = self._build_range_reversed_msg(bad_range)
         self.assertEqual(expected_msg, str(err))

@@ -22,6 +22,7 @@ import functools
 import random
 
 import netaddr
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import testscenarios
@@ -31,7 +32,6 @@ from neutron.agent.linux import iptables_firewall
 from neutron.agent.linux import openvswitch_firewall
 from neutron.agent import securitygroups_rpc as sg_cfg
 from neutron.cmd.sanity import checks
-from neutron.common import constants
 from neutron.tests.common import conn_testers
 from neutron.tests.functional import base
 
@@ -500,6 +500,7 @@ class FirewallTestCase(BaseFirewallTestCase):
         self._apply_security_group_rules(self.FAKE_SECURITY_GROUP_ID, list())
         self.tester.assert_no_established_connection(**connection)
 
+    @skip_if_firewall('openvswitch')
     def test_preventing_firewall_blink(self):
         direction = self.tester.INGRESS
         sg_rules = [{'ethertype': 'IPv4', 'direction': 'ingress',
@@ -659,4 +660,24 @@ class FirewallTestCaseIPv6(BaseFirewallTestCase):
         self.tester.assert_no_connection(protocol=self.tester.TCP,
                                          direction=self.tester.EGRESS)
         self.tester.assert_no_connection(protocol=self.tester.ICMP,
+                                         direction=self.tester.EGRESS)
+
+    @skip_if_firewall('openvswitch')
+    def test_ip_spoofing(self):
+        sg_rules = [{'ethertype': constants.IPv6,
+                     'direction': firewall.INGRESS_DIRECTION,
+                     'protocol': constants.PROTO_NAME_ICMP}]
+        self._apply_security_group_rules(self.FAKE_SECURITY_GROUP_ID, sg_rules)
+        not_allowed_ip = "%s/64" % (
+            netaddr.IPAddress(self.tester.vm_ip_address) + 1)
+
+        self.tester.assert_connection(protocol=self.tester.ICMP,
+                                      direction=self.tester.INGRESS)
+        self.tester.vm_ip_cidr = not_allowed_ip
+        self.tester.assert_no_connection(protocol=self.tester.ICMP,
+                                         direction=self.tester.INGRESS)
+        self.tester.assert_no_connection(protocol=self.tester.ICMP,
+                                         direction=self.tester.EGRESS)
+        self.tester.assert_no_connection(protocol=self.tester.UDP,
+                                         src_port=546, dst_port=547,
                                          direction=self.tester.EGRESS)

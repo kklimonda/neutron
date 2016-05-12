@@ -16,6 +16,7 @@
 
 import sys
 
+from neutron_lib import exceptions as lib_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_log import versionutils
@@ -64,7 +65,7 @@ quota_opts = [
                help=_('Default driver to use for quota checks')),
     cfg.BoolOpt('track_quota_usage',
                 default=True,
-                help=_('Keep in track in the database of current resource'
+                help=_('Keep in track in the database of current resource '
                        'quota usage. Plugins which do not leverage the '
                        'neutron database should set this flag to False')),
 ]
@@ -128,8 +129,8 @@ class ConfDriver(object):
         overs = [key for key, val in values.items()
                  if quotas[key] >= 0 and quotas[key] < val]
         if overs:
-            raise exceptions.OverQuota(overs=sorted(overs), quotas=quotas,
-                                       usages={})
+            raise lib_exc.OverQuota(overs=sorted(overs), quotas=quotas,
+                                    usages={})
 
     @staticmethod
     def get_tenant_quotas(context, resources, tenant_id):

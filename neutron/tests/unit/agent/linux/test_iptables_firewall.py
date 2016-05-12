@@ -16,6 +16,7 @@
 import copy
 
 import mock
+from neutron_lib import constants
 from oslo_config import cfg
 import six
 import testtools
@@ -25,7 +26,7 @@ from neutron.agent.linux import ipset_manager
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_firewall
 from neutron.agent import securitygroups_rpc as sg_cfg
-from neutron.common import constants
+from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.tests import base
@@ -952,17 +953,22 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         if ethertype == 'IPv6':
             filter_inst = self.v6filter_inst
 
-            dhcp_rule = [mock.call.add_rule('ofake_dev', '-p ipv6-icmp '
-                                            '-m icmp6 '
-                                            '--icmpv6-type %s -j DROP'
-                                            % constants.ICMPV6_TYPE_RA,
+            dhcp_rule = [mock.call.add_rule('ofake_dev',
+                                            '-s ::/128 -d ff02::/16 '
+                                            '-p ipv6-icmp -m icmp6 '
+                                            '--icmpv6-type 131 -j RETURN',
                                             comment=None),
                          mock.call.add_rule('ofake_dev',
-                                            '-p ipv6-icmp -j RETURN',
+                                            '-s ::/128 -d ff02::/16 '
+                                            '-p ipv6-icmp -m icmp6 '
+                                            '--icmpv6-type %s -j RETURN' %
+                                            n_const.ICMPV6_TYPE_NC,
                                             comment=None),
-                         mock.call.add_rule('ofake_dev', '-p udp -m udp '
-                                            '--sport 546 -m udp --dport 547 '
-                                            '-j RETURN', comment=None)]
+                         mock.call.add_rule('ofake_dev',
+                                            '-s ::/128 -d ff02::/16 '
+                                            '-p ipv6-icmp -m icmp6 '
+                                            '--icmpv6-type 143 -j RETURN',
+                                            comment=None)]
         sg = [rule]
         port['security_group_rules'] = sg
         self.firewall.prepare_port_filter(port)
@@ -985,7 +991,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                                     comment=ic.SG_TO_VM_SG)
                  ]
         if ethertype == 'IPv6':
-            for icmp6_type in constants.ICMPV6_ALLOWED_TYPES:
+            for icmp6_type in n_const.ICMPV6_ALLOWED_TYPES:
                 calls.append(
                     mock.call.add_rule('ifake_dev',
                                        '-p ipv6-icmp -m icmp6 --icmpv6-type '
@@ -1025,10 +1031,15 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                       'sfake_dev',
                       '-s %s -m mac --mac-source FF:FF:FF:FF:FF:FF -j RETURN'
                       % prefix,
-                      comment=ic.PAIR_ALLOW),
-                  mock.call.add_rule(
-                      'sfake_dev', '-j DROP',
-                      comment=ic.PAIR_DROP)]
+                      comment=ic.PAIR_ALLOW)]
+
+        if ethertype == 'IPv6':
+            calls.append(mock.call.add_rule('sfake_dev',
+                '-s fe80::fdff:ffff:feff:ffff/128 -m mac '
+                '--mac-source FF:FF:FF:FF:FF:FF -j RETURN',
+                comment=ic.PAIR_ALLOW))
+        calls.append(mock.call.add_rule('sfake_dev', '-j DROP',
+                                        comment=ic.PAIR_DROP))
         calls += dhcp_rule
         calls.append(mock.call.add_rule('ofake_dev', '-j $sfake_dev',
                                         comment=None))
@@ -1042,6 +1053,17 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                 '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
                 comment=None))
         if ethertype == 'IPv6':
+            calls.append(mock.call.add_rule('ofake_dev',
+                                            '-p ipv6-icmp -m icmp6 '
+                                            '--icmpv6-type %s -j DROP' %
+                                            constants.ICMPV6_TYPE_RA,
+                                            comment=None))
+            calls.append(mock.call.add_rule('ofake_dev',
+                                            '-p ipv6-icmp -j RETURN',
+                                            comment=None))
+            calls.append(mock.call.add_rule('ofake_dev', '-p udp -m udp '
+                                            '--sport 546 -m udp --dport 547 '
+                                            '-j RETURN', comment=None))
             calls.append(mock.call.add_rule(
                 'ofake_dev',
                 '-p udp -m udp --sport 547 -m udp --dport 546 -j DROP',
@@ -1131,11 +1153,27 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                        '-w', 10],
                       run_as_root=True, check_exit_code=True,
                       extra_ok_codes=[1]),
+            mock.call(['conntrack', '-D', '-f', 'ipv4', '-s', '10.0.0.1',
+                       '-w', 10],
+                      run_as_root=True, check_exit_code=True,
+                      extra_ok_codes=[1]),
             mock.call(['conntrack', '-D', '-f', 'ipv6', '-d', 'fe80::1',
+                       '-w', 10],
+                      run_as_root=True, check_exit_code=True,
+                      extra_ok_codes=[1]),
+            mock.call(['conntrack', '-D', '-f', 'ipv6', '-s', 'fe80::1',
                        '-w', 10],
                       run_as_root=True, check_exit_code=True,
                       extra_ok_codes=[1])]
         self.utils_exec.assert_has_calls(calls)
+
+    def test_user_sg_rules_deduped_before_call_to_iptables_manager(self):
+        port = self._fake_port()
+        port['security_group_rules'] = [{'ethertype': 'IPv4',
+                                         'direction': 'ingress'}] * 2
+        self.firewall.prepare_port_filter(port)
+        rules = [''.join(c[1]) for c in self.v4filter_inst.add_rule.mock_calls]
+        self.assertEqual(len(set(rules)), len(rules))
 
     def test_update_delete_port_filter(self):
         port = self._fake_port()
@@ -1862,6 +1900,7 @@ class IptablesFirewallEnhancedIpsetTestCase(BaseIptablesFirewallTestCase):
         fake_ipv4_pair.append((mac_unix, ipv4))
         fake_ipv6_pair = []
         fake_ipv6_pair.append((mac_unix, ipv6))
+        fake_ipv6_pair.append((mac_unix, 'fe80::fdff:ffff:fe0f:ffff'))
 
         mac_ipv4_pairs = []
         mac_ipv6_pairs = []
