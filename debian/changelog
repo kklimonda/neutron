@@ -4,6 +4,8 @@ neutron (2:8.0.1~dev377-0ubuntu1) UNRELEASED; urgency=medium
   * d/control: Align (build-)depends with upstream.
   * d/p/skip-ryu-tests.patch: Dropped since BDs no longer have to be in main.
   * d/p/drop-ryu-dep.patch: Rebased.
+  * d/control, d/neutron-bgp-dragent.*: Remove BGP support, aligning with
+    upstream removal.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Thu, 12 May 2016 15:51:59 -0400
 

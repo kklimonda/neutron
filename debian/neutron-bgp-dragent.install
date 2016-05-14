@@ -1,2 +1,0 @@
-etc/bgp_dragent.ini etc/neutron
-usr/bin/neutron-bgp-dragent usr/bin
