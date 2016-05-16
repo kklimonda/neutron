@@ -864,6 +864,7 @@ neutron/tests/functional/requirements.txt
 neutron/tests/functional/test_server.py
 neutron/tests/functional/test_service.py
 neutron/tests/functional/agent/__init__.py
+neutron/tests/functional/agent/test_dhcp_agent.py
 neutron/tests/functional/agent/test_l2_lb_agent.py
 neutron/tests/functional/agent/test_l2_ovs_agent.py
 neutron/tests/functional/agent/test_l3_agent.py
@@ -881,6 +882,7 @@ neutron/tests/functional/agent/linux/base.py
 neutron/tests/functional/agent/linux/helpers.py
 neutron/tests/functional/agent/linux/simple_daemon.py
 neutron/tests/functional/agent/linux/test_async_process.py
+neutron/tests/functional/agent/linux/test_bridge_lib.py
 neutron/tests/functional/agent/linux/test_dhcp.py
 neutron/tests/functional/agent/linux/test_interface.py
 neutron/tests/functional/agent/linux/test_ip_lib.py
@@ -1080,6 +1082,7 @@ neutron/tests/unit/db/test_dvr_mac_db.py
 neutron/tests/unit/db/test_ipam_backend_mixin.py
 neutron/tests/unit/db/test_ipam_non_pluggable_backend.py
 neutron/tests/unit/db/test_ipam_pluggable_backend.py
+neutron/tests/unit/db/test_l3_db.py
 neutron/tests/unit/db/test_l3_dvr_db.py
 neutron/tests/unit/db/test_l3_hamode_db.py
 neutron/tests/unit/db/test_migration.py
@@ -1220,6 +1223,7 @@ neutron/tests/unit/plugins/ml2/drivers/openvswitch/mech_driver/__init__.py
 neutron/tests/unit/plugins/ml2/drivers/openvswitch/mech_driver/test_mech_openvswitch.py
 neutron/tests/unit/plugins/ml2/extensions/__init__.py
 neutron/tests/unit/plugins/ml2/extensions/fake_extension.py
+neutron/tests/unit/plugins/ml2/extensions/test_port_security.py
 neutron/tests/unit/plugins/oneconvergence/__init__.py
 neutron/tests/unit/plugins/oneconvergence/test_nvsd_agent.py
 neutron/tests/unit/plugins/oneconvergence/test_nvsd_plugin.py
@@ -1265,11 +1269,13 @@ rally-jobs/plugins/__init__.py
 releasenotes/notes/713a5eb2833311e5-start-using-reno.yaml
 releasenotes/notes/add-port-rebinding-chance-33178b9abacf5804.yaml
 releasenotes/notes/agent-scheduling-3404da3fbe863366.yaml
+releasenotes/notes/clear-allowed-address-pairs-with-none-4757bcca78076c9e.yaml
 releasenotes/notes/deprecated-features-96c51d46f3498fad.yaml
 releasenotes/notes/deprecated-plugins-and-drivers-292865277ee1d182.yaml
 releasenotes/notes/dvr-ovs-agent-6052a8d60fddde22.yaml
 releasenotes/notes/ipv6-prefix-delegation-a2a342e5e34534c7.yaml
 releasenotes/notes/lbaas-v2-1628fe34700148f6.yaml
+releasenotes/notes/linuxbridge_vxlan_arp_responder-e9ea91552e1b62a7.yaml
 releasenotes/notes/macvtap_assigned_vf_check-f4d07660ffd82a24.yaml
 releasenotes/notes/neutron-rbac-516b499743b57d1f.yaml
 releasenotes/notes/ovs-agent-6137f5f82e10135c.yaml

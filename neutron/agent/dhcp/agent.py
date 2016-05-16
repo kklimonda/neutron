@@ -132,7 +132,7 @@ class DhcpAgent(manager.Manager):
             if (isinstance(e, oslo_messaging.RemoteError)
                 and e.exc_type == 'NetworkNotFound'
                 or isinstance(e, exceptions.NetworkNotFound)):
-                LOG.warning(_LW("Network %s has been deleted."), network.id)
+                LOG.debug("Network %s has been deleted.", network.id)
             else:
                 LOG.exception(_LE('Unable to %(action)s dhcp for %(net_id)s.'),
                               {'net_id': network.id, 'action': action})
@@ -155,6 +155,7 @@ class DhcpAgent(manager.Manager):
 
         try:
             active_networks = self.plugin_rpc.get_active_networks_info()
+            LOG.info(_LI('All active networks have been fetched through RPC.'))
             active_network_ids = set(network.id for network in active_networks)
             for deleted_id in known_network_ids - active_network_ids:
                 try:
@@ -205,7 +206,7 @@ class DhcpAgent(manager.Manager):
         try:
             network = self.plugin_rpc.get_network_info(network_id)
             if not network:
-                LOG.warn(_LW('Network %s has been deleted.'), network_id)
+                LOG.debug('Network %s has been deleted.', network_id)
             return network
         except Exception as e:
             self.schedule_resync(e, network_id)
@@ -220,7 +221,10 @@ class DhcpAgent(manager.Manager):
     @utils.exception_logger()
     def safe_configure_dhcp_for_network(self, network):
         try:
+            network_id = network.get('id')
+            LOG.info(_LI('Starting network %s dhcp configuration'), network_id)
             self.configure_dhcp_for_network(network)
+            LOG.info(_LI('Finished network %s dhcp configuration'), network_id)
         except (exceptions.NetworkNotFound, RuntimeError):
             LOG.warn(_LW('Network %s may have been deleted and its resources '
                          'may have already been disposed.'), network.id)
@@ -245,6 +249,12 @@ class DhcpAgent(manager.Manager):
                 if subnet.ip_version == 4 and subnet.enable_dhcp:
                     self.enable_isolated_metadata_proxy(network)
                     break
+        elif (self.conf.use_namespaces and not self.conf.force_metadata and
+              not self.conf.enable_isolated_metadata):
+            # In the case that the dhcp agent ran with metadata enabled,
+            # and dhcp agent now starts with metadata disabled, check and
+            # delete any metadata_proxy.
+            self.disable_isolated_metadata_proxy(network)
 
     def disable_dhcp_helper(self, network_id):
         """Disable DHCP for a network known to the agent."""

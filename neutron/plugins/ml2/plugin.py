@@ -251,6 +251,10 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             binding.vif_details = ''
             db.clear_binding_levels(session, port_id, original_host)
             mech_context._clear_binding_levels()
+            port['status'] = const.PORT_STATUS_DOWN
+            super(Ml2Plugin, self).update_port(
+                mech_context._plugin_context, port_id,
+                {attributes.PORT: {'status': const.PORT_STATUS_DOWN}})
 
         if port['device_owner'] == const.DEVICE_OWNER_DVR_INTERFACE:
             binding.vif_type = portbindings.VIF_TYPE_UNBOUND
@@ -548,10 +552,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         if not segment:
             # REVISIT(rkukura): This should notify agent to unplug port
             network = mech_context.network.current
-            LOG.warning(_LW("In _notify_port_updated(), no bound segment for "
-                            "port %(port_id)s on network %(network_id)s"),
-                        {'port_id': port['id'],
-                         'network_id': network['id']})
+            LOG.debug("In _notify_port_updated(), no bound segment for "
+                      "port %(port_id)s on network %(network_id)s",
+                      {'port_id': port['id'], 'network_id': network['id']})
             return
         self.notifier.port_update(mech_context._plugin_context, port,
                                   segment[api.NETWORK_TYPE],
@@ -1282,21 +1285,23 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             binding.vif_type == portbindings.VIF_TYPE_BINDING_FAILED or
             router_id != device_id)
         if update_required:
-            with session.begin(subtransactions=True):
-                try:
-                    orig_port = super(Ml2Plugin, self).get_port(context, id)
-                except exc.PortNotFound:
-                    LOG.debug("DVR Port %s has been deleted concurrently", id)
-                    return
-                if not binding:
-                    binding = db.ensure_dvr_port_binding(
-                        session, id, host, router_id=device_id)
-                network = self.get_network(context, orig_port['network_id'])
-                levels = db.get_binding_levels(session, id, host)
-                mech_context = driver_context.PortContext(self,
-                    context, orig_port, network,
-                    binding, levels, original_port=orig_port)
-                self._process_dvr_port_binding(mech_context, context, attrs)
+            try:
+                with session.begin(subtransactions=True):
+                    orig_port = self.get_port(context, id)
+                    if not binding:
+                        binding = db.ensure_dvr_port_binding(
+                            session, id, host, router_id=device_id)
+                    network = self.get_network(context,
+                                               orig_port['network_id'])
+                    levels = db.get_binding_levels(session, id, host)
+                    mech_context = driver_context.PortContext(self,
+                        context, orig_port, network,
+                        binding, levels, original_port=orig_port)
+                    self._process_dvr_port_binding(mech_context, context,
+                                                   attrs)
+            except (os_db_exception.DBReferenceError, exc.PortNotFound):
+                LOG.debug("DVR Port %s has been deleted concurrently", id)
+                return
             self._bind_port_if_needed(mech_context)
 
     def _pre_delete_port(self, context, port_id, port_check):

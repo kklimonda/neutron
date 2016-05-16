@@ -270,6 +270,12 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
                                        'INPUT',
                                        metadata_port_filter))
 
+    def _assert_iptables_rules_converged(self, router):
+        # if your code is failing on this line, it means you are not generating
+        # your iptables rules in the same format that iptables-save returns
+        # them. run iptables-save to see the format they should be in
+        self.assertFalse(router.iptables_manager.apply())
+
     def _assert_internal_devices(self, router):
         internal_devices = router.router[l3_constants.INTERFACE_KEY]
         self.assertTrue(len(internal_devices))
@@ -426,6 +432,27 @@ class L3AgentTestCase(L3AgentTestFramework):
                                      'fe80::f816:3eff:fe2e:1')
         self._router_lifecycle(enable_ha=False, dual_stack=True,
                                v6_ext_gw_with_sub=False)
+
+    def test_legacy_router_ns_rebuild(self):
+        router_info = self.generate_router_info(False)
+        router = self.manage_router(self.agent, router_info)
+        gw_port = router.router['gw_port']
+        gw_inf_name = router.get_external_device_name(gw_port['id'])
+        router_ports = [gw_inf_name]
+        for i_port in router_info.get(l3_constants.INTERFACE_KEY, []):
+            interface_name = router.get_internal_device_name(i_port['id'])
+            router_ports.append(interface_name)
+
+        namespaces.Namespace.delete(router.router_namespace)
+
+        # l3 agent should be able to rebuild the ns when it is deleted
+        self.manage_router(self.agent, router_info)
+        # Assert the router ports are there in namespace
+        self.assertTrue(
+            all([ip_lib.device_exists(port, namespace=router.ns_name)
+                for port in router_ports]))
+
+        self._delete_router(self.agent, router.router_id)
 
     def test_ha_router_lifecycle(self):
         self._router_lifecycle(enable_ha=True)
@@ -680,6 +707,7 @@ class L3AgentTestCase(L3AgentTestFramework):
             self.assertTrue(self.floating_ips_configured(router))
             self._assert_snat_chains(router)
             self._assert_floating_ip_chains(router)
+            self._assert_iptables_rules_converged(router)
             self._assert_extra_routes(router)
             ip_versions = [4, 6] if (ip_version == 6 or dual_stack) else [4]
             self._assert_onlink_subnet_routes(router, ip_versions)
@@ -1138,6 +1166,7 @@ class TestDvrRouter(L3AgentTestFramework):
         # attach interfaces, etc...)
         router = self.manage_router(self.agent, router_info)
 
+        ext_gateway_port = router_info['gw_port']
         self.assertTrue(self._namespace_exists(router.ns_name))
         self.assertTrue(self._metadata_proxy_exists(self.agent.conf, router))
         self._assert_internal_devices(router)
@@ -1154,7 +1183,7 @@ class TestDvrRouter(L3AgentTestFramework):
             self._assert_extra_routes(router, namespace=snat_ns_name)
 
         self._delete_router(self.agent, router.router_id)
-        self._assert_interfaces_deleted_from_ovs()
+        self._assert_fip_namespace_deleted(ext_gateway_port)
         self._assert_router_does_not_exist(router)
 
     def generate_dvr_router_info(self,
@@ -1358,7 +1387,7 @@ class TestDvrRouter(L3AgentTestFramework):
         router1.router[l3_constants.FLOATINGIP_KEY] = []
         self.manage_router(restarted_agent, router1.router)
         self._assert_dvr_snat_gateway(router1)
-        self.assertFalse(self._namespace_exists(fip_ns))
+        self.assertTrue(self._namespace_exists(fip_ns))
 
     def test_dvr_router_add_fips_on_restarted_agent(self):
         self.agent.conf.agent_mode = 'dvr'
@@ -1517,29 +1546,11 @@ class TestDvrRouter(L3AgentTestFramework):
         self.assertFalse(sg_device)
         self.assertTrue(qg_device)
 
-    def test_dvr_router_calls_delete_agent_gateway_if_last_fip(self):
-        """Test to validate delete fip if it is last fip managed by agent."""
-        self.agent.conf.agent_mode = 'dvr_snat'
-        router_info = self.generate_dvr_router_info(enable_snat=True)
-        router1 = self.manage_router(self.agent, router_info)
-        floating_agent_gw_port = (
-            router1.router[l3_constants.FLOATINGIP_AGENT_INTF_KEY])
-        self.assertTrue(floating_agent_gw_port)
-        fip_ns = router1.fip_ns.get_name()
-        router1.fip_ns.agent_gw_port = floating_agent_gw_port
-        self.assertTrue(self._namespace_exists(router1.ns_name))
-        self.assertTrue(self._namespace_exists(fip_ns))
-        self._assert_dvr_floating_ips(router1)
-        self._assert_dvr_snat_gateway(router1)
-        router1.router[l3_constants.FLOATINGIP_KEY] = []
-        rpc_mock = mock.patch.object(
-            self.agent.plugin_rpc, 'delete_agent_gateway_port').start()
-        self.agent._process_updated_router(router1.router)
-        self.assertTrue(rpc_mock.called)
-        rpc_mock.assert_called_once_with(
-            self.agent.context,
-            floating_agent_gw_port[0]['network_id'])
-        self.assertFalse(self._namespace_exists(fip_ns))
+    def _assert_fip_namespace_deleted(self, ext_gateway_port):
+        ext_net_id = ext_gateway_port['network_id']
+        self.agent.fipnamespace_delete_on_ext_net(
+            self.agent.context, ext_net_id)
+        self._assert_interfaces_deleted_from_ovs()
 
     def test_dvr_router_static_routes(self):
         """Test to validate the extra routes on dvr routers."""

@@ -65,7 +65,7 @@ class MetadataDriver(object):
         return [('PREROUTING', '-d 169.254.169.254/32 '
                  '-i %(interface_name)s '
                  '-p tcp -m tcp --dport 80 -j REDIRECT '
-                 '--to-port %(port)s' %
+                 '--to-ports %(port)s' %
                  {'interface_name': namespaces.INTERNAL_DEV_PREFIX + '+',
                   'port': port})]
 
@@ -166,14 +166,6 @@ def after_router_added(resource, event, l3_agent, **kwargs):
 def before_router_removed(resource, event, l3_agent, **kwargs):
     router = kwargs['router']
     proxy = l3_agent.metadata_driver
-    for c, r in proxy.metadata_filter_rules(proxy.metadata_port,
-                                           proxy.metadata_access_mark):
-        router.iptables_manager.ipv4['filter'].remove_rule(c, r)
-    for c, r in proxy.metadata_mangle_rules(proxy.metadata_access_mark):
-        router.iptables_manager.ipv4['mangle'].remove_rule(c, r)
-    for c, r in proxy.metadata_nat_rules(proxy.metadata_port):
-        router.iptables_manager.ipv4['nat'].remove_rule(c, r)
-    router.iptables_manager.apply()
 
     proxy.destroy_monitored_metadata_proxy(l3_agent.process_monitor,
                                           router.router['id'],

@@ -230,7 +230,7 @@ class ProcessMonitor(object):
                 LOG.error(_LE("%(service)s for %(resource_type)s "
                               "with uuid %(uuid)s not found. "
                               "The process should not have died"),
-                          {'service': pm.service,
+                          {'service': service_id.service,
                            'resource_type': self._resource_type,
                            'uuid': service_id.uuid})
                 self._execute_action(service_id)
@@ -247,9 +247,10 @@ class ProcessMonitor(object):
         action_function(service_id)
 
     def _respawn_action(self, service_id):
-        LOG.error(_LE("respawning %(service)s for uuid %(uuid)s"),
-                  {'service': service_id.service,
-                   'uuid': service_id.uuid})
+        # _LE used to avoid dropping translation for the message
+        LOG.warning(_LE("respawning %(service)s for uuid %(uuid)s"),
+                    {'service': service_id.service,
+                     'uuid': service_id.uuid})  # noqa
         self._monitored_processes[service_id].enable()
 
     def _exit_action(self, service_id):

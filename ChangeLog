@@ -1,20 +1,80 @@
 CHANGES
 =======
 
+* Add exponential back-off RPC client
+* Updated from global requirements
+* Cleanup stale OVS flows for physical bridges
+* IPtables firewall prevent ICMPv6 spoofing
+* OVS: Add mac spoofing filtering to flows
+* Delete fipnamespace when external net removed on DVR
+* unbreak unit test caused by c5fa665de3173f3ad82cc3e7624b5968bc52c08d
+* Consume service plugins queues in RPC workers
+* Only prevent l3 port deletion if router exists
+* Don't disconnect br-int from phys br if connected
+* ML2: update port's status to DOWN if its binding info has changed
+* Updated from global requirements
+* Fix corrupted release note in Liberty
+* Iptables firewall prevent IP spoofed DHCP requests
+* Switched from fixtures to mock to mock out starting RPC consumers
+* DVR: Increase the link-local address pair range
+* L3 agent: match format used by iptables
+* Don't drop 'protocol' from client supplied security_group_rule dict
+* Split the FIP Namespace delete in L3 agent for DVR
+* Don't delete br-int to br-tun patch on startup
+* Delete metadata_proxy for network if it is not needed
+* Adds base in-tree functional testing of the dhcp agent (OVS)
+* add arp_responder flag to linuxbridge agent
+* Switches metering agent to stateless iptables
+* Fix setting peer to bridge interfaces
+* Refactor and fix dummy process fixture
+* Remove obsolete keepalived PID files before start
+* Support Routes==2.3
+* Move test_extend_port_dict_no_port_security to where it belongs to
+* SG protocol validation to allow numbers or names
+* DVR: rebind port if ofport changes
+* Linux Bridge: Add mac spoofing filtering to ebtables
+* Change log level from error to warning
+* DHCP: Downgrade 'network has been deleted' logs
+* Catch DBDuplicateEntry errors in RBAC code
+* Change the exception type from ValueError to IpamValueInvalid
+* L3 agent: log traceback on floating ip setup failure
+* Skip fullstack L3 HA test
+* lb: avoid doing nova VIF work plumbing tap to qbr
+* Remove test_external_network_visibility
+* Check tap bridge timestamps to detect local changes
+
 7.0.4
 -----
 
+* Catch DB reference errors in binding DVR ports
+* Move db query to fetch down bindings under try/except
+* ML2: Downgrade 'no bound segment' warning
+* Close XenAPI sessions in neutron-rootwrap-xen-dom0
+* Allow address pairs to be cleared with None
+* Downgrade "device not found" log message
+* Downgrade network not found log in DHCP RPC
+* Fix branch order when upgrading to alembic milestone
 * Add option for nova endpoint type
 * Update devstack plugin for dependent packages
+* Removes host file contents from DHCP agent logs
+* Add VLAN tag info to port before applying SG initial setup
 * De-dup conntrack deletions before running them
+* Optimize and refactor router delete execution
 * Unmarshall portinfo on update_fdb_entries calls
 * Avoid DuplicateOptError in functional tests
+* Correct insufficient name for external process in manager log
 * Retry port create/update on duplicate db records
+* Separate the command for replace_port to delete and add
+* Corrected wrong ethertype exception message
 * Catch PortNotFound after HA router race condition
+* Add more log when dhcp agent sync_state
+* Prevent binding IPv6 addresses to Neutron interfaces
 * Documenting network_device_mtu in agents config files
 * Make all tox targets constrained
+* Do not remove router from dvr_snat agents on dvr port deletion
 * Filter HA routers without HA interface and state
 * Correct return values for bridge sysctl calls
+* Fix port relationship for DVRPortBinding
 * Add tests for RPC methods/classes
 * Fix sanity check --no* BoolOpts
 * Add extension requirement in port-security api test
