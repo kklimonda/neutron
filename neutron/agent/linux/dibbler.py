@@ -13,12 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os
-import shutil
-
 import jinja2
+import os
 from oslo_config import cfg
-from oslo_log import log as logging
+import shutil
 import six
 
 from neutron.agent.linux import external_process
@@ -26,7 +24,8 @@ from neutron.agent.linux import pd
 from neutron.agent.linux import pd_driver
 from neutron.agent.linux import utils
 from neutron.common import constants
-from neutron.common import utils as common_utils
+from oslo_log import log as logging
+
 
 LOG = logging.getLogger(__name__)
 
@@ -84,7 +83,7 @@ class PDDibbler(pd_driver.PDDriverBase):
         buf.write('%s' % SCRIPT_TEMPLATE.render(
                              prefix_path=self.prefix_path,
                              l3_agent_pid=os.getpid()))
-        common_utils.replace_file(script_path, buf.getvalue())
+        utils.replace_file(script_path, buf.getvalue())
         os.chmod(script_path, 0o744)
 
         dibbler_conf = utils.get_conf_file_name(dcwa, 'client', 'conf', False)
@@ -96,7 +95,7 @@ class PDDibbler(pd_driver.PDDriverBase):
                              interface_name='"%s"' % ex_gw_ifname,
                              bind_address='%s' % lla))
 
-        common_utils.replace_file(dibbler_conf, buf.getvalue())
+        utils.replace_file(dibbler_conf, buf.getvalue())
         return dcwa
 
     def _spawn_dibbler(self, pmon, router_ns, dibbler_conf):

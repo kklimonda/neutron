@@ -17,22 +17,22 @@ import collections
 import re
 
 import netaddr
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import six
 
-from neutron._i18n import _LI
 from neutron.agent import firewall
 from neutron.agent.linux import ip_conntrack
 from neutron.agent.linux import ipset_manager
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_manager
 from neutron.agent.linux import utils
-from neutron.common import constants as n_const
+from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as c_utils
+from neutron.extensions import portsecurity as psec
+from neutron.i18n import _LI
 
 
 LOG = logging.getLogger(__name__)
@@ -41,6 +41,8 @@ SPOOF_FILTER = 'spoof-filter'
 CHAIN_NAME_PREFIX = {firewall.INGRESS_DIRECTION: 'i',
                      firewall.EGRESS_DIRECTION: 'o',
                      SPOOF_FILTER: 's'}
+DIRECTION_IP_PREFIX = {firewall.INGRESS_DIRECTION: 'source_ip_prefix',
+                       firewall.EGRESS_DIRECTION: 'dest_ip_prefix'}
 ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES = [131, 135, 143]
 IPSET_DIRECTION = {firewall.INGRESS_DIRECTION: 'src',
                    firewall.EGRESS_DIRECTION: 'dst'}
@@ -89,7 +91,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         self._enabled_netfilter_for_bridges = False
         self.updated_rule_sg_ids = set()
         self.updated_sg_members = set()
-        self.devices_with_updated_sg_members = collections.defaultdict(list)
+        self.devices_with_udpated_sg_members = collections.defaultdict(list)
 
     def _enable_netfilter_for_bridges(self):
         # we only need to set these values once, but it has to be when
@@ -124,11 +126,10 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         for sg_id in sec_group_ids:
             for device in self.filtered_ports.values():
                 if sg_id in device.get('security_group_source_groups', []):
-                    self.devices_with_updated_sg_members[sg_id].append(device)
+                    self.devices_with_udpated_sg_members[sg_id].append(device)
 
     def security_group_updated(self, action_type, sec_group_ids,
-                               device_ids=None):
-        device_ids = device_ids or []
+                               device_ids=[]):
         if action_type == 'sg_rule':
             self.updated_rule_sg_ids.update(sec_group_ids)
         elif action_type == 'sg_member':
@@ -145,8 +146,11 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         LOG.debug("Update members of security group (%s)", sg_id)
         self.sg_members[sg_id] = collections.defaultdict(list, sg_members)
 
+    def _ps_enabled(self, port):
+        return port.get(psec.PORTSECURITY, True)
+
     def _set_ports(self, port):
-        if not firewall.port_sec_enabled(port):
+        if not self._ps_enabled(port):
             self.unfiltered_ports[port['device']] = port
             self.filtered_ports.pop(port['device'], None)
         else:
@@ -382,7 +386,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         else:
             mac_ipv6_pairs.append((mac, ip_address))
             lla = str(ipv6_utils.get_ipv6_addr_by_EUI64(
-                    n_const.IPV6_LLA_PREFIX, mac))
+                    constants.IPV6_LLA_PREFIX, mac))
             mac_ipv6_pairs.append((mac, lla))
 
     def _spoofing_rule(self, port, ipv4_rules, ipv6_rules):
@@ -448,7 +452,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         # Allow multicast listener, neighbor solicitation and
         # neighbor advertisement into the instance
         icmpv6_rules = []
-        for icmp6_type in n_const.ICMPV6_ALLOWED_TYPES:
+        for icmp6_type in constants.ICMPV6_ALLOWED_TYPES:
             icmpv6_rules += ['-p ipv6-icmp -m icmp6 --icmpv6-type %s '
                              '-j RETURN' % icmp6_type]
         return icmpv6_rules
@@ -479,8 +483,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
             for ip in self.sg_members[remote_group_id][ethertype]:
                 if ip not in port_ips:
                     ip_rule = rule.copy()
-                    direction_ip_prefix = firewall.DIRECTION_IP_PREFIX[
-                        direction]
+                    direction_ip_prefix = DIRECTION_IP_PREFIX[direction]
                     ip_prefix = str(netaddr.IPNetwork(ip).cidr)
                     ip_rule[direction_ip_prefix] = ip_prefix
                     yield ip_rule
@@ -547,7 +550,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
     def _generate_ipset_rule_args(self, sg_rule, remote_gid):
         ethertype = sg_rule.get('ethertype')
         ipset_name = self.ipset.get_name(remote_gid, ethertype)
-        if not self.ipset.set_name_exists(ipset_name):
+        if not self.ipset.set_exists(remote_gid, ethertype):
             #NOTE(mangelajo): ipsets for empty groups are not created
             #                 thus we can't reference them.
             return None
@@ -590,17 +593,10 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
     def _convert_sgr_to_iptables_rules(self, security_group_rules):
         iptables_rules = []
         self._allow_established(iptables_rules)
-        seen_sg_rules = set()
         for rule in security_group_rules:
             args = self._convert_sg_rule_to_iptables_args(rule)
             if args:
-                rule_command = ' '.join(args)
-                if rule_command in seen_sg_rules:
-                    # since these rules are from multiple security groups,
-                    # there may be duplicates so we prune them out here
-                    continue
-                seen_sg_rules.add(rule_command)
-                iptables_rules.append(rule_command)
+                iptables_rules += [' '.join(args)]
 
         self._drop_invalid_packets(iptables_rules)
         iptables_rules += [comment_rule('-j $sg-fallback',
@@ -808,7 +804,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
 
     def _clean_deleted_remote_sg_members_conntrack_entries(self):
         deleted_sg_ids = set()
-        for sg_id, devices in self.devices_with_updated_sg_members.items():
+        for sg_id, devices in self.devices_with_udpated_sg_members.items():
             for ethertype in [constants.IPv4, constants.IPv6]:
                 pre_ips = self._get_sg_members(
                     self.pre_sg_members, sg_id, ethertype)
@@ -820,7 +816,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                         devices, ethertype, ips)
             deleted_sg_ids.add(sg_id)
         for id in deleted_sg_ids:
-            self.devices_with_updated_sg_members.pop(id, None)
+            self.devices_with_udpated_sg_members.pop(id, None)
 
     def _remove_conntrack_entries_from_sg_updates(self):
         self._clean_deleted_sg_rule_conntrack_entries()

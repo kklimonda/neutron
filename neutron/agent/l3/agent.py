@@ -15,7 +15,6 @@
 
 import eventlet
 import netaddr
-from neutron_lib import constants as lib_const
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -24,10 +23,8 @@ from oslo_service import periodic_task
 from oslo_utils import excutils
 from oslo_utils import timeutils
 
-from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.common import utils as common_utils
 from neutron.agent.l3 import dvr
-from neutron.agent.l3 import dvr_edge_ha_router
 from neutron.agent.l3 import dvr_edge_router as dvr_router
 from neutron.agent.l3 import dvr_local_router as dvr_local_router
 from neutron.agent.l3 import ha
@@ -35,6 +32,7 @@ from neutron.agent.l3 import ha_router
 from neutron.agent.l3 import legacy_router
 from neutron.agent.l3 import namespace_manager
 from neutron.agent.l3 import namespaces
+from neutron.agent.l3 import router_info as rinf
 from neutron.agent.l3 import router_processing_queue as queue
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
@@ -50,18 +48,21 @@ from neutron.common import ipv6_utils
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron import context as n_context
+from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
+
+try:
+    from neutron_fwaas.services.firewall.agents.l3reference \
+        import firewall_l3_agent
+except Exception:
+    # TODO(dougw) - REMOVE THIS FROM NEUTRON; during l3_agent refactor only
+    from neutron.services.firewall.agents.l3reference import firewall_l3_agent
 
 LOG = logging.getLogger(__name__)
 # TODO(Carl) Following constants retained to increase SNR during refactoring
 NS_PREFIX = namespaces.NS_PREFIX
 INTERNAL_DEV_PREFIX = namespaces.INTERNAL_DEV_PREFIX
 EXTERNAL_DEV_PREFIX = namespaces.EXTERNAL_DEV_PREFIX
-
-# Number of routers to fetch from server at a time on resync.
-# Needed to reduce load on server side and to speed up resync on agent side.
-SYNC_ROUTERS_MAX_CHUNK_SIZE = 256
-SYNC_ROUTERS_MIN_CHUNK_SIZE = 32
 
 
 class L3PluginApi(object):
@@ -81,8 +82,6 @@ class L3PluginApi(object):
         1.6 - Added process_prefix_update
         1.7 - DVR support: new L3 plugin methods added.
               - delete_agent_gateway_port
-        1.8 - Added address scope information
-        1.9 - Added get_router_ids
     """
 
     def __init__(self, topic, host):
@@ -95,11 +94,6 @@ class L3PluginApi(object):
         cctxt = self.client.prepare()
         return cctxt.call(context, 'sync_routers', host=self.host,
                           router_ids=router_ids)
-
-    def get_router_ids(self, context):
-        """Make a remote process call to retrieve scheduled routers ids."""
-        cctxt = self.client.prepare(version='1.9')
-        return cctxt.call(context, 'get_router_ids', host=self.host)
 
     def get_external_network_id(self, context):
         """Make a remote process call to retrieve the external network id.
@@ -153,7 +147,8 @@ class L3PluginApi(object):
                           host=self.host, network_id=fip_net)
 
 
-class L3NATAgent(ha.AgentMixin,
+class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
+                 ha.AgentMixin,
                  dvr.AgentMixin,
                  manager.Manager):
     """Manager for L3NatAgent
@@ -192,12 +187,13 @@ class L3NATAgent(ha.AgentMixin,
         self.context = n_context.get_admin_context_without_session()
         self.plugin_rpc = L3PluginApi(topics.L3PLUGIN, host)
         self.fullsync = True
-        self.sync_routers_chunk_size = SYNC_ROUTERS_MAX_CHUNK_SIZE
 
         # Get the list of service plugins from Neutron Server
         # This is the first place where we contact neutron-server on startup
         # so retry in case its not ready to respond.
+        retry_count = 5
         while True:
+            retry_count = retry_count - 1
             try:
                 self.neutron_service_plugins = (
                     self.plugin_rpc.get_service_plugin_list(self.context))
@@ -214,13 +210,13 @@ class L3NATAgent(ha.AgentMixin,
                 self.neutron_service_plugins = None
             except oslo_messaging.MessagingTimeout as e:
                 with excutils.save_and_reraise_exception() as ctx:
-                    ctx.reraise = False
-                    LOG.warning(_LW('l3-agent cannot contact neutron server '
-                                    'to retrieve service plugins enabled. '
-                                    'Check connectivity to neutron server. '
-                                    'Retrying... '
-                                    'Detailed message: %(msg)s.') % {'msg': e})
-                    continue
+                    if retry_count > 0:
+                        ctx.reraise = False
+                        LOG.warning(_LW('l3-agent cannot check service '
+                                        'plugins enabled on the neutron '
+                                        'server. Retrying. '
+                                        'Detail message: %s'), e)
+                        continue
             break
 
         self.metadata_driver = None
@@ -230,10 +226,11 @@ class L3NATAgent(ha.AgentMixin,
         self.namespaces_manager = namespace_manager.NamespaceManager(
             self.conf,
             self.driver,
+            self.conf.use_namespaces,
             self.metadata_driver)
 
         self._queue = queue.RouterProcessingQueue()
-        super(L3NATAgent, self).__init__(host=self.conf.host)
+        super(L3NATAgent, self).__init__(conf=self.conf)
 
         self.target_ex_net_id = None
         self.use_ipv6 = ipv6_utils.is_enabled()
@@ -252,6 +249,11 @@ class L3NATAgent(ha.AgentMixin,
         """
         if not self.conf.interface_driver:
             msg = _LE('An interface driver must be specified')
+            LOG.error(msg)
+            raise SystemExit(1)
+
+        if not self.conf.use_namespaces and not self.conf.router_id:
+            msg = _LE('Router id is required if not using namespaces.')
             LOG.error(msg)
             raise SystemExit(1)
 
@@ -297,6 +299,11 @@ class L3NATAgent(ha.AgentMixin,
                     raise Exception(msg)
 
     def _create_router(self, router_id, router):
+        # TODO(Carl) We need to support a router that is both HA and DVR.  The
+        # patch that enables it will replace these lines.  See bug #1365473.
+        if router.get('distributed') and router.get('ha'):
+            raise n_exc.DvrHaRouterNotSupported(router_id=router_id)
+
         args = []
         kwargs = {
             'router_id': router_id,
@@ -309,13 +316,6 @@ class L3NATAgent(ha.AgentMixin,
         if router.get('distributed'):
             kwargs['agent'] = self
             kwargs['host'] = self.host
-
-        if router.get('distributed') and router.get('ha'):
-            if self.conf.agent_mode == l3_constants.L3_AGENT_MODE_DVR_SNAT:
-                kwargs['state_change_callback'] = self.enqueue_state_change
-                return dvr_edge_ha_router.DvrEdgeHaRouter(*args, **kwargs)
-
-        if router.get('distributed'):
             if self.conf.agent_mode == l3_constants.L3_AGENT_MODE_DVR_SNAT:
                 return dvr_router.DvrEdgeRouter(*args, **kwargs)
             else:
@@ -336,6 +336,9 @@ class L3NATAgent(ha.AgentMixin,
 
         ri.initialize(self.process_monitor)
 
+        # TODO(Carl) This is a hook in to fwaas.  It should be cleaned up.
+        self.process_router_add(ri)
+
     def _safe_router_removed(self, router_id):
         """Try to delete a router and return True if successful."""
 
@@ -350,8 +353,8 @@ class L3NATAgent(ha.AgentMixin,
     def _router_removed(self, router_id):
         ri = self.router_info.get(router_id)
         if ri is None:
-            LOG.warning(_LW("Info for router %s was not found. "
-                            "Performing router cleanup"), router_id)
+            LOG.warn(_LW("Info for router %s was not found. "
+                         "Performing router cleanup"), router_id)
             self.namespaces_manager.ensure_router_cleanup(router_id)
             return
 
@@ -362,6 +365,21 @@ class L3NATAgent(ha.AgentMixin,
         del self.router_info[router_id]
 
         registry.notify(resources.ROUTER, events.AFTER_DELETE, self, router=ri)
+
+    def update_fip_statuses(self, ri, existing_floating_ips, fip_statuses):
+        # Identify floating IPs which were disabled
+        ri.floating_ips = set(fip_statuses.keys())
+        for fip_id in existing_floating_ips - ri.floating_ips:
+            fip_statuses[fip_id] = l3_constants.FLOATINGIP_STATUS_DOWN
+        # filter out statuses that didn't change
+        fip_statuses = {f: stat for f, stat in fip_statuses.items()
+                        if stat != rinf.FLOATINGIP_STATUS_NOCHANGE}
+        if not fip_statuses:
+            return
+        LOG.debug('Sending floating ip statuses: %s', fip_statuses)
+        # Update floating IP status on the neutron server
+        self.plugin_rpc.update_floatingip_statuses(
+            self.context, ri.router_id, fip_statuses)
 
     def router_deleted(self, context, router_id):
         """Deal with router deletion RPC message."""
@@ -401,7 +419,10 @@ class L3NATAgent(ha.AgentMixin,
                       self.conf.external_network_bridge)
             return
 
-        if self.conf.router_id and router['id'] != self.conf.router_id:
+        # If namespaces are disabled, only process the router associated
+        # with the configured agent id.
+        if (not self.conf.use_namespaces and
+            router['id'] != self.conf.router_id):
             raise n_exc.RouterNotCompatibleWithAgent(router_id=router['id'])
 
         # Either ex_net_id or handle_internal_only_routers must be set
@@ -510,6 +531,7 @@ class L3NATAgent(ha.AgentMixin,
     # is responsible for task execution.
     @periodic_task.periodic_task(spacing=1, run_immediately=True)
     def periodic_sync_routers_task(self, context):
+        self.process_services_sync(context)
         if not self.fullsync:
             return
         LOG.debug("Starting fullsync periodic_sync_routers_task")
@@ -531,68 +553,46 @@ class L3NATAgent(ha.AgentMixin,
 
     def fetch_and_sync_all_routers(self, context, ns_manager):
         prev_router_ids = set(self.router_info)
-        curr_router_ids = set()
         timestamp = timeutils.utcnow()
 
         try:
-            router_ids = ([self.conf.router_id] if self.conf.router_id else
-                          self.plugin_rpc.get_router_ids(context))
-            # fetch routers by chunks to reduce the load on server and to
-            # start router processing earlier
-            for i in range(0, len(router_ids), self.sync_routers_chunk_size):
-                routers = self.plugin_rpc.get_routers(
-                    context, router_ids[i:i + self.sync_routers_chunk_size])
-                LOG.debug('Processing :%r', routers)
-                for r in routers:
-                    curr_router_ids.add(r['id'])
-                    ns_manager.keep_router(r['id'])
-                    if r.get('distributed'):
-                        # need to keep fip namespaces as well
-                        ext_net_id = (r['external_gateway_info'] or {}).get(
-                            'network_id')
-                        if ext_net_id:
-                            ns_manager.keep_ext_net(ext_net_id)
-                    update = queue.RouterUpdate(
-                        r['id'],
-                        queue.PRIORITY_SYNC_ROUTERS_TASK,
-                        router=r,
-                        timestamp=timestamp)
-                    self._queue.add(update)
-        except oslo_messaging.MessagingTimeout:
-            if self.sync_routers_chunk_size > SYNC_ROUTERS_MIN_CHUNK_SIZE:
-                self.sync_routers_chunk_size = max(
-                    self.sync_routers_chunk_size / 2,
-                    SYNC_ROUTERS_MIN_CHUNK_SIZE)
-                LOG.error(_LE('Server failed to return info for routers in '
-                              'required time, decreasing chunk size to: %s'),
-                          self.sync_routers_chunk_size)
+            if self.conf.use_namespaces:
+                routers = self.plugin_rpc.get_routers(context)
             else:
-                LOG.error(_LE('Server failed to return info for routers in '
-                              'required time even with min chunk size: %s. '
-                              'It might be under very high load or '
-                              'just inoperable'),
-                          self.sync_routers_chunk_size)
-            raise
+                routers = self.plugin_rpc.get_routers(context,
+                                                      [self.conf.router_id])
+
         except oslo_messaging.MessagingException:
             LOG.exception(_LE("Failed synchronizing routers due to RPC error"))
             raise n_exc.AbortSyncRouters()
+        else:
+            LOG.debug('Processing :%r', routers)
+            for r in routers:
+                ns_manager.keep_router(r['id'])
+                if r.get('distributed'):
+                    # need to keep fip namespaces as well
+                    ext_net_id = (r['external_gateway_info'] or {}).get(
+                        'network_id')
+                    if ext_net_id:
+                        ns_manager.keep_ext_net(ext_net_id)
+                update = queue.RouterUpdate(r['id'],
+                                            queue.PRIORITY_SYNC_ROUTERS_TASK,
+                                            router=r,
+                                            timestamp=timestamp)
+                self._queue.add(update)
+            self.fullsync = False
+            LOG.debug("periodic_sync_routers_task successfully completed")
 
-        self.fullsync = False
-        LOG.debug("periodic_sync_routers_task successfully completed")
-        # adjust chunk size after successful sync
-        if self.sync_routers_chunk_size < SYNC_ROUTERS_MAX_CHUNK_SIZE:
-            self.sync_routers_chunk_size = min(
-                self.sync_routers_chunk_size + SYNC_ROUTERS_MIN_CHUNK_SIZE,
-                SYNC_ROUTERS_MAX_CHUNK_SIZE)
+            curr_router_ids = set([r['id'] for r in routers])
 
-        # Delete routers that have disappeared since the last sync
-        for router_id in prev_router_ids - curr_router_ids:
-            ns_manager.keep_router(router_id)
-            update = queue.RouterUpdate(router_id,
-                                        queue.PRIORITY_SYNC_ROUTERS_TASK,
-                                        timestamp=timestamp,
-                                        action=queue.DELETE_ROUTER)
-            self._queue.add(update)
+            # Delete routers that have disappeared since the last sync
+            for router_id in prev_router_ids - curr_router_ids:
+                ns_manager.keep_router(router_id)
+                update = queue.RouterUpdate(router_id,
+                                            queue.PRIORITY_SYNC_ROUTERS_TASK,
+                                            timestamp=timestamp,
+                                            action=queue.DELETE_ROUTER)
+                self._queue.add(update)
 
     def after_start(self):
         # Note: the FWaaS' vArmourL3NATAgent is a subclass of L3NATAgent. It
@@ -616,14 +616,14 @@ class L3NATAgentWithStateReport(L3NATAgent):
 
     def __init__(self, host, conf=None):
         super(L3NATAgentWithStateReport, self).__init__(host=host, conf=conf)
-        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
         self.agent_state = {
             'binary': 'neutron-l3-agent',
             'host': host,
-            'availability_zone': self.conf.AGENT.availability_zone,
             'topic': topics.L3_AGENT,
             'configurations': {
                 'agent_mode': self.conf.agent_mode,
+                'use_namespaces': self.conf.use_namespaces,
                 'router_id': self.conf.router_id,
                 'handle_internal_only_routers':
                 self.conf.handle_internal_only_routers,
@@ -633,7 +633,7 @@ class L3NATAgentWithStateReport(L3NATAgent):
                 'interface_driver': self.conf.interface_driver,
                 'log_agent_heartbeats': self.conf.AGENT.log_agent_heartbeats},
             'start_flag': True,
-            'agent_type': lib_const.AGENT_TYPE_L3}
+            'agent_type': l3_constants.AGENT_TYPE_L3}
         report_interval = self.conf.AGENT.report_interval
         if report_interval:
             self.heartbeat = loopingcall.FixedIntervalLoopingCall(
@@ -650,9 +650,9 @@ class L3NATAgentWithStateReport(L3NATAgent):
             ex_gw_port = ri.get_ex_gw_port()
             if ex_gw_port:
                 num_ex_gw_ports += 1
-            num_interfaces += len(ri.router.get(lib_const.INTERFACE_KEY,
+            num_interfaces += len(ri.router.get(l3_constants.INTERFACE_KEY,
                                                 []))
-            num_floating_ips += len(ri.router.get(lib_const.FLOATINGIP_KEY,
+            num_floating_ips += len(ri.router.get(l3_constants.FLOATINGIP_KEY,
                                                   []))
         configurations = self.agent_state['configurations']
         configurations['routers'] = num_routers
@@ -670,8 +670,8 @@ class L3NATAgentWithStateReport(L3NATAgent):
             self.agent_state.pop('start_flag', None)
         except AttributeError:
             # This means the server does not support report_state
-            LOG.warning(_LW("Neutron server does not support state report. "
-                            "State report for this agent will be disabled."))
+            LOG.warn(_LW("Neutron server does not support state report."
+                         " State report for this agent will be disabled."))
             self.heartbeat.stop()
             return
         except Exception:

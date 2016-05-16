@@ -1,4 +1,4 @@
-# Copyright (c) 2014 OpenStack Foundation
+# Copyright (c) 2014 Openstack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -20,8 +20,6 @@ from oslo_config import cfg
 from oslo_utils import importutils
 import six
 
-from neutron._i18n import _
-
 interface_map = {
     'vsctl': 'neutron.agent.ovsdb.impl_vsctl.OvsdbVsctl',
     'native': 'neutron.agent.ovsdb.impl_idl.OvsdbIdl',
@@ -32,17 +30,13 @@ OPTS = [
                choices=interface_map.keys(),
                default='vsctl',
                help=_('The interface for interacting with the OVSDB')),
-    cfg.StrOpt('ovsdb_connection',
-               default='tcp:127.0.0.1:6640',
-               help=_('The connection string for the native OVSDB backend. '
-                      'Requires the native ovsdb_interface to be enabled.'))
 ]
 cfg.CONF.register_opts(OPTS, 'OVS')
 
 
 @six.add_metaclass(abc.ABCMeta)
 class Command(object):
-    """An OVSDB command that can be executed in a transaction
+    """An OSVDB command that can be executed in a transaction
 
     :attr result: The result of executing the command in a transaction
     """
@@ -102,7 +96,7 @@ class API(object):
 
     @abc.abstractmethod
     def add_br(self, name, may_exist=True, datapath_type=None):
-        """Create a command to add an OVS bridge
+        """Create an command to add an OVS bridge
 
         :param name:            The name of the bridge
         :type name:             string

@@ -15,10 +15,9 @@
 #    under the License.
 
 import math
-
 import mock
-from neutron_lib import constants as const
 
+from neutron.common import constants as const
 from neutron import context
 from neutron.extensions import securitygroup as ext_sg
 from neutron import manager
@@ -137,7 +136,7 @@ class TestMl2SecurityGroups(Ml2SecurityGroupsTestCase,
     def test_full_uuids_skip_port_id_lookup(self):
         plugin = manager.NeutronManager.get_plugin()
         # when full UUIDs are provided, the _or statement should only
-        # have one matching 'IN' criteria for all of the IDs
+        # have one matching 'IN' critiera for all of the IDs
         with mock.patch('neutron.plugins.ml2.db.or_') as or_mock,\
                 mock.patch('sqlalchemy.orm.Session.query') as qmock:
             fmock = qmock.return_value.outerjoin.return_value.filter

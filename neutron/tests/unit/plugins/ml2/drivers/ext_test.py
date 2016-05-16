@@ -16,12 +16,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import validators
-import oslo_db.sqlalchemy.session
 import sqlalchemy as sa
 from sqlalchemy import orm
 
+import oslo_db.sqlalchemy.session
+
 from neutron.api import extensions
+from neutron.api.v2 import attributes
 from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.plugins.ml2 import driver_api
@@ -146,7 +147,7 @@ class TestPortExtension(model_base.BASEV2):
 class TestDBExtensionDriver(TestExtensionDriverBase):
     def _get_value(self, data, key):
         value = data[key]
-        if not validators.is_attr_set(value):
+        if not attributes.is_attr_set(value):
             value = ''
         return value
 

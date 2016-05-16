@@ -133,7 +133,7 @@ class DHCPAgentOVSTestFramework(base.BaseSudoTestCase):
     def create_network_dict(self, net_id, subnets=None, ports=None):
         subnets = [] if not subnets else subnets
         ports = [] if not ports else ports
-        net_dict = dhcp.NetModel(d={
+        net_dict = dhcp.NetModel(use_namespaces=True, d={
             "id": net_id,
             "subnets": subnets,
             "ports": ports,
@@ -252,15 +252,6 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
             self.configure_dhcp_for_network(network=network,
                                             dhcp_enabled=dhcp_enabled)
             self.assert_dhcp_resources(network, dhcp_enabled)
-
-    def test_agent_mtu_set_on_interface_driver(self):
-        network = self.network_dict_for_dhcp()
-        network["mtu"] = 789
-        self.configure_dhcp_for_network(network=network)
-        port = network.ports[0]
-        iface_name = self.get_interface_name(network, port)
-        dev = ip_lib.IPDevice(iface_name, network.namespace)
-        self.assertEqual(789, dev.link.mtu)
 
     def test_good_address_allocation(self):
         network, port = self._get_network_port_for_allocation_test()

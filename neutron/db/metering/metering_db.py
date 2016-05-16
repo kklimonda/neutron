@@ -13,21 +13,25 @@
 # under the License.
 
 import netaddr
+from oslo_log import log as logging
 from oslo_utils import uuidutils
 import sqlalchemy as sa
 from sqlalchemy import orm
 from sqlalchemy import sql
 
 from neutron.api.rpc.agentnotifiers import metering_rpc_agent_api
-from neutron.api.v2 import attributes as attr
 from neutron.common import constants
 from neutron.db import common_db_mixin as base_db
 from neutron.db import l3_db
 from neutron.db import model_base
+from neutron.db import models_v2
 from neutron.extensions import metering
 
 
-class MeteringLabelRule(model_base.BASEV2, model_base.HasId):
+LOG = logging.getLogger(__name__)
+
+
+class MeteringLabelRule(model_base.BASEV2, models_v2.HasId):
     direction = sa.Column(sa.Enum('ingress', 'egress',
                                   name='meteringlabels_direction'))
     remote_ip_prefix = sa.Column(sa.String(64))
@@ -38,9 +42,9 @@ class MeteringLabelRule(model_base.BASEV2, model_base.HasId):
     excluded = sa.Column(sa.Boolean, default=False, server_default=sql.false())
 
 
-class MeteringLabel(model_base.BASEV2, model_base.HasId, model_base.HasTenant):
-    name = sa.Column(sa.String(attr.NAME_MAX_LEN))
-    description = sa.Column(sa.String(attr.LONG_DESCRIPTION_MAX_LEN))
+class MeteringLabel(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
+    name = sa.Column(sa.String(255))
+    description = sa.Column(sa.String(1024))
     rules = orm.relationship(MeteringLabelRule, backref="label",
                              cascade="delete", lazy="joined")
     routers = orm.relationship(
@@ -67,11 +71,12 @@ class MeteringDbMixin(metering.MeteringPluginBase,
 
     def create_metering_label(self, context, metering_label):
         m = metering_label['metering_label']
+        tenant_id = self._get_tenant_id_for_create(context, m)
 
         with context.session.begin(subtransactions=True):
             metering_db = MeteringLabel(id=uuidutils.generate_uuid(),
                                         description=m['description'],
-                                        tenant_id=m['tenant_id'],
+                                        tenant_id=tenant_id,
                                         name=m['name'],
                                         shared=m['shared'])
             context.session.add(metering_db)

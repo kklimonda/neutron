@@ -17,20 +17,19 @@ import copy
 import itertools
 import operator
 
-from neutron_lib import constants
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
 
-from neutron._i18n import _, _LW
-from neutron.common import constants as n_const
+from neutron.api.v2 import attributes
+from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.db import api as db_api
 from neutron.extensions import portbindings
+from neutron.i18n import _LW
 from neutron import manager
 from neutron.plugins.common import utils as p_utils
 from neutron.quota import resource_registry
@@ -58,15 +57,9 @@ class DhcpRpcCallback(object):
     #           RPC client for many releases, it should be OK to bump the
     #           minor release instead and claim RPC compatibility with the
     #           last few client versions.
-    #     1.3 - Removed release_port_fixed_ip. It's not used by reference DHCP
-    #           agent since Juno, so similar rationale for not bumping the
-    #           major version as above applies here too.
-    #     1.4 - Removed update_lease_expiration. It's not used by reference
-    #           DHCP agent since Juno, so similar rationale for not bumping the
-    #           major version as above applies here too.
     target = oslo_messaging.Target(
-        namespace=n_const.RPC_NAMESPACE_DHCP_PLUGIN,
-        version='1.4')
+        namespace=constants.RPC_NAMESPACE_DHCP_PLUGIN,
+        version='1.2')
 
     def _get_active_networks(self, context, **kwargs):
         """Retrieve and return a list of the active networks."""
@@ -92,27 +85,25 @@ class DhcpRpcCallback(object):
                 return plugin.update_port(context, port['id'], port)
             else:
                 msg = _('Unrecognized action')
-                raise exceptions.Invalid(message=msg)
-        except (db_exc.DBError,
-                exceptions.NetworkNotFound,
-                exceptions.SubnetNotFound,
-                exceptions.IpAddressGenerationFailure) as e:
+                raise n_exc.Invalid(message=msg)
+        except (db_exc.DBError, n_exc.NetworkNotFound,
+                n_exc.SubnetNotFound, n_exc.IpAddressGenerationFailure) as e:
             with excutils.save_and_reraise_exception(reraise=False) as ctxt:
-                if isinstance(e, exceptions.IpAddressGenerationFailure):
+                if isinstance(e, n_exc.IpAddressGenerationFailure):
                     # Check if the subnet still exists and if it does not,
                     # this is the reason why the ip address generation failed.
                     # In any other unlikely event re-raise
                     try:
                         subnet_id = port['port']['fixed_ips'][0]['subnet_id']
                         plugin.get_subnet(context, subnet_id)
-                    except exceptions.SubnetNotFound:
+                    except n_exc.SubnetNotFound:
                         pass
                     else:
                         ctxt.reraise = True
                 net_id = port['port']['network_id']
-                LOG.warning(_LW("Action %(action)s for network %(net_id)s "
-                                "could not complete successfully: %(reason)s"),
-                            {"action": action, "net_id": net_id, 'reason': e})
+                LOG.warn(_LW("Action %(action)s for network %(net_id)s "
+                             "could not complete successfully: %(reason)s"),
+                         {"action": action, "net_id": net_id, 'reason': e})
 
     def get_active_networks(self, context, **kwargs):
         """Retrieve and return a list of the active network ids."""
@@ -152,7 +143,7 @@ class DhcpRpcCallback(object):
         return networks
 
     def get_network_info(self, context, **kwargs):
-        """Retrieve and return extended information about a network."""
+        """Retrieve and return a extended information about a network."""
         network_id = kwargs.get('network_id')
         host = kwargs.get('host')
         LOG.debug('Network %(network_id)s requested from '
@@ -161,7 +152,7 @@ class DhcpRpcCallback(object):
         plugin = manager.NeutronManager.get_plugin()
         try:
             network = plugin.get_network(context, network_id)
-        except exceptions.NetworkNotFound:
+        except n_exc.NetworkNotFound:
             LOG.debug("Network %s could not be found, it might have "
                       "been deleted concurrently.", network_id)
             return
@@ -184,6 +175,41 @@ class DhcpRpcCallback(object):
         plugin.delete_ports_by_device_id(context, device_id, network_id)
 
     @db_api.retry_db_errors
+    def release_port_fixed_ip(self, context, **kwargs):
+        """Release the fixed_ip associated the subnet on a port."""
+        host = kwargs.get('host')
+        network_id = kwargs.get('network_id')
+        device_id = kwargs.get('device_id')
+        subnet_id = kwargs.get('subnet_id')
+
+        LOG.debug('DHCP port remove fixed_ip for %(subnet_id)s request '
+                  'from %(host)s',
+                  {'subnet_id': subnet_id, 'host': host})
+        plugin = manager.NeutronManager.get_plugin()
+        filters = dict(network_id=[network_id], device_id=[device_id])
+        ports = plugin.get_ports(context, filters=filters)
+
+        if ports:
+            port = ports[0]
+
+            fixed_ips = port.get('fixed_ips', [])
+            for i in range(len(fixed_ips)):
+                if fixed_ips[i]['subnet_id'] == subnet_id:
+                    del fixed_ips[i]
+                    break
+            plugin.update_port(context, port['id'], dict(port=port))
+
+    def update_lease_expiration(self, context, **kwargs):
+        """Release the fixed_ip associated the subnet on a port."""
+        # NOTE(arosen): This method is no longer used by the DHCP agent but is
+        # left so that neutron-dhcp-agents will still continue to work if
+        # neutron-server is upgraded and not the agent.
+        host = kwargs.get('host')
+
+        LOG.warning(_LW('Updating lease expiration is now deprecated. Issued  '
+                        'from host %s.'), host)
+
+    @db_api.retry_db_errors
     @resource_registry.mark_resources_dirty
     def create_dhcp_port(self, context, **kwargs):
         """Create and return dhcp port information.
@@ -203,7 +229,7 @@ class DhcpRpcCallback(object):
         port['port']['device_owner'] = constants.DEVICE_OWNER_DHCP
         port['port'][portbindings.HOST_ID] = host
         if 'mac_address' not in port['port']:
-            port['port']['mac_address'] = constants.ATTR_NOT_SPECIFIED
+            port['port']['mac_address'] = attributes.ATTR_NOT_SPECIFIED
         plugin = manager.NeutronManager.get_plugin()
         return self._port_action(plugin, context, port, 'create_port')
 
@@ -216,7 +242,7 @@ class DhcpRpcCallback(object):
         port['port'][portbindings.HOST_ID] = host
         plugin = manager.NeutronManager.get_plugin()
         old_port = plugin.get_port(context, port['id'])
-        if (old_port['device_id'] != n_const.DEVICE_ID_RESERVED_DHCP_PORT
+        if (old_port['device_id'] != constants.DEVICE_ID_RESERVED_DHCP_PORT
             and old_port['device_id'] !=
             utils.get_dhcp_agent_device_id(port['port']['network_id'], host)):
             raise n_exc.DhcpPortInUse(port_id=port['id'])

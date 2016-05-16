@@ -14,8 +14,8 @@
 import netaddr
 from oslo_log import log as logging
 
-from neutron._i18n import _LE
 from neutron.agent.linux import utils as linux_utils
+from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -79,12 +79,10 @@ class IpConntrackManager(object):
 
     def delete_conntrack_state_by_remote_ips(self, device_info_list,
                                              ethertype, remote_ips):
-        for direction in ['ingress', 'egress']:
-            rule = {'ethertype': str(ethertype).lower(),
-                    'direction': direction}
-            if remote_ips:
-                for remote_ip in remote_ips:
-                    self._delete_conntrack_state(
-                        device_info_list, rule, remote_ip)
-            else:
-                self._delete_conntrack_state(device_info_list, rule)
+        rule = {'ethertype': str(ethertype).lower(), 'direction': 'ingress'}
+        if remote_ips:
+            for remote_ip in remote_ips:
+                self._delete_conntrack_state(
+                    device_info_list, rule, remote_ip)
+        else:
+            self._delete_conntrack_state(device_info_list, rule)

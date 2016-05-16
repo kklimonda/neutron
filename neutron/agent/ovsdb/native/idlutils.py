@@ -17,13 +17,12 @@ import os
 import time
 import uuid
 
-from neutron_lib import exceptions
 from ovs.db import idl
 from ovs import jsonrpc
 from ovs import poller
 from ovs import stream
 
-from neutron._i18n import _
+from neutron.common import exceptions
 
 
 RowLookup = collections.namedtuple('RowLookup',
@@ -98,15 +97,15 @@ def get_schema_helper(connection, schema_name):
     err, strm = stream.Stream.open_block(
         stream.Stream.open(connection))
     if err:
-        raise Exception(_("Could not connect to %s") % connection)
+        raise Exception("Could not connect to %s" % (
+            connection,))
     rpc = jsonrpc.Connection(strm)
     req = jsonrpc.Message.create_request('get_schema', [schema_name])
     err, resp = rpc.transact_block(req)
     rpc.close()
     if err:
-        raise Exception(_("Could not retrieve schema from %(conn)s: "
-                          "%(err)s") % {'conn': connection,
-                                        'err': os.strerror(err)})
+        raise Exception("Could not retrieve schema from %s: %s" % (
+            connection, os.strerror(err)))
     elif resp.error:
         raise Exception(resp.error)
     return idl.SchemaHelper(None, resp.result)
@@ -122,7 +121,7 @@ def wait_for_change(_idl, timeout, seqno=None):
         ovs_poller.timer_wait(timeout * 1000)
         ovs_poller.block()
         if time.time() > stop:
-            raise Exception(_("Timeout"))
+            raise Exception("Timeout")
 
 
 def get_column_value(row, col):
@@ -144,8 +143,8 @@ def get_column_value(row, col):
 def condition_match(row, condition):
     """Return whether a condition matches a row
 
-    :param row:       An OVSDB Row
-    :param condition: A 3-tuple containing (column, operation, match)
+    :param row       An OVSDB Row
+    :param condition A 3-tuple containing (column, operation, match)
     """
 
     col, op, match = condition

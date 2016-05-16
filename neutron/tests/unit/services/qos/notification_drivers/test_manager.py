@@ -12,7 +12,6 @@
 
 import mock
 from oslo_config import cfg
-from oslo_utils import uuidutils
 
 from neutron.api.rpc.callbacks import events
 from neutron import context
@@ -41,8 +40,8 @@ class TestQosDriversManagerBase(base.BaseQosTestCase):
         config = cfg.ConfigOpts()
         config.register_opts(driver_mgr.QOS_PLUGIN_OPTS, "qos")
         self.policy_data = {'policy': {
-                            'id': uuidutils.generate_uuid(),
-                            'tenant_id': uuidutils.generate_uuid(),
+                            'id': 7777777,
+                            'tenant_id': 888888,
                             'name': 'test-policy',
                             'description': 'test policy description',
                             'shared': True}}

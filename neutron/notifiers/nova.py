@@ -13,8 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from keystoneauth1 import loading as ks_loading
-from neutron_lib import constants
+from keystoneclient import auth as ks_auth
+from keystoneclient.auth.identity import v2 as v2_auth
+from keystoneclient import session as ks_session
 from novaclient import client as nova_client
 from novaclient import exceptions as nova_exceptions
 from oslo_config import cfg
@@ -22,8 +23,9 @@ from oslo_log import log as logging
 from oslo_utils import uuidutils
 from sqlalchemy.orm import attributes as sql_attr
 
-from neutron._i18n import _LE, _LI, _LW
+from neutron.common import constants
 from neutron import context
+from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
 from neutron.notifiers import batch_notifier
 
@@ -39,6 +41,27 @@ NEUTRON_NOVA_EVENT_STATUS_MAP = {constants.PORT_STATUS_ACTIVE: 'completed',
 NOVA_API_VERSION = "2"
 
 
+class DefaultAuthPlugin(v2_auth.Password):
+    """A wrapper around standard v2 user/pass to handle bypass url.
+
+    This is only necessary because novaclient doesn't support endpoint_override
+    yet - bug #1403329.
+
+    When this bug is fixed we can pass the endpoint_override to the client
+    instead and remove this class.
+    """
+
+    def __init__(self, **kwargs):
+        self._endpoint_override = kwargs.pop('endpoint_override', None)
+        super(DefaultAuthPlugin, self).__init__(**kwargs)
+
+    def get_endpoint(self, session, **kwargs):
+        if self._endpoint_override:
+            return self._endpoint_override
+
+        return super(DefaultAuthPlugin, self).get_endpoint(session, **kwargs)
+
+
 class Notifier(object):
 
     def __init__(self):
@@ -46,15 +69,29 @@ class Notifier(object):
         # and each Notifier is handling it's own auth. That means that we are
         # authenticating the exact same thing len(controllers) times. This
         # should be an easy thing to optimize.
-        # FIXME(kevinbenton): remove this comment and the one above once the
-        # switch to pecan is complete since only one notifier is constructed
-        # in the pecan notification hook.
-        auth = ks_loading.load_auth_from_conf_options(cfg.CONF, 'nova')
+        auth = ks_auth.load_from_conf_options(cfg.CONF, 'nova')
+        endpoint_override = None
 
-        session = ks_loading.load_session_from_conf_options(
-            cfg.CONF,
-            'nova',
-            auth=auth)
+        if not auth:
+            LOG.warning(_LW('Authenticating to nova using nova_admin_* options'
+                            ' is deprecated. This should be done using'
+                            ' an auth plugin, like password'))
+
+            if cfg.CONF.nova_admin_tenant_id:
+                endpoint_override = "%s/%s" % (cfg.CONF.nova_url,
+                                               cfg.CONF.nova_admin_tenant_id)
+
+            auth = DefaultAuthPlugin(
+                auth_url=cfg.CONF.nova_admin_auth_url,
+                username=cfg.CONF.nova_admin_username,
+                password=cfg.CONF.nova_admin_password,
+                tenant_id=cfg.CONF.nova_admin_tenant_id,
+                tenant_name=cfg.CONF.nova_admin_tenant_name,
+                endpoint_override=endpoint_override)
+
+        session = ks_session.Session.load_from_conf_options(cfg.CONF,
+                                                            'nova',
+                                                            auth=auth)
 
         extensions = [
             ext for ext in nova_client.discover_extensions(NOVA_API_VERSION)
@@ -71,8 +108,7 @@ class Notifier(object):
     def _is_compute_port(self, port):
         try:
             if (port['device_id'] and uuidutils.is_uuid_like(port['device_id'])
-                    and port['device_owner'].startswith(
-                        constants.DEVICE_OWNER_COMPUTE_PREFIX)):
+                    and port['device_owner'].startswith('compute:')):
                 return True
         except (KeyError, AttributeError):
             pass
@@ -211,8 +247,8 @@ class Notifier(object):
             response = self.nclient.server_external_events.create(
                 batched_events)
         except nova_exceptions.NotFound:
-            LOG.debug("Nova returned NotFound for event: %s",
-                      batched_events)
+            LOG.warning(_LW("Nova returned NotFound for event: %s"),
+                        batched_events)
         except Exception:
             LOG.exception(_LE("Failed to notify nova on events: %s"),
                           batched_events)

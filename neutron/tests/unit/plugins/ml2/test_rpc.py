@@ -20,14 +20,14 @@ Unit Tests for ml2 rpc
 import collections
 
 import mock
-from neutron_lib import constants
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_context import context as oslo_context
 import oslo_messaging
 from sqlalchemy.orm import exc
 
 from neutron.agent import rpc as agent_rpc
+from neutron.common import constants
+from neutron.common import exceptions
 from neutron.common import topics
 from neutron.plugins.ml2.drivers import type_tunnel
 from neutron.plugins.ml2 import managers
@@ -116,7 +116,7 @@ class RpcCallbacksTestCase(base.BaseTestCase):
             {"id": "fake_network"})
         self.callbacks.get_device_details(mock.Mock(), host='fake_host',
                                           cached_networks=cached_networks)
-        self.assertIn('fake_port', cached_networks)
+        self.assertTrue('fake_port' in cached_networks)
 
     def test_get_device_details_wrong_host(self):
         port = collections.defaultdict(lambda: 'fake')

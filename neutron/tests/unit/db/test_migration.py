@@ -21,18 +21,16 @@ import textwrap
 from alembic.autogenerate import api as alembic_ag_api
 from alembic import config as alembic_config
 from alembic.operations import ops as alembic_ops
-from alembic import script as alembic_script
 import fixtures
 import mock
-from oslo_utils import fileutils
 import pkg_resources
 import sqlalchemy as sa
 
+from neutron.common import utils
 from neutron.db import migration
 from neutron.db.migration import autogen
 from neutron.db.migration import cli
 from neutron.tests import base
-from neutron.tests import tools
 from neutron.tests.unit import testlib_api
 
 
@@ -43,13 +41,12 @@ class FakeConfig(object):
 class FakeRevision(object):
     path = 'fakepath'
 
-    def __init__(self, labels=None, down_revision=None, is_branch_point=False):
+    def __init__(self, labels=None, down_revision=None):
         if not labels:
             labels = set()
         self.branch_labels = labels
         self.down_revision = down_revision
-        self.is_branch_point = is_branch_point
-        self.revision = tools.get_random_string()
+        self.revision = utils.get_random_string(10)
         self.module = mock.MagicMock()
 
 
@@ -119,7 +116,6 @@ class TestCli(base.BaseTestCase):
         self.do_alembic_cmd_p = mock.patch.object(cli, 'do_alembic_command')
         self.do_alembic_cmd = self.do_alembic_cmd_p.start()
         self.mock_alembic_err = mock.patch('alembic.util.err').start()
-        self.mock_alembic_warn = mock.patch('alembic.util.warn').start()
         self.mock_alembic_err.side_effect = SystemExit
 
         def mocked_root_dir(cfg):
@@ -151,19 +147,11 @@ class TestCli(base.BaseTestCase):
     def _main_test_helper(self, argv, func_name, exp_kwargs=[{}]):
         with mock.patch.object(sys, 'argv', argv),\
             mock.patch.object(cli, 'run_sanity_checks'),\
-            mock.patch.object(cli, 'validate_revisions'),\
-            mock.patch.object(cli, '_use_separate_migration_branches'):
+            mock.patch.object(cli, 'validate_labels'):
 
             cli.main()
-
-            def _append_version_path(args):
-                args = copy.copy(args)
-                if 'autogenerate' in args and not args['autogenerate']:
-                    args['version_path'] = mock.ANY
-                return args
-
             self.do_alembic_cmd.assert_has_calls(
-                [mock.call(mock.ANY, func_name, **_append_version_path(kwargs))
+                [mock.call(mock.ANY, func_name, **kwargs)
                  for kwargs in exp_kwargs]
             )
 
@@ -180,36 +168,19 @@ class TestCli(base.BaseTestCase):
             [{'revision': 'foo', 'sql': True}]
         )
 
-    def _validate_cmd(self, cmd):
-        self._main_test_helper(
-            ['prog', cmd],
-            cmd,
-            [{'verbose': False}])
-
-        self._main_test_helper(
-            ['prog', cmd, '--verbose'],
-            cmd,
-            [{'verbose': True}])
-
-    def test_branches(self):
-        self._validate_cmd('branches')
-
     def test_current(self):
-        self._validate_cmd('current')
+        self._main_test_helper(['prog', 'current'], 'current')
 
     def test_history(self):
-        self._validate_cmd('history')
-
-    def test_heads(self):
-        self._validate_cmd('heads')
+        self._main_test_helper(['prog', 'history'], 'history')
 
     def test_check_migration(self):
-        with mock.patch.object(cli, 'validate_head_files') as validate:
+        with mock.patch.object(cli, 'validate_heads_file') as validate:
             self._main_test_helper(['prog', 'check_migration'], 'branches')
             self.assertEqual(len(self.projects), validate.call_count)
 
     def _test_database_sync_revision(self, separate_branches=True):
-        with mock.patch.object(cli, 'update_head_files') as update,\
+        with mock.patch.object(cli, 'update_heads_file') as update,\
                 mock.patch.object(cli, '_use_separate_migration_branches',
                                   return_value=separate_branches):
             if separate_branches:
@@ -225,12 +196,6 @@ class TestCli(base.BaseTestCase):
             self.assertEqual(len(self.projects), update.call_count)
             update.reset_mock()
 
-            expected_kwargs = [{
-                'message': 'message',
-                'sql': True,
-                'autogenerate': False,
-                'head': cli._get_branch_head(branch)
-            } for branch in cli.MIGRATION_BRANCHES]
             for kwarg in expected_kwargs:
                 kwarg['autogenerate'] = False
                 kwarg['sql'] = True
@@ -243,12 +208,10 @@ class TestCli(base.BaseTestCase):
             self.assertEqual(len(self.projects), update.call_count)
             update.reset_mock()
 
-            expected_kwargs = [{
-                'message': 'message',
-                'sql': False,
-                'autogenerate': False,
-                'head': 'expand@head'
-            }]
+            for kwarg in expected_kwargs:
+                kwarg['sql'] = False
+                kwarg['head'] = 'expand@head'
+
             self._main_test_helper(
                 ['prog', 'revision', '-m', 'message', '--expand'],
                 'revision',
@@ -319,20 +282,6 @@ class TestCli(base.BaseTestCase):
             self._main_test_helper(
                 ['prog', 'upgrade', '--%s +3' % mode], 'upgrade')
 
-    def _test_revision_autogenerate_conflicts_with_branch(self, branch):
-        with testlib_api.ExpectedException(SystemExit):
-            self._main_test_helper(
-                ['prog', 'revision', '--autogenerate', '--%s' % branch],
-                'revision')
-
-    def test_revision_autogenerate_conflicts_with_expand(self):
-        self._test_revision_autogenerate_conflicts_with_branch(
-            cli.EXPAND_BRANCH)
-
-    def test_revision_autogenerate_conflicts_with_contract(self):
-        self._test_revision_autogenerate_conflicts_with_branch(
-            cli.CONTRACT_BRANCH)
-
     def test_upgrade_expand_conflicts_with_revision(self):
         self._test_upgrade_conflicts_with_revision('expand')
 
@@ -382,106 +331,100 @@ class TestCli(base.BaseTestCase):
     def test_downgrade_fails(self):
         self.assert_command_fails(['prog', 'downgrade', '--sql', 'juno'])
 
-    @mock.patch.object(cli, '_use_separate_migration_branches')
-    def test_upgrade_negative_relative_revision_fails(self, use_mock):
+    def test_upgrade_negative_relative_revision_fails(self):
         self.assert_command_fails(['prog', 'upgrade', '-2'])
 
-    @mock.patch.object(cli, '_use_separate_migration_branches')
-    def test_upgrade_negative_delta_fails(self, use_mock):
+    def test_upgrade_negative_delta_fails(self):
         self.assert_command_fails(['prog', 'upgrade', '--delta', '-2'])
 
-    @mock.patch.object(cli, '_use_separate_migration_branches')
-    def test_upgrade_rejects_delta_with_relative_revision(self, use_mock):
+    def test_upgrade_rejects_delta_with_relative_revision(self):
         self.assert_command_fails(['prog', 'upgrade', '+2', '--delta', '3'])
 
-    def _test_validate_head_files_helper(self, heads, contract_head='',
-                                         expand_head=''):
+    def _test_validate_heads_file_helper(self, heads, file_heads=None,
+                                         branchless=False):
+        if file_heads is None:
+            file_heads = []
         fake_config = self.configs[0]
-        head_files_not_exist = (contract_head == expand_head == '')
         with mock.patch('alembic.script.ScriptDirectory.from_config') as fc,\
-                mock.patch('os.path.exists') as os_mock,\
                 mock.patch.object(cli, '_use_separate_migration_branches',
-                                  return_value=True):
-            if head_files_not_exist:
-                os_mock.return_value = False
-            else:
-                os_mock.return_value = True
-
+                                  return_value=not branchless):
             fc.return_value.get_heads.return_value = heads
+            with mock.patch.object(cli, 'open') as mock_open:
+                mock_open.return_value.__enter__ = lambda s: s
+                mock_open.return_value.__exit__ = mock.Mock()
+                mock_open.return_value.read.return_value = (
+                    '\n'.join(file_heads))
 
-            revs = {heads[0]: FakeRevision(labels=cli.CONTRACT_BRANCH),
-                    heads[1]: FakeRevision(labels=cli.EXPAND_BRANCH)}
-            fc.return_value.get_revision.side_effect = revs.__getitem__
-            mock_open_con = self.useFixture(
-                tools.OpenFixture(cli._get_contract_head_file_path(
-                    fake_config), contract_head + '\n')).mock_open
-            mock_open_ex = self.useFixture(
-                tools.OpenFixture(cli._get_expand_head_file_path(
-                    fake_config), expand_head + '\n')).mock_open
+                if all(head in file_heads for head in heads):
+                    cli.validate_heads_file(fake_config)
+                else:
+                    self.assertRaises(
+                        SystemExit,
+                        cli.validate_heads_file,
+                        fake_config
+                    )
+                    self.assertTrue(self.mock_alembic_err.called)
 
-            if contract_head in heads and expand_head in heads:
-                cli.validate_head_files(fake_config)
-            elif head_files_not_exist:
-                cli.validate_head_files(fake_config)
-                self.assertTrue(self.mock_alembic_warn.called)
-            else:
-                self.assertRaises(
-                    SystemExit,
-                    cli.validate_head_files,
-                    fake_config
-                )
-                self.assertTrue(self.mock_alembic_err.called)
+                if branchless:
+                    mock_open.assert_called_with(
+                        cli._get_head_file_path(fake_config))
+                else:
+                    mock_open.assert_called_with(
+                        cli._get_heads_file_path(fake_config))
 
-            if contract_head in heads and expand_head in heads:
-                mock_open_ex.assert_called_with(
-                    cli._get_expand_head_file_path(fake_config))
-                mock_open_con.assert_called_with(
-                    cli._get_contract_head_file_path(fake_config))
+            fc.assert_called_once_with(fake_config)
 
-            if not head_files_not_exist:
-                fc.assert_called_once_with(fake_config)
+    def test_validate_heads_file_multiple_heads(self):
+        self._test_validate_heads_file_helper(['a', 'b'])
 
-    def test_validate_head_files_success(self):
-        self._test_validate_head_files_helper(['a', 'b'], contract_head='a',
-                                              expand_head='b')
+    def test_validate_heads_file_missing_file(self):
+        self._test_validate_heads_file_helper(['a'])
 
-    def test_validate_head_files_missing_file(self):
-        self._test_validate_head_files_helper(['a', 'b'])
+    def test_validate_heads_file_wrong_contents(self):
+        self._test_validate_heads_file_helper(['a'], ['b'])
 
-    def test_validate_head_files_wrong_contents(self):
-        self._test_validate_head_files_helper(['a', 'b'], contract_head='c',
-                                              expand_head='d')
+    def test_validate_heads_success(self):
+        self._test_validate_heads_file_helper(['a'], ['a'])
 
     @mock.patch.object(cli, '_use_separate_migration_branches',
-                       return_value=True)
-    @mock.patch.object(fileutils, 'delete_if_exists')
-    def test_update_head_files_success(self, *mocks):
-        heads = ['a', 'b']
-        mock_open_con = self.useFixture(
-                    tools.OpenFixture(cli._get_contract_head_file_path(
-                        self.configs[0]))).mock_open
-        mock_open_ex = self.useFixture(
-            tools.OpenFixture(cli._get_expand_head_file_path(
-                self.configs[0]))).mock_open
-        with mock.patch('alembic.script.ScriptDirectory.from_config') as fc:
-            fc.return_value.get_heads.return_value = heads
-            revs = {heads[0]: FakeRevision(labels=cli.CONTRACT_BRANCH),
-                    heads[1]: FakeRevision(labels=cli.EXPAND_BRANCH)}
-            fc.return_value.get_revision.side_effect = revs.__getitem__
-            cli.update_head_files(self.configs[0])
-            mock_open_con.return_value.write.assert_called_with(
-                heads[0] + '\n')
-            mock_open_ex.return_value.write.assert_called_with(heads[1] + '\n')
+                       return_value=False)
+    def test_validate_heads_file_branchless_failure(self, *args):
+        self._test_validate_heads_file_helper(['a'], ['b'], branchless=True)
 
-            old_head_file = cli._get_head_file_path(
-                self.configs[0])
-            old_heads_file = cli._get_heads_file_path(
-                self.configs[0])
-            delete_if_exists = mocks[0]
-            self.assertIn(mock.call(old_head_file),
-                          delete_if_exists.call_args_list)
-            self.assertIn(mock.call(old_heads_file),
-                          delete_if_exists.call_args_list)
+    @mock.patch.object(cli, '_use_separate_migration_branches',
+                       return_value=False)
+    def test_validate_heads_file_branchless_success(self, *args):
+        self._test_validate_heads_file_helper(['a'], ['a'], branchless=True)
+
+    def test_update_heads_file_two_heads(self):
+        with mock.patch('alembic.script.ScriptDirectory.from_config') as fc:
+            heads = ('b', 'a')
+            fc.return_value.get_heads.return_value = heads
+            with mock.patch('six.moves.builtins.open') as mock_open:
+                mock_open.return_value.__enter__ = lambda s: s
+                mock_open.return_value.__exit__ = mock.Mock()
+
+                cli.update_heads_file(self.configs[0])
+                mock_open.return_value.write.assert_called_once_with(
+                    '\n'.join(sorted(heads)))
+
+    @mock.patch('os.path.exists')
+    @mock.patch('os.remove')
+    def test_update_heads_file_success(self, *os_mocks):
+        with mock.patch('alembic.script.ScriptDirectory.from_config') as fc:
+            heads = ('a', 'b')
+            fc.return_value.get_heads.return_value = heads
+            with mock.patch('six.moves.builtins.open') as mock_open:
+                mock_open.return_value.__enter__ = lambda s: s
+                mock_open.return_value.__exit__ = mock.Mock()
+
+                cli.update_heads_file(self.configs[0])
+                mock_open.return_value.write.assert_called_once_with(
+                    '\n'.join(heads))
+
+                old_head_file = cli._get_head_file_path(self.configs[0])
+                for mock_ in os_mocks:
+                    mock_.assert_called_with(old_head_file)
 
     def test_get_project_base(self):
         config = alembic_config.Config()
@@ -586,35 +529,15 @@ class TestCli(base.BaseTestCase):
 
     @mock.patch.object(cli, '_validate_revision')
     @mock.patch('alembic.script.ScriptDirectory.walk_revisions')
-    def test_validate_revisions_walks_thru_all_revisions(
+    def test_validate_labels_walks_thru_all_revisions(
         self, walk_mock, validate_mock):
 
-        revisions = [FakeRevision() for i in range(10)]
+        revisions = [mock.Mock() for i in range(10)]
         walk_mock.return_value = revisions
-        cli.validate_revisions(self.configs[0])
+        cli.validate_labels(self.configs[0])
         validate_mock.assert_has_calls(
             [mock.call(mock.ANY, revision) for revision in revisions]
         )
-
-    @mock.patch.object(cli, '_validate_revision')
-    @mock.patch('alembic.script.ScriptDirectory.walk_revisions')
-    def test_validate_revisions_fails_on_multiple_branch_points(
-        self, walk_mock, validate_mock):
-
-        revisions = [FakeRevision(is_branch_point=True) for i in range(2)]
-        walk_mock.return_value = revisions
-        self.assertRaises(
-            SystemExit, cli.validate_revisions, self.configs[0])
-
-    @mock.patch('alembic.script.ScriptDirectory.walk_revisions')
-    def test__get_branch_points(self, walk_mock):
-        revisions = [FakeRevision(is_branch_point=tools.get_random_boolean)
-                     for i in range(50)]
-        walk_mock.return_value = revisions
-        script_dir = alembic_script.ScriptDirectory.from_config(
-            self.configs[0])
-        self.assertEqual(set(rev for rev in revisions if rev.is_branch_point),
-                         set(cli._get_branch_points(script_dir)))
 
     @mock.patch.object(cli, '_use_separate_migration_branches')
     @mock.patch.object(cli, '_get_version_branch_path')
@@ -624,7 +547,7 @@ class TestCli(base.BaseTestCase):
             use_separate_migration_branches):
 
         use_separate_migration_branches.return_value = True
-        get_version_branch_path.side_effect = lambda cfg, release, branch: (
+        get_version_branch_path.side_effect = lambda cfg, branch: (
             "/foo/expand" if branch == 'expand' else "/foo/contract")
 
         migration_script = alembic_ops.MigrationScript(
@@ -722,21 +645,6 @@ class TestCli(base.BaseTestCase):
             alembic_ag_api.render_python_code(contract.upgrade_ops)
         )
 
-    @mock.patch.object(cli, '_get_branch_points', return_value=[])
-    @mock.patch.object(cli.CONF, 'split_branches',
-                       new_callable=mock.PropertyMock,
-                       return_value=True, create=True)
-    def test__use_separate_migration_branches_enforced(self, *mocks):
-        self.assertTrue(cli._use_separate_migration_branches(self.configs[0]))
-
-    @mock.patch.object(cli, '_get_branch_points', return_value=[])
-    def test__use_separate_migration_branches_no_branch_points(self, *mocks):
-        self.assertFalse(cli._use_separate_migration_branches(self.configs[0]))
-
-    @mock.patch.object(cli, '_get_branch_points', return_value=['fake1'])
-    def test__use_separate_migration_branches_with_branch_points(self, *mocks):
-        self.assertTrue(cli._use_separate_migration_branches(self.configs[0]))
-
     @mock.patch('alembic.script.ScriptDirectory.walk_revisions')
     def test__find_milestone_revisions_one_branch(self, walk_mock):
         c_revs = [FakeRevision(labels={cli.CONTRACT_BRANCH}) for r in range(5)]
@@ -779,5 +687,5 @@ class TestCli(base.BaseTestCase):
 
 class TestSafetyChecks(base.BaseTestCase):
 
-    def test_validate_revisions(self, *mocks):
-        cli.validate_revisions(cli.get_neutron_config())
+    def test_validate_labels(self, *mocks):
+        cli.validate_labels(cli.get_neutron_config())

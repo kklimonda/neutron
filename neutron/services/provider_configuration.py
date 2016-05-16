@@ -16,13 +16,12 @@
 import importlib
 import os
 
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 import stevedore
 
-from neutron._i18n import _, _LW
-from neutron.api.v2 import attributes as attr
+from neutron.common import exceptions as n_exc
+from neutron.i18n import _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -134,10 +133,9 @@ def parse_service_provider_opt(service_module='neutron'):
 
     """Parse service definition opts and returns result."""
     def validate_name(name):
-        if len(name) > attr.NAME_MAX_LEN:
+        if len(name) > 255:
             raise n_exc.Invalid(
-                _("Provider name %(name)s is limited by %(len)s characters")
-                % {'name': name, 'len': attr.NAME_MAX_LEN})
+                _("Provider name is limited by 255 characters: %s") % name)
 
     neutron_mod = NeutronModule(service_module)
     svc_providers_opt = neutron_mod.service_providers()
@@ -220,7 +218,7 @@ class ProviderConfiguration(object):
         if provider_type in self.providers:
             msg = (_("Multiple providers specified for service "
                      "%s") % provider['service_type'])
-            LOG.error(msg)
+            LOG.exception(msg)
             raise n_exc.Invalid(msg)
         self.providers[provider_type] = {'driver': provider['driver'],
                                          'default': provider['default']}

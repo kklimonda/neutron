@@ -14,8 +14,7 @@
 #    under the License.
 
 import mock
-from neutron_lib import constants
-from oslo_log import versionutils
+from oslo_utils import uuidutils
 import testtools
 
 from neutron.agent.common import config
@@ -23,6 +22,7 @@ from neutron.agent.common import ovs_lib
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
+from neutron.common import constants
 from neutron.tests import base
 
 
@@ -56,23 +56,6 @@ class FakePort(object):
     network_id = network.id
 
 
-class FakeInterfaceDriverNoMtu(interface.LinuxInterfaceDriver):
-    # NOTE(ihrachys) this method intentially omit mtu= parameter, since that
-    # was the method signature before Mitaka. We should make sure the old
-    # signature still works.
-
-    def __init__(self, *args, **kwargs):
-        super(FakeInterfaceDriverNoMtu, self).__init__(*args, **kwargs)
-        self.plug_called = False
-
-    def plug_new(self, network_id, port_id, device_name, mac_address,
-                 bridge=None, namespace=None, prefix=None):
-        self.plug_called = True
-
-    def unplug(self, device_name, bridge=None, namespace=None, prefix=None):
-        pass
-
-
 class TestBase(base.BaseTestCase):
     def setUp(self):
         super(TestBase, self).setUp()
@@ -84,19 +67,6 @@ class TestBase(base.BaseTestCase):
         self.ip = self.ip_p.start()
         self.device_exists_p = mock.patch.object(ip_lib, 'device_exists')
         self.device_exists = self.device_exists_p.start()
-
-
-class TestABCDriverNoMtu(TestBase):
-
-    def test_plug_with_no_mtu_works(self):
-        driver = FakeInterfaceDriverNoMtu(self.conf)
-        self.device_exists.return_value = False
-        with mock.patch.object(
-                versionutils, 'report_deprecated_feature') as report:
-            driver.plug(
-                mock.Mock(), mock.Mock(), mock.Mock(), mock.Mock(), mtu=9000)
-        self.assertTrue(driver.plug_called)
-        self.assertTrue(report.called)
 
 
 class TestABCDriver(TestBase):
@@ -184,7 +154,7 @@ class TestABCDriver(TestBase):
     def test_l3_init_without_clean_connections(self):
         self._test_l3_init_clean_connections(False)
 
-    def test_init_router_port_ipv6_with_gw_ip(self):
+    def _test_init_router_port_with_ipv6(self, include_gw_ip):
         addresses = [dict(scope='global',
                           dynamic=False,
                           cidr='2001:db8:a::123/64')]
@@ -196,18 +166,29 @@ class TestABCDriver(TestBase):
         new_cidr = '2001:db8:a::124/64'
         kwargs = {'namespace': ns,
                   'extra_subnets': [{'cidr': '2001:db8:b::/64'}]}
+        if include_gw_ip:
+            kwargs['gateway_ips'] = ['2001:db8:a::1']
         bc.init_router_port('tap0', [new_cidr], **kwargs)
         expected_calls = (
             [mock.call('tap0', namespace=ns),
              mock.call().addr.list(filters=['permanent']),
              mock.call().addr.add('2001:db8:a::124/64'),
              mock.call().addr.delete('2001:db8:a::123/64')])
+        if include_gw_ip:
+            expected_calls += (
+                [mock.call().route.add_gateway('2001:db8:a::1')])
         expected_calls += (
              [mock.call('tap0', namespace=ns),
               mock.call().route.list_onlink_routes(constants.IP_VERSION_4),
               mock.call().route.list_onlink_routes(constants.IP_VERSION_6),
               mock.call().route.add_onlink_route('2001:db8:b::/64')])
         self.ip_dev.assert_has_calls(expected_calls)
+
+    def test_init_router_port_ipv6_with_gw_ip(self):
+        self._test_init_router_port_with_ipv6(include_gw_ip=True)
+
+    def test_init_router_port_ipv6_without_gw_ip(self):
+        self._test_init_router_port_with_ipv6(include_gw_ip=False)
 
     def test_init_router_port_ext_gw_with_dual_stack(self):
         old_addrs = [dict(ip_version=4, scope='global',
@@ -391,9 +372,9 @@ class TestOVSInterfaceDriver(TestBase):
                                          'aa:bb:cc:dd:ee:ff',
                                          internal=True)
 
-    def _test_plug(self, additional_expectation=None, bridge=None,
+    def _test_plug(self, additional_expectation=[], bridge=None,
                    namespace=None):
-        additional_expectation = additional_expectation or []
+
         if not bridge:
             bridge = 'br-int'
 
@@ -684,3 +665,54 @@ class TestIVSInterfaceDriver(TestBase):
             execute.assert_called_once_with(ivsctl_cmd, run_as_root=True)
             self.ip_dev.assert_has_calls([mock.call('ns-0', namespace=None),
                                           mock.call().link.delete()])
+
+
+class TestMidonetInterfaceDriver(TestBase):
+    def setUp(self):
+        self.conf = config.setup_conf()
+        self.conf.register_opts(interface.OPTS)
+        self.driver = interface.MidonetInterfaceDriver(self.conf)
+        self.network_id = uuidutils.generate_uuid()
+        self.port_id = uuidutils.generate_uuid()
+        self.device_name = "tap0"
+        self.mac_address = "aa:bb:cc:dd:ee:ff"
+        self.bridge = "br-test"
+        self.namespace = "ns-test"
+        super(TestMidonetInterfaceDriver, self).setUp()
+
+    def test_plug(self):
+        cmd = ['mm-ctl', '--bind-port', self.port_id, 'tap0']
+        self.device_exists.return_value = False
+
+        root_dev = mock.Mock()
+        ns_dev = mock.Mock()
+        self.ip().add_veth = mock.Mock(return_value=(root_dev, ns_dev))
+        with mock.patch.object(utils, 'execute') as execute:
+            self.driver.plug(
+                self.network_id, self.port_id,
+                self.device_name, self.mac_address,
+                self.bridge, self.namespace)
+            execute.assert_called_once_with(cmd, run_as_root=True)
+
+        expected = [mock.call(), mock.call(),
+                    mock.call().add_veth(self.device_name,
+                                         self.device_name,
+                                         namespace2=self.namespace),
+                    mock.call().ensure_namespace(self.namespace),
+                    mock.call().ensure_namespace().add_device_to_namespace(
+                        mock.ANY)]
+
+        ns_dev.assert_has_calls(
+            [mock.call.link.set_address(self.mac_address)])
+
+        root_dev.assert_has_calls([mock.call.link.set_up()])
+        ns_dev.assert_has_calls([mock.call.link.set_up()])
+        self.ip.assert_has_calls(expected, True)
+
+    def test_unplug(self):
+        self.driver.unplug(self.device_name, self.bridge, self.namespace)
+
+        self.ip_dev.assert_has_calls([
+            mock.call(self.device_name, namespace=self.namespace),
+            mock.call().link.delete()])
+        self.ip.assert_has_calls([mock.call().garbage_collect_namespace()])

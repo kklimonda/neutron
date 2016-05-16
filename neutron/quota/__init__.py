@@ -16,7 +16,6 @@
 
 import sys
 
-from neutron_lib import exceptions as lib_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_log import versionutils
@@ -24,9 +23,9 @@ from oslo_utils import importutils
 import six
 import webob
 
-from neutron._i18n import _, _LI, _LW
 from neutron.common import exceptions
 from neutron.db.quota import api as quota_api
+from neutron.i18n import _LI, _LW
 from neutron.quota import resource_registry
 
 
@@ -65,7 +64,7 @@ quota_opts = [
                help=_('Default driver to use for quota checks')),
     cfg.BoolOpt('track_quota_usage',
                 default=True,
-                help=_('Keep in track in the database of current resource '
+                help=_('Keep in track in the database of current resource'
                        'quota usage. Plugins which do not leverage the '
                        'neutron database should set this flag to False')),
 ]
@@ -111,7 +110,7 @@ class ConfDriver(object):
         nothing.
 
         :param context: The request context, for access checks.
-        :param tenant_id: The tenant_id to check quota.
+        :param tennant_id: The tenant_id to check quota.
         :param resources: A dictionary of the registered resources.
         :param values: A dictionary of the values to check against the
                        quota.
@@ -129,8 +128,8 @@ class ConfDriver(object):
         overs = [key for key, val in values.items()
                  if quotas[key] >= 0 and quotas[key] < val]
         if overs:
-            raise lib_exc.OverQuota(overs=sorted(overs), quotas=quotas,
-                                    usages={})
+            raise exceptions.OverQuota(overs=sorted(overs), quotas=quotas,
+                                       usages={})
 
     @staticmethod
     def get_tenant_quotas(context, resources, tenant_id):
@@ -176,10 +175,10 @@ class ConfDriver(object):
         return quota_api.ReservationInfo('fake', None, None, None)
 
     def commit_reservation(self, context, reservation_id):
-        """This is a noop as this driver does not support reservations."""
+        """Tnis is a noop as this driver does not support reservations."""
 
     def cancel_reservation(self, context, reservation_id):
-        """This is a noop as this driver does not support reservations."""
+        """Tnis is a noop as this driver does not support reservations."""
 
 
 class QuotaEngine(object):

@@ -13,21 +13,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import validators
-from neutron_lib import constants
-from neutron_lib import exceptions as exc
 from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import excutils
 import six
 import stevedore
 
-from neutron._i18n import _, _LE, _LI, _LW
+from neutron.api.v2 import attributes
+from neutron.common import exceptions as exc
 from neutron.extensions import external_net
 from neutron.extensions import multiprovidernet as mpnet
 from neutron.extensions import portbindings
 from neutron.extensions import providernet as provider
 from neutron.extensions import vlantransparent
+from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
@@ -92,7 +91,7 @@ class TypeManager(stevedore.named.NamedExtensionManager):
          segmentation_id) = (self._get_attribute(segment, attr)
                              for attr in provider.ATTRIBUTES)
 
-        if validators.is_attr_set(network_type):
+        if attributes.is_attr_set(network_type):
             segment = {api.NETWORK_TYPE: network_type,
                        api.PHYSICAL_NETWORK: physical_network,
                        api.SEGMENTATION_ID: segmentation_id}
@@ -103,15 +102,15 @@ class TypeManager(stevedore.named.NamedExtensionManager):
         raise exc.InvalidInput(error_message=msg)
 
     def _process_provider_create(self, network):
-        if any(validators.is_attr_set(network.get(attr))
+        if any(attributes.is_attr_set(network.get(attr))
                for attr in provider.ATTRIBUTES):
             # Verify that multiprovider and provider attributes are not set
             # at the same time.
-            if validators.is_attr_set(network.get(mpnet.SEGMENTS)):
+            if attributes.is_attr_set(network.get(mpnet.SEGMENTS)):
                 raise mpnet.SegmentsSetInConjunctionWithProviders()
             segment = self._get_provider_segment(network)
             return [self._process_provider_segment(segment)]
-        elif validators.is_attr_set(network.get(mpnet.SEGMENTS)):
+        elif attributes.is_attr_set(network.get(mpnet.SEGMENTS)):
             segments = [self._process_provider_segment(s)
                         for s in network[mpnet.SEGMENTS]]
             mpnet.check_duplicate_segments(segments, self.is_partial_segment)
@@ -133,10 +132,10 @@ class TypeManager(stevedore.named.NamedExtensionManager):
     def network_matches_filters(self, network, filters):
         if not filters:
             return True
-        if any(validators.is_attr_set(network.get(attr))
+        if any(attributes.is_attr_set(network.get(attr))
                for attr in provider.ATTRIBUTES):
             segments = [self._get_provider_segment(network)]
-        elif validators.is_attr_set(network.get(mpnet.SEGMENTS)):
+        elif attributes.is_attr_set(network.get(mpnet.SEGMENTS)):
             segments = self._get_attribute(network, mpnet.SEGMENTS)
         else:
             return True
@@ -144,7 +143,7 @@ class TypeManager(stevedore.named.NamedExtensionManager):
 
     def _get_attribute(self, attrs, key):
         value = attrs.get(key)
-        if value is constants.ATTR_NOT_SPECIFIED:
+        if value is attributes.ATTR_NOT_SPECIFIED:
             value = None
         return value
 
@@ -312,10 +311,6 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                                                name_order=True)
         LOG.info(_LI("Loaded mechanism driver names: %s"), self.names())
         self._register_mechanisms()
-        self.host_filtering_supported = self.is_host_filtering_supported()
-        if not self.host_filtering_supported:
-            LOG.warning(_LW("Host filtering is disabled because at least one "
-                            "mechanism doesn't support it."))
 
     def _register_mechanisms(self):
         """Register all mechanism drivers.
@@ -357,7 +352,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                 else:
                     # at least one of drivers does not support QoS, meaning
                     # there are no rule types supported by all of them
-                    LOG.warning(
+                    LOG.warn(
                         _LW("%s does not support QoS; "
                             "no rule types available"),
                         driver.name)
@@ -384,7 +379,10 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         VlanTransparencyDriverError if any mechanism driver doesn't
         support vlan transparency.
         """
-        if context.current.get('vlan_transparent'):
+        if context.current['vlan_transparent'] is None:
+            return
+
+        if context.current['vlan_transparent']:
             for driver in self.ordered_mech_drivers:
                 if not driver.obj.check_vlan_transparency(context):
                     raise vlantransparent.VlanTransparencyDriverError()
@@ -424,7 +422,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if any mechanism driver create_network_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
@@ -452,7 +450,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if any mechanism driver update_network_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
@@ -479,7 +477,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if any mechanism driver delete_network_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
@@ -510,7 +508,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if any mechanism driver create_subnet_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
@@ -537,7 +535,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if any mechanism driver update_subnet_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
@@ -564,7 +562,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if any mechanism driver delete_subnet_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
@@ -595,7 +593,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if any mechanism driver create_port_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
@@ -622,7 +620,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if any mechanism driver update_port_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
@@ -649,7 +647,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if any mechanism driver delete_port_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
@@ -692,13 +690,9 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if not self._bind_port_level(context, 0,
                                      context.network.network_segments):
             binding.vif_type = portbindings.VIF_TYPE_BINDING_FAILED
-            LOG.error(_LE("Failed to bind port %(port)s on host %(host)s "
-                          "for vnic_type %(vnic_type)s using segments "
-                          "%(segments)s"),
+            LOG.error(_LE("Failed to bind port %(port)s on host %(host)s"),
                       {'port': context.current['id'],
-                       'host': context.host,
-                       'vnic_type': binding.vnic_type,
-                       'segments': context.network.network_segments})
+                       'host': context.host})
 
     def _bind_port_level(self, context, level, segments_to_bind):
         binding = context._binding
@@ -739,11 +733,6 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                                                  next_segments):
                             return True
                         else:
-                            LOG.warning(_LW("Failed to bind port %(port)s on "
-                                            "host %(host)s at level %(lvl)s"),
-                                        {'port': context.current['id'],
-                                         'host': context.host,
-                                         'lvl': level + 1})
                             context._pop_binding_level()
                     else:
                         # Binding complete.
@@ -762,45 +751,19 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                 LOG.exception(_LE("Mechanism driver %s failed in "
                                   "bind_port"),
                               driver.name)
-
-    def is_host_filtering_supported(self):
-        return all(driver.obj.is_host_filtering_supported()
-                   for driver in self.ordered_mech_drivers)
-
-    def filter_hosts_with_segment_access(
-            self, context, segments, candidate_hosts, agent_getter):
-        """Filter hosts with access to at least one segment.
-
-        :returns: a subset of candidate_hosts.
-
-        This method returns all hosts from candidate_hosts with access to a
-        segment according to at least one driver.
-        """
-        candidate_hosts = set(candidate_hosts)
-        if not self.host_filtering_supported:
-            return candidate_hosts
-
-        hosts_with_access = set()
-        for driver in self.ordered_mech_drivers:
-            hosts = driver.obj.filter_hosts_with_segment_access(
-                context, segments, candidate_hosts, agent_getter)
-            hosts_with_access |= hosts
-            candidate_hosts -= hosts
-            if not candidate_hosts:
-                break
-        return hosts_with_access
+        LOG.error(_LE("Failed to bind port %(port)s on host %(host)s"),
+                  {'port': context.current['id'],
+                   'host': binding.host})
 
     def _check_driver_to_bind(self, driver, segments_to_bind, binding_levels):
         # To prevent a possible binding loop, don't try to bind with
         # this driver if the same driver has already bound at a higher
         # level to one of the segments we are currently trying to
-        # bind. Note that it is OK for the same driver to bind at
+        # bind. Note that is is OK for the same driver to bind at
         # multiple levels using different segments.
-        segment_ids_to_bind = {s[api.SEGMENTATION_ID]
-                               for s in segments_to_bind}
         for level in binding_levels:
             if (level.driver == driver and
-                level.segment_id in segment_ids_to_bind):
+                level.segment_id in segments_to_bind):
                 return False
         return True
 

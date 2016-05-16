@@ -13,11 +13,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+"""
+Policy engine for neutron.  Largely copied from nova.
+"""
+
 import collections
 import re
 
-from neutron_lib import constants
-from neutron_lib import exceptions as lib_exc
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
@@ -26,10 +28,10 @@ from oslo_utils import excutils
 from oslo_utils import importutils
 import six
 
-from neutron._i18n import _, _LE, _LW
 from neutron.api.v2 import attributes
 from neutron.common import constants as const
 from neutron.common import exceptions
+from neutron.i18n import _LE, _LW
 
 
 LOG = logging.getLogger(__name__)
@@ -62,13 +64,10 @@ def refresh(policy_file=None):
 
 
 def get_resource_and_action(action, pluralized=None):
-    """Return resource and enforce_attr_based_check(boolean) per
-       resource and action extracted from api operation.
-    """
+    """Extract resource and action (write, read) from api operation."""
     data = action.split(':', 1)[0].split('_', 1)
     resource = pluralized or ("%ss" % data[-1])
-    enforce_attr_based_check = data[0] not in ('get', 'delete')
-    return (resource, enforce_attr_based_check)
+    return (resource, data[0] != 'get')
 
 
 def set_rules(policies, overwrite=True):
@@ -91,10 +90,10 @@ def _is_attribute_explicitly_set(attribute_name, resource, target, action):
         # default value of an attribute, but check whether it was explicitly
         # marked as being updated instead.
         return (attribute_name in target[const.ATTRIBUTES_TO_UPDATE] and
-                target[attribute_name] is not constants.ATTR_NOT_SPECIFIED)
+                target[attribute_name] is not attributes.ATTR_NOT_SPECIFIED)
     return ('default' in resource[attribute_name] and
             attribute_name in target and
-            target[attribute_name] is not constants.ATTR_NOT_SPECIFIED and
+            target[attribute_name] is not attributes.ATTR_NOT_SPECIFIED and
             target[attribute_name] != resource[attribute_name]['default'])
 
 
@@ -114,9 +113,8 @@ def _build_subattr_match_rule(attr_name, attr, action, target):
     validate = attr['validate']
     key = list(filter(lambda k: k.startswith('type:dict'), validate.keys()))
     if not key:
-        LOG.warning(_LW("Unable to find data type descriptor "
-                        "for attribute %s"),
-                    attr_name)
+        LOG.warn(_LW("Unable to find data type descriptor for attribute %s"),
+                 attr_name)
         return
     data = validate[key[0]]
     if not isinstance(data, dict):
@@ -155,9 +153,9 @@ def _build_match_rule(action, target, pluralized):
        (e.g.: create_router:external_gateway_info:network_id)
     """
     match_rule = policy.RuleCheck('rule', action)
-    resource, enforce_attr_based_check = get_resource_and_action(
-        action, pluralized)
-    if enforce_attr_based_check:
+    resource, is_write = get_resource_and_action(action, pluralized)
+    # Attribute-based checks shall not be enforced on GETs
+    if is_write:
         # assigning to variable with short name for improving readability
         res_map = attributes.RESOURCE_ATTRIBUTE_MAP
         if resource in res_map:
@@ -264,7 +262,7 @@ class OwnerCheck(policy.Check):
                          target[parent_foreign_key],
                          fields=[parent_field])
                 target[self.target_field] = data[parent_field]
-            except lib_exc.NotFound as e:
+            except exceptions.NotFound as e:
                 # NOTE(kevinbenton): a NotFound exception can occur if a
                 # list operation is happening at the same time as one of
                 # the parents and its children being deleted. So we issue
@@ -424,3 +422,13 @@ def check_is_advsvc(context):
     if ADVSVC_CTX_POLICY not in _ENFORCER.rules:
         return False
     return _ENFORCER.enforce(ADVSVC_CTX_POLICY, credentials, credentials)
+
+
+def _extract_roles(rule, roles):
+    if isinstance(rule, policy.RoleCheck):
+        roles.append(rule.match.lower())
+    elif isinstance(rule, policy.RuleCheck):
+        _extract_roles(_ENFORCER.rules[rule.match], roles)
+    elif hasattr(rule, 'rules'):
+        for rule in rule.rules:
+            _extract_roles(rule, roles)

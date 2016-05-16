@@ -19,8 +19,8 @@ import re
 from oslo_log import log as logging
 import six
 
-from neutron._i18n import _, _LE, _LW
 from neutron.common import utils
+from neutron.i18n import _LE, _LW
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
 from neutron.plugins.ml2.drivers.mech_sriov.agent import pci_lib
@@ -340,10 +340,9 @@ class ESwitchManager(object):
         """
         if exclude_devices is None:
             exclude_devices = {}
-        for phys_net, dev_names in six.iteritems(device_mappings):
-            for dev_name in dev_names:
-                self._create_emb_switch(phys_net, dev_name,
-                                        exclude_devices.get(dev_name, set()))
+        for phys_net, dev_name in six.iteritems(device_mappings):
+            self._create_emb_switch(phys_net, dev_name,
+                                    exclude_devices.get(dev_name, set()))
 
     def _create_emb_switch(self, phys_net, dev_name, exclude_devices):
         embedded_switch = EmbSwitch(phys_net, dev_name, exclude_devices)

@@ -15,16 +15,13 @@
 
 import functools
 
-from neutron_lib.api import validators
-from neutron_lib import constants
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 from sqlalchemy.orm import exc
 
 from neutron.api.v2 import attributes
-from neutron.common import constants as n_const
-from neutron.common import exceptions
+from neutron.common import constants
+from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.db import common_db_mixin
 from neutron.db import models_v2
@@ -110,12 +107,6 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
             subnet_id=subnet_id
         )
         context.session.add(allocated)
-        # NOTE(kevinbenton): We add this to the session info so the sqlalchemy
-        # object isn't immediately garbage collected. Otherwise when the
-        # fixed_ips relationship is referenced a new persistent object will be
-        # added to the session that will interfere with retry operations.
-        # See bug 1556178 for details.
-        context.session.info.setdefault('allocated_ips', []).append(allocated)
 
     def _make_subnet_dict(self, subnet, fields=None, context=None):
         res = {'id': subnet['id'],
@@ -154,15 +145,12 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                'default_prefixlen': default_prefixlen,
                'min_prefixlen': min_prefixlen,
                'max_prefixlen': max_prefixlen,
-               'is_default': subnetpool['is_default'],
                'shared': subnetpool['shared'],
                'prefixes': [prefix['cidr']
                             for prefix in subnetpool['prefixes']],
                'ip_version': subnetpool['ip_version'],
                'default_quota': subnetpool['default_quota'],
                'address_scope_id': subnetpool['address_scope_id']}
-        self._apply_dict_extend_functions(attributes.SUBNETPOOLS, res,
-                                          subnetpool)
         return self._fields(res, fields)
 
     def _make_port_dict(self, port, fields=None,
@@ -210,7 +198,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         try:
             return self._get_by_id(context, models_v2.SubnetPool, id)
         except exc.NoResultFound:
-            raise exceptions.SubnetPoolNotFound(subnetpool_id=id)
+            raise n_exc.SubnetPoolNotFound(subnetpool_id=id)
 
     def _get_all_subnetpools(self, context):
         # NOTE(tidwellr): see note in _get_all_subnets()
@@ -276,11 +264,17 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                'name': network['name'],
                'tenant_id': network['tenant_id'],
                'admin_state_up': network['admin_state_up'],
-               'mtu': network.get('mtu', n_const.DEFAULT_NETWORK_MTU),
+               'mtu': network.get('mtu', constants.DEFAULT_NETWORK_MTU),
                'status': network['status'],
                'subnets': [subnet['id']
                            for subnet in network['subnets']]}
         res['shared'] = self._is_network_shared(context, network)
+        # TODO(pritesh): Move vlan_transparent to the extension module.
+        # vlan_transparent here is only added if the vlantransparent
+        # extension is enabled.
+        if ('vlan_transparent' in network and network['vlan_transparent'] !=
+            attributes.ATTR_NOT_SPECIFIED):
+            res['vlan_transparent'] = network['vlan_transparent']
         # Call auxiliary extend functions, if any
         if process_extensions:
             self._apply_dict_extend_functions(
@@ -307,12 +301,11 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                 'cidr': str(detail.subnet_cidr),
                 'subnetpool_id': subnetpool_id,
                 'enable_dhcp': subnet['enable_dhcp'],
-                'gateway_ip': gateway_ip,
-                'description': subnet.get('description')}
+                'gateway_ip': gateway_ip}
         if subnet['ip_version'] == 6 and subnet['enable_dhcp']:
-            if validators.is_attr_set(subnet['ipv6_ra_mode']):
+            if attributes.is_attr_set(subnet['ipv6_ra_mode']):
                 args['ipv6_ra_mode'] = subnet['ipv6_ra_mode']
-            if validators.is_attr_set(subnet['ipv6_address_mode']):
+            if attributes.is_attr_set(subnet['ipv6_address_mode']):
                 args['ipv6_address_mode'] = subnet['ipv6_address_mode']
         return args
 
@@ -321,21 +314,3 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         return [{'subnet_id': ip["subnet_id"],
                  'ip_address': ip["ip_address"]}
                 for ip in ips]
-
-    def _port_filter_hook(self, context, original_model, conditions):
-        # Apply the port filter only in non-admin and non-advsvc context
-        if self.model_query_scope(context, original_model):
-            conditions |= (
-                (context.tenant_id == models_v2.Network.tenant_id) &
-                (models_v2.Network.id == models_v2.Port.network_id))
-        return conditions
-
-    def _port_query_hook(self, context, original_model, query):
-        # we need to outerjoin to networks if the model query scope
-        # is necessary so we can filter based on network id. without
-        # this the conditions in the filter hook cause the networks
-        # table to be added to the FROM statement so we get lots of
-        # duplicated rows that break the COUNT operation
-        if self.model_query_scope(context, original_model):
-            query = query.outerjoin(models_v2.Network)
-        return query

@@ -1,4 +1,4 @@
-# Copyright (c) 2015 OpenStack Foundation
+# Copyright (c) 2015 Openstack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -13,11 +13,11 @@
 #    under the License.
 
 import mock
-from neutron_lib import constants as l3_constants
 from oslo_utils import uuidutils
 
 from neutron.agent.l3 import legacy_router
 from neutron.agent.linux import ip_lib
+from neutron.common import constants as l3_constants
 from neutron.tests import base
 
 _uuid = uuidutils.generate_uuid

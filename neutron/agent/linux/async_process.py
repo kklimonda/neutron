@@ -19,10 +19,9 @@ import eventlet.event
 import eventlet.queue
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LE
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.common import utils as common_utils
+from neutron.i18n import _LE
 
 
 LOG = logging.getLogger(__name__)
@@ -155,7 +154,6 @@ class AsyncProcess(object):
         if self._process:
             return utils.get_root_helper_child_pid(
                 self._process.pid,
-                self.cmd_without_namespace,
                 run_as_root=self.run_as_root)
 
     def _kill(self, kill_signal):
@@ -225,7 +223,7 @@ class AsyncProcess(object):
     def _read(self, stream, queue):
         data = stream.readline()
         if data:
-            data = common_utils.safe_decode_utf8(data.strip())
+            data = data.strip()
             queue.put(data)
             return data
 

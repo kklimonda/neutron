@@ -28,26 +28,15 @@
 
 # first purge the all reviews that are more than 4w old and blocked by a core -2
 
-if [ "$1" = "--dry-run" ]; then
-    echo "Enabling dry run mode"
-    DRY_RUN=1
-else
-    DRY_RUN=0
-fi
-
 set -o errexit
 
 function abandon_review {
     local gitid=$1
     shift
     local msg=$@
+    echo "Abandoning $gitid"
     # echo ssh review.openstack.org gerrit review $gitid --abandon --message \"$msg\"
-    if [ $DRY_RUN -eq 1 ]; then
-	echo "Would abandon $gitid"
-    else
-	echo "Abandoning $gitid"
-	ssh review.openstack.org gerrit review $gitid --abandon --message \"$msg\"
-    fi
+    ssh review.openstack.org gerrit review $gitid --abandon --message \"$msg\"
 }
 
 PROJECTS="(project:openstack/neutron OR project:openstack/neutron-fwaas OR \

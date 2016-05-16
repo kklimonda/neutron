@@ -13,9 +13,9 @@
 #    under the License.
 #
 
-from neutron_lib.api import validators
-from oslo_db import exception as db_exc
 import sqlalchemy as sa
+
+from oslo_db import exception as db_exc
 from sqlalchemy import orm
 
 from neutron.api.v2 import attributes as attr
@@ -43,7 +43,7 @@ class AllowedAddressPairsMixin(object):
 
     def _process_create_allowed_address_pairs(self, context, port,
                                               allowed_address_pairs):
-        if not validators.is_attr_set(allowed_address_pairs):
+        if not attr.is_attr_set(allowed_address_pairs):
             return []
         try:
             with context.session.begin(subtransactions=True):
@@ -95,7 +95,7 @@ class AllowedAddressPairsMixin(object):
         return self._fields(res, fields)
 
     def _has_address_pairs(self, port):
-        return (validators.is_attr_set(port['port'][addr_pair.ADDRESS_PAIRS])
+        return (attr.is_attr_set(port['port'][addr_pair.ADDRESS_PAIRS])
                 and port['port'][addr_pair.ADDRESS_PAIRS] != [])
 
     def _check_update_has_allowed_address_pairs(self, port):
@@ -110,7 +110,7 @@ class AllowedAddressPairsMixin(object):
     def _check_update_deletes_allowed_address_pairs(self, port):
         """Determine if request deletes address pair.
 
-        Return True if port has an allowed address pair and its value
+        Return True if port has as a allowed address pair and its value
         is either [] or not is_attr_set, otherwise return False
         """
         return (addr_pair.ADDRESS_PAIRS in port['port'] and

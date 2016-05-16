@@ -14,12 +14,11 @@
 # limitations under the License.
 
 import mock
+from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import fields as obj_fields
-from oslo_versionedobjects import fixture
 import testtools
 
 from neutron.api.rpc.callbacks import resources
-from neutron.api.rpc.callbacks import version_manager
 from neutron.api.rpc.handlers import resources_rpc
 from neutron.common import topics
 from neutron import context
@@ -39,9 +38,8 @@ def _create_test_resource(context=None):
     return resource
 
 
+@obj_base.VersionedObjectRegistry.register
 class FakeResource(objects_base.NeutronObject):
-    # Version 1.0: Initial version
-    VERSION = '1.0'
 
     fields = {
         'id': obj_fields.UUIDField(),
@@ -57,10 +55,6 @@ class ResourcesRpcBaseTestCase(base.BaseTestCase):
 
     def setUp(self):
         super(ResourcesRpcBaseTestCase, self).setUp()
-
-        self.obj_registry = self.useFixture(
-            fixture.VersionedObjectRegistryFixture())
-
         self.context = context.get_admin_context()
 
 
@@ -109,7 +103,6 @@ class ResourcesPullRpcApiTestCase(ResourcesRpcBaseTestCase):
         self.assertIs(self.rpc, resources_rpc.ResourcesPullRpcApi())
 
     def test_pull(self):
-        self.obj_registry.register(FakeResource)
         expected_obj = _create_test_resource(self.context)
         resource_id = expected_obj.id
         self.cctxt_mock.call.return_value = expected_obj.obj_to_primitive()
@@ -131,26 +124,10 @@ class ResourcesPullRpcApiTestCase(ResourcesRpcBaseTestCase):
                           resource_id)
 
 
-class ResourcesPushToServerRpcCallbackTestCase(ResourcesRpcBaseTestCase):
-
-    def test_report_versions(self):
-        callbacks = resources_rpc.ResourcesPushToServerRpcCallback()
-        with mock.patch('neutron.api.rpc.callbacks.version_manager'
-                        '.update_versions') as update_versions:
-            version_map = {'A': '1.0'}
-            callbacks.report_agent_resource_versions(context=mock.ANY,
-                                      agent_type='DHCP Agent',
-                                      agent_host='fake-host',
-                                      version_map=version_map)
-            update_versions.assert_called_once_with(mock.ANY,
-                                                    version_map)
-
-
 class ResourcesPullRpcCallbackTestCase(ResourcesRpcBaseTestCase):
 
     def setUp(self):
         super(ResourcesPullRpcCallbackTestCase, self).setUp()
-        self.obj_registry.register(FakeResource)
         self.callbacks = resources_rpc.ResourcesPullRpcCallback()
         self.resource_obj = _create_test_resource(self.context)
 
@@ -198,7 +175,7 @@ class ResourcesPushRpcApiTestCase(ResourcesRpcBaseTestCase):
         with mock.patch.object(resources_rpc.resources, 'get_resource_cls',
                 return_value=FakeResource):
             observed = self.rpc._prepare_object_fanout_context(
-                self.resource_obj, self.resource_obj.VERSION)
+                self.resource_obj)
 
         self.rpc.client.prepare.assert_called_once_with(
             fanout=True, topic=expected_topic)
@@ -207,10 +184,8 @@ class ResourcesPushRpcApiTestCase(ResourcesRpcBaseTestCase):
     def test_pushy(self):
         with mock.patch.object(resources_rpc.resources, 'get_resource_cls',
                 return_value=FakeResource):
-            with mock.patch.object(version_manager, 'get_resource_versions',
-                    return_value=set([FakeResource.VERSION])):
-                self.rpc.push(
-                    self.context, self.resource_obj, 'TYPE')
+            self.rpc.push(
+                self.context, self.resource_obj, 'TYPE')
 
         self.cctxt_mock.cast.assert_called_once_with(
             self.context, 'push',
@@ -232,7 +207,6 @@ class ResourcesPushRpcCallbackTestCase(ResourcesRpcBaseTestCase):
 
     @mock.patch.object(resources_rpc.cons_registry, 'push')
     def test_push(self, reg_push_mock):
-        self.obj_registry.register(FakeResource)
         self.callbacks.push(self.context, self.resource_prim, 'TYPE')
         reg_push_mock.assert_called_once_with(self.resource_obj.obj_name(),
                                               self.resource_obj, 'TYPE')

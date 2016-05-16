@@ -18,7 +18,6 @@ import collections
 import random
 import time
 
-from neutron_lib import exceptions as lib_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -26,21 +25,19 @@ from oslo_messaging import serializer as om_serializer
 from oslo_service import service
 from oslo_utils import excutils
 
-from neutron._i18n import _LE, _LW
 from neutron.common import exceptions
 from neutron import context
+from neutron.i18n import _LE, _LW
 
 
 LOG = logging.getLogger(__name__)
 
 
 TRANSPORT = None
-NOTIFICATION_TRANSPORT = None
 NOTIFIER = None
 
 ALLOWED_EXMODS = [
     exceptions.__name__,
-    lib_exceptions.__name__,
 ]
 EXTRA_EXMODS = []
 
@@ -64,27 +61,22 @@ RPC_DISABLED = False
 
 
 def init(conf):
-    global TRANSPORT, NOTIFICATION_TRANSPORT, NOTIFIER
+    global TRANSPORT, NOTIFIER
     exmods = get_allowed_exmods()
     TRANSPORT = oslo_messaging.get_transport(conf,
                                              allowed_remote_exmods=exmods,
                                              aliases=TRANSPORT_ALIASES)
-    NOTIFICATION_TRANSPORT = oslo_messaging.get_notification_transport(
-        conf, allowed_remote_exmods=exmods, aliases=TRANSPORT_ALIASES)
     serializer = RequestContextSerializer()
-    NOTIFIER = oslo_messaging.Notifier(NOTIFICATION_TRANSPORT,
-                                       serializer=serializer)
+    NOTIFIER = oslo_messaging.Notifier(TRANSPORT, serializer=serializer)
 
 
 def cleanup():
-    global TRANSPORT, NOTIFICATION_TRANSPORT, NOTIFIER
+    global TRANSPORT, NOTIFIER
     assert TRANSPORT is not None
-    assert NOTIFICATION_TRANSPORT is not None
     assert NOTIFIER is not None
     TRANSPORT.cleanup()
-    NOTIFICATION_TRANSPORT.cleanup()
+    TRANSPORT = NOTIFIER = None
     _ContextWrapper.reset_timeouts()
-    TRANSPORT = NOTIFICATION_TRANSPORT = NOTIFIER = None
 
 
 def add_extra_exmods(*args):
@@ -243,7 +235,7 @@ class Service(service.Service):
     def start(self):
         super(Service, self).start()
 
-        self.conn = create_connection()
+        self.conn = create_connection(new=True)
         LOG.debug("Creating Consumer connection for Service %s",
                   self.topic)
 
@@ -306,8 +298,8 @@ class VoidConnection(object):
 
 
 # functions
-def create_connection():
-    # NOTE(salv-orlando): This is a clever interpretation of the factory design
+def create_connection(new=True):
+    # NOTE(salv-orlando): This is a clever interpreation of the factory design
     # patter aimed at preventing plugins from initializing RPC servers upon
     # initialization when they are running in the REST over HTTP API server.
     # The educated reader will perfectly be able that this a fairly dirty hack

@@ -20,9 +20,9 @@ from oslo_utils import excutils
 from sqlalchemy import event
 from sqlalchemy import exc as sql_exc
 
-from neutron._i18n import _LE, _LW
 from neutron.db import api as db_api
 from neutron.db.quota import api as quota_api
+from neutron.i18n import _LE, _LW
 
 LOG = log.getLogger(__name__)
 
@@ -36,7 +36,8 @@ def _count_resource(context, plugin, collection_name, tenant_id):
     # and count in python, allowing older plugins to still be supported
     try:
         obj_count_getter = getattr(plugin, count_getter_name)
-        return obj_count_getter(context, filters={'tenant_id': [tenant_id]})
+        meh = obj_count_getter(context, filters={'tenant_id': [tenant_id]})
+        return meh
     except (NotImplementedError, AttributeError):
         obj_getter = getattr(plugin, "get_%s" % collection_name)
         obj_list = obj_getter(context, filters={'tenant_id': [tenant_id]})

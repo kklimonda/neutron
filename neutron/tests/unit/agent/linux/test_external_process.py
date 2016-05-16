@@ -18,7 +18,6 @@ import os.path
 from neutron.agent.linux import external_process as ep
 from neutron.common import utils as common_utils
 from neutron.tests import base
-from neutron.tests import tools
 
 
 TEST_UUID = 'test-uuid'
@@ -217,14 +216,20 @@ class TestProcessManager(base.BaseTestCase):
         self.assertEqual(retval, '/var/path/uuid.pid')
 
     def test_pid(self):
-        self.useFixture(tools.OpenFixture('/var/path/uuid.pid', '5'))
-        manager = ep.ProcessManager(self.conf, 'uuid')
-        self.assertEqual(manager.pid, 5)
+        with mock.patch('six.moves.builtins.open') as mock_open:
+            mock_open.return_value.__enter__ = lambda s: s
+            mock_open.return_value.__exit__ = mock.Mock()
+            mock_open.return_value.read.return_value = '5'
+            manager = ep.ProcessManager(self.conf, 'uuid')
+            self.assertEqual(manager.pid, 5)
 
     def test_pid_no_an_int(self):
-        self.useFixture(tools.OpenFixture('/var/path/uuid.pid', 'foo'))
-        manager = ep.ProcessManager(self.conf, 'uuid')
-        self.assertIsNone(manager.pid)
+        with mock.patch('six.moves.builtins.open') as mock_open:
+            mock_open.return_value.__enter__ = lambda s: s
+            mock_open.return_value.__exit__ = mock.Mock()
+            mock_open.return_value.read.return_value = 'foo'
+            manager = ep.ProcessManager(self.conf, 'uuid')
+            self.assertIsNone(manager.pid, 5)
 
     def test_pid_invalid_file(self):
         with mock.patch.object(ep.ProcessManager, 'get_pid_file_name') as name:
@@ -233,15 +238,17 @@ class TestProcessManager(base.BaseTestCase):
             self.assertIsNone(manager.pid)
 
     def test_active(self):
-        mock_open = self.useFixture(
-            tools.OpenFixture('/proc/4/cmdline', 'python foo --router_id=uuid')
-        ).mock_open
-        with mock.patch.object(ep.ProcessManager, 'pid') as pid:
-            pid.__get__ = mock.Mock(return_value=4)
-            manager = ep.ProcessManager(self.conf, 'uuid')
-            self.assertTrue(manager.active)
+        with mock.patch('six.moves.builtins.open') as mock_open:
+            mock_open.return_value.__enter__ = lambda s: s
+            mock_open.return_value.__exit__ = mock.Mock()
+            mock_open.return_value.readline.return_value = \
+                'python foo --router_id=uuid'
+            with mock.patch.object(ep.ProcessManager, 'pid') as pid:
+                pid.__get__ = mock.Mock(return_value=4)
+                manager = ep.ProcessManager(self.conf, 'uuid')
+                self.assertTrue(manager.active)
 
-        mock_open.assert_called_once_with('/proc/4/cmdline', 'r')
+            mock_open.assert_called_once_with('/proc/4/cmdline', 'r')
 
     def test_active_none(self):
         dummy_cmd_line = 'python foo --router_id=uuid'
@@ -252,13 +259,14 @@ class TestProcessManager(base.BaseTestCase):
             self.assertFalse(manager.active)
 
     def test_active_cmd_mismatch(self):
-        mock_open = self.useFixture(
-            tools.OpenFixture('/proc/4/cmdline',
-                              'python foo --router_id=anotherid')
-        ).mock_open
-        with mock.patch.object(ep.ProcessManager, 'pid') as pid:
-            pid.__get__ = mock.Mock(return_value=4)
-            manager = ep.ProcessManager(self.conf, 'uuid')
-            self.assertFalse(manager.active)
+        with mock.patch('six.moves.builtins.open') as mock_open:
+            mock_open.return_value.__enter__ = lambda s: s
+            mock_open.return_value.__exit__ = mock.Mock()
+            mock_open.return_value.readline.return_value = \
+                'python foo --router_id=anotherid'
+            with mock.patch.object(ep.ProcessManager, 'pid') as pid:
+                pid.__get__ = mock.Mock(return_value=4)
+                manager = ep.ProcessManager(self.conf, 'uuid')
+                self.assertFalse(manager.active)
 
-        mock_open.assert_called_once_with('/proc/4/cmdline', 'r')
+            mock_open.assert_called_once_with('/proc/4/cmdline', 'r')

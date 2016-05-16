@@ -13,13 +13,13 @@
 #    under the License.
 
 import os
+from six.moves import queue as Queue
 import threading
 import traceback
 
 from ovs.db import idl
 from ovs import poller
 import retrying
-from six.moves import queue as Queue
 
 from neutron.agent.ovsdb.native import helpers
 from neutron.agent.ovsdb.native import idlutils
@@ -59,14 +59,7 @@ class Connection(object):
         self.lock = threading.Lock()
         self.schema_name = schema_name
 
-    def start(self, table_name_list=None):
-        """
-        :param table_name_list: A list of table names for schema_helper to
-                register. When this parameter is given, schema_helper will only
-                register tables which name are in list. Otherwise,
-                schema_helper will register all tables for given schema_name as
-                default.
-        """
+    def start(self):
         with self.lock:
             if self.idl is not None:
                 return
@@ -86,11 +79,7 @@ class Connection(object):
                                                       self.schema_name)
                 helper = do_get_schema_helper()
 
-            if table_name_list is None:
-                helper.register_all()
-            else:
-                for table_name in table_name_list:
-                    helper.register_table(table_name)
+            helper.register_all()
             self.idl = idl.Idl(self.connection, helper)
             idlutils.wait_for_change(self.idl, self.timeout)
             self.poller = poller.Poller()

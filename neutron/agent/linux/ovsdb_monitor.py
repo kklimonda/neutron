@@ -16,9 +16,9 @@ import eventlet
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 
-from neutron._i18n import _LE
 from neutron.agent.linux import async_process
 from neutron.agent.ovsdb import api as ovsdb
+from neutron.i18n import _LE
 
 
 LOG = logging.getLogger(__name__)
@@ -26,7 +26,6 @@ LOG = logging.getLogger(__name__)
 OVSDB_ACTION_INITIAL = 'initial'
 OVSDB_ACTION_INSERT = 'insert'
 OVSDB_ACTION_DELETE = 'delete'
-OVSDB_ACTION_NEW = 'new'
 
 
 class OvsdbMonitor(async_process.AsyncProcess):
@@ -61,6 +60,7 @@ class SimpleInterfaceMonitor(OvsdbMonitor):
             format='json',
             respawn_interval=respawn_interval,
         )
+        self.data_received = False
         self.new_events = {'added': [], 'removed': []}
 
     @property
@@ -86,7 +86,6 @@ class SimpleInterfaceMonitor(OvsdbMonitor):
     def process_events(self):
         devices_added = []
         devices_removed = []
-        dev_to_ofport = {}
         for row in self.iter_stdout():
             json = jsonutils.loads(row).get('data')
             for ovs_id, action, name, ofport, external_ids in json:
@@ -101,14 +100,8 @@ class SimpleInterfaceMonitor(OvsdbMonitor):
                     devices_added.append(device)
                 elif action == OVSDB_ACTION_DELETE:
                     devices_removed.append(device)
-                elif action == OVSDB_ACTION_NEW:
-                    dev_to_ofport[name] = ofport
-
         self.new_events['added'].extend(devices_added)
         self.new_events['removed'].extend(devices_removed)
-        # update any events with ofports received from 'new' action
-        for event in self.new_events['added']:
-            event['ofport'] = dev_to_ofport.get(event['name'], event['ofport'])
 
     def start(self, block=False, timeout=5):
         super(SimpleInterfaceMonitor, self).start()
@@ -116,3 +109,13 @@ class SimpleInterfaceMonitor(OvsdbMonitor):
             with eventlet.timeout.Timeout(timeout):
                 while not self.is_active():
                     eventlet.sleep()
+
+    def _kill(self, *args, **kwargs):
+        self.data_received = False
+        super(SimpleInterfaceMonitor, self)._kill(*args, **kwargs)
+
+    def _read_stdout(self):
+        data = super(SimpleInterfaceMonitor, self)._read_stdout()
+        if data and not self.data_received:
+            self.data_received = True
+        return data

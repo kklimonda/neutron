@@ -13,18 +13,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import mock
 import netaddr
-from neutron_lib import constants
-from neutron_lib import exceptions as n_exc
 
-from neutron.common import constants as n_const
+from neutron.api.v2 import attributes
+from neutron.common import constants
+from neutron.common import exceptions as n_exc
 from neutron import context
-from neutron.db import api as ndb_api
 from neutron.ipam.drivers.neutrondb_ipam import driver
 from neutron.ipam import exceptions as ipam_exc
 from neutron.ipam import requests as ipam_req
 from neutron import manager
+
 from neutron.tests.unit.db import test_db_base_plugin_v2 as test_db_plugin
 from neutron.tests.unit import testlib_api
 
@@ -44,18 +43,18 @@ class TestNeutronDbIpamMixin(object):
         return (created_network, created_network['id'])
 
     def _create_subnet(self, plugin, ctx, network_id, cidr, ip_version=4,
-                       v6_address_mode=constants.ATTR_NOT_SPECIFIED,
-                       allocation_pools=constants.ATTR_NOT_SPECIFIED):
+                       v6_address_mode=attributes.ATTR_NOT_SPECIFIED,
+                       allocation_pools=attributes.ATTR_NOT_SPECIFIED):
         subnet = {'subnet': {'name': 'sub',
                              'cidr': cidr,
                              'ip_version': ip_version,
-                             'gateway_ip': constants.ATTR_NOT_SPECIFIED,
+                             'gateway_ip': attributes.ATTR_NOT_SPECIFIED,
                              'allocation_pools': allocation_pools,
                              'enable_dhcp': True,
-                             'dns_nameservers': constants.ATTR_NOT_SPECIFIED,
-                             'host_routes': constants.ATTR_NOT_SPECIFIED,
+                             'dns_nameservers': attributes.ATTR_NOT_SPECIFIED,
+                             'host_routes': attributes.ATTR_NOT_SPECIFIED,
                              'ipv6_address_mode': v6_address_mode,
-                             'ipv6_ra_mode': constants.ATTR_NOT_SPECIFIED,
+                             'ipv6_ra_mode': attributes.ATTR_NOT_SPECIFIED,
                              'network_id': network_id,
                              'tenant_id': self._tenant_id}}
         return plugin.create_subnet(ctx, subnet)
@@ -202,7 +201,7 @@ class TestNeutronDbIpamPool(testlib_api.SqlTestCase,
 
 class TestNeutronDbIpamSubnet(testlib_api.SqlTestCase,
                               TestNeutronDbIpamMixin):
-    """Test case for Subnet interface for Neutron's DB IPAM driver.
+    """Test case for Subnet interface for Nuetron's DB IPAM driver.
 
     This test case exercises the reference IPAM driver.
     Even if it loads a plugin, the unit tests in this class do not exercise
@@ -212,14 +211,14 @@ class TestNeutronDbIpamSubnet(testlib_api.SqlTestCase,
     """
 
     def _create_and_allocate_ipam_subnet(
-        self, cidr, allocation_pools=constants.ATTR_NOT_SPECIFIED,
+        self, cidr, allocation_pools=attributes.ATTR_NOT_SPECIFIED,
         ip_version=4, v6_auto_address=False, tenant_id=None):
-        v6_address_mode = constants.ATTR_NOT_SPECIFIED
+        v6_address_mode = attributes.ATTR_NOT_SPECIFIED
         if v6_auto_address:
             # set ip version to 6 regardless of what's been passed to the
             # method
             ip_version = 6
-            v6_address_mode = n_const.IPV6_SLAAC
+            v6_address_mode = constants.IPV6_SLAAC
         subnet = self._create_subnet(
             self.plugin, self.ctx, self.net_id, cidr,
             ip_version=ip_version,
@@ -445,18 +444,3 @@ class TestNeutronDbIpamSubnet(testlib_api.SqlTestCase,
         subnet_req = ipam_req.SpecificSubnetRequest(
             'tenant_id', 'meh', '192.168.0.0/24')
         self.ipam_pool.allocate_subnet(subnet_req)
-
-    def test__allocate_specific_ip_raises_exception(self):
-        cidr = '10.0.0.0/24'
-        ip = '10.0.0.15'
-        ipam_subnet = self._create_and_allocate_ipam_subnet(cidr)[0]
-        ipam_subnet.subnet_manager = mock.Mock()
-        ipam_subnet.subnet_manager.list_ranges_by_subnet_id.return_value = [{
-            'first_ip': '10.0.0.15', 'last_ip': '10.0.0.15'}]
-        ipam_subnet.subnet_manager.delete_range.return_value = 0
-
-        @ndb_api.retry_db_errors
-        def go():
-            ipam_subnet._allocate_specific_ip(self.ctx.session, ip)
-
-        self.assertRaises(ipam_exc.IPAllocationFailed, go)

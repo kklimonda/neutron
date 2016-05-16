@@ -18,23 +18,21 @@ import re
 import eventlet
 import mock
 import netaddr
-from neutron_lib import constants
-from neutron_lib import exceptions as exc
-from oslo_log import log as logging
-import six
 import testtools
 
+from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
 from neutron.tests import base
-from neutron.tests.common import helpers
+
+from oslo_log import log as logging
 
 
 class TestParseMappings(base.BaseTestCase):
-    def parse(self, mapping_list, unique_values=True, unique_keys=True):
-        return utils.parse_mappings(mapping_list, unique_values, unique_keys)
+    def parse(self, mapping_list, unique_values=True):
+        return utils.parse_mappings(mapping_list, unique_values)
 
     def test_parse_mappings_fails_for_missing_separator(self):
         with testtools.ExpectedException(ValueError):
@@ -61,32 +59,27 @@ class TestParseMappings(base.BaseTestCase):
             self.parse(['key1:val', 'key2:val'])
 
     def test_parse_mappings_succeeds_for_one_mapping(self):
-        self.assertEqual({'key': 'val'}, self.parse(['key:val']))
+        self.assertEqual(self.parse(['key:val']), {'key': 'val'})
 
     def test_parse_mappings_succeeds_for_n_mappings(self):
-        self.assertEqual({'key1': 'val1', 'key2': 'val2'},
-                         self.parse(['key1:val1', 'key2:val2']))
+        self.assertEqual(self.parse(['key1:val1', 'key2:val2']),
+                         {'key1': 'val1', 'key2': 'val2'})
 
     def test_parse_mappings_succeeds_for_duplicate_value(self):
-        self.assertEqual({'key1': 'val', 'key2': 'val'},
-                         self.parse(['key1:val', 'key2:val'], False))
+        self.assertEqual(self.parse(['key1:val', 'key2:val'], False),
+                         {'key1': 'val', 'key2': 'val'})
 
     def test_parse_mappings_succeeds_for_no_mappings(self):
-        self.assertEqual({}, self.parse(['']))
-
-    def test_parse_mappings_succeeds_for_nonuniq_key(self):
-        self.assertEqual({'key': ['val1', 'val2']},
-                         self.parse(['key:val1', 'key:val2', 'key:val2'],
-                                    unique_keys=False))
+        self.assertEqual(self.parse(['']), {})
 
 
 class TestParseTunnelRangesMixin(object):
     TUN_MIN = None
     TUN_MAX = None
     TYPE = None
-    _err_prefix = "Invalid network tunnel range: '%d:%d' - "
-    _err_suffix = "%s is not a valid %s identifier."
-    _err_range = "End of tunnel range is less than start of tunnel range."
+    _err_prefix = "Invalid network Tunnel range: '%d:%d' - "
+    _err_suffix = "%s is not a valid %s identifier"
+    _err_range = "End of tunnel range is less than start of tunnel range"
 
     def _build_invalid_tunnel_range_msg(self, t_range_tuple, n):
         bad_id = t_range_tuple[n - 1]
@@ -104,12 +97,12 @@ class TestParseTunnelRangesMixin(object):
 
     def _check_range_invalid_ranges(self, bad_range, which):
         expected_msg = self._build_invalid_tunnel_range_msg(bad_range, which)
-        err = self.assertRaises(exc.NetworkTunnelRangeError,
+        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         self.assertEqual(expected_msg, str(err))
 
     def _check_range_reversed(self, bad_range):
-        err = self.assertRaises(exc.NetworkTunnelRangeError,
+        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         expected_msg = self._build_range_reversed_msg(bad_range)
         self.assertEqual(expected_msg, str(err))
@@ -144,11 +137,11 @@ class TestVxlanTunnelRangeVerifyValid(TestParseTunnelRangesMixin,
 
 class UtilTestParseVlanRanges(base.BaseTestCase):
     _err_prefix = "Invalid network VLAN range: '"
-    _err_too_few = "' - 'need more than 2 values to unpack'."
+    _err_too_few = "' - 'need more than 2 values to unpack'"
     _err_too_many_prefix = "' - 'too many values to unpack"
-    _err_not_int = "' - 'invalid literal for int() with base 10: '%s''."
-    _err_bad_vlan = "' - '%s is not a valid VLAN tag'."
-    _err_range = "' - 'End of VLAN range is less than start of VLAN range'."
+    _err_not_int = "' - 'invalid literal for int() with base 10: '%s''"
+    _err_bad_vlan = "' - '%s is not a valid VLAN tag'"
+    _err_range = "' - 'End of VLAN range is less than start of VLAN range'"
 
     def _range_too_few_err(self, nv_range):
         return self._err_prefix + nv_range + self._err_too_few
@@ -259,12 +252,12 @@ class TestParseOneVlanRange(UtilTestParseVlanRanges):
     def test_parse_one_net_no_vlan_range(self):
         config_str = "net1"
         expected_networks = ("net1", None)
-        self.assertEqual(expected_networks, self.parse_one(config_str))
+        self.assertEqual(self.parse_one(config_str), expected_networks)
 
     def test_parse_one_net_and_vlan_range(self):
         config_str = "net1:100:199"
         expected_networks = ("net1", (100, 199))
-        self.assertEqual(expected_networks, self.parse_one(config_str))
+        self.assertEqual(self.parse_one(config_str), expected_networks)
 
     def test_parse_one_net_incomplete_range(self):
         config_str = "net1:100"
@@ -300,7 +293,7 @@ class TestParseOneVlanRange(UtilTestParseVlanRanges):
     def test_parse_one_net_and_max_range(self):
         config_str = "net1:1:4094"
         expected_networks = ("net1", (1, 4094))
-        self.assertEqual(expected_networks, self.parse_one(config_str))
+        self.assertEqual(self.parse_one(config_str), expected_networks)
 
     def test_parse_one_net_range_bad_vlan1(self):
         config_str = "net1:9000:150"
@@ -324,33 +317,33 @@ class TestParseVlanRangeList(UtilTestParseVlanRanges):
     def test_parse_list_one_net_no_vlan_range(self):
         config_list = ["net1"]
         expected_networks = {"net1": []}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_list_one_net_vlan_range(self):
         config_list = ["net1:100:199"]
         expected_networks = {"net1": [(100, 199)]}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_no_vlan_range(self):
         config_list = ["net1",
                        "net2"]
         expected_networks = {"net1": [],
                              "net2": []}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_range_and_no_range(self):
         config_list = ["net1:100:199",
                        "net2"]
         expected_networks = {"net1": [(100, 199)],
                              "net2": []}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_no_range_and_range(self):
         config_list = ["net1",
                        "net2:200:299"]
         expected_networks = {"net1": [],
                              "net2": [(200, 299)]}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_bad_vlan_range1(self):
         config_list = ["net1:100",
@@ -375,7 +368,7 @@ class TestParseVlanRangeList(UtilTestParseVlanRanges):
         expected_networks = {"net1": [(100, 199),
                                       (1000, 1099)],
                              "net2": [(200, 299)]}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_and_append_1_3(self):
         config_list = ["net1:100:199",
@@ -384,23 +377,23 @@ class TestParseVlanRangeList(UtilTestParseVlanRanges):
         expected_networks = {"net1": [(100, 199),
                                       (1000, 1099)],
                              "net2": [(200, 299)]}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
 
 class TestDictUtils(base.BaseTestCase):
     def test_dict2str(self):
         dic = {"key1": "value1", "key2": "value2", "key3": "value3"}
         expected = "key1=value1,key2=value2,key3=value3"
-        self.assertEqual(expected, utils.dict2str(dic))
+        self.assertEqual(utils.dict2str(dic), expected)
 
     def test_str2dict(self):
         string = "key1=value1,key2=value2,key3=value3"
         expected = {"key1": "value1", "key2": "value2", "key3": "value3"}
-        self.assertEqual(expected, utils.str2dict(string))
+        self.assertEqual(utils.str2dict(string), expected)
 
     def test_dict_str_conversion(self):
         dic = {"key1": "value1", "key2": "value2"}
-        self.assertEqual(dic, utils.str2dict(utils.dict2str(dic)))
+        self.assertEqual(utils.str2dict(utils.dict2str(dic)), dic)
 
     def test_diff_list_of_dict(self):
         old_list = [{"key1": "value1"},
@@ -577,7 +570,7 @@ class TestDvrServices(base.BaseTestCase):
         self._test_is_dvr_serviced(constants.DEVICE_OWNER_DHCP, True)
 
     def test_is_dvr_serviced_with_vm_port(self):
-        self._test_is_dvr_serviced(constants.DEVICE_OWNER_COMPUTE_PREFIX, True)
+        self._test_is_dvr_serviced('compute:', True)
 
 
 class TestIpToCidr(base.BaseTestCase):
@@ -639,12 +632,12 @@ class TestCidrIsHost(base.BaseTestCase):
 
 class TestIpVersionFromInt(base.BaseTestCase):
     def test_ip_version_from_int_ipv4(self):
-        self.assertEqual(constants.IPv4,
-                         utils.ip_version_from_int(4))
+        self.assertEqual(utils.ip_version_from_int(4),
+                         constants.IPv4)
 
     def test_ip_version_from_int_ipv6(self):
-        self.assertEqual(constants.IPv6,
-                         utils.ip_version_from_int(6))
+        self.assertEqual(utils.ip_version_from_int(6),
+                         constants.IPv6)
 
     def test_ip_version_from_int_illegal_int(self):
         self.assertRaises(ValueError,
@@ -723,64 +716,3 @@ class TestGetRandomString(base.BaseTestCase):
         self.assertEqual(length, len(random_string))
         regex = re.compile('^[0-9a-fA-F]+$')
         self.assertIsNotNone(regex.match(random_string))
-
-
-class TestSafeDecodeUtf8(base.BaseTestCase):
-
-    @helpers.requires_py2
-    def test_py2_does_nothing(self):
-        s = 'test-py2'
-        self.assertIs(s, utils.safe_decode_utf8(s))
-
-    @helpers.requires_py3
-    def test_py3_decoded_valid_bytes(self):
-        s = bytes('test-py2', 'utf-8')
-        decoded_str = utils.safe_decode_utf8(s)
-        self.assertIsInstance(decoded_str, six.text_type)
-        self.assertEqual(s, decoded_str.encode('utf-8'))
-
-    @helpers.requires_py3
-    def test_py3_decoded_invalid_bytes(self):
-        s = bytes('test-py2', 'utf_16')
-        decoded_str = utils.safe_decode_utf8(s)
-        self.assertIsInstance(decoded_str, six.text_type)
-
-
-class TestPortRuleMasking(base.BaseTestCase):
-    def test_port_rule_masking(self):
-        compare_rules = lambda x, y: set(x) == set(y) and len(x) == len(y)
-
-        # Test 1.
-        port_min = 5
-        port_max = 12
-        expected_rules = ['0x0005', '0x000c', '0x0006/0xfffe',
-                          '0x0008/0xfffc']
-        rules = utils.port_rule_masking(port_min, port_max)
-        self.assertTrue(compare_rules(rules, expected_rules))
-
-        # Test 2.
-        port_min = 20
-        port_max = 130
-        expected_rules = ['0x0014/0xfffe', '0x0016/0xfffe', '0x0018/0xfff8',
-                          '0x0020/0xffe0', '0x0040/0xffc0', '0x0080/0xfffe',
-                          '0x0082']
-        rules = utils.port_rule_masking(port_min, port_max)
-        self.assertEqual(expected_rules, rules)
-
-        # Test 3.
-        port_min = 4501
-        port_max = 33057
-        expected_rules = ['0x1195', '0x1196/0xfffe', '0x1198/0xfff8',
-                          '0x11a0/0xffe0', '0x11c0/0xffc0', '0x1200/0xfe00',
-                          '0x1400/0xfc00', '0x1800/0xf800', '0x2000/0xe000',
-                          '0x4000/0xc000', '0x8021/0xff00', '0x8101/0xffe0',
-                          '0x8120/0xfffe']
-
-        rules = utils.port_rule_masking(port_min, port_max)
-        self.assertEqual(expected_rules, rules)
-
-    def test_port_rule_masking_min_higher_than_max(self):
-        port_min = 10
-        port_max = 5
-        with testtools.ExpectedException(ValueError):
-            utils.port_rule_masking(port_min, port_max)

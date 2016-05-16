@@ -12,14 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from logging import config as logging_config
+
 from alembic import context
 from oslo_config import cfg
+from oslo_db.sqlalchemy import session
 import sqlalchemy as sa
 from sqlalchemy import event
 
 from neutron.db.migration.alembic_migrations import external
 from neutron.db.migration import autogen
-from neutron.db.migration.connection import DBConnection
 from neutron.db.migration.models import head  # noqa
 from neutron.db import model_base
 
@@ -37,6 +39,10 @@ MYSQL_ENGINE = None
 # access to the values within the .ini file in use.
 config = context.config
 neutron_config = config.neutron_config
+
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
+logging_config.fileConfig(config.config_file_name)
 
 # set the target for 'autogenerate' support
 target_metadata = model_base.BASEV2.metadata
@@ -103,15 +109,24 @@ def run_migrations_online():
     """
     set_mysql_engine()
     connection = config.attributes.get('connection')
-    with DBConnection(neutron_config.database.connection, connection) as conn:
-        context.configure(
-            connection=conn,
-            target_metadata=target_metadata,
-            include_object=include_object,
-            process_revision_directives=autogen.process_revision_directives
-        )
+    new_engine = connection is None
+    if new_engine:
+        engine = session.create_engine(neutron_config.database.connection)
+        connection = engine.connect()
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_object=include_object,
+        process_revision_directives=autogen.process_revision_directives
+    )
+
+    try:
         with context.begin_transaction():
             context.run_migrations()
+    finally:
+        if new_engine:
+            connection.close()
+            engine.dispose()
 
 
 if context.is_offline_mode():
