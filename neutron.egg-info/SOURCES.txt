@@ -95,7 +95,6 @@ etc/neutron/plugins/brocade/brocade_mlx.ini
 etc/neutron/plugins/brocade/vyatta/vrouter.ini
 etc/neutron/plugins/cisco/cisco_vpn_agent.ini
 etc/neutron/plugins/embrane/heleos_conf.ini
-etc/neutron/plugins/midonet/midonet.ini
 etc/neutron/plugins/ml2/linuxbridge_agent.ini
 etc/neutron/plugins/ml2/ml2_conf.ini
 etc/neutron/plugins/ml2/ml2_conf_brocade.ini
@@ -584,9 +583,6 @@ neutron/plugins/hyperv/agent/__init__.py
 neutron/plugins/hyperv/agent/config.py
 neutron/plugins/hyperv/agent/l2_agent.py
 neutron/plugins/hyperv/agent/security_groups_driver.py
-neutron/plugins/midonet/__init__.py
-neutron/plugins/midonet/plugin.py
-neutron/plugins/midonet/requirements.txt
 neutron/plugins/ml2/README
 neutron/plugins/ml2/__init__.py
 neutron/plugins/ml2/config.py

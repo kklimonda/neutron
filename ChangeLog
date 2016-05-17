@@ -1,6 +1,7 @@
 CHANGES
 =======
 
+* Updated from global requirements
 * Add exponential back-off RPC client
 * Updated from global requirements
 * Cleanup stale OVS flows for physical bridges
@@ -77,6 +78,7 @@ CHANGES
 * Fix port relationship for DVRPortBinding
 * Add tests for RPC methods/classes
 * Fix sanity check --no* BoolOpts
+* Decomposition phase2 for MidoNet plugin
 * Add extension requirement in port-security api test
 * Fix for adding gateway with IP outside subnet
 * Add the rebinding chance in _bind_port_if_needed
