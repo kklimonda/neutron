@@ -13,4 +13,4 @@ Forwarded: not-needed
 -ryu>=3.23.2 # Apache-2.0
  SQLAlchemy<1.1.0,>=0.9.9
  WebOb>=1.2.3
- python-keystoneclient!=1.8.0,>=1.6.0
+ python-keystoneclient!=1.8.0,<3.0.0,>=1.6.0
