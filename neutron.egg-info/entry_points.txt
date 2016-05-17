@@ -37,7 +37,6 @@ dibbler = neutron.agent.linux.dibbler:PDDibbler
 bigswitch = neutron.plugins.bigswitch.plugin:NeutronRestProxyV2
 brocade = neutron.plugins.brocade.NeutronPlugin:BrocadePluginV2
 embrane = neutron.plugins.embrane.plugins.embrane_ml2_plugin:EmbraneMl2Plugin
-midonet = neutron.plugins.midonet.plugin:MidonetPluginV2
 ml2 = neutron.plugins.ml2.plugin:Ml2Plugin
 nuage = neutron.plugins.nuage.plugin:NuagePlugin
 oneconvergence = neutron.plugins.oneconvergence.plugin:OneConvergencePluginV2
