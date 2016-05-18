@@ -1,8 +1,12 @@
 neutron (2:8.1.0-0ubuntu1) xenial; urgency=medium
 
+  [ David Della Vecchia ]
   * New upstream point release for OpenStack Mitaka (LP: #1580674).
 
- -- David Della Vecchia <ddv@canonical.com>  Wed, 11 May 2016 12:05:38 -0400
+  [ Corey Bryant ]
+  * d/rules: Switch to using ostestr for unit test execution to avoid races.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Wed, 18 May 2016 08:16:42 -0400
 
 neutron (2:8.0.0-0ubuntu1) xenial; urgency=medium
 
