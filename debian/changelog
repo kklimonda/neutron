@@ -1,9 +1,11 @@
-neutron (2:8.1.0-0ubuntu1) xenial; urgency=medium
+neutron (2:8.1.0-0ubuntu0.16.04.2) xenial; urgency=medium
 
   [ David Della Vecchia ]
   * New upstream point release for OpenStack Mitaka (LP: #1580674).
 
   [ Corey Bryant ]
+  * d/changelog: Change package version to 2:8.1.0-0ubuntu0.16.04.1 in order
+    to not conflict with yakkety version 2:8.1.0-0ubuntu1.
   * d/rules: Switch to using ostestr for unit test execution to avoid races.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Wed, 18 May 2016 08:16:42 -0400
