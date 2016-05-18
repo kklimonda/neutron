@@ -32,19 +32,12 @@ override_dh_installinit:
 
 override_dh_auto_clean:
 	dh_auto_clean
-	rm -f debian/*.upstart debian/*.init debian/*.service
+	rm -f debian/*.upstart debian/*.init debian/*.service .testrepository
 
 get-orig-source:
 	uscan --verbose --force-download --rename --destdir=../build-area
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
-	rm -rf .testrepository
-	testr init && \
-    set -e && \
-    TEMP_REZ=`mktemp -t` && \
-    testr run --subunit neutron.tests.unit | tee $$TEMP_REZ | subunit2pyunit; \
-	cat $$TEMP_REZ | subunit-filter -s --no-passthrough | subunit-stats; \
-	rm -f $$TEMP_REZ ; \
-	testr slowest;
+	ostestr
 endif
