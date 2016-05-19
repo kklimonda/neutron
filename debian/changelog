@@ -8,6 +8,8 @@ neutron (2:7.0.5~dev99-0ubuntu1) UNRELEASED; urgency=medium
   * d/p/fix-test-treat-devices-added-updated-no-local-interface.patch:
     Mock ip_lib for failing test.
   * d/rules: Use ostestr to run tests.
+  * d/control, d/neutron-plugin-midonet.install, d/t/midonet-plugin:
+    Drop MidonetInterfaceDriver as it has moved out of tree.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Thu, 19 May 2016 12:39:02 -0400
 
