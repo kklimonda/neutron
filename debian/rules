@@ -24,7 +24,7 @@ override_dh_installinit:
 
 override_dh_auto_clean:
 	dh_auto_clean
-	rm -f debian/*.upstart debian/*.init debian/*.service
+	rm -f debian/*.upstart debian/*.init debian/*.service .testrepository
 
 get-orig-source:
 	uscan --verbose --force-download --rename --destdir=../build-area
@@ -34,14 +34,7 @@ override_dh_auto_test:
 	# Unpatch neutron configuration to fixup tests which conflict
 	# with a core_plugin being set.
 	patch -p1 -R < debian/patches/fix-neutron-configuration.patch
-	rm -rf .testrepository
-	testr init && \
-    set -e && \
-    TEMP_REZ=`mktemp -t` && \
-    testr run --subunit neutron.tests.unit | tee $$TEMP_REZ | subunit2pyunit; \
-	cat $$TEMP_REZ | subunit-filter -s --no-passthrough | subunit-stats; \
-	rm -f $$TEMP_REZ ; \
-	testr slowest; \
+	ostestr
 	# Patch configuration file after testing
 	patch -p1 < debian/patches/fix-neutron-configuration.patch
 endif
