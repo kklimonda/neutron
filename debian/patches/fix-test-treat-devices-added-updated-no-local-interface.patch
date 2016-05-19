@@ -1,0 +1,37 @@
+Description: Fix test error by mocking out call that leads to subprocess
+             failure. The error only exists on liberty as the test code has
+             since been moved and refactored.
+             Following is the original traceback:
+
+     Traceback (most recent call last):
+       File "/<<PKGBUILDDIR>>/neutron/tests/unit/plugins/ml2/drivers/linuxbridge/agent/test_linuxbridge_neutron_agent.py", line 425, in test_treat_devices_added_upd
+         agent.treat_devices_added_updated(set(['tap1']))
+       ...
+       File "/<<PKGBUILDDIR>>/neutron/plugins/ml2/drivers/linuxbridge/agent/linuxbridge_neutron_agent.py", line 476, in add_tap_interface
+         if not ip_lib.device_exists(tap_device_name):
+       ...
+       File "/<<PKGBUILDDIR>>/neutron/common/utils.py", line 199, in subprocess_popen
+         close_fds=close_fds, env=env)
+       File "/usr/lib/python2.7/dist-packages/eventlet/green/subprocess.py", line 54, in __init__
+         subprocess_orig.Popen.__init__(self, args, 0, *argss, **kwds)
+       File "/usr/lib/python2.7/subprocess.py", line 711, in __init__
+         errread, errwrite)
+       File "/usr/lib/python2.7/subprocess.py", line 1340, in _execute_child
+         raise child_exception
+     OSError: [Errno 2] No such file or directory
+
+Author: Corey Bryant <corey.bryant@canonical.com>
+Forwarded: No (upstream is in security-fix only mode for liberty)
+
+--- a/neutron/tests/unit/plugins/ml2/drivers/linuxbridge/agent/test_linuxbridge_neutron_agent.py
++++ b/neutron/tests/unit/plugins/ml2/drivers/linuxbridge/agent/test_linuxbridge_neutron_agent.py
+@@ -422,7 +422,8 @@
+         agent.mgr = mock.Mock()
+         agent.mgr.plug_interface.return_value = False
+         agent.mgr.ensure_port_admin_state = mock.Mock()
+-        agent.treat_devices_added_updated(set(['tap1']))
++        with mock.patch.object(ip_lib, 'device_exists', return_value=False):
++            agent.treat_devices_added_updated(set(['tap1']))
+         self.assertFalse(agent.mgr.ensure_port_admin_state.called)
+ 
+     def test_treat_devices_added_updated_admin_state_up_true(self):

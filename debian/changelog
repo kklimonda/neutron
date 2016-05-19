@@ -1,9 +1,14 @@
 neutron (2:7.0.5~dev99-0ubuntu1) UNRELEASED; urgency=medium
 
+  [ James Page ]
   * New upstream version.
   * d/p/*: Refresh.
 
- -- James Page <james.page@ubuntu.com>  Tue, 17 May 2016 11:55:41 +0100
+  [ Corey Bryant ]
+  * d/p/fix-test-treat-devices-added-updated-no-local-interface.patch:
+    Mock ip_lib for failing test.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 19 May 2016 12:39:02 -0400
 
 neutron (2:7.0.4-0ubuntu1) wily; urgency=medium
 
