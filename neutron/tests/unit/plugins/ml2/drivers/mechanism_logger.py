@@ -15,6 +15,7 @@
 
 from oslo_log import log
 
+from neutron._i18n import _
 from neutron.plugins.ml2 import driver_api as api
 
 LOG = log.getLogger(__name__)
@@ -129,3 +130,10 @@ class LoggerMechanismDriver(api.MechanismDriver):
 
     def bind_port(self, context):
         self._log_port_call("bind_port", context)
+
+    def filter_hosts_with_segment_access(
+            self, context, segments, candidate_hosts, agent_getter):
+        LOG.info(_("filter_hosts_with_segment_access called with segments "
+                   "%(segments)s, candidate hosts %(hosts)s "),
+                 {'segments': segments, 'hosts': candidate_hosts})
+        return set()

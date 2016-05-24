@@ -15,7 +15,9 @@
 
 """Exceptions used by SRIOV Mechanism Driver."""
 
-from neutron.common import exceptions
+from neutron_lib import exceptions
+
+from neutron._i18n import _
 
 
 class SriovUnsupportedNetworkType(exceptions.NeutronException):

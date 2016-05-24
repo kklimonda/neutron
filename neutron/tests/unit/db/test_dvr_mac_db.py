@@ -14,11 +14,17 @@
 # limitations under the License.
 
 import mock
+from neutron_lib import constants
 from oslo_config import cfg
 
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
 from neutron import context
 from neutron.db import dvr_mac_db
 from neutron.extensions import dvr
+from neutron.extensions import portbindings
+from neutron import manager
 from neutron.tests.unit.plugins.ml2 import test_plugin
 
 
@@ -73,12 +79,33 @@ class DvrDbMixinTestCase(test_plugin.Ml2PluginV2TestCase):
                               self.ctx, "foo_host_2")
         self.assertEqual(new_retries, f.call_count)
 
-    def test_delete_dvr_mac_address(self):
-        self._create_dvr_mac_entry('foo_host', 'foo_mac_address')
-        self.mixin.delete_dvr_mac_address(self.ctx, 'foo_host')
-        count = self.ctx.session.query(
-            dvr_mac_db.DistributedVirtualRouterMacAddress).count()
-        self.assertFalse(count)
+    def test_mac_not_cleared_on_agent_delete_event_with_remaining_agents(self):
+        plugin = manager.NeutronManager.get_plugin()
+        self._create_dvr_mac_entry('host_1', 'mac_1')
+        self._create_dvr_mac_entry('host_2', 'mac_2')
+        agent1 = {'host': 'host_1', 'id': 'a1'}
+        agent2 = {'host': 'host_1', 'id': 'a2'}
+        with mock.patch.object(plugin, 'get_agents', return_value=[agent2]):
+            with mock.patch.object(plugin, 'notifier') as notifier:
+                registry.notify(resources.AGENT, events.BEFORE_DELETE, self,
+                                context=self.ctx, agent=agent1)
+        mac_list = self.mixin.get_dvr_mac_address_list(self.ctx)
+        self.assertEqual(2, len(mac_list))
+        self.assertFalse(notifier.dvr_mac_address_update.called)
+
+    def test_mac_cleared_on_agent_delete_event(self):
+        plugin = manager.NeutronManager.get_plugin()
+        self._create_dvr_mac_entry('host_1', 'mac_1')
+        self._create_dvr_mac_entry('host_2', 'mac_2')
+        agent = {'host': 'host_1', 'id': 'a1'}
+        with mock.patch.object(plugin, 'notifier') as notifier:
+            registry.notify(resources.AGENT, events.BEFORE_DELETE, self,
+                            context=self.ctx, agent=agent)
+        mac_list = self.mixin.get_dvr_mac_address_list(self.ctx)
+        self.assertEqual(1, len(mac_list))
+        self.assertEqual('host_2', mac_list[0]['host'])
+        notifier.dvr_mac_address_update.assert_called_once_with(
+            self.ctx, mac_list)
 
     def test_get_dvr_mac_address_list(self):
         self._create_dvr_mac_entry('host_1', 'mac_1')
@@ -134,3 +161,33 @@ class DvrDbMixinTestCase(test_plugin.Ml2PluginV2TestCase):
                     self.ctx, subnet['subnet']['id'], fixed_ips)
                 self.assertEqual(gw_port['port']['mac_address'],
                                  dvr_subnet['gateway_mac'])
+
+    def test_get_ports_on_host_by_subnet(self):
+        HOST = 'host1'
+        host_arg = {portbindings.HOST_ID: HOST}
+        arg_list = (portbindings.HOST_ID,)
+        with self.subnet() as subnet,\
+                self.port(subnet=subnet,
+                          device_owner=constants.DEVICE_OWNER_COMPUTE_PREFIX,
+                          arg_list=arg_list, **host_arg) as compute_port,\
+                self.port(subnet=subnet,
+                          device_owner=constants.DEVICE_OWNER_DHCP,
+                          arg_list=arg_list, **host_arg) as dhcp_port,\
+                self.port(subnet=subnet,
+                          device_owner=constants.DEVICE_OWNER_LOADBALANCER,
+                          arg_list=arg_list, **host_arg) as lb_port,\
+                self.port(device_owner=constants.DEVICE_OWNER_COMPUTE_PREFIX,
+                          arg_list=arg_list, **host_arg),\
+                self.port(subnet=subnet,
+                          device_owner=constants.DEVICE_OWNER_COMPUTE_PREFIX,
+                          arg_list=arg_list,
+                          **{portbindings.HOST_ID: 'other'}),\
+                self.port(subnet=subnet,
+                          device_owner=constants.DEVICE_OWNER_NETWORK_PREFIX,
+                          arg_list=arg_list, **host_arg):
+            expected_ids = [port['port']['id'] for port in
+                            [compute_port, dhcp_port, lb_port]]
+            dvr_ports = self.mixin.get_ports_on_host_by_subnet(
+                self.ctx, HOST, subnet['subnet']['id'])
+            self.assertEqual(len(expected_ids), len(dvr_ports))
+            self.assertEqual(expected_ids, [port['id'] for port in dvr_ports])

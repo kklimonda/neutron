@@ -16,15 +16,12 @@
 import abc
 import itertools
 
+from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_log import helpers as log_helpers
-from oslo_log import log as logging
 import six
 
-from neutron.common import constants as n_const
 from neutron.plugins.ml2.drivers.l2pop import rpc as l2pop_rpc
-
-LOG = logging.getLogger(__name__)
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -107,6 +104,7 @@ class L2populationRpcCallBackMixin(object):
         pass
 
 
+@six.add_metaclass(abc.ABCMeta)
 class L2populationRpcCallBackTunnelMixin(L2populationRpcCallBackMixin):
     '''Mixin class of L2-population call back for Tunnel.
 

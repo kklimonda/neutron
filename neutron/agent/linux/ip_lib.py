@@ -13,19 +13,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import os
+import re
+
 import eventlet
 import netaddr
-import os
+from neutron_lib import constants
+from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
-import re
 import six
 
+from neutron._i18n import _, _LE
 from neutron.agent.common import utils
-from neutron.common import constants
-from neutron.common import exceptions
-from neutron.i18n import _LE
+from neutron.common import exceptions as n_exc
 
 LOG = logging.getLogger(__name__)
 
@@ -103,6 +105,9 @@ class SubProcessBase(object):
     def set_log_fail_as_error(self, fail_with_error):
         self.log_fail_as_error = fail_with_error
 
+    def get_log_fail_as_error(self):
+        return self.log_fail_as_error
+
 
 class IPWrapper(SubProcessBase):
     def __init__(self, namespace=None):
@@ -170,6 +175,12 @@ class IPWrapper(SubProcessBase):
         return (IPDevice(name1, namespace=self.namespace),
                 IPDevice(name2, namespace=namespace2))
 
+    def add_macvtap(self, name, src_dev, mode='bridge'):
+        args = ['add', 'link', src_dev, 'name', name, 'type', 'macvtap',
+                'mode', mode]
+        self._as_root([], 'link', tuple(args))
+        return IPDevice(name, namespace=self.namespace)
+
     def del_veth(self, name):
         """Delete a virtual interface between two namespaces."""
         self._as_root([], 'link', ('del', name))
@@ -213,22 +224,22 @@ class IPWrapper(SubProcessBase):
                   local=None, port=None, proxy=False):
         cmd = ['add', name, 'type', 'vxlan', 'id', vni]
         if group:
-                cmd.extend(['group', group])
+            cmd.extend(['group', group])
         if dev:
-                cmd.extend(['dev', dev])
+            cmd.extend(['dev', dev])
         if ttl:
-                cmd.extend(['ttl', ttl])
+            cmd.extend(['ttl', ttl])
         if tos:
-                cmd.extend(['tos', tos])
+            cmd.extend(['tos', tos])
         if local:
-                cmd.extend(['local', local])
+            cmd.extend(['local', local])
         if proxy:
-                cmd.append('proxy')
+            cmd.append('proxy')
         # tuple: min,max
         if port and len(port) == 2:
-                cmd.extend(['port', port[0], port[1]])
+            cmd.extend(['port', port[0], port[1]])
         elif port:
-            raise exceptions.NetworkVxlanPortRangeError(vxlan_range=port)
+            raise n_exc.NetworkVxlanPortRangeError(vxlan_range=port)
         self._as_root([], 'link', cmd)
         return (IPDevice(name, namespace=self.namespace))
 
@@ -253,6 +264,18 @@ class IPDevice(SubProcessBase):
 
     def __str__(self):
         return self.name
+
+    def exists(self):
+        """Return True if the device exists in the namespace."""
+        # we must save and restore this before returning
+        orig_log_fail_as_error = self.get_log_fail_as_error()
+        self.set_log_fail_as_error(False)
+        try:
+            return bool(self.link.address)
+        except RuntimeError:
+            return False
+        finally:
+            self.set_log_fail_as_error(orig_log_fail_as_error)
 
     def delete_addr_and_conntrack_state(self, cidr):
         """Delete an address along with its conntrack state
@@ -349,7 +372,7 @@ class IpRuleCommand(IpCommandBase):
 
     @staticmethod
     def _make_canonical(ip_version, settings):
-        """Converts settings to a canonical represention to compare easily"""
+        """Converts settings to a canonical representation to compare easily"""
         def canonicalize_fwmark_string(fwmark_mask):
             """Reformats fwmark/mask in to a canonical form
 
@@ -471,6 +494,9 @@ class IpLinkCommand(IpDeviceCommandBase):
     def set_address(self, mac_address):
         self._as_root([], ('set', self.name, 'address', mac_address))
 
+    def set_allmulticast_on(self):
+        self._as_root([], ('set', self.name, 'allmulticast', 'on'))
+
     def set_mtu(self, mtu_size):
         self._as_root([], ('set', self.name, 'mtu', mtu_size))
 
@@ -538,12 +564,12 @@ class IpLinkCommand(IpDeviceCommandBase):
 class IpAddrCommand(IpDeviceCommandBase):
     COMMAND = 'addr'
 
-    def add(self, cidr, scope='global'):
+    def add(self, cidr, scope='global', add_broadcast=True):
         net = netaddr.IPNetwork(cidr)
         args = ['add', cidr,
                 'scope', scope,
                 'dev', self.name]
-        if net.version == 4:
+        if add_broadcast and net.version == 4:
             args += ['brd', str(net[-1])]
         self._as_root([net.version], tuple(args))
 
@@ -622,14 +648,14 @@ class IpAddrCommand(IpDeviceCommandBase):
             except IndexError:
                 raise AddressNotReady(
                     address=address,
-                    reason=_LE('Address not present on interface'))
+                    reason=_('Address not present on interface'))
             if not addr_info['tentative']:
                 return True
             if addr_info['dadfailed']:
                 raise AddressNotReady(
-                    address=address, reason=_LE('Duplicate adddress detected'))
-        errmsg = _LE("Exceeded %s second limit waiting for "
-                     "address to leave the tentative state.") % wait_time
+                    address=address, reason=_('Duplicate address detected'))
+        errmsg = _("Exceeded %s second limit waiting for "
+                   "address to leave the tentative state.") % wait_time
         utils.utils.wait_until_true(
             is_address_ready, timeout=wait_time, sleep=0.20,
             exception=AddressNotReady(address=address, reason=errmsg))
@@ -663,20 +689,22 @@ class IpRouteCommand(IpDeviceCommandBase):
         args += self._table_args(table)
         self._as_root([ip_version], tuple(args))
 
+    def _run_as_root_detect_device_not_found(self, *args, **kwargs):
+        try:
+            return self._as_root(*args, **kwargs)
+        except RuntimeError as rte:
+            with excutils.save_and_reraise_exception() as ctx:
+                if "Cannot find device" in str(rte):
+                    ctx.reraise = False
+                    raise n_exc.DeviceNotFoundError(device_name=self.name)
+
     def delete_gateway(self, gateway, table=None):
         ip_version = get_ip_version(gateway)
         args = ['del', 'default',
                 'via', gateway]
         args += self._dev_args()
         args += self._table_args(table)
-        try:
-            self._as_root([ip_version], tuple(args))
-        except RuntimeError as rte:
-            with (excutils.save_and_reraise_exception()) as ctx:
-                if "Cannot find device" in str(rte):
-                    ctx.reraise = False
-                    raise exceptions.DeviceNotFoundError(
-                        device_name=self.name)
+        self._run_as_root_detect_device_not_found([ip_version], tuple(args))
 
     def _parse_routes(self, ip_version, output, **kwargs):
         for line in output.splitlines():
@@ -749,57 +777,6 @@ class IpRouteCommand(IpDeviceCommandBase):
 
         return retval
 
-    def pullup_route(self, interface_name, ip_version):
-        """Ensures that the route entry for the interface is before all
-        others on the same subnet.
-        """
-        options = [ip_version]
-        device_list = []
-        device_route_list_lines = self._run(options,
-                                            ('list',
-                                             'proto', 'kernel',
-                                             'dev', interface_name)
-                                            ).split('\n')
-        for device_route_line in device_route_list_lines:
-            try:
-                subnet = device_route_line.split()[0]
-            except Exception:
-                continue
-            subnet_route_list_lines = self._run(options,
-                                                ('list',
-                                                 'proto', 'kernel',
-                                                 'match', subnet)
-                                                ).split('\n')
-            for subnet_route_line in subnet_route_list_lines:
-                i = iter(subnet_route_line.split())
-                while(next(i) != 'dev'):
-                    pass
-                device = next(i)
-                try:
-                    while(next(i) != 'src'):
-                        pass
-                    src = next(i)
-                except Exception:
-                    src = ''
-                if device != interface_name:
-                    device_list.append((device, src))
-                else:
-                    break
-
-            for (device, src) in device_list:
-                self._as_root(options, ('del', subnet, 'dev', device))
-                if (src != ''):
-                    self._as_root(options,
-                                  ('append', subnet,
-                                   'proto', 'kernel',
-                                   'src', src,
-                                   'dev', device))
-                else:
-                    self._as_root(options,
-                                  ('append', subnet,
-                                   'proto', 'kernel',
-                                   'dev', device))
-
     def add_route(self, cidr, via=None, table=None, **kwargs):
         ip_version = get_ip_version(cidr)
         args = ['replace', cidr]
@@ -809,7 +786,7 @@ class IpRouteCommand(IpDeviceCommandBase):
         args += self._table_args(table)
         for k, v in kwargs.items():
             args += [k, v]
-        self._as_root([ip_version], tuple(args))
+        self._run_as_root_detect_device_not_found([ip_version], tuple(args))
 
     def delete_route(self, cidr, via=None, table=None, **kwargs):
         ip_version = get_ip_version(cidr)
@@ -820,7 +797,7 @@ class IpRouteCommand(IpDeviceCommandBase):
         args += self._table_args(table)
         for k, v in kwargs.items():
             args += [k, v]
-        self._as_root([ip_version], tuple(args))
+        self._run_as_root_detect_device_not_found([ip_version], tuple(args))
 
 
 class IPRoute(SubProcessBase):
@@ -925,13 +902,7 @@ def vxlan_in_use(segmentation_id, namespace=None):
 
 def device_exists(device_name, namespace=None):
     """Return True if the device exists in the namespace."""
-    try:
-        dev = IPDevice(device_name, namespace=namespace)
-        dev.set_log_fail_as_error(False)
-        address = dev.link.address
-    except RuntimeError:
-        return False
-    return bool(address)
+    return IPDevice(device_name, namespace=namespace).exists()
 
 
 def device_exists_with_ips_and_mac(device_name, ip_cidrs, mac, namespace=None):

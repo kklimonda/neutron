@@ -65,6 +65,9 @@ class ItemAllocator(object):
         allocations to free the pool.  This final desperate step will not
         happen often in practice.
         """
+        if key in self.allocations:
+            return self.allocations[key]
+
         if key in self.remembered:
             self.allocations[key] = self.remembered.pop(key)
             return self.allocations[key]
@@ -76,7 +79,7 @@ class ItemAllocator(object):
             if not self.pool:
                 # The number of address pairs allocated from the
                 # pool depends upon the prefix length specified
-                # in FIP_LL_SUBNET
+                # in DVR_FIP_LL_CIDR
                 raise RuntimeError("Cannot allocate item of type:"
                                    " %s from pool using file %s"
                                    % (self.ItemClass, self.state_file))

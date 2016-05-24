@@ -43,37 +43,38 @@ Neutron Policies
 ================
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
    policies/index
+
+Neutron Stadium
+===============
+
+.. toctree::
+   :maxdepth: 2
+
+   stadium/index
 
 Developer Docs
 ==============
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 3
 
    devref/index
 
 Dashboards
 ==========
 
-.. toctree::
-   :maxdepth: 1
-
 There is a collection of dashboards to help developers and reviewers
-located here_
+located here.
 
-.. _here: dashboards/index
+.. toctree::
+   :maxdepth: 2
+
+   dashboards/index
 
 API Extensions
 ==============
 
 Go to http://api.openstack.org for information about OpenStack Network API extensions.
-
-Man Pages
----------
-
-.. toctree::
-
-    man/neutron-server

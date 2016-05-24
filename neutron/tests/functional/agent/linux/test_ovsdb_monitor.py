@@ -24,9 +24,9 @@ Tests in this module will be skipped unless:
 
 from oslo_config import cfg
 
+from neutron.agent.common import ovs_lib
 from neutron.agent.linux import ovsdb_monitor
 from neutron.agent.linux import utils
-from neutron.tests import base as tests_base
 from neutron.tests.common import net_helpers
 from neutron.tests.functional.agent.linux import base as linux_base
 from neutron.tests.functional import base as functional_base
@@ -85,15 +85,10 @@ class TestSimpleInterfaceMonitor(BaseMonitorTest):
 
         self.monitor = ovsdb_monitor.SimpleInterfaceMonitor()
         self.addCleanup(self.monitor.stop)
-        # In case a global test timeout isn't set or disabled, use a
-        # value that will ensure the monitor has time to start.
-        timeout = max(tests_base.get_test_timeout(), 60)
-        self.monitor.start(block=True, timeout=timeout)
+        self.monitor.start(block=True, timeout=60)
 
     def test_has_updates(self):
-        utils.wait_until_true(lambda: self.monitor.data_received is True)
-        self.assertTrue(self.monitor.has_updates,
-                        'Initial call should always be true')
+        utils.wait_until_true(lambda: self.monitor.has_updates)
         # clear the event list
         self.monitor.get_events()
         self.useFixture(net_helpers.OVSPortFixture())
@@ -118,7 +113,7 @@ class TestSimpleInterfaceMonitor(BaseMonitorTest):
                 return True
 
     def test_get_events(self):
-        utils.wait_until_true(lambda: self.monitor.data_received is True)
+        utils.wait_until_true(lambda: self.monitor.has_updates)
         devices = self.monitor.get_events()
         self.assertTrue(devices.get('added'),
                         'Initial call should always be true')
@@ -139,3 +134,18 @@ class TestSimpleInterfaceMonitor(BaseMonitorTest):
         devices = self.monitor.get_events()
         self.assertTrue(devices.get('added'),
                         'Initial call should always be true')
+
+    def test_get_events_includes_ofport(self):
+        utils.wait_until_true(lambda: self.monitor.has_updates)
+        self.monitor.get_events()  # clear initial events
+        br = self.useFixture(net_helpers.OVSBridgeFixture())
+        p1 = self.useFixture(net_helpers.OVSPortFixture(br.bridge))
+
+        def p1_event_has_ofport():
+            if not self.monitor.has_updates:
+                return
+            for e in self.monitor.new_events['added']:
+                if (e['name'] == p1.port.name and
+                        e['ofport'] != ovs_lib.UNASSIGNED_OFPORT):
+                    return True
+        utils.wait_until_true(p1_event_has_ofport)

@@ -16,12 +16,14 @@
 import abc
 import itertools
 
+from neutron_lib.api import converters
 import six
 
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
 from neutron.api.v2 import resource_helper
+from neutron.common import constants as common_constants
 from neutron import manager
 from neutron.plugins.common import constants
 from neutron.services.qos import qos_consts
@@ -44,7 +46,7 @@ RESOURCE_ATTRIBUTE_MAP = {
     'policies': {
         'id': {'allow_post': False, 'allow_put': False,
                'validate': {'type:uuid': None},
-        'is_visible': True, 'primary_key': True},
+               'is_visible': True, 'primary_key': True},
         'name': {'allow_post': True, 'allow_put': True,
                  'is_visible': True, 'default': '',
                  'validate': {'type:string': None}},
@@ -53,7 +55,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                         'validate': {'type:string': None}},
         'shared': {'allow_post': True, 'allow_put': True,
                    'is_visible': True, 'default': False,
-                   'convert_to': attr.convert_to_boolean},
+                   'convert_to': converters.convert_to_boolean},
         'tenant_id': {'allow_post': True, 'allow_put': False,
                       'required_by_policy': True,
                       'is_visible': True},
@@ -78,6 +80,17 @@ SUB_RESOURCE_ATTRIBUTE_MAP = {
                                   'allow_post': True, 'allow_put': True,
                                   'is_visible': True, 'default': 0,
                                   'validate': {'type:non_negative': None}}})
+    },
+    'dscp_marking_rules': {
+        'parent': {'collection_name': 'policies',
+                   'member_name': 'policy'},
+        'parameters': dict(QOS_RULE_COMMON_FIELDS,
+                           **{'dscp_mark': {
+                                  'allow_post': True, 'allow_put': True,
+                                  'convert_to': converters.convert_to_int,
+                                  'is_visible': True, 'default': None,
+                                  'validate': {'type:values': common_constants.
+                                              VALID_DSCP_MARKS}}})
     }
 }
 
@@ -97,11 +110,11 @@ EXTENDED_ATTRIBUTES_2_0 = {
 
 
 class Qos(extensions.ExtensionDescriptor):
-    """Quality of service API extension."""
+    """Quality of Service API extension."""
 
     @classmethod
     def get_name(cls):
-        return "qos"
+        return "Quality of Service"
 
     @classmethod
     def get_alias(cls):
@@ -164,8 +177,8 @@ class Qos(extensions.ExtensionDescriptor):
 
     def get_extended_resources(self, version):
         if version == "2.0":
-            return dict(EXTENDED_ATTRIBUTES_2_0.items() +
-                        RESOURCE_ATTRIBUTE_MAP.items())
+            return dict(list(EXTENDED_ATTRIBUTES_2_0.items()) +
+                        list(RESOURCE_ATTRIBUTE_MAP.items()))
         else:
             return {}
 
@@ -227,6 +240,32 @@ class QoSPluginBase(service_base.ServicePluginBase):
 
     @abc.abstractmethod
     def delete_policy_bandwidth_limit_rule(self, context, rule_id, policy_id):
+        pass
+
+    @abc.abstractmethod
+    def get_policy_dscp_marking_rule(self, context, rule_id,
+                                     policy_id, fields=None):
+        pass
+
+    @abc.abstractmethod
+    def get_policy_dscp_marking_rules(self, context, policy_id,
+                                      filters=None, fields=None,
+                                      sorts=None, limit=None,
+                                      marker=None, page_reverse=False):
+        pass
+
+    @abc.abstractmethod
+    def create_policy_dscp_marking_rule(self, context, policy_id,
+                                        dscp_marking_rule):
+        pass
+
+    @abc.abstractmethod
+    def update_policy_dscp_marking_rule(self, context, rule_id, policy_id,
+                                        dscp_marking_rule):
+        pass
+
+    @abc.abstractmethod
+    def delete_policy_dscp_marking_rule(self, context, rule_id, policy_id):
         pass
 
     @abc.abstractmethod

@@ -26,35 +26,19 @@ from oslo_service import service as common_service
 from oslo_utils import excutils
 from oslo_utils import importutils
 
+from neutron._i18n import _LE, _LI
 from neutron.common import config
+from neutron.common import profiler
 from neutron.common import rpc as n_rpc
+from neutron.conf import service
 from neutron import context
 from neutron.db import api as session
-from neutron.i18n import _LE, _LI
 from neutron import manager
 from neutron import worker
 from neutron import wsgi
 
 
-service_opts = [
-    cfg.IntOpt('periodic_interval',
-               default=40,
-               help=_('Seconds between running periodic tasks')),
-    cfg.IntOpt('api_workers',
-               help=_('Number of separate API worker processes for service. '
-                      'If not specified, the default is equal to the number '
-                      'of CPUs available for best performance.')),
-    cfg.IntOpt('rpc_workers',
-               default=1,
-               help=_('Number of RPC worker processes for service')),
-    cfg.IntOpt('periodic_fuzzy_delay',
-               default=5,
-               help=_('Range of seconds to randomly delay when starting the '
-                      'periodic task scheduler to reduce stampeding. '
-                      '(Disable by setting to 0)')),
-]
-CONF = cfg.CONF
-CONF.register_opts(service_opts)
+service.register_service_opts(service.service_opts)
 
 LOG = logging.getLogger(__name__)
 
@@ -81,6 +65,9 @@ class WsgiService(object):
 
 class NeutronApiService(WsgiService):
     """Class for neutron-api service."""
+    def __init__(self, app_name):
+        profiler.setup('neutron-server', cfg.CONF.host)
+        super(NeutronApiService, self).__init__(app_name)
 
     @classmethod
     def create(cls, app_name='neutron'):
@@ -132,6 +119,7 @@ class RpcWorker(worker.NeutronWorker):
         self._servers = []
 
     def start(self):
+        super(RpcWorker, self).start()
         for plugin in self._plugins:
             if hasattr(plugin, self.start_listeners_method):
                 try:
@@ -169,6 +157,10 @@ class RpcWorker(worker.NeutronWorker):
         config.reset_service()
 
 
+class RpcReportsWorker(RpcWorker):
+    start_listeners_method = 'start_rpc_state_reports_listener'
+
+
 def serve_rpc():
     plugin = manager.NeutronManager.get_plugin()
     service_plugins = (
@@ -192,7 +184,6 @@ def serve_rpc():
     try:
         # passing service plugins only, because core plugin is among them
         rpc = RpcWorker(service_plugins)
-
         # dispose the whole pool before os.fork, otherwise there will
         # be shared DB connections in child processes which may cause
         # DB errors.
@@ -200,6 +191,14 @@ def serve_rpc():
         session.dispose()
         launcher = common_service.ProcessLauncher(cfg.CONF, wait_interval=1.0)
         launcher.launch_service(rpc, workers=cfg.CONF.rpc_workers)
+        if (cfg.CONF.rpc_state_report_workers > 0 and
+            plugin.rpc_state_report_workers_supported()):
+            rpc_state_rep = RpcReportsWorker([plugin])
+            LOG.debug('using launcher for state reports rpc, workers=%s',
+                      cfg.CONF.rpc_state_report_workers)
+            launcher.launch_service(
+                rpc_state_rep, workers=cfg.CONF.rpc_state_report_workers)
+
         return launcher
     except Exception:
         with excutils.save_and_reraise_exception():
@@ -219,6 +218,10 @@ def _run_wsgi(app_name):
     if not app:
         LOG.error(_LE('No known API applications configured.'))
         return
+    return run_wsgi_app(app)
+
+
+def run_wsgi_app(app):
     server = wsgi.Server("Neutron")
     server.start(app, cfg.CONF.bind_port, cfg.CONF.bind_host,
                  workers=_get_api_workers())
@@ -247,6 +250,7 @@ class Service(n_rpc.Service):
         self.periodic_fuzzy_delay = periodic_fuzzy_delay
         self.saved_args, self.saved_kwargs = args, kwargs
         self.timers = []
+        profiler.setup(binary, host)
         super(Service, self).__init__(host, topic, manager=self.manager)
 
     def start(self):
@@ -281,30 +285,30 @@ class Service(n_rpc.Service):
                periodic_fuzzy_delay=None):
         """Instantiates class and passes back application object.
 
-        :param host: defaults to CONF.host
+        :param host: defaults to cfg.CONF.host
         :param binary: defaults to basename of executable
         :param topic: defaults to bin_name - 'neutron-' part
-        :param manager: defaults to CONF.<topic>_manager
-        :param report_interval: defaults to CONF.report_interval
-        :param periodic_interval: defaults to CONF.periodic_interval
-        :param periodic_fuzzy_delay: defaults to CONF.periodic_fuzzy_delay
+        :param manager: defaults to cfg.CONF.<topic>_manager
+        :param report_interval: defaults to cfg.CONF.report_interval
+        :param periodic_interval: defaults to cfg.CONF.periodic_interval
+        :param periodic_fuzzy_delay: defaults to cfg.CONF.periodic_fuzzy_delay
 
         """
         if not host:
-            host = CONF.host
+            host = cfg.CONF.host
         if not binary:
             binary = os.path.basename(inspect.stack()[-1][1])
         if not topic:
             topic = binary.rpartition('neutron-')[2]
             topic = topic.replace("-", "_")
         if not manager:
-            manager = CONF.get('%s_manager' % topic, None)
+            manager = cfg.CONF.get('%s_manager' % topic, None)
         if report_interval is None:
-            report_interval = CONF.report_interval
+            report_interval = cfg.CONF.report_interval
         if periodic_interval is None:
-            periodic_interval = CONF.periodic_interval
+            periodic_interval = cfg.CONF.periodic_interval
         if periodic_fuzzy_delay is None:
-            periodic_fuzzy_delay = CONF.periodic_fuzzy_delay
+            periodic_fuzzy_delay = cfg.CONF.periodic_fuzzy_delay
         service_obj = cls(host, binary, topic, manager,
                           report_interval=report_interval,
                           periodic_interval=periodic_interval,

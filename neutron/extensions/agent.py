@@ -15,10 +15,14 @@
 
 import abc
 
+from neutron_lib.api import converters
+from neutron_lib import exceptions
+import six
+
+from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
-from neutron.common import exceptions
 from neutron import manager
 
 
@@ -38,7 +42,7 @@ RESOURCE_ATTRIBUTE_MAP = {
         'host': {'allow_post': False, 'allow_put': False,
                  'is_visible': True},
         'admin_state_up': {'allow_post': False, 'allow_put': True,
-                           'convert_to': attr.convert_to_boolean,
+                           'convert_to': converters.convert_to_boolean,
                            'is_visible': True},
         'created_at': {'allow_post': False, 'allow_put': False,
                        'is_visible': True},
@@ -108,6 +112,10 @@ class Agent(extensions.ExtensionDescriptor):
 
         return [ex]
 
+    def update_attributes_map(self, attributes):
+        super(Agent, self).update_attributes_map(
+            attributes, extension_attrs_map=RESOURCE_ATTRIBUTE_MAP)
+
     def get_extended_resources(self, version):
         if version == "2.0":
             return RESOURCE_ATTRIBUTE_MAP
@@ -115,6 +123,7 @@ class Agent(extensions.ExtensionDescriptor):
             return {}
 
 
+@six.add_metaclass(abc.ABCMeta)
 class AgentPluginBase(object):
     """REST API to operate the Agent.
 
@@ -134,8 +143,8 @@ class AgentPluginBase(object):
         """Delete agent.
 
         Agents register themselves on reporting state.
-        But if a agent does not report its status
-        for a long time (for example, it is dead for ever. ),
+        But if an agent does not report its status
+        for a long time (for example, it is dead forever. ),
         admin can remove it. Agents must be disabled before
         being removed.
         """

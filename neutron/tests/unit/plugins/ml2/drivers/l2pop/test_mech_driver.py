@@ -13,11 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import mock
+from neutron_lib import constants
+from oslo_serialization import jsonutils
 import testtools
 
-import mock
-
-from neutron.common import constants
+from neutron.common import constants as n_const
 from neutron.common import topics
 from neutron import context
 from neutron.extensions import portbindings
@@ -43,7 +44,7 @@ HOST_5 = HOST + '_5'
 
 
 NOTIFIER = 'neutron.plugins.ml2.rpc.AgentNotifierApi'
-DEVICE_OWNER_COMPUTE = 'compute:None'
+DEVICE_OWNER_COMPUTE = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
 
 
 class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
@@ -97,8 +98,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         cast_patch = mock.patch(cast)
         self.mock_cast = cast_patch.start()
 
-        uptime = ('neutron.plugins.ml2.drivers.l2pop.db.L2populationDbMixin.'
-                  'get_agent_uptime')
+        uptime = ('neutron.plugins.ml2.drivers.l2pop.db.get_agent_uptime')
         uptime_patch = mock.patch(uptime, return_value=190)
         uptime_patch.start()
 
@@ -162,22 +162,11 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         self.assertIsInstance(agt2['before'][0], l2pop_rpc.PortInfo)
         self.assertEqual(('fa:16:3e:ff:8c:0e', '10.0.0.8'), agt2['before'][0])
 
-    def test__marshall_fdb_entries(self):
-        entries = {'foouuid': {
-            'segment_id': 1001,
-            'ports': {'192.168.0.10': [('00:00:00:00:00:00', '0.0.0.0'),
-                                       ('fa:16:3e:ff:8c:0f', '10.0.0.6')]},
-            'network_type': 'vxlan'}}
-
-        entries = l2pop_rpc.L2populationAgentNotifyAPI._marshall_fdb_entries(
-            entries)
-
-        port_info_list = entries['foouuid']['ports']['192.168.0.10']
-        # Check that the PortInfo tuples have been converted to list
-        self.assertIsInstance(port_info_list[0], list)
-        self.assertIsInstance(port_info_list[1], list)
-        self.assertEqual(['00:00:00:00:00:00', '0.0.0.0'], port_info_list[0])
-        self.assertEqual(['fa:16:3e:ff:8c:0f', '10.0.0.6'], port_info_list[1])
+    def test_portinfo_marshalled_as_list(self):
+        entry = ['fa:16:3e:ff:8c:0f', '10.0.0.6']
+        payload = {'netuuid': {'ports': {'1': [l2pop_rpc.PortInfo(*entry)]}}}
+        result = jsonutils.loads(jsonutils.dumps(payload))
+        self.assertEqual(entry, result['netuuid']['ports']['1'][0])
 
     def test_fdb_add_called(self):
         self._register_ml2_agents()
@@ -435,6 +424,51 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                             self.mock_fanout.assert_called_with(
                                 mock.ANY, 'add_fdb_entries', expected2)
 
+    def test_fdb_add_called_dualstack(self):
+        self._register_ml2_agents()
+
+        host_arg = {portbindings.HOST_ID: HOST,
+                    'admin_state_up': True}
+        with self.subnet(self._network) as subnet,\
+            self.subnet(
+                self._network,
+                cidr='2001:db8::/64',
+                ip_version=6,
+                gateway_ip='fe80::1',
+                ipv6_address_mode=n_const.IPV6_SLAAC) as subnet2:
+            with self.port(
+                subnet,
+                fixed_ips=[{'subnet_id': subnet['subnet']['id']},
+                           {'subnet_id': subnet2['subnet']['id']}],
+                device_owner=DEVICE_OWNER_COMPUTE,
+                arg_list=(portbindings.HOST_ID,),
+                **host_arg
+            ) as port:
+                p1 = port['port']
+
+                device = 'tap' + p1['id']
+
+                self.mock_fanout.reset_mock()
+                self.callbacks.update_device_up(self.adminContext,
+                                                agent_id=HOST,
+                                                device=device)
+
+                p1_ips = [p['ip_address'] for p in p1['fixed_ips']]
+                expected = {p1['network_id']:
+                            {'ports':
+                             {'20.0.0.1': [constants.FLOODING_ENTRY,
+                                           l2pop_rpc.PortInfo(
+                                               p1['mac_address'],
+                                               p1_ips[0]),
+                                           l2pop_rpc.PortInfo(
+                                               p1['mac_address'],
+                                               p1_ips[1])]},
+                             'network_type': 'vxlan',
+                             'segment_id': 1}}
+
+                self.mock_fanout.assert_called_with(
+                    mock.ANY, 'add_fdb_entries', expected)
+
     def test_update_port_down(self):
         self._register_ml2_agents()
 
@@ -602,7 +636,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                            arg_list=(portbindings.HOST_ID,),
                            **host_arg) as port1:
                 p1 = port1['port']
-
+                p1_ip = p1['fixed_ips'][0]['ip_address']
                 self.mock_fanout.reset_mock()
                 device = 'tap' + p1['id']
 
@@ -633,7 +667,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                             '20.0.0.1': [
                                 l2pop_rpc.PortInfo('00:00:00:00:00:00',
                                                    '0.0.0.0'),
-                                l2pop_rpc.PortInfo(new_mac, '10.0.0.2')
+                                l2pop_rpc.PortInfo(new_mac, p1_ip)
                             ]
                         }
                     }
@@ -646,9 +680,12 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
 
         with self.subnet(network=self._network) as subnet:
             host_arg = {portbindings.HOST_ID: HOST}
+            fixed_ips = [{'subnet_id': subnet['subnet']['id'],
+                          'ip_address': '10.0.0.2'}]
             with self.port(subnet=subnet, cidr='10.0.0.0/24',
                            device_owner=DEVICE_OWNER_COMPUTE,
                            arg_list=(portbindings.HOST_ID,),
+                           fixed_ips=fixed_ips,
                            **host_arg) as port1:
                 p1 = port1['port']
 
@@ -665,7 +702,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 req = self.new_update_request('ports', data, p1['id'])
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 ips = res['port']['fixed_ips']
-                self.assertEqual(len(ips), 2)
+                self.assertEqual(2, len(ips))
 
                 add_expected = {'chg_ip':
                                 {p1['network_id']:
@@ -683,7 +720,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 req = self.new_update_request('ports', data, p1['id'])
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 ips = res['port']['fixed_ips']
-                self.assertEqual(len(ips), 2)
+                self.assertEqual(2, len(ips))
 
                 upd_expected = {'chg_ip':
                                 {p1['network_id']:
@@ -702,7 +739,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 req = self.new_update_request('ports', data, p1['id'])
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 ips = res['port']['fixed_ips']
-                self.assertEqual(len(ips), 1)
+                self.assertEqual(1, len(ips))
 
                 del_expected = {'chg_ip':
                                 {p1['network_id']:
@@ -753,11 +790,11 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 self.assertEqual(port_id, details['port_id'])
 
     def _update_and_check_portbinding(self, port_id, host_id):
-        data = {'port': {'binding:host_id': host_id}}
+        data = {'port': {portbindings.HOST_ID: host_id}}
         req = self.new_update_request('ports', data, port_id)
         res = self.deserialize(self.fmt,
                                req.get_response(self.api))
-        self.assertEqual(host_id, res['port']['binding:host_id'])
+        self.assertEqual(host_id, res['port'][portbindings.HOST_ID])
 
     def _test_host_changed(self, twice):
         self._register_ml2_agents()
@@ -814,6 +851,39 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
             l2pop_mech.delete_port_postcommit(mock.Mock())
             self.assertTrue(upd_port_down.called)
 
+    def test_delete_unbound_port(self):
+        l2pop_mech = l2pop_mech_driver.L2populationMechanismDriver()
+        l2pop_mech.initialize()
+
+        with self.port() as port:
+            port_context = driver_context.PortContext(
+                self.driver, self.context, port['port'],
+                self.driver.get_network(
+                    self.context, port['port']['network_id']),
+                None, None)
+            # The point is to provide coverage and to assert that no exceptions
+            # are raised.
+            l2pop_mech.delete_port_postcommit(port_context)
+
+    def test_fixed_ips_change_unbound_port_no_rpc(self):
+        l2pop_mech = l2pop_mech_driver.L2populationMechanismDriver()
+        l2pop_mech.initialize()
+        l2pop_mech.L2populationAgentNotify = mock.Mock()
+
+        with self.port() as port:
+            port_context = driver_context.PortContext(
+                self.driver, self.context, port['port'],
+                self.driver.get_network(
+                    self.context, port['port']['network_id']),
+                None, None)
+            l2pop_mech._fixed_ips_changed(
+                port_context, None, port['port'], (set(['10.0.0.1']), set()))
+
+        # There's no need to send an RPC update if the IP address for an
+        # unbound port changed.
+        self.assertFalse(
+            l2pop_mech.L2populationAgentNotify.update_fdb_entries.called)
+
 
 class TestL2PopulationMechDriver(base.BaseTestCase):
 
@@ -822,15 +892,14 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
         agent = mock.Mock()
         agent.host = HOST
         network_ports = ((None, agent),)
-        with mock.patch.object(l2pop_db.L2populationDbMixin,
-                               'get_agent_ip',
+        with mock.patch.object(l2pop_db, 'get_agent_ip',
                                return_value=agent_ip):
             excluded_host = HOST + '-EXCLUDE' if exclude_host else HOST
             return mech_driver._get_tunnels(network_ports, excluded_host)
 
     def test_get_tunnels(self):
         tunnels = self._test_get_tunnels('20.0.0.1')
-        self.assertTrue('20.0.0.1' in tunnels)
+        self.assertIn('20.0.0.1', tunnels)
 
     def test_get_tunnels_no_ip(self):
         tunnels = self._test_get_tunnels(None)
@@ -849,14 +918,11 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
         def agent_ip_side_effect(agent):
             return agent_ips[agent]
 
-        with mock.patch.object(l2pop_db.L2populationDbMixin,
-                               'get_agent_ip',
+        with mock.patch.object(l2pop_db, 'get_agent_ip',
                                side_effect=agent_ip_side_effect),\
-                mock.patch.object(l2pop_db.L2populationDbMixin,
-                                  'get_nondvr_active_network_ports',
+                mock.patch.object(l2pop_db, 'get_nondvr_active_network_ports',
                                   return_value=fdb_network_ports),\
-                mock.patch.object(l2pop_db.L2populationDbMixin,
-                                  'get_dvr_active_network_ports',
+                mock.patch.object(l2pop_db, 'get_dvr_active_network_ports',
                                   return_value=tunnel_network_ports):
             session = mock.Mock()
             agent = mock.Mock()
@@ -909,7 +975,7 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
 
     def test_update_port_precommit_mac_address_changed_raises(self):
         port = {'status': u'ACTIVE',
-                'device_owner': u'compute:None',
+                'device_owner': DEVICE_OWNER_COMPUTE,
                 'mac_address': u'12:34:56:78:4b:0e',
                 'id': u'1'}
 

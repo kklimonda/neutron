@@ -16,13 +16,13 @@
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from neutron._i18n import _, _LI
 from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
 from neutron.agent.l3 import config as l3_config
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.common import config
-from neutron.i18n import _LI
 
 
 LOG = logging.getLogger(__name__)
@@ -48,7 +48,6 @@ def setup_conf():
     conf.register_opts(l3_config.OPTS)
     conf.register_opts(interface.OPTS)
     agent_config.register_interface_driver_opts_helper(conf)
-    agent_config.register_use_namespaces_opts_helper(conf)
     return conf
 
 
@@ -67,8 +66,8 @@ def delete_neutron_ports(ports):
     Non-internal OVS ports need to be removed manually.
     """
     for port in ports:
-        if ip_lib.device_exists(port):
-            device = ip_lib.IPDevice(port)
+        device = ip_lib.IPDevice(port)
+        if device.exists():
             device.link.delete()
             LOG.info(_LI("Deleting port: %s"), port)
 

@@ -15,17 +15,18 @@
 
 import abc
 
+from neutron_lib import constants
+from neutron_lib import exceptions
 from oslo_log import log as logging
+import six
 import webob.exc
 
+from neutron._i18n import _, _LE
 from neutron.api import extensions
 from neutron.api.v2 import base
 from neutron.api.v2 import resource
-from neutron.common import constants
-from neutron.common import exceptions
 from neutron.common import rpc as n_rpc
 from neutron.extensions import agent
-from neutron.i18n import _LE
 from neutron import manager
 from neutron.plugins.common import constants as service_constants
 from neutron import policy
@@ -154,13 +155,13 @@ class InvalidL3Agent(agent.AgentNotFound):
 
 
 class RouterHostedByL3Agent(exceptions.Conflict):
-    message = _("The router %(router_id)s has been already hosted"
-                " by the L3 Agent %(agent_id)s.")
+    message = _("The router %(router_id)s has been already hosted "
+                "by the L3 Agent %(agent_id)s.")
 
 
 class RouterSchedulingFailed(exceptions.Conflict):
-    message = _("Failed scheduling router %(router_id)s to"
-                " the L3 Agent %(agent_id)s.")
+    message = _("Failed scheduling router %(router_id)s to "
+                "the L3 Agent %(agent_id)s.")
 
 
 class RouterReschedulingFailed(exceptions.Conflict):
@@ -169,16 +170,21 @@ class RouterReschedulingFailed(exceptions.Conflict):
 
 
 class RouterL3AgentMismatch(exceptions.Conflict):
-    message = _("Cannot host %(router_type)s router %(router_id)s "
-                "on %(agent_mode)s L3 agent %(agent_id)s.")
+    message = _("Cannot host distributed router %(router_id)s "
+                "on legacy L3 agent %(agent_id)s.")
 
 
 class DVRL3CannotAssignToDvrAgent(exceptions.Conflict):
-    message = _("Not allowed to manually assign a %(router_type)s "
-                "router %(router_id)s from an existing DVR node "
-                "to another L3 agent %(agent_id)s.")
+    message = _("Not allowed to manually assign a router to an "
+                "agent in 'dvr' mode.")
 
 
+class DVRL3CannotRemoveFromDvrAgent(exceptions.Conflict):
+    message = _("Not allowed to manually remove a router from "
+                "an agent in 'dvr' mode.")
+
+
+@six.add_metaclass(abc.ABCMeta)
 class L3AgentSchedulerPluginBase(object):
     """REST API to operate the l3 agent scheduler.
 

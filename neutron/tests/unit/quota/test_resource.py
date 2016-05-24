@@ -12,9 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import mock
 import uuid
 
+import mock
 from oslo_config import cfg
 
 from neutron import context
@@ -186,7 +186,7 @@ class TestTrackedResource(testlib_api.SqlTestCaseLight):
     def test_add_delete_data_triggers_event(self):
         res = self._create_resource()
         other_res = self._create_other_resource()
-        # Validate dirty tenants since mock does not work well with sqlalchemy
+        # Validate dirty tenants since mock does not work well with SQLAlchemy
         # event handlers.
         self._add_data()
         self._add_data('someone_else')

@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Openstack Foundation
+# Copyright (c) 2015 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -12,9 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants as l3_constants
+
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import ip_lib
-from neutron.common import constants as l3_constants
 
 
 class LegacyRouter(router.RouterInfo):

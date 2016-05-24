@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Openstack Foundation
+# Copyright (c) 2015 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -16,15 +16,16 @@ import os
 import shutil
 
 import netaddr
+from neutron_lib import constants as n_consts
 from oslo_log import log as logging
 
+from neutron._i18n import _LE
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
-from neutron.common import constants as n_consts
 from neutron.common import utils as common_utils
-from neutron.i18n import _LE
+from neutron.extensions import portbindings
 
 LOG = logging.getLogger(__name__)
 HA_DEV_PREFIX = 'ha-'
@@ -38,11 +39,6 @@ class HaRouter(router.RouterInfo):
         self.ha_port = None
         self.keepalived_manager = None
         self.state_change_callback = state_change_callback
-
-    @property
-    def is_ha(self):
-        # TODO(Carl) Remove when refactoring to use sub-classes is complete.
-        return self.router is not None
 
     @property
     def ha_priority(self):
@@ -74,6 +70,10 @@ class HaRouter(router.RouterInfo):
             LOG.error(_LE('Error while writing HA state for %s'),
                       self.router_id)
 
+    @property
+    def ha_namespace(self):
+        return self.ns_name
+
     def initialize(self, process_monitor):
         super(HaRouter, self).initialize(process_monitor)
         ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
@@ -94,7 +94,7 @@ class HaRouter(router.RouterInfo):
             keepalived.KeepalivedConf(),
             process_monitor,
             conf_path=self.agent_conf.ha_confs_path,
-            namespace=self.ns_name)
+            namespace=self.ha_namespace)
 
         config = self.keepalived_manager.config
 
@@ -143,18 +143,23 @@ class HaRouter(router.RouterInfo):
                          self.ha_port['id'],
                          interface_name,
                          self.ha_port['mac_address'],
-                         namespace=self.ns_name,
-                         prefix=HA_DEV_PREFIX)
+                         namespace=self.ha_namespace,
+                         prefix=HA_DEV_PREFIX,
+                         mtu=self.ha_port.get('mtu'))
         ip_cidrs = common_utils.fixed_ip_cidrs(self.ha_port['fixed_ips'])
         self.driver.init_l3(interface_name, ip_cidrs,
-                            namespace=self.ns_name,
+                            namespace=self.ha_namespace,
                             preserve_ips=[self._get_primary_vip()])
 
     def ha_network_removed(self):
         self.driver.unplug(self.get_ha_device_name(),
-                           namespace=self.ns_name,
+                           namespace=self.ha_namespace,
                            prefix=HA_DEV_PREFIX)
         self.ha_port = None
+
+    def _add_vips(self, port, interface_name):
+        for ip_cidr in common_utils.fixed_ip_cidrs(port['fixed_ips']):
+            self._add_vip(ip_cidr, interface_name)
 
     def _add_vip(self, ip_cidr, interface, scope=None):
         instance = self._get_keepalived_instance()
@@ -228,7 +233,7 @@ class HaRouter(router.RouterInfo):
         a VIP to keepalived. This means that the IPv6 link local address
         will only be present on the master.
         """
-        device = ip_lib.IPDevice(interface_name, namespace=self.ns_name)
+        device = ip_lib.IPDevice(interface_name, namespace=self.ha_namespace)
         ipv6_lladdr = ip_lib.get_ipv6_lladdr(device.link.address)
 
         if self._should_delete_ipv6_lladdr(ipv6_lladdr):
@@ -238,8 +243,7 @@ class HaRouter(router.RouterInfo):
         self._add_vip(ipv6_lladdr, interface_name, scope='link')
 
     def _add_gateway_vip(self, ex_gw_port, interface_name):
-        for ip_cidr in common_utils.fixed_ip_cidrs(ex_gw_port['fixed_ips']):
-            self._add_vip(ip_cidr, interface_name)
+        self._add_vips(ex_gw_port, interface_name)
         self._add_default_gw_virtual_route(ex_gw_port, interface_name)
         self._add_extra_subnet_onlink_routes(ex_gw_port, interface_name)
 
@@ -251,7 +255,9 @@ class HaRouter(router.RouterInfo):
 
     def remove_floating_ip(self, device, ip_cidr):
         self._remove_vip(ip_cidr)
-        if self.ha_state == 'master' and device.addr.list():
+        if self.ha_state == 'master' and device.addr.list(to=ip_cidr):
+            # Delete the floatingip address from external port only after
+            # the ip address has been configured to the device
             super(HaRouter, self).remove_floating_ip(device, ip_cidr)
 
     def internal_network_updated(self, interface_name, ip_cidrs):
@@ -260,20 +266,23 @@ class HaRouter(router.RouterInfo):
         for ip_cidr in ip_cidrs:
             self._add_vip(ip_cidr, interface_name)
 
-    def internal_network_added(self, port):
+    def _plug_ha_router_port(self, port, name_getter, prefix):
         port_id = port['id']
-        interface_name = self.get_internal_device_name(port_id)
-
+        interface_name = name_getter(port_id)
         self.driver.plug(port['network_id'],
                          port_id,
                          interface_name,
                          port['mac_address'],
-                         namespace=self.ns_name,
-                         prefix=router.INTERNAL_DEV_PREFIX)
+                         namespace=self.ha_namespace,
+                         prefix=prefix,
+                         mtu=port.get('mtu'))
 
         self._disable_ipv6_addressing_on_interface(interface_name)
-        for ip_cidr in common_utils.fixed_ip_cidrs(port['fixed_ips']):
-            self._add_vip(ip_cidr, interface_name)
+        self._add_vips(port, interface_name)
+
+    def internal_network_added(self, port):
+        self._plug_ha_router_port(
+            port, self.get_internal_device_name, router.INTERNAL_DEV_PREFIX)
 
     def internal_network_removed(self, port):
         super(HaRouter, self).internal_network_removed(port)
@@ -285,7 +294,7 @@ class HaRouter(router.RouterInfo):
         return external_process.ProcessManager(
             self.agent_conf,
             '%s.monitor' % self.router_id,
-            self.ns_name,
+            self.ha_namespace,
             default_cmd_callback=self._get_state_change_monitor_callback())
 
     def _get_state_change_monitor_callback(self):
@@ -296,7 +305,7 @@ class HaRouter(router.RouterInfo):
             cmd = [
                 'neutron-keepalived-state-change',
                 '--router_id=%s' % self.router_id,
-                '--namespace=%s' % self.ns_name,
+                '--namespace=%s' % self.ha_namespace,
                 '--conf_dir=%s' % self.keepalived_manager.get_conf_dir(),
                 '--monitor_interface=%s' % ha_device,
                 '--monitor_cidr=%s' % ha_cidr,
@@ -323,7 +332,7 @@ class HaRouter(router.RouterInfo):
     def update_initial_state(self, callback):
         ha_device = ip_lib.IPDevice(
             self.get_ha_device_name(),
-            self.ns_name)
+            self.ha_namespace)
         addresses = ha_device.addr.list()
         cidrs = (address['cidr'] for address in addresses)
         ha_cidr = self._get_primary_vip()
@@ -336,7 +345,7 @@ class HaRouter(router.RouterInfo):
         def _get_filtered_dict(d, ignore):
             return {k: v for k, v in d.items() if k not in ignore}
 
-        keys_to_ignore = set(['binding:host_id'])
+        keys_to_ignore = set([portbindings.HOST_ID])
         port1_filtered = _get_filtered_dict(port1, keys_to_ignore)
         port2_filtered = _get_filtered_dict(port2, keys_to_ignore)
         return port1_filtered == port2_filtered
@@ -347,7 +356,8 @@ class HaRouter(router.RouterInfo):
         self._disable_ipv6_addressing_on_interface(interface_name)
 
     def external_gateway_updated(self, ex_gw_port, interface_name):
-        self._plug_external_gateway(ex_gw_port, interface_name, self.ns_name)
+        self._plug_external_gateway(
+            ex_gw_port, interface_name, self.ha_namespace)
         ip_cidrs = common_utils.fixed_ip_cidrs(self.ex_gw_port['fixed_ips'])
         for old_gateway_cidr in ip_cidrs:
             self._remove_vip(old_gateway_cidr)

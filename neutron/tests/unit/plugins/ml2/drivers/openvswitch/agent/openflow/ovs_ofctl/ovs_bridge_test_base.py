@@ -15,8 +15,7 @@
 #    under the License.
 
 import mock
-
-from neutron.common import constants
+from neutron_lib import constants
 
 from neutron.tests.unit.plugins.ml2.drivers.openvswitch.agent \
     import ovs_test_base

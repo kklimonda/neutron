@@ -13,14 +13,36 @@
 #    under the License.
 
 """
-Common utilities and helper functions for Openstack Networking Plugins.
+Common utilities and helper functions for OpenStack Networking Plugins.
 """
 
+import hashlib
+
+from neutron_lib import constants as n_const
+from neutron_lib import exceptions
+from oslo_config import cfg
+from oslo_log import log as logging
+from oslo_utils import encodeutils
 import webob.exc
 
+from neutron._i18n import _, _LI
 from neutron.api.v2 import attributes
 from neutron.common import exceptions as n_exc
 from neutron.plugins.common import constants as p_const
+
+INTERFACE_HASH_LEN = 6
+LOG = logging.getLogger(__name__)
+
+
+def get_deployment_physnet_mtu():
+    """Retrieves global physical network MTU setting.
+
+    Plugins should use this function to retrieve the MTU set by the operator
+    that is equal to or less than the MTU of their nodes' physical interfaces.
+    Note that it is the responsibility of the plugin to deduct the value of
+    any encapsulation overhead required before advertising it to VMs.
+    """
+    return cfg.CONF.global_physnet_mtu
 
 
 def is_valid_vlan_tag(vlan):
@@ -47,12 +69,12 @@ def verify_tunnel_range(tunnel_range, tunnel_type):
     if tunnel_type in mappings:
         for ident in tunnel_range:
             if not mappings[tunnel_type](ident):
-                raise n_exc.NetworkTunnelRangeError(
+                raise exceptions.NetworkTunnelRangeError(
                     tunnel_range=tunnel_range,
                     error=_("%(id)s is not a valid %(type)s identifier") %
                     {'id': ident, 'type': tunnel_type})
     if tunnel_range[1] < tunnel_range[0]:
-        raise n_exc.NetworkTunnelRangeError(
+        raise exceptions.NetworkTunnelRangeError(
             tunnel_range=tunnel_range,
             error=_("End of tunnel range is less "
                     "than start of tunnel range"))
@@ -138,3 +160,34 @@ def create_port(core_plugin, context, port, check_allow_post=True):
                                 port.get('port', {}),
                                 check_allow_post=check_allow_post)
     return core_plugin.create_port(context, {'port': port_data})
+
+
+def get_interface_name(name, prefix='', max_len=n_const.DEVICE_NAME_MAX_LEN):
+    """Construct an interface name based on the prefix and name.
+
+    The interface name can not exceed the maximum length passed in. Longer
+    names are hashed to help ensure uniqueness.
+    """
+    requested_name = prefix + name
+
+    if len(requested_name) <= max_len:
+        return requested_name
+
+    # We can't just truncate because interfaces may be distinguished
+    # by an ident at the end. A hash over the name should be unique.
+    # Leave part of the interface name on for easier identification
+    if (len(prefix) + INTERFACE_HASH_LEN) > max_len:
+        raise ValueError(_("Too long prefix provided. New name would exceed "
+                           "given length for an interface name."))
+
+    namelen = max_len - len(prefix) - INTERFACE_HASH_LEN
+    hashed_name = hashlib.sha1(encodeutils.to_utf8(name))
+    new_name = ('%(prefix)s%(truncated)s%(hash)s' %
+                {'prefix': prefix, 'truncated': name[0:namelen],
+                 'hash': hashed_name.hexdigest()[0:INTERFACE_HASH_LEN]})
+    LOG.info(_LI("The requested interface name %(requested_name)s exceeds the "
+                 "%(limit)d character limitation. It was shortened to "
+                 "%(new_name)s to fit."),
+             {'requested_name': requested_name,
+              'limit': max_len, 'new_name': new_name})
+    return new_name

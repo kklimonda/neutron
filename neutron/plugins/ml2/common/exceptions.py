@@ -15,7 +15,9 @@
 
 """Exceptions used by ML2."""
 
-from neutron.common import exceptions
+from neutron_lib import exceptions
+
+from neutron._i18n import _
 
 
 class MechanismDriverError(exceptions.NeutronException):
@@ -26,3 +28,14 @@ class MechanismDriverError(exceptions.NeutronException):
 class ExtensionDriverError(exceptions.InvalidInput):
     """Extension driver call failed."""
     message = _("Extension %(driver)s failed.")
+
+
+class ExtensionDriverNotFound(exceptions.InvalidConfigurationOption):
+    """Required extension driver not found in ML2 config."""
+    message = _("Extension driver %(driver)s required for "
+                "service plugin %(service_plugin)s not found.")
+
+
+class UnknownNetworkType(exceptions.NeutronException):
+    """Network with unknown type."""
+    message = _("Unknown network type %(network_type)s.")

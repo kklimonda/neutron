@@ -13,15 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import exceptions as exc
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log
 import six
 import sqlalchemy as sa
 
-from neutron.common import exceptions as exc
+from neutron._i18n import _, _LI, _LW
+from neutron.common import exceptions as n_exc
 from neutron.db import model_base
-from neutron.i18n import _LI, _LW
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import helpers
@@ -30,10 +31,11 @@ LOG = log.getLogger(__name__)
 
 flat_opts = [
     cfg.ListOpt('flat_networks',
-                default=[],
+                default='*',
                 help=_("List of physical_network names with which flat "
-                       "networks can be created. Use * to allow flat "
-                       "networks with arbitrary physical_network names."))
+                       "networks can be created. Use default '*' to allow "
+                       "flat networks with arbitrary physical_network names. "
+                       "Use an empty list to disable flat networks."))
 ]
 
 cfg.CONF.register_opts(flat_opts, "ml2_type_flat")
@@ -72,9 +74,8 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
         if '*' in self.flat_networks:
             LOG.info(_LI("Arbitrary flat physical_network names allowed"))
             self.flat_networks = None
-        elif not all(self.flat_networks):
-            msg = _("physical network name is empty")
-            raise exc.InvalidInput(error_message=msg)
+        elif not self.flat_networks:
+            LOG.info(_LI("Flat networks are disabled"))
         else:
             LOG.info(_LI("Allowable flat physical_network names: %s"),
                      self.flat_networks)
@@ -92,6 +93,9 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
         physical_network = segment.get(api.PHYSICAL_NETWORK)
         if not physical_network:
             msg = _("physical_network required for flat provider network")
+            raise exc.InvalidInput(error_message=msg)
+        if self.flat_networks is not None and not self.flat_networks:
+            msg = _("Flat provider networks are disabled")
             raise exc.InvalidInput(error_message=msg)
         if self.flat_networks and physical_network not in self.flat_networks:
             msg = (_("physical_network '%s' unknown for flat provider network")
@@ -113,7 +117,7 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
                 alloc = FlatAllocation(physical_network=physical_network)
                 alloc.save(session)
             except db_exc.DBDuplicateEntry:
-                raise exc.FlatNetworkInUse(
+                raise n_exc.FlatNetworkInUse(
                     physical_network=physical_network)
             segment[api.MTU] = self.get_mtu(alloc.physical_network)
         return segment

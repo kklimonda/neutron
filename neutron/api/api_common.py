@@ -15,30 +15,40 @@
 
 import functools
 
+import netaddr
+from neutron_lib import exceptions
 from oslo_config import cfg
+import oslo_i18n
 from oslo_log import log as logging
-import six
+from oslo_policy import policy as oslo_policy
 from six.moves.urllib import parse
 from webob import exc
 
+from neutron._i18n import _, _LW
 from neutron.common import constants
-from neutron.common import exceptions
-from neutron.i18n import _LW
+from neutron import wsgi
 
 
 LOG = logging.getLogger(__name__)
 
 
-def get_filters(request, attr_info, skips=[]):
-    """Extracts the filters from the request string.
+def get_filters(request, attr_info, skips=None):
+    return get_filters_from_dict(request.GET.dict_of_lists(),
+                                 attr_info,
+                                 skips)
+
+
+def get_filters_from_dict(data, attr_info, skips=None):
+    """Extracts the filters from a dict of query parameters.
 
     Returns a dict of lists for the filters:
     check=a&check=b&name=Bob&
     becomes:
     {'check': [u'a', u'b'], 'name': [u'Bob']}
     """
+    skips = skips or []
     res = {}
-    for key, values in six.iteritems(request.GET.dict_of_lists()):
+    for key, values in data.items():
         if key in skips:
             continue
         values = [v for v in values if v]
@@ -83,7 +93,7 @@ def get_limit_and_marker(request):
                     pagination, then return None.
     """
     max_limit = _get_pagination_max_limit()
-    limit = _get_limit_param(request, max_limit)
+    limit = _get_limit_param(request)
     if max_limit > 0:
         limit = min(max_limit, limit) or max_limit
     if not limit:
@@ -101,13 +111,13 @@ def _get_pagination_max_limit():
             if max_limit == 0:
                 raise ValueError()
         except ValueError:
-            LOG.warn(_LW("Invalid value for pagination_max_limit: %s. It "
-                         "should be an integer greater to 0"),
-                     cfg.CONF.pagination_max_limit)
+            LOG.warning(_LW("Invalid value for pagination_max_limit: %s. It "
+                            "should be an integer greater to 0"),
+                        cfg.CONF.pagination_max_limit)
     return max_limit
 
 
-def _get_limit_param(request, max_limit):
+def _get_limit_param(request):
     """Extract integer limit from request or fail."""
     try:
         limit = int(request.GET.get('limit', 0))
@@ -338,3 +348,82 @@ class NeutronController(object):
                 raise exc.HTTPBadRequest(msg)
             data[param_name] = param_value or param.get('default-value')
         return body
+
+
+def convert_exception_to_http_exc(e, faults, language):
+    serializer = wsgi.JSONDictSerializer()
+    e = translate(e, language)
+    body = serializer.serialize(
+        {'NeutronError': get_exception_data(e)})
+    kwargs = {'body': body, 'content_type': 'application/json'}
+    if isinstance(e, exc.HTTPException):
+        # already an HTTP error, just update with content type and body
+        e.body = body
+        e.content_type = kwargs['content_type']
+        return e
+    if isinstance(e, (exceptions.NeutronException, netaddr.AddrFormatError,
+                      oslo_policy.PolicyNotAuthorized)):
+        for fault in faults:
+            if isinstance(e, fault):
+                mapped_exc = faults[fault]
+                break
+        else:
+            mapped_exc = exc.HTTPInternalServerError
+        return mapped_exc(**kwargs)
+    if isinstance(e, NotImplementedError):
+        # NOTE(armando-migliaccio): from a client standpoint
+        # it makes sense to receive these errors, because
+        # extensions may or may not be implemented by
+        # the underlying plugin. So if something goes south,
+        # because a plugin does not implement a feature,
+        # returning 500 is definitely confusing.
+        kwargs['body'] = serializer.serialize(
+            {'NotImplementedError': get_exception_data(e)})
+        return exc.HTTPNotImplemented(**kwargs)
+    # NOTE(jkoelker) Everything else is 500
+    # Do not expose details of 500 error to clients.
+    msg = _('Request Failed: internal server error while '
+            'processing your request.')
+    msg = translate(msg, language)
+    kwargs['body'] = serializer.serialize(
+        {'NeutronError': get_exception_data(exc.HTTPInternalServerError(msg))})
+    return exc.HTTPInternalServerError(**kwargs)
+
+
+def get_exception_data(e):
+    """Extract the information about an exception.
+
+    Neutron client for the v2 API expects exceptions to have 'type', 'message'
+    and 'detail' attributes.This information is extracted and converted into a
+    dictionary.
+
+    :param e: the exception to be reraised
+    :returns: a structured dict with the exception data
+    """
+    err_data = {'type': e.__class__.__name__,
+                'message': e, 'detail': ''}
+    return err_data
+
+
+def translate(translatable, locale):
+    """Translates the object to the given locale.
+
+    If the object is an exception its translatable elements are translated
+    in place, if the object is a translatable string it is translated and
+    returned. Otherwise, the object is returned as-is.
+
+    :param translatable: the object to be translated
+    :param locale: the locale to translate to
+    :returns: the translated object, or the object as-is if it
+              was not translated
+    """
+    localize = oslo_i18n.translate
+    if isinstance(translatable, exceptions.NeutronException):
+        translatable.msg = localize(translatable.msg, locale)
+    elif isinstance(translatable, exc.HTTPError):
+        translatable.detail = localize(translatable.detail, locale)
+    elif isinstance(translatable, Exception):
+        translatable.message = localize(translatable, locale)
+    else:
+        return localize(translatable, locale)
+    return translatable

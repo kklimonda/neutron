@@ -12,15 +12,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_log import log as logging
 import oslo_messaging
 
-from oslo_log import log as logging
-
+from neutron._i18n import _LW
 from neutron.common import constants
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
-from neutron.i18n import _LW
 from neutron import manager
 
 LOG = logging.getLogger(__name__)

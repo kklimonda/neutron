@@ -20,6 +20,7 @@
       '''''''  Heading 4
       (Avoid deeper levels because they do not render well.)
 
+.. _alembic_migrations:
 
 Alembic Migrations
 ==================
@@ -58,6 +59,12 @@ Instead of reading the DB connection from the configuration file(s) the
 ``--database-connection`` option can be used::
 
  neutron-db-manage --database-connection mysql+pymysql://root:secret@127.0.0.1/neutron?charset=utf8 <commands>
+
+The ``branches``, ``current``, and ``history`` commands all accept a
+``--verbose`` option, which, when passed, will instruct ``neutron-db-manage``
+to display more verbose output for the specified command::
+
+ neutron-db-manage current --verbose
 
 For some commands the wrapper needs to know the entrypoint of the core plugin
 for the installation. This can be read from the configuration file(s) or
@@ -103,8 +110,8 @@ Migration Branches
 
 Neutron makes use of alembic branches for two purposes.
 
-1. Indepedent Sub-Project Tables
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1. Independent Sub-Project Tables
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Various `sub-projects <sub_projects.html>`_ can be installed with Neutron. Each
 sub-project registers its own alembic branch which is responsible for migrating
@@ -155,10 +162,109 @@ complete. The operations in the template are those supported by the Alembic
 migration library.
 
 
+.. _neutron-db-manage-without-devstack:
+
+Running neutron-db-manage without devstack
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When, as a developer, you want to work with the Neutron DB schema and alembic
+migrations only, it can be rather tedious to rely on devstack just to get an
+up-to-date neutron-db-manage installed. This section describes how to work on
+the schema and migration scripts with just the unit test virtualenv and
+mysql. You can also operate on a separate test database so you don't mess up
+the installed Neutron database.
+
+Setting up the environment
+++++++++++++++++++++++++++
+
+Install mysql service
+'''''''''''''''''''''
+
+This only needs to be done once since it is a system install. If you have run
+devstack on your system before, then the mysql service is already installed and
+you can skip this step.
+
+Mysql must be configured as installed by devstack, and the following script
+accomplishes this without actually running devstack::
+
+ INSTALL_MYSQL_ONLY=True ./tools/configure_for_func_testing.sh ../devstack
+
+Run this from the root of the neutron repo. It assumes an up-to-date clone of
+the devstack repo is in ``../devstack``.
+
+Note that you must know the mysql root password. It is derived from (in order
+of precedence):
+
+- ``$MYSQL_PASSWORD`` in your environment
+- ``$MYSQL_PASSWORD`` in ``../devstack/local.conf``
+- ``$MYSQL_PASSWORD`` in ``../devstack/localrc``
+- default of 'secretmysql' from ``tools/configure_for_func_testing.sh``
+
+Work on a test database
+'''''''''''''''''''''''
+
+Rather than using the neutron database when working on schema and alembic
+migration script changes, we can work on a test database. In the examples
+below, we use a database named ``testdb``.
+
+To create the database::
+
+ mysql -e "create database testdb;"
+
+You will often need to clear it to re-run operations from a blank database::
+
+ mysql -e "drop database testdb; create database testdb;"
+
+To work on the test database instead of the neutron database, point to it with
+the ``--database-connection`` option::
+
+ neutron-db-manage --database-connection mysql+pymysql://root:secretmysql@127.0.0.1/testdb?charset=utf8 <commands>
+
+You may find it convenient to set up an alias (in your .bashrc) for this::
+
+ alias test-db-manage='neutron-db-manage --database-connection mysql+pymysql://root:secretmysql@127.0.0.1/testdb?charset=utf8'
+
+Create and activate the virtualenv
+''''''''''''''''''''''''''''''''''
+
+From the root of the neutron (or sub-project) repo directory, run::
+
+ tox --notest -r -e py27
+ source .tox/py27/bin/activate
+
+Now you can use the ``test-db-manage`` alias in place of ``neutron-db-manage``
+in the script auto-generation instructions below.
+
+When you are done, exit the virtualenv::
+
+ deactivate
+
+
 Script Auto-generation
 ~~~~~~~~~~~~~~~~~~~~~~
 
-::
+This section describes how to auto-generate an alembic migration script for a
+model change. You may either use the system installed devstack environment, or
+a virtualenv + testdb environment as described in
+:ref:`neutron-db-manage-without-devstack`.
+
+Stop the neutron service. Work from the base directory of the neutron (or
+sub-project) repo. Check out the master branch and do ``git pull`` to
+ensure it is fully up to date. Check out your development branch and rebase to
+master.
+
+**NOTE:** Make sure you have not updated the ``CONTRACT_HEAD`` or
+``EXPAND_HEAD`` yet at this point.
+
+Start with an empty database and upgrade to heads::
+
+ mysql -e "drop database neutron; create database neutron;"
+ neutron-db-manage upgrade heads
+
+The database schema is now created without your model changes. The alembic
+``revision --autogenerate`` command will look for differences between the
+schema generated by the upgrade command and the schema defined by the models,
+including your model updates::
 
  neutron-db-manage revision -m "description of revision" --autogenerate
 
@@ -188,6 +294,12 @@ blank file for a branch via::
 **NOTE:** If you use above command you should check that migration is created
 in a directory that is named as current release. If not, please raise the issue
 with the development team (IRC, mailing list, launchpad bug).
+
+**NOTE:** The "description of revision" text should be a simple English
+sentence. The first 30 characters of the description will be used in the file
+name for the script, with underscores substituted for spaces. If the truncation
+occurs at an awkward point in the description, you can modify the script file
+name manually before committing.
 
 The timeline on each alembic branch should remain linear and not interleave
 with other branches, so that there is a clear path when upgrading. To verify
@@ -306,6 +418,19 @@ following directive should be added in the contraction script::
     depends_on = ('<expansion-revision>',)
 
 
+HEAD files for conflict management
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In directory ``neutron/db/migration/alembic_migrations/versions`` there are two
+files, ``CONTRACT_HEAD`` and ``EXPAND_HEAD``. These files contain the ID of the
+head revision in each branch. The purpose of these files is to validate the
+revision timelines and prevent non-linear changes from entering the merge queue.
+
+When you create a new migration script by neutron-db-manage these files will be
+updated automatically. But if another migration script is merged while your
+change is under review, you will need to resolve the conflict manually by
+changing the ``down_revision`` in your migration script.
+
 Applying database migration rules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -320,6 +445,14 @@ non-expansive migration rules, if any::
 
 and finally, start your neutron-server again.
 
+If you have multiple neutron-server instances in your cloud, and there are
+pending contract scripts not applied to the database, full shutdown of all
+those services is required before 'upgrade --contract' is executed. You can
+determine whether there are any pending contract scripts by checking the
+message returned from the following command::
+
+ neutron-db-manage has_offline_migrations
+
 If you are not interested in applying safe migration rules while the service is
 running, you can still upgrade database the old way, by stopping the service,
 and then applying all available rules::
@@ -328,3 +461,35 @@ and then applying all available rules::
 
 It will apply all the rules from both the expand and the contract branches, in
 proper order.
+
+
+Tagging milestone revisions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When named release (liberty, mitaka, etc.) is done for neutron or a
+sub-project, the alembic revision scripts at the head of each branch for that
+release must be tagged. This is referred to as a milestone revision tag.
+
+For example, `here <https://review.openstack.org/228272>`_ is a patch that tags
+the liberty milestone revisions for the neutron-fwaas sub-project. Note that
+each branch (expand and contract) is tagged.
+
+Tagging milestones allows neutron-db-manage to upgrade the schema to a
+milestone release, e.g.::
+
+ neutron-db-manage upgrade liberty
+
+
+Generation of comparable metadata with current database schema
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Directory ``neutron/db/migration/models`` contains module ``head.py``, which
+provides all database models at current HEAD. Its purpose is to create
+comparable metadata with the current database schema. The database schema is
+generated by alembic migration scripts. The models must match, and this is
+verified by a model-migration sync test in Neutron's functional test suite.
+That test requires all modules containing DB models to be imported by head.py
+in order to make a complete comparison.
+
+When adding new database models, developers must update this module, otherwise
+the change will fail to merge.
