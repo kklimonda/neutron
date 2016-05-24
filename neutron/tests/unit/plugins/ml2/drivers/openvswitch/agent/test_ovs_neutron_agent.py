@@ -117,6 +117,10 @@ class TestOvsNeutronAgent(object):
         mock.patch('neutron.agent.common.ovs_lib.BaseOVS.config',
                    new_callable=mock.PropertyMock,
                    return_value={}).start()
+        self.agent = self._make_agent()
+        self.agent.sg_agent = mock.Mock()
+
+    def _make_agent(self):
         with mock.patch.object(self.mod_agent.OVSNeutronAgent,
                                'setup_integration_br'),\
                 mock.patch.object(self.mod_agent.OVSNeutronAgent,
@@ -131,10 +135,10 @@ class TestOvsNeutronAgent(object):
                 mock.patch(
                     'neutron.agent.common.ovs_lib.OVSBridge.' 'get_vif_ports',
                     return_value=[]):
-            self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
-                                                        cfg.CONF)
-            self.agent.tun_br = self.br_tun_cls(br_name='br-tun')
-        self.agent.sg_agent = mock.Mock()
+            agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
+                                                   cfg.CONF)
+            agent.tun_br = self.br_tun_cls(br_name='br-tun')
+            return agent
 
     def _mock_port_bound(self, ofport=None, new_local_vlan=None,
                          old_local_vlan=None, db_get_val=None):
@@ -861,6 +865,21 @@ class TestOvsNeutronAgent(object):
             failed_devices['removed'] = self.agent.treat_devices_removed([{}])
             self.assertEqual(set([dev_mock]), failed_devices.get('removed'))
 
+    def test_treat_devices_removed_ext_delete_port(self):
+        port_id = 'fake-id'
+
+        m_delete = mock.patch.object(self.agent.ext_manager, 'delete_port')
+        m_rpc = mock.patch.object(self.agent.plugin_rpc, 'update_device_list',
+                                  return_value={'devices_up': [],
+                                                'devices_down': [],
+                                                'failed_devices_up': [],
+                                                'failed_devices_down': []})
+        m_unbound = mock.patch.object(self.agent, 'port_unbound')
+
+        with m_delete as delete, m_rpc, m_unbound:
+            self.agent.treat_devices_removed([port_id])
+            delete.assert_called_with(mock.ANY, {'port_id': port_id})
+
     def test_bind_port_with_missing_network(self):
         vif_port = mock.Mock()
         vif_port.name.return_value = 'port'
@@ -934,6 +953,31 @@ class TestOvsNeutronAgent(object):
                 set(['eth1', 'tap1']), False)
             setup_port_filters.assert_called_once_with(
                 set(), port_info.get('updated', set()))
+
+    def test_hybrid_plug_flag_based_on_firewall(self):
+        cfg.CONF.set_default(
+            'firewall_driver',
+            'neutron.agent.firewall.NoopFirewallDriver',
+            group='SECURITYGROUP')
+        agt = self._make_agent()
+        self.assertFalse(agt.agent_state['configurations']['ovs_hybrid_plug'])
+        cfg.CONF.set_default(
+            'firewall_driver',
+            'neutron.agent.linux.openvswitch_firewall.OVSFirewallDriver',
+            group='SECURITYGROUP')
+        with mock.patch('neutron.agent.linux.openvswitch_firewall.'
+                        'OVSFirewallDriver.initialize_bridge'):
+            agt = self._make_agent()
+        self.assertFalse(agt.agent_state['configurations']['ovs_hybrid_plug'])
+        cfg.CONF.set_default(
+            'firewall_driver',
+            'neutron.agent.linux.iptables_firewall.'
+            'OVSHybridIptablesFirewallDriver',
+            group='SECURITYGROUP')
+        with mock.patch('neutron.agent.linux.iptables_firewall.'
+                        'IptablesFirewallDriver._populate_initial_zone_map'):
+            agt = self._make_agent()
+        self.assertTrue(agt.agent_state['configurations']['ovs_hybrid_plug'])
 
     def test_report_state(self):
         with mock.patch.object(self.agent.state_rpc,
@@ -1061,7 +1105,7 @@ class TestOvsNeutronAgent(object):
             self.assertFalse(int_br.set_db_attribute.called)
             self.assertFalse(int_br.drop_port.called)
 
-    def test_setup_physical_bridges(self):
+    def _test_setup_physical_bridges(self, port_exists=False):
         with mock.patch.object(ip_lib.IPDevice, "exists") as devex_fn,\
                 mock.patch.object(sys, "exit"),\
                 mock.patch.object(utils, "execute"),\
@@ -1073,10 +1117,14 @@ class TestOvsNeutronAgent(object):
             parent.attach_mock(phys_br_cls, 'phys_br_cls')
             parent.attach_mock(phys_br, 'phys_br')
             parent.attach_mock(int_br, 'int_br')
-            phys_br.add_patch_port.return_value = "phy_ofport"
-            int_br.add_patch_port.return_value = "int_ofport"
-            phys_br.get_port_ofport.return_value = ovs_lib.INVALID_OFPORT
-            int_br.get_port_ofport.return_value = ovs_lib.INVALID_OFPORT
+            if port_exists:
+                phys_br.get_port_ofport.return_value = "phy_ofport"
+                int_br.get_port_ofport.return_value = "int_ofport"
+            else:
+                phys_br.add_patch_port.return_value = "phy_ofport"
+                int_br.add_patch_port.return_value = "int_ofport"
+            phys_br.port_exists.return_value = port_exists
+            int_br.port_exists.return_value = port_exists
             self.agent.setup_physical_bridges({"physnet1": "br-eth"})
             expected_calls = [
                 mock.call.phys_br_cls('br-eth'),
@@ -1088,12 +1136,30 @@ class TestOvsNeutronAgent(object):
                 # Have to use __getattr__ here to avoid mock._Call.__eq__
                 # method being called
                 mock.call.int_br.db_get_val().__getattr__('__eq__')('veth'),
-                mock.call.int_br.get_port_ofport('int-br-eth'),
-                mock.call.int_br.add_patch_port('int-br-eth',
-                                                constants.NONEXISTENT_PEER),
-                mock.call.phys_br.get_port_ofport('phy-br-eth'),
-                mock.call.phys_br.add_patch_port('phy-br-eth',
-                                                 constants.NONEXISTENT_PEER),
+                mock.call.int_br.port_exists('int-br-eth'),
+            ]
+            if port_exists:
+                expected_calls += [
+                    mock.call.int_br.get_port_ofport('int-br-eth'),
+                ]
+            else:
+                expected_calls += [
+                    mock.call.int_br.add_patch_port(
+                        'int-br-eth', constants.NONEXISTENT_PEER),
+                ]
+            expected_calls += [
+                mock.call.phys_br.port_exists('phy-br-eth'),
+            ]
+            if port_exists:
+                expected_calls += [
+                    mock.call.phys_br.get_port_ofport('phy-br-eth'),
+                ]
+            else:
+                expected_calls += [
+                    mock.call.phys_br.add_patch_port(
+                        'phy-br-eth', constants.NONEXISTENT_PEER),
+                ]
+            expected_calls += [
                 mock.call.int_br.drop_port(in_port='int_ofport'),
                 mock.call.phys_br.drop_port(in_port='phy_ofport'),
                 mock.call.int_br.set_db_attribute('Interface', 'int-br-eth',
@@ -1108,6 +1174,12 @@ class TestOvsNeutronAgent(object):
                              self.agent.int_ofports["physnet1"])
             self.assertEqual("phy_ofport",
                              self.agent.phys_ofports["physnet1"])
+
+    def test_setup_physical_bridges(self):
+        self._test_setup_physical_bridges()
+
+    def test_setup_physical_bridges_port_exists(self):
+        self._test_setup_physical_bridges(port_exists=True)
 
     def test_setup_physical_bridges_using_veth_interconnection(self):
         self.agent.use_veth_interconnection = True
@@ -1146,7 +1218,8 @@ class TestOvsNeutronAgent(object):
             self.assertEqual("phys_veth_ofport",
                              self.agent.phys_ofports["physnet1"])
 
-    def test_setup_physical_bridges_change_from_veth_to_patch_conf(self):
+    def _test_setup_physical_bridges_change_from_veth_to_patch_conf(
+            self, port_exists=False):
         with mock.patch.object(sys, "exit"),\
                 mock.patch.object(utils, "execute"),\
                 mock.patch.object(self.agent, 'br_phys_cls') as phys_br_cls,\
@@ -1158,10 +1231,14 @@ class TestOvsNeutronAgent(object):
             parent.attach_mock(phys_br_cls, 'phys_br_cls')
             parent.attach_mock(phys_br, 'phys_br')
             parent.attach_mock(int_br, 'int_br')
-            phys_br.add_patch_port.return_value = "phy_ofport"
-            int_br.add_patch_port.return_value = "int_ofport"
-            phys_br.get_port_ofport.return_value = ovs_lib.INVALID_OFPORT
-            int_br.get_port_ofport.return_value = ovs_lib.INVALID_OFPORT
+            if port_exists:
+                phys_br.get_port_ofport.return_value = "phy_ofport"
+                int_br.get_port_ofport.return_value = "int_ofport"
+            else:
+                phys_br.add_patch_port.return_value = "phy_ofport"
+                int_br.add_patch_port.return_value = "int_ofport"
+            phys_br.port_exists.return_value = port_exists
+            int_br.port_exists.return_value = port_exists
             self.agent.setup_physical_bridges({"physnet1": "br-eth"})
             expected_calls = [
                 mock.call.phys_br_cls('br-eth'),
@@ -1170,12 +1247,30 @@ class TestOvsNeutronAgent(object):
                 mock.call.phys_br.setup_default_table(),
                 mock.call.int_br.delete_port('int-br-eth'),
                 mock.call.phys_br.delete_port('phy-br-eth'),
-                mock.call.int_br.get_port_ofport('int-br-eth'),
-                mock.call.int_br.add_patch_port('int-br-eth',
-                                                constants.NONEXISTENT_PEER),
-                mock.call.phys_br.get_port_ofport('phy-br-eth'),
-                mock.call.phys_br.add_patch_port('phy-br-eth',
-                                                 constants.NONEXISTENT_PEER),
+                mock.call.int_br.port_exists('int-br-eth'),
+            ]
+            if port_exists:
+                expected_calls += [
+                    mock.call.int_br.get_port_ofport('int-br-eth'),
+                ]
+            else:
+                expected_calls += [
+                    mock.call.int_br.add_patch_port(
+                        'int-br-eth', constants.NONEXISTENT_PEER),
+                ]
+            expected_calls += [
+                mock.call.phys_br.port_exists('phy-br-eth'),
+            ]
+            if port_exists:
+                expected_calls += [
+                    mock.call.phys_br.get_port_ofport('phy-br-eth'),
+                ]
+            else:
+                expected_calls += [
+                    mock.call.phys_br.add_patch_port(
+                        'phy-br-eth', constants.NONEXISTENT_PEER),
+                ]
+            expected_calls += [
                 mock.call.int_br.drop_port(in_port='int_ofport'),
                 mock.call.phys_br.drop_port(in_port='phy_ofport'),
                 mock.call.int_br.set_db_attribute('Interface', 'int-br-eth',
@@ -1190,6 +1285,14 @@ class TestOvsNeutronAgent(object):
                              self.agent.int_ofports["physnet1"])
             self.assertEqual("phy_ofport",
                              self.agent.phys_ofports["physnet1"])
+
+    def test_setup_physical_bridges_change_from_veth_to_patch_conf(self):
+        self._test_setup_physical_bridges_change_from_veth_to_patch_conf()
+
+    def test_setup_physical_bridges_change_from_veth_to_patch_conf_port_exists(
+            self):
+        self._test_setup_physical_bridges_change_from_veth_to_patch_conf(
+            port_exists=True)
 
     def test_setup_tunnel_br(self):
         self.tun_br = mock.Mock()
@@ -2112,7 +2215,7 @@ class TestOvsDvrNeutronAgent(object):
                     'neutron.agent.common.ovs_lib.OVSBridge.' 'get_vif_ports',
                     return_value=[]):
             self.agent = self.mod_agent.OVSNeutronAgent(self._bridge_classes(),
-                                                        cfg.CONF)
+                                                       cfg.CONF)
             self.agent.tun_br = self.br_tun_cls(br_name='br-tun')
         self.agent.sg_agent = mock.Mock()
 

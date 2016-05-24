@@ -1,15 +1,59 @@
 CHANGES
 =======
 
+* Call ext_manager.delete_port on port removal
+* devref: remove l2 agent extensions steps literal
+* Trivial fix - NETWORK_TYPE validate
+* Change log level when L3 agent is disabled
+* Introducing the Subnet OVO
+* Add OSprofiler support
+* fullstack: test for snat and floatingip
+* Pecan: Backwards compatible/cleaner init
+* fix wrong default value of qos.notification_drivers
+* fullstack: test for east west traffic
+* Update unit tests to use correct method being used
+* Deprecate neutron-debug
+* Allow for excepted operations in migrations
+* Mock out poller in ovsdb unittests
+* DVR: Moving router from dvr_snat node removes the qrouters
+* Pecan: remove deprecation warning
+* Update for removing ofagent
+* Ensure unit tests don't assume an IP address allocation strategy
+* Updated from global requirements
+* Segment: remove deprecation warning for converters
+* Add negative API tests that try to remove the resources in use
+* Check if pool update is needed in reference driver
+* Remove cliff requirement in test-requirements.txt
+* sriov_nic config options were declared under wrong group
+* Refactoring config options for service
+* Pecan: Handle hyphenated collection with shims
+* Enforce UUID of port/subnet ID for router interfaces
+* Make exception translation common and add to pecan
+* Remove unhelpful test of oslo.service ServiceLauncher
+* Avoid testing oslo.service library internals
+* Restart dsnmasq on any network subnet change
+* Add service-type extension to flavors plugin
+* Add method to get service provider names by resources
+* Enable flavor plugin as a default service plugin
+* Add setting default max_burst value if not given by user
+* Fix for 'ofport' query retries during neutron agent start
 * Segment extension: remove deprecated warnings
+* Add provisioning blocks to status ACTIVE transition
+* Refactoring config options for quota
 * Trivial Fixes for 'sub_project.rst' devref document
+* Add retry support to pecan
 * Remove openstack-common.conf
 * Enable IPAM drivers to allocate from more than one subnet
 * Associate subnets to segments through subnet API
+* OVS Mech: Set hybrid plug based on agent config
 * Remove deprecated references to attributes
 * SR-IOV driver and SimpleAgentMechanismDriverBase
+* Delete a magic number of security_group_rule quotas test
+* Pecan: skip all notifications on failures
+* Remove tools/pecan_server.sh
 * DVR: Ensure fpr and rfp devices are configured correctly
 * Changing VPNaaS bug contact name
+* Check for existence of snat port before deleting it
 * Move address scope specific code out of iptables_manager
 * Use correct session in update_allocation_pools
 * Revise ICMPV6_ALLOWED_TYPES
@@ -17,8 +61,10 @@ CHANGES
 * Basic Extension and CRUD for Segments
 * Classes lack metaclass decoration
 * DVR: Use existing IPDevice to add address on FIP VETH
+* Fix SR-IOV binding when two NICs mapped to one physnet
 * Add exponential back-off RPC client
 * Fix prefix delegation deleting addresses for ports
+* Fix the sriov agent config group name
 * DVR: Clear SNAT namespace when agent restarts after router move
 * Delete post_test_hook.generate_test_logs
 * Add logging for some functional tests
@@ -30,10 +76,12 @@ CHANGES
 * Remove threading before process forking
 * Add API to retrieve default quotas
 * fullstack: Use noop firewall
+* Annotate alembic migration for VLAN trunking
 * Fix update target tenant RBAC external path
 * Preserve backward compatibility with OVS hybrid plugging
 * Avoid eventlet monkey patching for the tempest plugin
 * Policies: additional go-to contacts for IPv6 bugs
+* Added PecanResourceExtension
 * Resigning as "go to contact" for DVR bugs
 * Pecan: Fix Shim status codes
 * Do not rewrite original exception for IPAM
@@ -59,6 +107,7 @@ CHANGES
 * Remove functional migration script about external tables
 * Allow OVSDB Connection to register certain tables
 * Switch to inheriting hacking checks from neutron-lib
+* Add test that ensures subnet is usable after update
 * Use exceptions from neutron-lib
 * Revert "ML2: Configure path_mtu to default to 1500 bytes"
 * Object tests: couple of pep8 and list comparison improvements

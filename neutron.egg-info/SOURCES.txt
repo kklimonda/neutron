@@ -59,6 +59,7 @@ doc/source/devref/openvswitch_firewall.rst
 doc/source/devref/ovs_vhostuser.rst
 doc/source/devref/plugin-api.rst
 doc/source/devref/policy.rst
+doc/source/devref/provisioning_blocks.rst
 doc/source/devref/quality_of_service.rst
 doc/source/devref/quota.rst
 doc/source/devref/rpc_api.rst
@@ -295,10 +296,14 @@ neutron/common/constants.py
 neutron/common/eventlet_utils.py
 neutron/common/exceptions.py
 neutron/common/ipv6_utils.py
+neutron/common/profiler.py
 neutron/common/rpc.py
 neutron/common/test_lib.py
 neutron/common/topics.py
 neutron/common/utils.py
+neutron/conf/__init__.py
+neutron/conf/quota.py
+neutron/conf/service.py
 neutron/core_extensions/__init__.py
 neutron/core_extensions/base.py
 neutron/core_extensions/qos.py
@@ -337,6 +342,7 @@ neutron/db/portbindings_base.py
 neutron/db/portbindings_db.py
 neutron/db/portsecurity_db.py
 neutron/db/portsecurity_db_common.py
+neutron/db/provisioning_blocks.py
 neutron/db/quota_db.py
 neutron/db/rbac_db_mixin.py
 neutron/db/rbac_db_models.py
@@ -437,6 +443,7 @@ neutron/db/migration/alembic_migrations/versions/mitaka/expand/ec7fcfbf72ee_netw
 neutron/db/migration/alembic_migrations/versions/newton/contract/7bbb25278f53_device_owner_ha_replicate_int.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/89ab9a816d70_rename_ml2_network_segments.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/c879c5e1ee90_add_segment_id_to_subnet.py
+neutron/db/migration/alembic_migrations/versions/newton/expand/30107ab6a3ee_provisioning_blocks.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/45f8dd33480b_qos_dscp_db_addition.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/5abc0278ca73_add_support_for_vlan_trunking.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/d3435b514502_add_device_id_index_to_port.py
@@ -535,6 +542,7 @@ neutron/objects/address_scope.py
 neutron/objects/base.py
 neutron/objects/common_types.py
 neutron/objects/rbac_db.py
+neutron/objects/subnet.py
 neutron/objects/subnetpool.py
 neutron/objects/db/__init__.py
 neutron/objects/db/api.py
@@ -777,6 +785,7 @@ neutron/tests/contrib/functional-testing.filters
 neutron/tests/contrib/gate_hook.sh
 neutron/tests/contrib/post_test_hook.sh
 neutron/tests/contrib/hooks/api_extensions
+neutron/tests/contrib/hooks/osprofiler
 neutron/tests/contrib/hooks/pecan
 neutron/tests/contrib/hooks/qos
 neutron/tests/etc/api-paste.ini.test
@@ -910,6 +919,7 @@ neutron/tests/tempest/api/test_floating_ips_negative.py
 neutron/tests/tempest/api/test_metering_extensions.py
 neutron/tests/tempest/api/test_network_ip_availability.py
 neutron/tests/tempest/api/test_networks.py
+neutron/tests/tempest/api/test_networks_negative.py
 neutron/tests/tempest/api/test_ports.py
 neutron/tests/tempest/api/test_qos.py
 neutron/tests/tempest/api/test_routers.py
@@ -944,6 +954,7 @@ neutron/tests/unit/extension_stubs.py
 neutron/tests/unit/test_auth.py
 neutron/tests/unit/test_context.py
 neutron/tests/unit/test_manager.py
+neutron/tests/unit/test_opts.py
 neutron/tests/unit/test_policy.py
 neutron/tests/unit/test_service.py
 neutron/tests/unit/test_wsgi.py
@@ -1063,6 +1074,7 @@ neutron/tests/unit/db/test_l3_hamode_db.py
 neutron/tests/unit/db/test_migration.py
 neutron/tests/unit/db/test_portsecurity_db.py
 neutron/tests/unit/db/test_portsecurity_db_common.py
+neutron/tests/unit/db/test_provisioning_blocks.py
 neutron/tests/unit/db/test_securitygroups_db.py
 neutron/tests/unit/db/test_sqlalchemytypes.py
 neutron/tests/unit/db/metering/__init__.py
@@ -1121,6 +1133,7 @@ neutron/tests/unit/objects/test_base.py
 neutron/tests/unit/objects/test_common_types.py
 neutron/tests/unit/objects/test_objects.py
 neutron/tests/unit/objects/test_rbac_db.py
+neutron/tests/unit/objects/test_subnet.py
 neutron/tests/unit/objects/test_subnetpool.py
 neutron/tests/unit/objects/extensions/__init__.py
 neutron/tests/unit/objects/extensions/test_standardattributes.py
@@ -1277,6 +1290,7 @@ releasenotes/notes/add-availability-zone-4440cf00be7c54ba.yaml
 releasenotes/notes/add-get-me-a-network-56321aeef5389001.yaml
 releasenotes/notes/add-integration-with-external-dns-f56ec8a4993b1fc4.yaml
 releasenotes/notes/add-ip-protocols-in-sg-60467a073e771aee.yaml
+releasenotes/notes/add-osprofiler-support-7fc2de3001187075.yaml
 releasenotes/notes/add-port-rebinding-chance-33178b9abacf5804.yaml
 releasenotes/notes/add-rbac-qos-8b1154ee756c66df.yaml
 releasenotes/notes/add-standard-attr-descriptions-1ba0d7a454c3fd8f.yaml
@@ -1296,6 +1310,7 @@ releasenotes/notes/deprecate-force_gateway_on_subnet-376855c4e66f4e11.yaml
 releasenotes/notes/deprecate-network-device-mtu-59b78264c9974808.yaml
 releasenotes/notes/deprecate-router_id-34aca9ea5ee9e789.yaml
 releasenotes/notes/deprecate_max_fixed_ips_per_port-5e80518cbf25cfd6.yaml
+releasenotes/notes/deprecate_neutron_debug-a578e0adfc9cff4c.yaml
 releasenotes/notes/deprecate_prevent_arp_spoofing_option-a09e673fc8f9fee4.yaml
 releasenotes/notes/deprecated-driver-e368e0befc9bee4c.yaml
 releasenotes/notes/direct-physical-vnic-878d15bdb758b70e.yaml
@@ -1305,6 +1320,7 @@ releasenotes/notes/dvr-ovs-agent-6052a8d60fddde22.yaml
 releasenotes/notes/dvr-support-live-migration-b818b12bd9cbb518.yaml
 releasenotes/notes/end-to-end-mtu-00345fc4282cb8fb.yaml
 releasenotes/notes/fail-on-missing-extensions-bc332124b780875b.yaml
+releasenotes/notes/firewall_driver_not_needed_on_server-4159669ad834dea6.yaml
 releasenotes/notes/hyperv-neutron-agent-decomposition-ae6a052aeb48c6ac.yaml
 releasenotes/notes/linuxbridge-agent-extensions-66bdf9feee25ef99.yaml
 releasenotes/notes/linuxbridge_vxlan_arp_responder-e9ea91552e1b62a7.yaml
@@ -1323,6 +1339,7 @@ releasenotes/notes/remove-driver-60eb7e26d95f7322.yaml
 releasenotes/notes/remove-force_gateway_on_subnet-77cb79f0b35d0c6d.yaml
 releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml
 releasenotes/notes/segment_mtu_to_global_physnet_mtu-9cee5ff09557edeb.yaml
+releasenotes/notes/set-of-default-qos-burst-value-0790773703fa08fc.yaml
 releasenotes/notes/sriov_allow_use_many_nics_for_one_physnet-3570aa67a60ce6c4.yaml
 releasenotes/notes/sriov_show_l2_agent_extensions-ca852e155a529e99.yaml
 releasenotes/notes/use-keystoneauth-24f309566001a16b.yaml
@@ -1346,6 +1363,5 @@ tools/install_venv_common.py
 tools/milestone-review-dash.py
 tools/misc-sanity-checks.sh
 tools/ostestr_compat_shim.sh
-tools/pecan_server.sh
 tools/split.sh
 tools/with_venv.sh

@@ -17,14 +17,16 @@ import abc
 
 from neutron_lib.api import converters
 from neutron_lib import exceptions as nexception
-from oslo_config import cfg
 import six
 
 from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import resource_helper
+from neutron.conf import quota
+from neutron import manager
 from neutron.pecan_wsgi import controllers
+from neutron.pecan_wsgi.controllers import utils as pecan_utils
 from neutron.plugins.common import constants
 
 
@@ -156,17 +158,8 @@ RESOURCE_ATTRIBUTE_MAP = {
     },
 }
 
-l3_quota_opts = [
-    cfg.IntOpt('quota_router',
-               default=10,
-               help=_('Number of routers allowed per tenant. '
-                      'A negative value means unlimited.')),
-    cfg.IntOpt('quota_floatingip',
-               default=50,
-               help=_('Number of floating IPs allowed per tenant. '
-                      'A negative value means unlimited.')),
-]
-cfg.CONF.register_opts(l3_quota_opts, 'QUOTAS')
+# Register the configuration options
+quota.register_quota_opts(quota.l3_quota_opts)
 
 
 class L3(extensions.ExtensionDescriptor):
@@ -209,10 +202,16 @@ class L3(extensions.ExtensionDescriptor):
             attributes, extension_attrs_map=RESOURCE_ATTRIBUTE_MAP)
 
     @classmethod
-    def get_pecan_controllers(cls):
-        return ((ROUTERS, controllers.RoutersController()),
-                (FLOATINGIPS, controllers.CollectionsController(FLOATINGIPS,
-                                                                FLOATINGIP)))
+    def get_pecan_resources(cls):
+        plugin = manager.NeutronManager.get_service_plugins()[
+            constants.L3_ROUTER_NAT]
+        router_controller = controllers.RoutersController()
+        fip_controller = controllers.CollectionsController(
+            FLOATINGIPS, FLOATINGIP)
+        return [pecan_utils.PecanResourceExtension(
+                    ROUTERS, router_controller, plugin),
+                pecan_utils.PecanResourceExtension(
+                    FLOATINGIPS, fip_controller, plugin)]
 
     def get_extended_resources(self, version):
         if version == "2.0":

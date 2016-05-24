@@ -39,6 +39,7 @@ from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2 as base_plugin
 from neutron.db import l3_db
 from neutron.db import models_v2
+from neutron.db import provisioning_blocks
 from neutron.extensions import availability_zone as az_ext
 from neutron.extensions import external_net
 from neutron.extensions import multiprovidernet as mpnet
@@ -556,10 +557,51 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                 plugin.update_port_status(ctx, short_id, 'UP')
                 mock_gbl.assert_called_once_with(mock.ANY, port_id, mock.ANY)
 
+    def _add_fake_dhcp_agent(self):
+        agent = mock.Mock(configurations='{"notifies_port_ready": true}')
+        plugin = manager.NeutronManager.get_plugin()
+        self.get_dhcp_mock = mock.patch.object(
+            plugin, 'get_dhcp_agents_hosting_networks',
+            return_value=[agent]).start()
+
+    def test_dhcp_provisioning_blocks_inserted_on_create_with_agents(self):
+        self._add_fake_dhcp_agent()
+        with mock.patch.object(provisioning_blocks,
+                               'add_provisioning_component') as ap:
+            with self.port():
+                self.assertTrue(ap.called)
+
+    def test_dhcp_provisioning_blocks_skipped_on_create_with_no_dhcp(self):
+        self._add_fake_dhcp_agent()
+        with self.subnet(enable_dhcp=False) as subnet:
+            with mock.patch.object(provisioning_blocks,
+                                   'add_provisioning_component') as ap:
+                with self.port(subnet=subnet):
+                    self.assertFalse(ap.called)
+
+    def test_dhcp_provisioning_blocks_inserted_on_update(self):
+        ctx = context.get_admin_context()
+        plugin = manager.NeutronManager.get_plugin()
+        self._add_fake_dhcp_agent()
+        with self.port() as port:
+            with mock.patch.object(provisioning_blocks,
+                                   'add_provisioning_component') as ap:
+                port['port']['binding:host_id'] = 'newhost'
+                plugin.update_port(ctx, port['port']['id'], port)
+                self.assertTrue(ap.called)
+
+    def test_dhcp_provisioning_blocks_removed_without_dhcp_agents(self):
+        with mock.patch.object(provisioning_blocks,
+                               'remove_provisioning_component') as cp:
+            with self.port():
+                self.assertTrue(cp.called)
+
     def test_update_port_fixed_ip_changed(self):
         ctx = context.get_admin_context()
         plugin = manager.NeutronManager.get_plugin()
-        with self.port() as port, mock.patch.object(
+        fixed_ip_data = [{'ip_address': '10.0.0.4'}]
+        with self.port(fixed_ips=fixed_ip_data) as port,\
+            mock.patch.object(
                 plugin.notifier,
                 'security_groups_member_updated') as sg_member_update:
             port['port']['fixed_ips'][0]['ip_address'] = '10.0.0.3'
@@ -829,14 +871,20 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
         self._test_operation_resillient_to_ipallocation_failure(make_port)
 
     def test_port_update_resillient_to_duplicate_records(self):
-        with self.port() as p:
-            data = {'port': {'fixed_ips': [{'ip_address': '10.0.0.9'}]}}
-            req = self.new_update_request('ports', data, p['port']['id'])
+        cidr = '10.0.0.0/24'
+        allocation_pools = [{'start': '10.0.0.2', 'end': '10.0.0.8'}]
+        with self.subnet(cidr=cidr,
+                         allocation_pools=allocation_pools) as subnet:
+            with self.port(subnet=subnet) as p:
+                data = {'port': {'fixed_ips': [{'ip_address': '10.0.0.9'}]}}
+                req = self.new_update_request('ports', data, p['port']['id'])
 
-            def do_request():
-                self.assertEqual(200, req.get_response(self.api).status_int)
+                def do_request():
+                    self.assertEqual(200,
+                                     req.get_response(self.api).status_int)
 
-            self._test_operation_resillient_to_ipallocation_failure(do_request)
+                self._test_operation_resillient_to_ipallocation_failure(
+                    do_request)
 
     def _test_operation_resillient_to_ipallocation_failure(self, func):
         from sqlalchemy import event

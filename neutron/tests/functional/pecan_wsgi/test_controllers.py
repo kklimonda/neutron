@@ -10,11 +10,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from collections import namedtuple
-
 import mock
 from neutron_lib import constants as n_const
 from oslo_config import cfg
+from oslo_db import exception as db_exc
 from oslo_policy import policy as oslo_policy
 from oslo_serialization import jsonutils
 import pecan
@@ -268,6 +267,26 @@ class TestResourceController(TestRootController):
             headers={'X-Project-Id': 'tenid'})
         self.assertEqual(response.status_int, 201)
 
+    def test_post_with_retry(self):
+        self._create_failed = False
+        orig = self.plugin.create_port
+
+        def new_create(*args, **kwargs):
+            if not self._create_failed:
+                self._create_failed = True
+                raise db_exc.RetryRequest(ValueError())
+            return orig(*args, **kwargs)
+
+        with mock.patch.object(self.plugin, 'create_port',
+                               new=new_create):
+            response = self.app.post_json(
+                '/v2.0/ports.json',
+                params={'port': {'network_id': self.port['network_id'],
+                                 'admin_state_up': True,
+                                 'tenant_id': 'tenid'}},
+                headers={'X-Project-Id': 'tenid'})
+            self.assertEqual(201, response.status_int)
+
     def test_put(self):
         response = self.app.put_json('/v2.0/ports/%s.json' % self.port['id'],
                                      params={'port': {'name': 'test'}},
@@ -404,10 +423,9 @@ class TestRequestProcessing(TestResourceController):
             self.req_stash['plugin'])
 
     def test_service_plugin_uri(self):
-        service_plugin = namedtuple('DummyServicePlugin', 'path_prefix')
-        service_plugin.path_prefix = 'dummy'
         nm = manager.NeutronManager.get_instance()
-        nm.service_plugins['dummy_sp'] = service_plugin
+        nm.path_prefix_resource_mappings['dummy'] = [
+            _SERVICE_PLUGIN_COLLECTION]
         response = self.do_request('/v2.0/dummy/serviceplugins.json')
         self.assertEqual(200, response.status_int)
         self.assertEqual(_SERVICE_PLUGIN_INDEX_BODY, response.json_body)
@@ -569,3 +587,38 @@ class TestL3AgentShimControllers(test_functional.PecanFunctionalTest):
             headers=headers)
         self.assertNotIn(self.agent.id,
                          [a['id'] for a in response.json['agents']])
+
+
+class TestShimControllers(test_functional.PecanFunctionalTest):
+
+    def setUp(self):
+        fake_ext = pecan_utils.FakeExtension()
+        fake_plugin = pecan_utils.FakePlugin()
+        plugins = {pecan_utils.FakePlugin.PLUGIN_TYPE: fake_plugin}
+        new_extensions = {fake_ext.get_alias(): fake_ext}
+        super(TestShimControllers, self).setUp(
+            service_plugins=plugins, extensions=new_extensions)
+        policy.init()
+        policy._ENFORCER.set_rules(
+            oslo_policy.Rules.from_dict(
+                {'get_meh_meh': '',
+                 'get_meh_mehs': ''}),
+            overwrite=False)
+        self.addCleanup(policy.reset)
+
+    def test_hyphenated_resource_controller_not_shimmed(self):
+        collection = pecan_utils.FakeExtension.HYPHENATED_COLLECTION.replace(
+            '_', '-')
+        resource = pecan_utils.FakeExtension.HYPHENATED_RESOURCE
+        url = '/v2.0/{}/something.json'.format(collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({resource: {'fake': 'something'}}, resp.json)
+
+    def test_hyphenated_collection_controller_not_shimmed(self):
+        body_collection = pecan_utils.FakeExtension.HYPHENATED_COLLECTION
+        uri_collection = body_collection.replace('_', '-')
+        url = '/v2.0/{}.json'.format(uri_collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({body_collection: [{'fake': 'fake'}]}, resp.json)

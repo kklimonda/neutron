@@ -13,6 +13,7 @@ NETWORK_API_EXTENSIONS="
     external-net, \
     extra_dhcp_opt, \
     extraroute, \
+    flavors, \
     l3-ha, \
     l3_agent_scheduler, \
     metering, \
@@ -28,6 +29,7 @@ NETWORK_API_EXTENSIONS="
     router, \
     router_availability_zone, \
     security-group, \
+    service-type, \
     standard-attr-description, \
     subnet_allocation, \
     tag, \
