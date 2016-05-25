@@ -1,18 +1,31 @@
 CHANGES
 =======
 
+* Introduce official lib tag for neutron-lib issues
+* Remove using PROTO_NAME_IPV6_ICMP_LEGACY from neutron.common.constants
+* Updated from global requirements
+* Remove remaining BGP code from neutron
+* DVR: Pings to floatingip returns with fixed-ip on same network
+* Migration for qospolicyrbacs has hardcoded InnoDB
+* Remove the inaccurate help message for min_l3_agents_per_router
+* OSProfiler imports break decomposed plugins
+* tests: validate sorting and pagination for networks
+* Fix unit test for new list of icmpv6 allowed_types
 * Call ext_manager.delete_port on port removal
 * devref: remove l2 agent extensions steps literal
 * Trivial fix - NETWORK_TYPE validate
 * Change log level when L3 agent is disabled
+* Add quota tests in api tests
 * Introducing the Subnet OVO
 * Add OSprofiler support
 * fullstack: test for snat and floatingip
+* Integrate the port allowed address pairs VersionedObject in Neutron
 * Pecan: Backwards compatible/cleaner init
 * fix wrong default value of qos.notification_drivers
 * fullstack: test for east west traffic
 * Update unit tests to use correct method being used
 * Deprecate neutron-debug
+* Remove nested transaction from ipam driver
 * Allow for excepted operations in migrations
 * Mock out poller in ovsdb unittests
 * DVR: Moving router from dvr_snat node removes the qrouters
@@ -45,6 +58,7 @@ CHANGES
 * Remove openstack-common.conf
 * Enable IPAM drivers to allocate from more than one subnet
 * Associate subnets to segments through subnet API
+* Insert validation with request params for HTTP DELETE
 * OVS Mech: Set hybrid plug based on agent config
 * Remove deprecated references to attributes
 * SR-IOV driver and SimpleAgentMechanismDriverBase
