@@ -355,6 +355,8 @@ neutron/db/sqlalchemyutils.py
 neutron/db/standardattrdescription_db.py
 neutron/db/tag_db.py
 neutron/db/vlantransparent_db.py
+neutron/db/allowed_address_pairs/__init__.py
+neutron/db/allowed_address_pairs/models.py
 neutron/db/availability_zone/__init__.py
 neutron/db/availability_zone/network.py
 neutron/db/availability_zone/router.py
@@ -786,8 +788,11 @@ neutron/tests/contrib/gate_hook.sh
 neutron/tests/contrib/post_test_hook.sh
 neutron/tests/contrib/hooks/api_extensions
 neutron/tests/contrib/hooks/osprofiler
+neutron/tests/contrib/hooks/pagination
 neutron/tests/contrib/hooks/pecan
 neutron/tests/contrib/hooks/qos
+neutron/tests/contrib/hooks/quotas
+neutron/tests/contrib/hooks/sorting
 neutron/tests/etc/api-paste.ini.test
 neutron/tests/etc/neutron.conf
 neutron/tests/etc/neutron_test.conf
@@ -938,6 +943,7 @@ neutron/tests/tempest/api/admin/test_external_network_extension.py
 neutron/tests/tempest/api/admin/test_floating_ips_admin_actions.py
 neutron/tests/tempest/api/admin/test_l3_agent_scheduler.py
 neutron/tests/tempest/api/admin/test_quotas.py
+neutron/tests/tempest/api/admin/test_quotas_negative.py
 neutron/tests/tempest/api/admin/test_routers_dvr.py
 neutron/tests/tempest/api/admin/test_shared_network_extension.py
 neutron/tests/tempest/common/__init__.py
