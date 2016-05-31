@@ -11,6 +11,7 @@ neutron (2:8.1.1~dev264-0ubuntu1) UNRELEASED; urgency=medium
 
   [ James Page ]
   * d/rules: Switch to using ostestr for unit test execution to avoid races.
+  * d/p/*: Refresh.
 
  -- James Page <james.page@ubuntu.com>  Tue, 31 May 2016 11:22:31 +0100
 
