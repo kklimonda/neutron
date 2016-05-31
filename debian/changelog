@@ -1,4 +1,4 @@
-neutron (2:8.0.1~dev500-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:8.1.1~dev264-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * New upstream version.
@@ -12,7 +12,7 @@ neutron (2:8.0.1~dev500-0ubuntu1) UNRELEASED; urgency=medium
   [ James Page ]
   * d/rules: Switch to using ostestr for unit test execution to avoid races.
 
- -- Corey Bryant <corey.bryant@canonical.com>  Wed, 25 May 2016 07:54:34 -0400
+ -- James Page <james.page@ubuntu.com>  Tue, 31 May 2016 11:22:31 +0100
 
 neutron (2:8.0.0-0ubuntu1) xenial; urgency=medium
 
