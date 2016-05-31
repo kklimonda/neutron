@@ -1,7 +1,26 @@
 CHANGES
 =======
 
+* Dont use query if network_ids is empty
+* Fix two spelling mistakes
+* RPC unit tests: remove UUID future warnings
+* Use ICMPV6_TYPE_* constants from neutron-lib
+* Updated from global requirements
+* Allow the service plugin to import the extension
+* ovsdb: Don't let block() wait indefinitely
+* [qos] section is missing from neutron.conf
+* oslo: remove usage of oslo.log verbose option
+* Adopt to config_dir option being a list and not a string
+* OVS: compare names when checking devices both added and deleted
+* Do not inherit test case classes from regular Neutron classes
+* tests: guarantee unique networks in get_list_of_random_networks
+* Refactor QoS plugin to avoid code duplication
+* Avoid shadowing the method's port argument
+* OVO for VLAN aware VMs
+* tests: cover port with existing sorting/pagination api tests
 * Introduce official lib tag for neutron-lib issues
+* Pecan: tell the plugin about field selection
+* Add segments to hosts mappings
 * Remove using PROTO_NAME_IPV6_ICMP_LEGACY from neutron.common.constants
 * Updated from global requirements
 * Remove remaining BGP code from neutron
@@ -13,13 +32,16 @@ CHANGES
 * Fix unit test for new list of icmpv6 allowed_types
 * Call ext_manager.delete_port on port removal
 * devref: remove l2 agent extensions steps literal
+* Fixed help messages for path_mtu and global_physnet_mtus options
 * Trivial fix - NETWORK_TYPE validate
 * Change log level when L3 agent is disabled
 * Add quota tests in api tests
 * Introducing the Subnet OVO
+* unit: fix ValueError on TransactionQueue init with py34
 * Add OSprofiler support
 * fullstack: test for snat and floatingip
 * Integrate the port allowed address pairs VersionedObject in Neutron
+* Deprecate advertise_mtu option
 * Pecan: Backwards compatible/cleaner init
 * fix wrong default value of qos.notification_drivers
 * fullstack: test for east west traffic
@@ -38,11 +60,13 @@ CHANGES
 * Check if pool update is needed in reference driver
 * Remove cliff requirement in test-requirements.txt
 * sriov_nic config options were declared under wrong group
+* Make deepcopy of update body in API layer
 * Refactoring config options for service
 * Pecan: Handle hyphenated collection with shims
 * Enforce UUID of port/subnet ID for router interfaces
 * Make exception translation common and add to pecan
 * Remove unhelpful test of oslo.service ServiceLauncher
+* Remove a SGs API test following sync to Tempest
 * Avoid testing oslo.service library internals
 * Restart dsnmasq on any network subnet change
 * Add service-type extension to flavors plugin
@@ -90,6 +114,7 @@ CHANGES
 * Remove threading before process forking
 * Add API to retrieve default quotas
 * fullstack: Use noop firewall
+* Don't load DNS integration in l3_router_plugin
 * Annotate alembic migration for VLAN trunking
 * Fix update target tenant RBAC external path
 * Preserve backward compatibility with OVS hybrid plugging
@@ -106,6 +131,11 @@ CHANGES
 * agentnotifiers: retried notifications refactor
 * Avoid L3 agent termination without server
 * Use paginate_query from oslo_db
+
+8.1.0
+-----
+
+* Revert "Improve performance of ensure_namespace"
 * IPtables firewall prevent ICMPv6 spoofing
 * Remove BGP code from neutron
 * Add device_id index to Port
@@ -119,11 +149,13 @@ CHANGES
 * Use constants from neutron-lib
 * Decorate AvailabilityZonePluginBase properly
 * Remove functional migration script about external tables
+* add networking-fortinet in affiliated projects
 * Allow OVSDB Connection to register certain tables
 * Switch to inheriting hacking checks from neutron-lib
 * Add test that ensures subnet is usable after update
 * Use exceptions from neutron-lib
 * Revert "ML2: Configure path_mtu to default to 1500 bytes"
+* Imported Translations from Zanata
 * Object tests: couple of pep8 and list comparison improvements
 * Add a missing address-scope extension check
 * policies: changed owner for release-subproject tag to @ihrachyshka
@@ -135,9 +167,11 @@ CHANGES
 * Remove two exceptions already in neutron-lib
 * Correct the interval between two reports
 * Don't log warning for missing resource_versions
+* Imported Translations from Zanata
 * tempest: enable hacking rule checks
 * Return a 404 on quota delete if entry not found
 * Move class properties to instances for dhcp/test_agent.py
+* Updated from global requirements
 * LinuxBridge agent's QoS driver bw limit for egress traffic
 * Add check that external gw port exist when metering-agent adds a rule
 * Port allowed address pairs to OVO
@@ -152,22 +186,28 @@ CHANGES
 * Don't update DHCP ports in a transaction
 * Use switch-case instead of if-then-elif
 * Match job name for scenario tests
+* Clear DVR MAC on last agent deletion from host
 * Move class properties to instances for dhcp tests
 * Optimize get_ports query by filtering on subnet
 * Avoid calling _get_subnet(s) multiple times in ipam driver
 * Be explicit about the APIs tested in the gate
 * Move away from invoking api tests explicitly
 * Updated from global requirements
+* Add an option for WSGI pool size
 * Make gate-hook structure more readable and extensible
+* Don't disconnect br-int from phys br if connected
 * Avoid referencing code from master branch
 * Support interface drivers that don't support mtu parameter for plug_new
 * Use tempest plugin interface
+* Fix deprecation warning for external_network_bridge
+* Add ALLOCATING state to routers
 * Change wrong word "propogated" to "propagated"
 * Delete conntrack entry on the other direction
 * Skip l2_ovs_agent functional tests
 * Added initial release check list
 * Skip firewall blink test for ovs-fw
 * Fix doc build if git is absent
+* Cleanup stale OVS flows for physical bridges
 * Updated from global requirements
 * Revert "Add 169.254.169.254 when enable force_metadata"
 * Fix broken Tempest conf options in API tests
@@ -175,13 +215,22 @@ CHANGES
 * Add an option for WSGI pool size
 * Add support for building ovs from git sources on stacking
 * Make tunnel_sync logging less verbose
+* Notify resource_versions from agents only when needed
+* ADDRESS_SCOPE_MARK_IDS should not be global for L3 agent
+* Wrap all update/delete l3_rpc handlers with retries
 * Cleanup override of compare_type from oslo_db
 * Notify resource_versions from agents only when needed
+* Values for [ml2]/physical_network_mtus should not be unique
+* Use new DB context when checking if agent is online during rescheduling
 * Remove Openflow Agent(OFAgent) mechanism driver
 * Add RECLONE support for ovs
 * ovsfw: Load vlan tag from other_config
+* ovsfw: Load vlan tag from other_config
 * Reuse to_utf8() and jsonutils.dump_as_bytes()
 * Postgresql: add do_drop arg in alter_enum function
+* Imported Translations from Zanata
+* firewall: don't warn about a driver that does not accept bridge
+* Add uselist=True to subnet rbac_entries relationship
 * Add 169.254.169.254 when enable force_metadata
 * RPC: remove unused parameter
 * Fullstack connectivity: test interface scenario added
@@ -189,14 +238,25 @@ CHANGES
 * Deprecate 'ovs_use_veth' and 'veth_mtu' options
 * Get rid of unnecessary _ha_routers_present check
 * Clear DVR MAC on last agent deletion from host
+* Iptables firewall prevent IP spoofed DHCP requests
 * ovo: Introduce standard attributes to objects
 * Tempest 11.0.0 is released
+* Fix race conditions in IP availability API tests
+* Switched from fixtures to mock to mock out starting RPC consumers
+* Imported Translations from Zanata
 * Imported Translations from Zanata
 * Use new DB context when checking if agent is online during rescheduling
 * Add quota tests in unit tests
 * Refactor IPAM ip allocation method
+* Fix zuul_cloner errors during tox job setup
 * When checking if there is a duplicate rule ignore the id field
 * Revert "Add instrumentation devref, Part I"
+* Return oslo_config Opts to config generator
+* Refactor and fix dummy process fixture
+* Switches metering agent to stateless iptables
+* Remove obsolete keepalived PID files before start
+* Add IPAllocation object to session info to stop GC
+* Ensure metadata agent doesn't use SSL for UNIX socket
 * Fix Windows IPDevice.device_has_ip racefulness
 * Switched from fixtures to mock to mock out starting RPC consumers
 * Values for [ml2]/physical_network_mtus should not be unique
@@ -204,6 +264,7 @@ CHANGES
 * Integrate the Extra Dhcp Opt VersionedObject in Neutron
 * ADDRESS_SCOPE_MARK_IDS should not be global for L3 agent
 * Move all link-local cidr constants to a central location
+* DVR: Increase the link-local address pair range
 * Instantiate Enum() rather than subclassing
 * Fix keepalived functional tests
 * Always call ipam driver on subnet update
@@ -219,16 +280,22 @@ CHANGES
 * Ignore timestamp fields in model update
 * standard attributes: expose created_at/updated_at on models
 * Updated from global requirements
+* SG protocol validation to allow numbers or names
 * Define localstatedir for ovs compilation
+* L3 agent: match format used by iptables
 * Partial revert "DVR: Fix issue of SNAT rule for DVR with floating ip"
 * Add semaphore to ML2 create_port db operation
 * OVS: Add mac spoofing filtering to flows
+* Use right class method in IP availability tests
 * Don't drop 'protocol' from client supplied security_group_rule dict
 * L3 agent: match format used by iptables
+* Make L3 HA interface creation concurrency safe
 * Updated from global requirements
 * ovo: Make return values from objects db api consistent
+* ovsfw: Remove vlan tag before injecting packets to port
 * Fix invalid mock name in test_ovs_neutron_agent
 * lb: interface name hashing for too long vlan interface names
+* Imported Translations from Zanata
 * QoS DSCP use mod_flow instead of mod_flows
 * Change get_root_helper_child_pid to stop when it finds cmd
 * API tests: Check extensions with proper functions
@@ -241,14 +308,17 @@ CHANGES
 * Use right class method in IP availability tests
 * Fix zuul_cloner errors during tox job setup
 * Increase ports per network and add SLA for rally
+* test_network_ip_availability: Skip IPv6 tests when configured so
 * Iptables firewall prevent IP spoofed DHCP requests
 * objects: SubnetPool, SubnetPoolPrefix
 * Don't disconnect br-int from phys br if connected
 * De-dup user-defined SG rules before iptables call
 * Ensure bridge names are shorter than max device name len
+* Retry updating agents table in case of deadlock
 * Improve error when exclusive resource allocation fails
 * Cleanup stale OVS flows for physical bridges
 * Avoids logging error on ML2 OVS agent start
+* Allow to use several nics for physnet with SR-IOV
 * Log fullstack allocation and release of exclusive resources
 * Hacking rule to check i18n usage
 
@@ -257,16 +327,23 @@ CHANGES
 
 * Support Routes==2.3
 * Rename first argument to extend_dict hook correctly
+* port security: gracefully handle resources with no bindings
 * Switches metering agent to stateless iptables
 * Wrap all update/delete l3_rpc handlers with retries
 * Allow to use several nics for physnet with SR-IOV
 * Fix error format message
+* Ignore exception when deleting linux bridge if doesn't exist
 * Refactor and fix dummy process fixture
+* Don't delete br-int to br-tun patch on startup
 * Constraint requirements using mitaka upper-constraints.txt file
+* functional: Update ref used from ovs branch-2.5
 * Imported Translations from Zanata
 * Don't delete br-int to br-tun patch on startup
 * Delete Devref Enable Service for Network IP Availability
+* DVR: rebind port if ofport changes
 * Support Routes==2.3
+* ovs-fw: Mark conntrack entries invalid if no rule is matched
+* l3: Send notify on router_create when ext gw is specified
 * l3: Send notify on router_create when ext gw is specified
 * Remove obsolete keepalived PID files before start
 * Imported Translations from Zanata
@@ -318,9 +395,13 @@ CHANGES
 * ovs-fw: Mark conntrack entries invalid if no rule is matched
 * Add fullstack logging
 * Fix alembic 'No handlers could be found for logger...'
+* Move db query to fetch down bindings under try/except
+* Close XenAPI sessions in neutron-rootwrap-xen-dom0
+* Watch for 'new' events in ovsdb monitor for ofport
 * conn_testers: Bump timeout for ICMPv6 echo tests
 * Port Security added to OVO
 * Adds Enum fields for different types
+* Removes host file contents from DHCP agent logs
 * Removing 'force_gateway_on_subnet' option
 * Imported Translations from Zanata
 * Fix a couple of problems with random hex string generation

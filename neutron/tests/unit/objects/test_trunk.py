@@ -1,5 +1,4 @@
-# Copyright 2016 Hewlett Packard Enterprise Development, LP
-#
+# Copyright (c) 2016 Mirantis, Inc.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,19 +13,25 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron.objects import trunk as t_obj
+from neutron.tests.unit.objects import test_base
 
-from neutron.extensions import segment
-from neutron.services.segments import db
+
+class SubPortObjectTestCase(test_base.BaseObjectIfaceTestCase):
+
+    _test_class = t_obj.SubPort
 
 
-class Plugin(db.SegmentDbMixin, segment.SegmentPluginBase):
+class SubPortDbObjectTestCase(test_base.BaseDbObjectTestCase):
 
-    _instance = None
+    _test_class = t_obj.SubPort
 
-    supported_extension_aliases = ["segment"]
 
-    @classmethod
-    def get_instance(cls):
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+class TrunkObjectTestCase(test_base.BaseObjectIfaceTestCase):
+
+    _test_class = t_obj.Trunk
+
+
+class TrunkDbObjectTestCase(test_base.BaseDbObjectTestCase):
+
+    _test_class = t_obj.Trunk

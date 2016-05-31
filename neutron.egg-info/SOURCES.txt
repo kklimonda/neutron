@@ -444,6 +444,7 @@ neutron/db/migration/alembic_migrations/versions/mitaka/expand/dce3ec7a25c9_rout
 neutron/db/migration/alembic_migrations/versions/mitaka/expand/ec7fcfbf72ee_network_az.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/7bbb25278f53_device_owner_ha_replicate_int.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/89ab9a816d70_rename_ml2_network_segments.py
+neutron/db/migration/alembic_migrations/versions/newton/contract/8fd3918ef6f4_add_segment_host_mapping.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/c879c5e1ee90_add_segment_id_to_subnet.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/30107ab6a3ee_provisioning_blocks.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/45f8dd33480b_qos_dscp_db_addition.py
@@ -546,6 +547,7 @@ neutron/objects/common_types.py
 neutron/objects/rbac_db.py
 neutron/objects/subnet.py
 neutron/objects/subnetpool.py
+neutron/objects/trunk.py
 neutron/objects/db/__init__.py
 neutron/objects/db/api.py
 neutron/objects/extensions/__init__.py
@@ -796,6 +798,7 @@ neutron/tests/contrib/hooks/sorting
 neutron/tests/etc/api-paste.ini.test
 neutron/tests/etc/neutron.conf
 neutron/tests/etc/neutron_test.conf
+neutron/tests/etc/neutron_test2.conf.example
 neutron/tests/etc/policy.json
 neutron/tests/fullstack/README
 neutron/tests/fullstack/__init__.py
@@ -1020,6 +1023,7 @@ neutron/tests/unit/agent/metadata/test_agent.py
 neutron/tests/unit/agent/metadata/test_driver.py
 neutron/tests/unit/agent/metadata/test_namespace_proxy.py
 neutron/tests/unit/agent/ovsdb/__init__.py
+neutron/tests/unit/agent/ovsdb/test_impl_idl.py
 neutron/tests/unit/agent/ovsdb/native/__init__.py
 neutron/tests/unit/agent/ovsdb/native/test_connection.py
 neutron/tests/unit/agent/ovsdb/native/test_helpers.py
@@ -1082,6 +1086,7 @@ neutron/tests/unit/db/test_portsecurity_db.py
 neutron/tests/unit/db/test_portsecurity_db_common.py
 neutron/tests/unit/db/test_provisioning_blocks.py
 neutron/tests/unit/db/test_securitygroups_db.py
+neutron/tests/unit/db/test_segments_db.py
 neutron/tests/unit/db/test_sqlalchemytypes.py
 neutron/tests/unit/db/metering/__init__.py
 neutron/tests/unit/db/metering/test_metering_db.py
@@ -1141,6 +1146,7 @@ neutron/tests/unit/objects/test_objects.py
 neutron/tests/unit/objects/test_rbac_db.py
 neutron/tests/unit/objects/test_subnet.py
 neutron/tests/unit/objects/test_subnetpool.py
+neutron/tests/unit/objects/test_trunk.py
 neutron/tests/unit/objects/extensions/__init__.py
 neutron/tests/unit/objects/extensions/test_standardattributes.py
 neutron/tests/unit/objects/port/__init__.py
@@ -1312,6 +1318,7 @@ releasenotes/notes/config-wsgi-pool-size-a4c06753b79fee6d.yaml
 releasenotes/notes/correlate-address-scope-with-network-ea16e16b0154ac21.yaml
 releasenotes/notes/default-local-dns-a1c3fa1451f228fa.yaml
 releasenotes/notes/default-subnetpool-semantics-1cdc5cdde2be88c2.yaml
+releasenotes/notes/deprecate-advertise-mtu-51e3f78475a14efc.yaml
 releasenotes/notes/deprecate-force_gateway_on_subnet-376855c4e66f4e11.yaml
 releasenotes/notes/deprecate-network-device-mtu-59b78264c9974808.yaml
 releasenotes/notes/deprecate-router_id-34aca9ea5ee9e789.yaml
