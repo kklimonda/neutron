@@ -1,4 +1,4 @@
-# Copyright 2016 Hewlett Packard Enterprise Development, LP
+# Copyright (c) 2016 IBM Corp.
 #
 # All Rights Reserved.
 #
@@ -14,19 +14,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import mock
 
-from neutron.extensions import segment
-from neutron.services.segments import db
+from neutron.db import segments_db
+from neutron.tests import base
 
 
-class Plugin(db.SegmentDbMixin, segment.SegmentPluginBase):
+class TestSegmentsDb(base.BaseTestCase):
 
-    _instance = None
-
-    supported_extension_aliases = ["segment"]
-
-    @classmethod
-    def get_instance(cls):
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+    def test_get_networks_segments_with_empty_networks(self):
+        session = mock.MagicMock()
+        net_segs = segments_db.get_networks_segments(session, [])
+        self.assertFalse(session.query.called)
+        self.assertEqual({}, net_segs)

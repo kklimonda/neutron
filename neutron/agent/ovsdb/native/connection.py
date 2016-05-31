@@ -29,8 +29,10 @@ class TransactionQueue(Queue.Queue, object):
     def __init__(self, *args, **kwargs):
         super(TransactionQueue, self).__init__(*args, **kwargs)
         alertpipe = os.pipe()
-        self.alertin = os.fdopen(alertpipe[0], 'r', 0)
-        self.alertout = os.fdopen(alertpipe[1], 'w', 0)
+        # NOTE(ivasilevskaya) python 3 doesn't allow unbuffered I/O. Will get
+        # around this constraint by using binary mode.
+        self.alertin = os.fdopen(alertpipe[0], 'rb', 0)
+        self.alertout = os.fdopen(alertpipe[1], 'wb', 0)
 
     def get_nowait(self, *args, **kwargs):
         try:
@@ -102,6 +104,9 @@ class Connection(object):
         while True:
             self.idl.wait(self.poller)
             self.poller.fd_wait(self.txns.alert_fileno, poller.POLLIN)
+            #TODO(jlibosva): Remove next line once losing connection to ovsdb
+            #                is solved.
+            self.poller.timer_wait(self.timeout)
             self.poller.block()
             self.idl.run()
             txn = self.txns.get_nowait()
