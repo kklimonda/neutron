@@ -1027,6 +1027,7 @@ neutron/tests/unit/agent/ovsdb/test_impl_idl.py
 neutron/tests/unit/agent/ovsdb/native/__init__.py
 neutron/tests/unit/agent/ovsdb/native/test_connection.py
 neutron/tests/unit/agent/ovsdb/native/test_helpers.py
+neutron/tests/unit/agent/ovsdb/native/test_idlutils.py
 neutron/tests/unit/agent/windows/__init__.py
 neutron/tests/unit/agent/windows/test_ip_lib.py
 neutron/tests/unit/api/__init__.py
@@ -1147,6 +1148,8 @@ neutron/tests/unit/objects/test_rbac_db.py
 neutron/tests/unit/objects/test_subnet.py
 neutron/tests/unit/objects/test_subnetpool.py
 neutron/tests/unit/objects/test_trunk.py
+neutron/tests/unit/objects/db/__init__.py
+neutron/tests/unit/objects/db/test_api.py
 neutron/tests/unit/objects/extensions/__init__.py
 neutron/tests/unit/objects/extensions/test_standardattributes.py
 neutron/tests/unit/objects/port/__init__.py

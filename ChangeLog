@@ -1,12 +1,25 @@
 CHANGES
 =======
 
+* Fix get_free_namespace_port to actually avoid used ports
+* DVRHA interfaces should be created in all cases
+* Updated from global requirements
+* Guard against config_dirs not defined on ConfigOpts
+* Macvtap: Allow noop alias as FW driver
+* objects: support advanced criteria for get_objects
+* Fix wrong description in the class DhcpAgentNotifyAPI docstring
+* Follow effective Neutron guidelines
+* DB: remove deprecated warnings
 * Dont use query if network_ids is empty
 * Fix two spelling mistakes
+* ML2: use neutron-lib for PORT_STATUS_ACTIVE
+* Use IPv6_LLA_PREFIX from neutron-lib
 * RPC unit tests: remove UUID future warnings
 * Use ICMPV6_TYPE_* constants from neutron-lib
 * Updated from global requirements
 * Allow the service plugin to import the extension
+* functional: fix OVSFW failure with native OVSDB api
+* ovsdb: Don't skip ovsdb test cases in py34 suite
 * ovsdb: Don't let block() wait indefinitely
 * [qos] section is missing from neutron.conf
 * oslo: remove usage of oslo.log verbose option
@@ -30,6 +43,7 @@ CHANGES
 * OSProfiler imports break decomposed plugins
 * tests: validate sorting and pagination for networks
 * Fix unit test for new list of icmpv6 allowed_types
+* Use unittest2 uniformly across Neutron
 * Call ext_manager.delete_port on port removal
 * devref: remove l2 agent extensions steps literal
 * Fixed help messages for path_mtu and global_physnet_mtus options
@@ -49,6 +63,7 @@ CHANGES
 * Deprecate neutron-debug
 * Remove nested transaction from ipam driver
 * Allow for excepted operations in migrations
+* functional: Run OVSFW tests with ovsdb native interface
 * Mock out poller in ovsdb unittests
 * DVR: Moving router from dvr_snat node removes the qrouters
 * Pecan: remove deprecation warning
