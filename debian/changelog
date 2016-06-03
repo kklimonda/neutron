@@ -1,4 +1,4 @@
-neutron (2:8.1.1~dev294-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:8.1.1~dev318-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * New upstream version.
@@ -8,12 +8,13 @@ neutron (2:8.1.1~dev294-0ubuntu1) UNRELEASED; urgency=medium
   * d/control, d/neutron-bgp-dragent.*: Remove BGP support, aligning with
     upstream removal.
   * d/control: Add python-osprofiler to (Build-)Depends.
+  * d/control: Add python-oslo.cache to (Build-)Depends.
 
   [ James Page ]
   * d/rules: Switch to using ostestr for unit test execution to avoid races.
   * d/p/*: Refresh.
 
- -- Corey Bryant <corey.bryant@canonical.com>  Wed, 01 Jun 2016 14:02:03 -0400
+ -- Corey Bryant <corey.bryant@canonical.com>  Fri, 03 Jun 2016 11:08:42 -0400
 
 neutron (2:8.0.0-0ubuntu1) xenial; urgency=medium
 
