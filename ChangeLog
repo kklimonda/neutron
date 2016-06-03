@@ -1,8 +1,17 @@
 CHANGES
 =======
 
+* Use IPv[46]_BITS instead of IPV[46]_MAX_PREFIXLEN
+* Switch to oslo.cache
+* [TrivialFix] Deprecate unused NeutronController class
+* Correct hyperlinks to sub_projects documentation
+* DB base plugin: correct typo id to subnet_id
+* Updated from global requirements
+* Fix getting dhcp agents for multiple networks
+* Pass ha_router_port flag for _snat_router_interfaces ports
 * Fix get_free_namespace_port to actually avoid used ports
 * DVRHA interfaces should be created in all cases
+* Make IPAM segment aware on port create
 * Updated from global requirements
 * Guard against config_dirs not defined on ConfigOpts
 * Macvtap: Allow noop alias as FW driver
@@ -17,6 +26,7 @@ CHANGES
 * RPC unit tests: remove UUID future warnings
 * Use ICMPV6_TYPE_* constants from neutron-lib
 * Updated from global requirements
+* fullstack: test for IPv6 east-west traffic
 * Allow the service plugin to import the extension
 * functional: fix OVSFW failure with native OVSDB api
 * ovsdb: Don't skip ovsdb test cases in py34 suite
@@ -58,6 +68,8 @@ CHANGES
 * Deprecate advertise_mtu option
 * Pecan: Backwards compatible/cleaner init
 * fix wrong default value of qos.notification_drivers
+* Rename _find_router_port_by_network_and_device_owner
+* DVR: Fix check multiprefix when delete ipv4 router interface
 * fullstack: test for east west traffic
 * Update unit tests to use correct method being used
 * Deprecate neutron-debug
