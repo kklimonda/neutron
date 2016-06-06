@@ -335,9 +335,12 @@ class DhcpAgentSchedulerDbMixin(dhcpagentscheduler
         query = query.options(orm.contains_eager(
                               NetworkDhcpAgentBinding.dhcp_agent))
         query = query.join(NetworkDhcpAgentBinding.dhcp_agent)
-        if network_ids:
+        if len(network_ids) == 1:
             query = query.filter(
-                NetworkDhcpAgentBinding.network_id.in_(network_ids))
+                NetworkDhcpAgentBinding.network_id == network_ids[0])
+        elif network_ids:
+            query = query.filter(
+                NetworkDhcpAgentBinding.network_id in network_ids)
         if admin_state_up is not None:
             query = query.filter(agents_db.Agent.admin_state_up ==
                                  admin_state_up)
