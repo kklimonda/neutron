@@ -3,12 +3,12 @@ neutron (2:9.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
   [ Corey Bryant ]
   * New upstream milestone for OpenStack Newton.
   * d/p/skip-ryu-tests.patch: Dropped since BDs no longer have to be in main.
-  * d/p/drop-ryu-dep.patch: Rebased.
   * d/control, d/neutron-bgp-dragent.*: Remove BGP support, aligning with
     upstream removal.
   * d/control: Add python-osprofiler to (Build-)Depends.
   * d/control: Add python-oslo.cache to (Build-)Depends.
   * d/control: Align (build-)depends with upstream.
+  * d/p/drop-ryu-dep.patch: Rebased.
 
   [ James Page ]
   * d/rules: Switch to using ostestr for unit test execution to avoid races.
