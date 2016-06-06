@@ -69,29 +69,6 @@ def get_updatable_fields(cls, fields):
     return fields
 
 
-class Pager(object):
-    '''
-    This class represents a pager object. It is consumed by get_objects to
-    specify sorting and pagination criteria.
-    '''
-    def __init__(self, sorts=None, limit=None, page_reverse=None, marker=None):
-        self.sorts = sorts
-        self.limit = limit
-        self.page_reverse = page_reverse
-        self.marker = marker
-
-    def to_kwargs(self, context, model):
-        res = {
-            attr: getattr(self, attr)
-            for attr in ('sorts', 'limit', 'page_reverse')
-            if getattr(self, attr) is not None
-        }
-        if self.marker and self.limit:
-            res['marker_obj'] = obj_db_api.get_object(
-                context, model, id=self.marker)
-        return res
-
-
 @six.add_metaclass(abc.ABCMeta)
 class NeutronObject(obj_base.VersionedObject,
                     obj_base.VersionedObjectDictCompat,
@@ -149,7 +126,7 @@ class NeutronObject(obj_base.VersionedObject,
 
     @classmethod
     @abc.abstractmethod
-    def get_objects(cls, context, _pager=None, **kwargs):
+    def get_objects(cls, context, **kwargs):
         raise NotImplementedError()
 
     def create(self):
@@ -264,10 +241,11 @@ class NeutronDbObject(NeutronObject):
     @classmethod
     def get_object(cls, context, **kwargs):
         """
-        Fetch object from DB and convert it to a versioned object.
+        This method fetches object from DB and convert it to versioned
+        object.
 
         :param context:
-        :param kwargs: multiple keys defined by key=value pairs
+        :param kwargs: multiple primary keys defined key=value pairs
         :return: single object of NeutronDbObject class
         """
         missing_keys = set(cls.primary_keys).difference(kwargs.keys())
@@ -281,20 +259,10 @@ class NeutronDbObject(NeutronObject):
                 return cls._load_object(context, db_obj)
 
     @classmethod
-    def get_objects(cls, context, _pager=None, **kwargs):
-        """
-        Fetch objects from DB and convert them to versioned objects.
-
-        :param context:
-        :param _pager: a Pager object representing advanced sorting/pagination
-                       criteria
-        :param kwargs: multiple keys defined by key=value pairs
-        :return: list of objects of NeutronDbObject class
-        """
+    def get_objects(cls, context, **kwargs):
         cls.validate_filters(**kwargs)
         with db_api.autonested_transaction(context.session):
-            db_objs = obj_db_api.get_objects(
-                context, cls.db_model, _pager=_pager, **kwargs)
+            db_objs = obj_db_api.get_objects(context, cls.db_model, **kwargs)
             return [cls._load_object(context, db_obj) for db_obj in db_objs]
 
     @classmethod

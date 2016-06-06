@@ -289,10 +289,9 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
             if subnet['ip_version'] == 6:
                 # Add new prefix to an existing ipv6 csnat port with the
                 # same network id if one exists
-                cs_port = (
-                    self._find_v6_router_port_by_network_and_device_owner(
-                        router, subnet['network_id'],
-                        const.DEVICE_OWNER_ROUTER_SNAT))
+                cs_port = self._find_router_port_by_network_and_device_owner(
+                    router, subnet['network_id'],
+                    const.DEVICE_OWNER_ROUTER_SNAT)
                 if cs_port:
                     fixed_ips = list(cs_port['port']['fixed_ips'])
                     fixed_ips.append(fixed_ip)
@@ -330,7 +329,7 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
         return super(L3_NAT_with_dvr_db_mixin,
                      self)._port_has_ipv6_address(port)
 
-    def _find_v6_router_port_by_network_and_device_owner(
+    def _find_router_port_by_network_and_device_owner(
         self, router, net_id, device_owner):
         for port in router.attached_ports:
             p = port['port']
@@ -352,19 +351,13 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
         if router.gw_port:
             # If router has a gateway port, check if it has IPV6 subnet
             cs_port = (
-                self._find_v6_router_port_by_network_and_device_owner(
+                self._find_router_port_by_network_and_device_owner(
                     router, network_id, const.DEVICE_OWNER_ROUTER_SNAT))
             if cs_port:
                 fixed_ips = (
                     [fixedip for fixedip in
                         cs_port['port']['fixed_ips']
                         if fixedip['subnet_id'] != subnet_id])
-
-                if len(fixed_ips) == len(cs_port['port']['fixed_ips']):
-                    # The subnet being detached from router is not part of
-                    # ipv6 router port. No need to update the multiprefix.
-                    return False
-
                 if fixed_ips:
                     # multiple prefix port - delete prefix from port
                     self._core_plugin.update_port(

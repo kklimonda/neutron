@@ -71,12 +71,7 @@ class NeutronModule(object):
             if neutron_dir is not None:
                 neutron_dirs = [neutron_dir]
             else:
-                try:
-                    neutron_dirs = cfg.CONF.config_dirs
-                except cfg.NoSuchOptError:
-                    neutron_dirs = None
-                if not neutron_dirs:
-                    neutron_dirs = ['/etc/neutron']
+                neutron_dirs = cfg.CONF.config_dirs or ['/etc/neutron']
 
             # load configuration from all matching files to reflect oslo.config
             # behaviour

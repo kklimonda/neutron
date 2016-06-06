@@ -291,7 +291,6 @@ neutron/cmd/sanity/__init__.py
 neutron/cmd/sanity/checks.py
 neutron/common/__init__.py
 neutron/common/_deprecate.py
-neutron/common/cache_utils.py
 neutron/common/config.py
 neutron/common/constants.py
 neutron/common/eventlet_utils.py
@@ -563,6 +562,12 @@ neutron/objects/qos/policy.py
 neutron/objects/qos/rule.py
 neutron/objects/qos/rule_type.py
 neutron/openstack/__init__.py
+neutron/openstack/common/__init__.py
+neutron/openstack/common/cache/__init__.py
+neutron/openstack/common/cache/backends.py
+neutron/openstack/common/cache/cache.py
+neutron/openstack/common/cache/_backends/__init__.py
+neutron/openstack/common/cache/_backends/memory.py
 neutron/pecan_wsgi/__init__.py
 neutron/pecan_wsgi/app.py
 neutron/pecan_wsgi/constants.py
@@ -1022,7 +1027,6 @@ neutron/tests/unit/agent/ovsdb/test_impl_idl.py
 neutron/tests/unit/agent/ovsdb/native/__init__.py
 neutron/tests/unit/agent/ovsdb/native/test_connection.py
 neutron/tests/unit/agent/ovsdb/native/test_helpers.py
-neutron/tests/unit/agent/ovsdb/native/test_idlutils.py
 neutron/tests/unit/agent/windows/__init__.py
 neutron/tests/unit/agent/windows/test_ip_lib.py
 neutron/tests/unit/api/__init__.py
@@ -1057,7 +1061,6 @@ neutron/tests/unit/cmd/test_ovs_cleanup.py
 neutron/tests/unit/cmd/test_sanity_check.py
 neutron/tests/unit/cmd/server/__init__.py
 neutron/tests/unit/common/__init__.py
-neutron/tests/unit/common/test_cache_utils.py
 neutron/tests/unit/common/test_ipv6_utils.py
 neutron/tests/unit/common/test_rpc.py
 neutron/tests/unit/common/test_utils.py
@@ -1144,8 +1147,6 @@ neutron/tests/unit/objects/test_rbac_db.py
 neutron/tests/unit/objects/test_subnet.py
 neutron/tests/unit/objects/test_subnetpool.py
 neutron/tests/unit/objects/test_trunk.py
-neutron/tests/unit/objects/db/__init__.py
-neutron/tests/unit/objects/db/test_api.py
 neutron/tests/unit/objects/extensions/__init__.py
 neutron/tests/unit/objects/extensions/test_standardattributes.py
 neutron/tests/unit/objects/port/__init__.py
@@ -1341,7 +1342,6 @@ releasenotes/notes/macvtap_assigned_vf_check-f4d07660ffd82a24.yaml
 releasenotes/notes/mtu-selection-and-advertisement-ab29f9ec43140224.yaml
 releasenotes/notes/network_ip_availability-d64bd7032b3c15ee.yaml
 releasenotes/notes/new-vif-type-for-pf-passthrough-33ec560b9b5d246f.yaml
-releasenotes/notes/oslo-cache-cache-url-deprecated-16cd3d335c5962eb.yaml
 releasenotes/notes/oslo-messaging-notifier-queue-d94677076a1db261.yaml
 releasenotes/notes/oslo-reports-166a169037bf64f2.yaml
 releasenotes/notes/ovs-ct-firewall-driver-52a70a6a16d06f59.yaml

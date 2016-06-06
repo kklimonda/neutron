@@ -14,8 +14,14 @@
 
 import eventlet
 import mock
-from ovs.db import idl
-from ovs import poller
+import unittest2
+
+try:
+    from ovs.db import idl
+    from ovs import poller
+except ImportError:
+    raise unittest2.SkipTest(
+        "Skip test since ovs requirement for PY3 doesn't support yet.")
 
 from neutron.agent.ovsdb.native import connection
 from neutron.agent.ovsdb.native import idlutils
