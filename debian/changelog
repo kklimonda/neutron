@@ -8,6 +8,8 @@ neutron (2:9.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
   * d/control: Add python-osprofiler to (Build-)Depends.
   * d/control: Add python-oslo.cache to (Build-)Depends.
   * d/control: Align (build-)depends with upstream.
+  * d/control: Drop python-openvswitch min version to 2.5.0 since this package
+    doesn't yet support python3.
   * d/p/drop-ryu-dep.patch: Rebased.
 
   [ James Page ]
