@@ -1,4 +1,4 @@
-neutron (2:9.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.0.0~b1-0ubuntu1) yakkety; urgency=medium
 
   [ Corey Bryant ]
   * New upstream milestone for OpenStack Newton.
