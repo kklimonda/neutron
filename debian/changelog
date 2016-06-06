@@ -1,7 +1,7 @@
-neutron (2:8.1.1~dev318-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
-  * New upstream version.
+  * New upstream milestone for OpenStack Newton.
   * d/control: Align (build-)depends with upstream.
   * d/p/skip-ryu-tests.patch: Dropped since BDs no longer have to be in main.
   * d/p/drop-ryu-dep.patch: Rebased.
@@ -14,7 +14,7 @@ neutron (2:8.1.1~dev318-0ubuntu1) UNRELEASED; urgency=medium
   * d/rules: Switch to using ostestr for unit test execution to avoid races.
   * d/p/*: Refresh.
 
- -- Corey Bryant <corey.bryant@canonical.com>  Fri, 03 Jun 2016 11:08:42 -0400
+ -- Corey Bryant <corey.bryant@canonical.com>  Mon, 06 Jun 2016 12:55:59 -0400
 
 neutron (2:8.0.0-0ubuntu1) xenial; urgency=medium
 
