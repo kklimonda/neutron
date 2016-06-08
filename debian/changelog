@@ -1,6 +1,7 @@
 neutron (2:9.0.0.0b2~dev76-0ubuntu1) UNRELEASED; urgency=medium
 
   * New upstream version.
+  * d/p/drop-ryu-dep.patch: Rebased.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Wed, 08 Jun 2016 14:00:45 -0400
 
