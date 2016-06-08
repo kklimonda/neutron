@@ -76,9 +76,6 @@ local = neutron.plugins.ml2.drivers.type_local:LocalTypeDriver
 vlan = neutron.plugins.ml2.drivers.type_vlan:VlanTypeDriver
 vxlan = neutron.plugins.ml2.drivers.type_vxlan:VxlanTypeDriver
 
-[neutron.openstack.common.cache.backends]
-memory = neutron.openstack.common.cache._backends.memory:MemoryBackend
-
 [neutron.qos.agent_drivers]
 linuxbridge = neutron.plugins.ml2.drivers.linuxbridge.agent.extension_drivers.qos_driver:QosLinuxbridgeAgentDriver
 ovs = neutron.plugins.ml2.drivers.openvswitch.agent.extension_drivers.qos_driver:QosOVSAgentDriver

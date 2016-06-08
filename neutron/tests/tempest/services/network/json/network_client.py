@@ -69,6 +69,12 @@ class NetworkClientJSON(service_client.RestClient):
             uri = '%s/%s' % (self.uri_prefix, plural_name)
         return uri
 
+    def build_uri(self, plural_name, **kwargs):
+        uri = self.get_uri(plural_name)
+        if kwargs:
+            uri += '?' + urlparse.urlencode(kwargs, doseq=1)
+        return uri
+
     def pluralize(self, resource_name):
         # get plural from map or just add 's'
 
@@ -83,11 +89,16 @@ class NetworkClientJSON(service_client.RestClient):
         }
         return resource_plural_map.get(resource_name, resource_name + 's')
 
+    def get_uri_with_links(self, plural_name, uri):
+        resp, body = self.get(uri)
+        result = {plural_name: self.deserialize_list(body)}
+        links = self.deserialize_links(body)
+        self.expected_success(200, resp.status)
+        return links, service_client.ResponseBody(resp, result)
+
     def _lister(self, plural_name):
         def _list(**filters):
-            uri = self.get_uri(plural_name)
-            if filters:
-                uri += '?' + urlparse.urlencode(filters, doseq=1)
+            uri = self.build_uri(plural_name, **filters)
             resp, body = self.get(uri)
             result = {plural_name: self.deserialize_list(body)}
             self.expected_success(200, resp.status)
@@ -271,6 +282,19 @@ class NetworkClientJSON(service_client.RestClient):
             if k.endswith("_links"):
                 continue
             return res[k]
+
+    def deserialize_links(self, body):
+        res = jsonutils.loads(body)
+        # expecting response in form
+        # {'resources': [ res1, res2] } => when pagination disabled
+        # {'resources': [..], 'resources_links': {}} => if pagination enabled
+        for k in res.keys():
+            if k.endswith("_links"):
+                return {
+                    link['rel']: link['href']
+                    for link in res[k]
+                }
+        return {}
 
     def serialize(self, data):
         return jsonutils.dumps(data)
@@ -637,5 +661,59 @@ class NetworkClientJSON(service_client.RestClient):
         uri = '%s/auto-allocated-topology/%s' % (self.uri_prefix, tenant_id)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def create_security_group_rule(self, direction, security_group_id,
+                                   **kwargs):
+        post_body = {'security_group_rule': kwargs}
+        post_body['security_group_rule']['direction'] = direction
+        post_body['security_group_rule'][
+            'security_group_id'] = security_group_id
+        body = jsonutils.dumps(post_body)
+        uri = '%s/security-group-rules' % self.uri_prefix
+        resp, body = self.post(uri, body)
+        self.expected_success(201, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def list_security_groups(self, **kwargs):
+        post_body = {'security_groups': kwargs}
+        body = jsonutils.dumps(post_body)
+        uri = '%s/security-groups' % self.uri_prefix
+        if kwargs:
+            uri += '?' + urlparse.urlencode(kwargs, doseq=1)
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_security_group(self, security_group_id):
+        uri = '%s/security-groups/%s' % (
+            self.uri_prefix, security_group_id)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def list_ports(self, **kwargs):
+        post_body = {'ports': kwargs}
+        body = jsonutils.dumps(post_body)
+        uri = '%s/ports' % self.uri_prefix
+        if kwargs:
+            uri += '?' + urlparse.urlencode(kwargs, doseq=1)
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def create_floatingip(self, floating_network_id, **kwargs):
+        post_body = {'floatingip': {
+            'floating_network_id': floating_network_id}}
+        if kwargs:
+            post_body['floatingip'].update(kwargs)
+        body = jsonutils.dumps(post_body)
+        uri = '%s/floatingips' % self.uri_prefix
+        resp, body = self.post(uri, body)
+        self.expected_success(201, resp.status)
         body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)

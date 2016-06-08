@@ -14,6 +14,7 @@
 #    under the License.
 
 import collections
+import copy
 import itertools
 
 import netaddr
@@ -23,6 +24,7 @@ from neutron_lib import exceptions as exc
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import exc as orm_exc
 
 from neutron._i18n import _, _LI
@@ -33,8 +35,10 @@ from neutron.common import utils as common_utils
 from neutron.db import db_base_plugin_common
 from neutron.db import models_v2
 from neutron.db import segments_db
+from neutron.extensions import portbindings
 from neutron.extensions import segment
 from neutron.ipam import utils as ipam_utils
+from neutron.services.segments import db as segment_svc_db
 from neutron.services.segments import exceptions as segment_exc
 
 LOG = logging.getLogger(__name__)
@@ -532,12 +536,59 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                 fixed_ip_list.append({'subnet_id': subnet['id']})
         return fixed_ip_list
 
-    def _ipam_get_subnets(self, context, network_id, segment_id):
-        query = self._get_collection_query(context, models_v2.Subnet)
-        query = query.filter(models_v2.Subnet.network_id == network_id)
-        query = query.filter(models_v2.Subnet.segment_id == segment_id)
-        subnets = [self._make_subnet_dict(c, context=context) for c in query]
-        return subnets
+    def _ipam_get_subnets(self, context, network_id, host):
+        Subnet = models_v2.Subnet
+        SegmentHostMapping = segment_svc_db.SegmentHostMapping
+
+        query = self._get_collection_query(context, Subnet)
+        query = query.filter(Subnet.network_id == network_id)
+        if not validators.is_attr_set(host):
+            query = query.filter(Subnet.segment_id.is_(None))
+            return [self._make_subnet_dict(c, context=context) for c in query]
+
+        # A host has been provided.  Consider these two scenarios
+        # 1. Not a routed network:  subnets are not on segments
+        # 2. Is a routed network:  only subnets on segments mapped to host
+        # The following join query returns results for either.  The two are
+        # guaranteed to be mutually exclusive when subnets are created.
+        query = query.add_entity(SegmentHostMapping)
+        query = query.outerjoin(
+            SegmentHostMapping,
+            and_(Subnet.segment_id == SegmentHostMapping.segment_id,
+                 SegmentHostMapping.host == host))
+        # Essentially "segment_id IS NULL XNOR host IS NULL"
+        query = query.filter(or_(and_(Subnet.segment_id.isnot(None),
+                                      SegmentHostMapping.host.isnot(None)),
+                                 and_(Subnet.segment_id.is_(None),
+                                      SegmentHostMapping.host.is_(None))))
+
+        results = query.all()
+
+        # See if results are empty because the host isn't mapped to a segment
+        if not results:
+            # Check if it's a routed network (i.e subnets on segments)
+            query = self._get_collection_query(context, Subnet)
+            query = query.filter(Subnet.network_id == network_id)
+            query = query.filter(Subnet.segment_id.isnot(None))
+            if query.count() == 0:
+                return []
+            # It is a routed network but no subnets found for host
+            raise segment_exc.HostNotConnectedToAnySegment(
+                host=host, network_id=network_id)
+
+        # For now, we're using a simplifying assumption that a host will only
+        # touch one segment in a given routed network.  Raise exception
+        # otherwise.  This restriction may be relaxed as use cases for multiple
+        # mappings are understood.
+        segment_ids = {subnet.segment_id
+                       for subnet, mapping in results
+                       if mapping}
+        if 1 < len(segment_ids):
+            raise segment_exc.HostConnectedToMultipleSegments(
+                host=host, network_id=network_id)
+
+        return [self._make_subnet_dict(subnet, context=context)
+                for subnet, _mapping in results]
 
     def _make_subnet_args(self, detail, subnet, subnetpool_id):
         args = super(IpamBackendMixin, self)._make_subnet_args(
@@ -545,3 +596,41 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         if validators.is_attr_set(subnet.get(segment.SEGMENT_ID)):
             args['segment_id'] = subnet[segment.SEGMENT_ID]
         return args
+
+    def update_port(self, context, old_port_db, old_port, new_port):
+        """Update the port IPs
+
+        Updates the port's IPs based on any new fixed_ips passed in or if
+        deferred IP allocation is in effect because allocation requires host
+        binding information that wasn't provided until port update.
+
+        :param old_port_db: The port database record
+        :param old_port: A port dict created by calling _make_port_dict.  This
+                         must be called before calling this method in order to
+                         load data from extensions, specifically host binding.
+        :param new_port: The new port data passed through the API.
+        """
+        old_host = old_port.get(portbindings.HOST_ID)
+        new_host = new_port.get(portbindings.HOST_ID)
+        host = new_host if validators.is_attr_set(new_host) else old_host
+
+        changes = self.update_port_with_ips(context,
+                                            host,
+                                            old_port_db,
+                                            new_port,
+                                            new_port.get('mac_address'))
+
+        fixed_ips_requested = validators.is_attr_set(new_port.get('fixed_ips'))
+        deferred_ip_allocation = (host and not old_host
+                                  and not old_port.get('fixed_ips')
+                                  and not fixed_ips_requested)
+        if not deferred_ip_allocation:
+            return changes
+
+        # Allocate as if this were the port create.
+        port_copy = copy.deepcopy(old_port)
+        port_copy['fixed_ips'] = const.ATTR_NOT_SPECIFIED
+        port_copy.update(new_port)
+        ips = self.allocate_ips_for_port_and_store(
+            context, {'port': port_copy}, port_copy['id'])
+        return self.Changes(add=ips, original=[], remove=[])
