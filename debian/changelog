@@ -1,4 +1,4 @@
-neutron (2:8.1.2-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:8.1.2-0ubuntu1) xenial; urgency=medium
 
   * New upstream point release for OpenStack Mitaka (LP: #1591248).
 
