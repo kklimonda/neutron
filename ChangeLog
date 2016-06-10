@@ -1,11 +1,62 @@
 CHANGES
 =======
 
+8.1.2
+-----
+
+* Revert "DVR: Clear SNAT namespace when agent restarts after router move"
+* Force "out-of-band" controller connection mode
+* DVR: Fix check multiprefix when delete ipv4 router interface
+* Pass ha_router_port flag for _snat_router_interfaces ports
+* Fixed help messages for path_mtu and global_physnet_mtus options
+* Fix bgp-speaker-network-remove error
+* Make deepcopy of update body in API layer
+* OVS: compare names when checking devices both added and deleted
+* fix wrong default value of qos.notification_drivers
+* Fix invalid mock name in test_ovs_neutron_agent
+* Correct the interval between two reports
+* Check for existence of snat port before deleting it
+* fullstack: Use noop firewall
+* DVR: Ensure fpr and rfp devices are configured correctly
+* DVR: Use existing IPDevice to add address on FIP VETH
+* Migration for qospolicyrbacs has hardcoded InnoDB
+* Call ext_manager.delete_port on port removal
+* Improve handle port_update and port_delete events in ovs qos agent
+
+8.1.1
+-----
+
+* DVR: Use IPDevice class consistently
+* Fix Windows IPDevice.device_has_ip racefulness
+* Avoid L3 agent termination without server
+* Fix for 'ofport' query retries during neutron agent start
+* DVR: Moving router from dvr_snat node removes the qrouters
+* DVR: Fix TypeError in arp update with allowed_address_pairs
+* DVR: Handle unbound allowed_address_pair port with FIP
+* Fix SR-IOV binding when two NICs mapped to one physnet
+* Enforce UUID of port/subnet ID for router interfaces
+* Restart dsnmasq on any network subnet change
+* Fix broken Tempest conf options in API tests
+* Fix update target tenant RBAC external path
+* Add semaphore to ML2 create_port db operation
+* Imported Translations from Zanata
+* Fix test failure against latest oslo.* from master
+* Add exponential back-off RPC client
+* Use correct session in  update_allocation_pools
+* Preserve backward compatibility with OVS hybrid plugging
+* DVR: Clear SNAT namespace when agent restarts after router move
+* Don't log warning for missing resource_versions
+* Updated from global requirements
+* IPtables firewall prevent ICMPv6 spoofing
+
 8.1.0
 -----
 
 * Revert "Improve performance of ensure_namespace"
+* OVS: Add mac spoofing filtering to flows
 * Imported Translations from Zanata
+* Support interface drivers that don't support mtu parameter for plug_new
+* LinuxBridge agent's QoS driver bw limit for egress traffic
 * Imported Translations from Zanata
 * Updated from global requirements
 * Clear DVR MAC on last agent deletion from host
@@ -59,6 +110,7 @@ CHANGES
 * ovs-fw: Mark conntrack entries invalid if no rule is matched
 * l3: Send notify on router_create when ext gw is specified
 * Imported Translations from Zanata
+* Linux Bridge: Add mac spoofing filtering to ebtables
 * Imported Translations from Zanata
 * api tests: Check correct extensions
 

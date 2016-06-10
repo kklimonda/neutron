@@ -887,12 +887,14 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             LOG.info(_LI("Skipping ARP spoofing rules for port '%s' because "
                          "it has port security disabled"), vif.port_name)
             bridge.delete_arp_spoofing_protection(port=vif.ofport)
+            bridge.set_allowed_macs_for_port(port=vif.ofport, allow_all=True)
             return
         if port_details['device_owner'].startswith(
             n_const.DEVICE_OWNER_NETWORK_PREFIX):
             LOG.debug("Skipping ARP spoofing rules for network owned port "
                       "'%s'.", vif.port_name)
             bridge.delete_arp_spoofing_protection(port=vif.ofport)
+            bridge.set_allowed_macs_for_port(port=vif.ofport, allow_all=True)
             return
         # clear any previous flows related to this port in our ARP table
         bridge.delete_arp_spoofing_allow_rules(port=vif.ofport)
@@ -906,6 +908,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                               for p in port_details['allowed_address_pairs']
                               if p.get('mac_address')}
 
+        bridge.set_allowed_macs_for_port(vif.ofport, mac_addresses)
         ipv6_addresses = {ip for ip in addresses
                           if netaddr.IPNetwork(ip).version == 6}
         # Allow neighbor advertisements for LLA address.
@@ -1132,13 +1135,14 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 # Setup int_br to physical bridge patches.  If they already
                 # exist we leave them alone, otherwise we create them but don't
                 # connect them until after the drop rules are in place.
-                int_ofport = self.int_br.get_port_ofport(int_if_name)
-                if int_ofport == ovs_lib.INVALID_OFPORT:
+                if self.int_br.port_exists(int_if_name):
+                    int_ofport = self.int_br.get_port_ofport(int_if_name)
+                else:
                     int_ofport = self.int_br.add_patch_port(
                         int_if_name, constants.NONEXISTENT_PEER)
-
-                phys_ofport = br.get_port_ofport(phys_if_name)
-                if phys_ofport == ovs_lib.INVALID_OFPORT:
+                if br.port_exists(phys_if_name):
+                    phys_ofport = br.get_port_ofport(phys_if_name)
+                else:
                     phys_ofport = br.add_patch_port(
                         phys_if_name, constants.NONEXISTENT_PEER)
 
@@ -1181,6 +1185,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         ofports_deleted = set(previous.values()) - set(current.values())
         for ofport in ofports_deleted:
             self.int_br.delete_arp_spoofing_protection(port=ofport)
+            self.int_br.set_allowed_macs_for_port(port=ofport, allow_all=True)
 
         # store map for next iteration
         self.vifname_to_ofport_map = current
@@ -1251,13 +1256,16 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         # if a port was added and then removed or viceversa since the agent
         # can't know the order of the operations, check the status of the port
         # to determine if the port was added or deleted
-        ports_removed_and_added = [
-            p for p in events['added'] if p in events['removed']]
+        added_ports = {p['name'] for p in events['added']}
+        removed_ports = {p['name'] for p in events['removed']}
+        ports_removed_and_added = added_ports & removed_ports
         for p in ports_removed_and_added:
-            if ovs_lib.BaseOVS().port_exists(p['name']):
-                events['removed'].remove(p)
+            if ovs_lib.BaseOVS().port_exists(p):
+                events['removed'] = [e for e in events['removed']
+                                     if e['name'] != p]
             else:
-                events['added'].remove(p)
+                events['added'] = [e for e in events['added']
+                                   if e['name'] != p]
 
         #TODO(rossella_s): scanning the ancillary bridge won't be needed
         # anymore when https://review.openstack.org/#/c/203381 since the bridge
@@ -1550,6 +1558,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         failed_devices = set(devices_down.get('failed_devices_down'))
         LOG.debug("Port removal failed for %s", failed_devices)
         for device in devices:
+            self.ext_manager.delete_port(self.context, {'port_id': device})
             self.port_unbound(device)
         return failed_devices
 
