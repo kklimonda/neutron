@@ -16,8 +16,6 @@
 import datetime
 
 from eventlet import greenthread
-from neutron_lib.api import converters
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
@@ -36,14 +34,13 @@ from neutron.api.v2 import attributes
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants as n_const
+from neutron.common import constants
 from neutron import context
 from neutron.db import api as db_api
 from neutron.db import model_base
 from neutron.extensions import agent as ext_agent
 from neutron.extensions import availability_zone as az_ext
 from neutron import manager
-from neutron.services.segments import db as segments_db
 
 LOG = logging.getLogger(__name__)
 
@@ -284,7 +281,7 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                                       filters=filters, fields=fields)
         alive = filters and filters.get('alive', None)
         if alive:
-            alive = converters.convert_to_boolean(alive[0])
+            alive = attributes.convert_to_boolean(alive[0])
             agents = [agent for agent in agents if agent['alive'] == alive]
         return agents
 
@@ -325,18 +322,6 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
         agent = self._get_agent(context, id)
         return self._make_agent_dict(agent, fields)
 
-    def filter_hosts_with_network_access(
-            self, context, network_id, candidate_hosts):
-        """Filter hosts with access to network_id.
-
-        This method returns a subset of candidate_hosts with the ones with
-        network access to network_id.
-
-        A plugin can overload this method to define its own host network_id
-        based filter.
-        """
-        return candidate_hosts
-
     def _log_heartbeat(self, state, agent_db, agent_conf):
         if agent_conf.get('log_agent_heartbeats'):
             delta = timeutils.utcnow() - agent_db.heartbeat_timestamp
@@ -353,7 +338,7 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
         Returns agent status from server point of view: alive, new or revived.
         It could be used by agent to do some sync with the server if needed.
         """
-        status = n_const.AGENT_ALIVE
+        status = constants.AGENT_ALIVE
         with context.session.begin(subtransactions=True):
             res_keys = ['agent_type', 'binary', 'host', 'topic']
             res = dict((k, agent_state[k]) for k in res_keys)
@@ -371,7 +356,7 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                 agent_db = self._get_agent_by_type_and_host(
                     context, agent_state['agent_type'], agent_state['host'])
                 if not agent_db.is_active:
-                    status = n_const.AGENT_REVIVED
+                    status = constants.AGENT_REVIVED
                     if 'resource_versions' not in agent_state:
                         # updating agent_state with resource_versions taken
                         # from db so that
@@ -395,10 +380,8 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                 greenthread.sleep(0)
                 context.session.add(agent_db)
                 self._log_heartbeat(agent_state, agent_db, configurations_dict)
-                status = n_const.AGENT_NEW
+                status = constants.AGENT_NEW
             greenthread.sleep(0)
-            segments_db.update_segment_host_mapping_for_agent(
-                context, agent_state['host'], self, agent_state)
         return status
 
     def create_or_update_agent(self, context, agent):
@@ -457,7 +440,7 @@ class AgentExtRpcCallback(object):
     """
 
     target = oslo_messaging.Target(version='1.1',
-                                   namespace=n_const.RPC_NAMESPACE_STATE)
+                                   namespace=constants.RPC_NAMESPACE_STATE)
     START_TIME = timeutils.utcnow()
 
     def __init__(self, plugin=None):

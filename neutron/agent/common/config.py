@@ -84,7 +84,6 @@ AVAILABILITY_ZONE_OPTS = [
 
 EXT_NET_BRIDGE_OPTS = [
     cfg.StrOpt('external_network_bridge', default='br-ex',
-               deprecated_for_removal=True,
                help=_("Name of bridge used for external network "
                       "traffic. This should be set to an empty value for the "
                       "Linux Bridge. When this parameter is set, each L3 "
@@ -98,6 +97,8 @@ def get_log_args(conf, log_file_name, **kwargs):
     cmd_args = []
     if conf.debug:
         cmd_args.append('--debug')
+    if conf.verbose:
+        cmd_args.append('--verbose')
     if (conf.log_dir or conf.log_file):
         cmd_args.append('--log-file=%s' % log_file_name)
         log_dir = None

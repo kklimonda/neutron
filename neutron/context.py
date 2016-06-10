@@ -19,7 +19,6 @@ import copy
 import datetime
 
 from oslo_context import context as oslo_context
-from oslo_db.sqlalchemy import enginefacade
 
 from neutron.db import api as db_api
 from neutron import policy
@@ -48,14 +47,14 @@ class ContextBase(oslo_context.RequestContext):
                                           user=user_id, tenant=tenant_id,
                                           is_admin=is_admin,
                                           request_id=request_id,
-                                          overwrite=overwrite,
-                                          roles=roles)
+                                          overwrite=overwrite)
         self.user_name = user_name
         self.tenant_name = tenant_name
 
         if not timestamp:
             timestamp = datetime.datetime.utcnow()
         self.timestamp = timestamp
+        self.roles = roles or []
         self.is_advsvc = is_advsvc
         if self.is_advsvc is None:
             self.is_advsvc = self.is_admin or policy.check_is_advsvc(self)
@@ -88,6 +87,7 @@ class ContextBase(oslo_context.RequestContext):
             'user_id': self.user_id,
             'tenant_id': self.tenant_id,
             'project_id': self.project_id,
+            'roles': self.roles,
             'timestamp': str(self.timestamp),
             'tenant_name': self.tenant_name,
             'project_name': self.tenant_name,
@@ -110,22 +110,13 @@ class ContextBase(oslo_context.RequestContext):
         return context
 
 
-@enginefacade.transaction_context_provider
-class ContextBaseWithSession(ContextBase):
-    pass
-
-
-class Context(ContextBaseWithSession):
+class Context(ContextBase):
     def __init__(self, *args, **kwargs):
         super(Context, self).__init__(*args, **kwargs)
         self._session = None
 
     @property
     def session(self):
-        # TODO(akamyshnikova): checking for session attribute won't be needed
-        # when reader and writer will be used
-        if hasattr(super(Context, self), 'session'):
-            return super(Context, self).session
         if self._session is None:
             self._session = db_api.get_session()
         return self._session

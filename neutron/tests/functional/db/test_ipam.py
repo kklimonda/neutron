@@ -13,39 +13,51 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
+from oslo_db.sqlalchemy import session
 import testtools
 
+from neutron.api.v2 import attributes
+from neutron.common import constants
+from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import db_base_plugin_v2 as base_plugin
+from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.ipam.drivers.neutrondb_ipam import db_models as ipam_models
 from neutron.tests import base
 from neutron.tests.common import base as common_base
-from neutron.tests.unit import testlib_api
 
 
-class IpamTestCase(base.BaseTestCase):
+def get_admin_test_context(db_url):
+    """
+    get_admin_test_context is used to provide a test context. A new session is
+    created using the db url specified
+    """
+    ctx = context.Context(user_id=None,
+                          tenant_id=None,
+                          is_admin=True,
+                          overwrite=False)
+    facade = session.EngineFacade(db_url, mysql_sql_mode='STRICT_ALL_TABLES')
+    ctx._session = facade.get_session(autocommit=False, expire_on_commit=True)
+    return ctx
+
+
+class IpamTestCase(object):
     """
     Base class for tests that aim to test ip allocation.
     """
-    use_pluggable_ipam = False
 
-    def setUp(self):
-        super(IpamTestCase, self).setUp()
+    def configure_test(self, use_pluggable_ipam=False):
+        model_base.BASEV2.metadata.create_all(self.engine)
         cfg.CONF.set_override('notify_nova_on_port_status_changes', False)
-        self.useFixture(testlib_api.SqlFixture())
-        if self.use_pluggable_ipam:
+        if use_pluggable_ipam:
             self._turn_on_pluggable_ipam()
         else:
             self._turn_off_pluggable_ipam()
         self.plugin = base_plugin.NeutronDbPluginV2()
-        self.cxt = context.Context(user_id=None,
-                                   tenant_id=None,
-                                   is_admin=True,
-                                   overwrite=False)
+        self.cxt = get_admin_test_context(self.engine.url)
+        self.addCleanup(self.cxt._session.close)
         self.tenant_id = 'test_tenant'
         self.network_id = 'test_net_id'
         self.subnet_id = 'test_sub_id'
@@ -108,19 +120,19 @@ class IpamTestCase(base.BaseTestCase):
                   'enable_dhcp': False,
                   'gateway_ip': '10.10.10.1',
                   'shared': False,
-                  'allocation_pools': constants.ATTR_NOT_SPECIFIED,
-                  'dns_nameservers': constants.ATTR_NOT_SPECIFIED,
-                  'host_routes': constants.ATTR_NOT_SPECIFIED}
+                  'allocation_pools': attributes.ATTR_NOT_SPECIFIED,
+                  'dns_nameservers': attributes.ATTR_NOT_SPECIFIED,
+                  'host_routes': attributes.ATTR_NOT_SPECIFIED}
         return self.plugin.create_subnet(self.cxt, {'subnet': subnet})
 
     def _create_port(self, port_id, fixed_ips=None):
         port_fixed_ips = (fixed_ips if fixed_ips else
-                          constants.ATTR_NOT_SPECIFIED)
+                          attributes.ATTR_NOT_SPECIFIED)
         port = {'tenant_id': self.tenant_id,
                 'name': 'test_port',
                 'id': port_id,
                 'network_id': self.network_id,
-                'mac_address': constants.ATTR_NOT_SPECIFIED,
+                'mac_address': attributes.ATTR_NOT_SPECIFIED,
                 'admin_state_up': True,
                 'status': constants.PORT_STATUS_ACTIVE,
                 'device_id': 'test_dev_id',
@@ -207,17 +219,33 @@ class IpamTestCase(base.BaseTestCase):
             ip_avail_ranges_expected)
 
 
-class TestIpamMySql(common_base.MySQLTestCase, IpamTestCase):
-    pass
+class TestIpamMySql(common_base.MySQLTestCase, base.BaseTestCase,
+                    IpamTestCase):
+
+    def setUp(self):
+        super(TestIpamMySql, self).setUp()
+        self.configure_test()
 
 
-class TestIpamPsql(common_base.PostgreSQLTestCase, IpamTestCase):
-    pass
+class TestIpamPsql(common_base.PostgreSQLTestCase,
+                   base.BaseTestCase, IpamTestCase):
+
+    def setUp(self):
+        super(TestIpamPsql, self).setUp()
+        self.configure_test()
 
 
-class TestPluggableIpamMySql(common_base.MySQLTestCase, IpamTestCase):
-    use_pluggable_ipam = True
+class TestPluggableIpamMySql(common_base.MySQLTestCase,
+                             base.BaseTestCase, IpamTestCase):
+
+    def setUp(self):
+        super(TestPluggableIpamMySql, self).setUp()
+        self.configure_test(use_pluggable_ipam=True)
 
 
-class TestPluggableIpamPsql(common_base.PostgreSQLTestCase, IpamTestCase):
-    use_pluggable_ipam = True
+class TestPluggableIpamPsql(common_base.PostgreSQLTestCase,
+                            base.BaseTestCase, IpamTestCase):
+
+    def setUp(self):
+        super(TestPluggableIpamPsql, self).setUp()
+        self.configure_test(use_pluggable_ipam=True)

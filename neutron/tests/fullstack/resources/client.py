@@ -13,10 +13,8 @@
 #    under the License.
 #
 import functools
-import netaddr
 
 import fixtures
-from neutron_lib import constants
 from neutronclient.common import exceptions
 
 from neutron.extensions import portbindings
@@ -50,39 +48,31 @@ class ClientFixture(fixtures.Fixture):
         self.addCleanup(_safe_method(delete), data['id'])
         return data
 
-    def create_router(self, tenant_id, name=None, ha=False,
-                      external_network=None):
+    def create_router(self, tenant_id, name=None, ha=False):
         resource_type = 'router'
 
         name = name or base.get_rand_name(prefix=resource_type)
         spec = {'tenant_id': tenant_id, 'name': name, 'ha': ha}
-        if external_network:
-            spec['external_gateway_info'] = {"network_id": external_network}
 
         return self._create_resource(resource_type, spec)
 
-    def create_network(self, tenant_id, name=None, external=False):
+    def create_network(self, tenant_id, name=None):
         resource_type = 'network'
 
         name = name or base.get_rand_name(prefix=resource_type)
         spec = {'tenant_id': tenant_id, 'name': name}
-        spec['router:external'] = external
+
         return self._create_resource(resource_type, spec)
 
     def create_subnet(self, tenant_id, network_id,
-                      cidr, gateway_ip=None, name=None, enable_dhcp=True,
-                      ipv6_address_mode='slaac', ipv6_ra_mode='slaac'):
+                      cidr, gateway_ip=None, ip_version=4,
+                      name=None, enable_dhcp=True):
         resource_type = 'subnet'
 
         name = name or base.get_rand_name(prefix=resource_type)
-        ip_version = netaddr.IPNetwork(cidr).version
         spec = {'tenant_id': tenant_id, 'network_id': network_id, 'name': name,
-                'cidr': cidr, 'enable_dhcp': enable_dhcp,
-                'ip_version': ip_version}
-        if ip_version == constants.IP_VERSION_6:
-            spec['ipv6_address_mode'] = ipv6_address_mode
-            spec['ipv6_ra_mode'] = ipv6_ra_mode
-
+                'cidr': cidr, 'ip_version': ip_version,
+                'enable_dhcp': enable_dhcp}
         if gateway_ip:
             spec['gateway_ip'] = gateway_ip
 
@@ -98,24 +88,11 @@ class ClientFixture(fixtures.Fixture):
             spec['qos_policy_id'] = qos_policy_id
         return self._create_resource('port', spec)
 
-    def create_floatingip(self, tenant_id, floating_network_id,
-                          fixed_ip_address, port_id):
-        spec = {
-            'floating_network_id': floating_network_id,
-            'tenant_id': tenant_id,
-            'fixed_ip_address': fixed_ip_address,
-            'port_id': port_id
-        }
-
-        return self._create_resource('floatingip', spec)
-
     def add_router_interface(self, router_id, subnet_id):
         body = {'subnet_id': subnet_id}
-        router_interface_info = self.client.add_interface_router(
-            router=router_id, body=body)
+        self.client.add_interface_router(router=router_id, body=body)
         self.addCleanup(_safe_method(self.client.remove_interface_router),
                         router=router_id, body=body)
-        return router_interface_info
 
     def create_qos_policy(self, tenant_id, name, description, shared):
         policy = self.client.create_qos_policy(

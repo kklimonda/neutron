@@ -24,7 +24,6 @@ import sys
 import time
 
 import eventlet.wsgi
-from neutron_lib import exceptions as exception
 from oslo_config import cfg
 import oslo_i18n
 from oslo_log import log as logging
@@ -33,7 +32,6 @@ from oslo_service import service as common_service
 from oslo_service import sslutils
 from oslo_service import systemd
 from oslo_service import wsgi
-from oslo_utils import encodeutils
 from oslo_utils import excutils
 import six
 import webob.dec
@@ -41,10 +39,10 @@ import webob.exc
 
 from neutron._i18n import _, _LE, _LI
 from neutron.common import config
-from neutron.common import exceptions as n_exc
+from neutron.common import exceptions as exception
 from neutron import context
 from neutron.db import api
-from neutron import worker as neutron_worker
+from neutron import worker
 
 socket_opts = [
     cfg.IntOpt('backlog',
@@ -71,15 +69,14 @@ def encode_body(body):
 
     WebOb requires to encode unicode body used to update response body.
     """
-    return encodeutils.to_utf8(body)
+    if isinstance(body, six.text_type):
+        return body.encode('utf-8')
+    return body
 
 
-class WorkerService(neutron_worker.NeutronWorker):
+class WorkerService(worker.NeutronWorker):
     """Wraps a worker to be handled by ProcessLauncher"""
-    def __init__(self, service, application, disable_ssl=False,
-                 worker_process_count=0):
-        super(WorkerService, self).__init__(worker_process_count)
-
+    def __init__(self, service, application, disable_ssl=False):
         self._service = service
         self._application = application
         self._disable_ssl = disable_ssl
@@ -191,7 +188,7 @@ class Server(object):
         self._launch(application, workers)
 
     def _launch(self, application, workers=0):
-        service = WorkerService(self, application, self.disable_ssl, workers)
+        service = WorkerService(self, application, self.disable_ssl)
         if workers < 1:
             # The API service should run in the current process.
             self._server = service
@@ -209,8 +206,7 @@ class Server(object):
             # wait interval past the default of 0.01s.
             self._server = common_service.ProcessLauncher(cfg.CONF,
                                                           wait_interval=1.0)
-            self._server.launch_service(service,
-                                        workers=service.worker_process_count)
+            self._server.launch_service(service, workers=workers)
 
     @property
     def host(self):
@@ -393,7 +389,7 @@ class JSONDeserializer(TextDeserializer):
             return jsonutils.loads(datastring)
         except ValueError:
             msg = _("Cannot understand JSON")
-            raise n_exc.MalformedRequestBody(reason=msg)
+            raise exception.MalformedRequestBody(reason=msg)
 
     def default(self, datastring):
         return {'body': self._from_json(datastring)}
@@ -606,7 +602,7 @@ class Resource(Application):
             msg = _("Unsupported Content-Type")
             LOG.exception(_LE("InvalidContentType: %s"), msg)
             return Fault(webob.exc.HTTPBadRequest(explanation=msg))
-        except n_exc.MalformedRequestBody:
+        except exception.MalformedRequestBody:
             msg = _("Malformed request body")
             LOG.exception(_LE("MalformedRequestBody: %s"), msg)
             return Fault(webob.exc.HTTPBadRequest(explanation=msg))
@@ -639,15 +635,15 @@ class Resource(Application):
         return response
 
     def dispatch(self, request, action, action_args):
-        """Find action-specific method on controller and call it."""
+        """Find action-spefic method on controller and call it."""
 
         controller_method = getattr(self.controller, action)
         try:
             #NOTE(salvatore-orlando): the controller method must have
             # an argument whose name is 'request'
             return controller_method(request=request, **action_args)
-        except TypeError:
-            LOG.exception(_LE('Invalid request'))
+        except TypeError as exc:
+            LOG.exception(exc)
             return Fault(webob.exc.HTTPBadRequest())
 
 

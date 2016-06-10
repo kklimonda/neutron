@@ -29,7 +29,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
+from neutron.common import constants
 
 
 class OVSDVRProcessMixin(object):

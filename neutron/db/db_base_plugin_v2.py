@@ -16,13 +16,8 @@
 import functools
 
 import netaddr
-from neutron_lib.api import validators
-from neutron_lib import constants
-from neutron_lib.db import utils as db_utils
-from neutron_lib import exceptions as exc
 from oslo_config import cfg
 from oslo_db import exception as db_exc
-from oslo_db.sqlalchemy import utils as sa_utils
 from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import uuidutils
@@ -37,7 +32,7 @@ from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants as n_const
+from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils
@@ -49,6 +44,7 @@ from neutron.db import ipam_pluggable_backend
 from neutron.db import models_v2
 from neutron.db import rbac_db_mixin as rbac_mixin
 from neutron.db import rbac_db_models as rbac_db
+from neutron.db import sqlalchemyutils
 from neutron.db import standardattrdescription_db as stattr_db
 from neutron.extensions import l3
 from neutron import ipam
@@ -80,7 +76,7 @@ def _check_subnet_not_used(context, subnet_id):
         registry.notify(
             resources.SUBNET, events.BEFORE_DELETE, None, **kwargs)
     except exceptions.CallbackFailure as e:
-        raise exc.SubnetInUse(subnet_id=subnet_id, reason=e)
+        raise n_exc.SubnetInUse(subnet_id=subnet_id, reason=e)
 
 
 class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
@@ -142,7 +138,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             if not context.is_admin and net['tenant_id'] != context.tenant_id:
                 msg = _("Only admins can manipulate policies on networks "
                         "they do not own.")
-                raise exc.InvalidInput(error_message=msg)
+                raise n_exc.InvalidInput(error_message=msg)
 
         tenant_to_check = None
         if event == events.BEFORE_UPDATE:
@@ -200,11 +196,11 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             netaddr.IPAddress(route['nexthop'])
         except netaddr.core.AddrFormatError:
             err_msg = _("Invalid route: %s") % route
-            raise exc.InvalidInput(error_message=err_msg)
+            raise n_exc.InvalidInput(error_message=err_msg)
         except ValueError:
             # netaddr.IPAddress would raise this
             err_msg = _("Invalid route: %s") % route
-            raise exc.InvalidInput(error_message=err_msg)
+            raise n_exc.InvalidInput(error_message=err_msg)
         self._validate_ip_version(ip_version, route['nexthop'], 'nexthop')
         self._validate_ip_version(ip_version, route['destination'],
                                   'destination')
@@ -233,8 +229,8 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         if cur_subnet:
             self._validate_ipv6_update_dhcp(subnet, cur_subnet)
             return
-        ra_mode_set = validators.is_attr_set(subnet.get('ipv6_ra_mode'))
-        address_mode_set = validators.is_attr_set(
+        ra_mode_set = attributes.is_attr_set(subnet.get('ipv6_ra_mode'))
+        address_mode_set = attributes.is_attr_set(
             subnet.get('ipv6_address_mode'))
         self._validate_ipv6_dhcp(ra_mode_set, address_mode_set,
                                  subnet['enable_dhcp'])
@@ -254,7 +250,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 msg = _('Invalid CIDR %s for IPv6 address mode. '
                         'OpenStack uses the EUI-64 address format, '
                         'which requires the prefix to be /64.')
-                raise exc.InvalidInput(
+                raise n_exc.InvalidInput(
                     error_message=(msg % subnet['cidr']))
 
     def _validate_ipv6_combination(self, ra_mode, address_mode):
@@ -263,33 +259,33 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                     "set to '%(addr_mode)s' is not valid. "
                     "If both attributes are set, they must be the same value"
                     ) % {'ra_mode': ra_mode, 'addr_mode': address_mode}
-            raise exc.InvalidInput(error_message=msg)
+            raise n_exc.InvalidInput(error_message=msg)
 
     def _validate_ipv6_dhcp(self, ra_mode_set, address_mode_set, enable_dhcp):
         if (ra_mode_set or address_mode_set) and not enable_dhcp:
             msg = _("ipv6_ra_mode or ipv6_address_mode cannot be set when "
                     "enable_dhcp is set to False.")
-            raise exc.InvalidInput(error_message=msg)
+            raise n_exc.InvalidInput(error_message=msg)
 
     def _validate_ipv6_update_dhcp(self, subnet, cur_subnet):
         if ('enable_dhcp' in subnet and not subnet['enable_dhcp']):
             msg = _("Cannot disable enable_dhcp with "
                     "ipv6 attributes set")
 
-            ra_mode_set = validators.is_attr_set(subnet.get('ipv6_ra_mode'))
-            address_mode_set = validators.is_attr_set(
+            ra_mode_set = attributes.is_attr_set(subnet.get('ipv6_ra_mode'))
+            address_mode_set = attributes.is_attr_set(
                 subnet.get('ipv6_address_mode'))
 
             if ra_mode_set or address_mode_set:
-                raise exc.InvalidInput(error_message=msg)
+                raise n_exc.InvalidInput(error_message=msg)
 
-            old_ra_mode_set = validators.is_attr_set(
+            old_ra_mode_set = attributes.is_attr_set(
                 cur_subnet.get('ipv6_ra_mode'))
-            old_address_mode_set = validators.is_attr_set(
+            old_address_mode_set = attributes.is_attr_set(
                 cur_subnet.get('ipv6_address_mode'))
 
             if old_ra_mode_set or old_address_mode_set:
-                raise exc.InvalidInput(error_message=msg)
+                raise n_exc.InvalidInput(error_message=msg)
 
     def _create_bulk(self, resource, context, request_items):
         objects = []
@@ -329,7 +325,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                     'id': n.get('id') or uuidutils.generate_uuid(),
                     'name': n['name'],
                     'admin_state_up': n['admin_state_up'],
-                    'mtu': n.get('mtu', n_const.DEFAULT_NETWORK_MTU),
+                    'mtu': n.get('mtu', constants.DEFAULT_NETWORK_MTU),
                     'status': n.get('status', constants.NET_STATUS_ACTIVE),
                     'description': n.get('description')}
             network = models_v2.Network(**args)
@@ -384,7 +380,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 network_id=id).first()
 
             if port_in_use:
-                raise exc.NetworkInUse(net_id=id)
+                raise n_exc.NetworkInUse(net_id=id)
 
             # clean up subnets
             subnets = self._get_subnets_by_network(context, id)
@@ -427,7 +423,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                     'ip_version': ip_version}
             msg = _("%(name)s '%(addr)s' does not match "
                     "the ip_version '%(ip_version)s'") % data
-            raise exc.InvalidInput(error_message=msg)
+            raise n_exc.InvalidInput(error_message=msg)
 
     def _validate_subnet(self, context, s, cur_subnet=None):
         """Validate a subnet spec."""
@@ -441,7 +437,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
 
         ip_ver = s['ip_version']
 
-        if validators.is_attr_set(s.get('cidr')):
+        if attributes.is_attr_set(s.get('cidr')):
             self._validate_ip_version(ip_ver, s['cidr'], 'cidr')
 
         # TODO(watanabe.isao): After we found a way to avoid the re-sync
@@ -456,26 +452,33 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                               "incompatible with DHCP service enabled.")
             if ((ip_ver == 4 and subnet_prefixlen > 30) or
                 (ip_ver == 6 and subnet_prefixlen > 126)):
-                    raise exc.InvalidInput(error_message=error_message)
+                    raise n_exc.InvalidInput(error_message=error_message)
 
             net = netaddr.IPNetwork(s['cidr'])
             if net.is_multicast():
                 error_message = _("Multicast IP subnet is not supported "
                                   "if enable_dhcp is True.")
-                raise exc.InvalidInput(error_message=error_message)
+                raise n_exc.InvalidInput(error_message=error_message)
             elif net.is_loopback():
                 error_message = _("Loopback IP subnet is not supported "
                                   "if enable_dhcp is True.")
-                raise exc.InvalidInput(error_message=error_message)
+                raise n_exc.InvalidInput(error_message=error_message)
 
-        if validators.is_attr_set(s.get('gateway_ip')):
+        if attributes.is_attr_set(s.get('gateway_ip')):
             self._validate_ip_version(ip_ver, s['gateway_ip'], 'gateway_ip')
-            is_gateway_not_valid = (
-                ipam.utils.check_gateway_invalid_in_subnet(
-                    s['cidr'], s['gateway_ip']))
+            if cfg.CONF.force_gateway_on_subnet:
+                # TODO(sreesiv) check_gateway_in_subnet() will be
+                # obsolete and should be removed when the option
+                # 'force_gateway_on_subnet' is removed.
+                is_gateway_not_valid = not ipam.utils.check_gateway_in_subnet(
+                                            s['cidr'], s['gateway_ip'])
+            else:
+                is_gateway_not_valid = (
+                    ipam.utils.check_gateway_invalid_in_subnet(
+                        s['cidr'], s['gateway_ip']))
             if is_gateway_not_valid:
                 error_message = _("Gateway is not valid on subnet")
-                raise exc.InvalidInput(error_message=error_message)
+                raise n_exc.InvalidInput(error_message=error_message)
             # Ensure the gateway IP is not assigned to any port
             # skip this check in case of create (s parameter won't have id)
             # NOTE(salv-orlando): There is slight chance of a race, when
@@ -493,7 +496,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                         ip_address=cur_subnet['gateway_ip'],
                         port_id=allocated['port_id'])
 
-        if validators.is_attr_set(s.get('dns_nameservers')):
+        if attributes.is_attr_set(s.get('dns_nameservers')):
             if len(s['dns_nameservers']) > cfg.CONF.max_dns_nameservers:
                 raise n_exc.DNSNameServersExhausted(
                     subnet_id=s.get('id', _('new subnet')),
@@ -502,12 +505,12 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 try:
                     netaddr.IPAddress(dns)
                 except Exception:
-                    raise exc.InvalidInput(
+                    raise n_exc.InvalidInput(
                         error_message=(_("Error parsing dns address %s") %
                                        dns))
                 self._validate_ip_version(ip_ver, dns, 'dns_nameserver')
 
-        if validators.is_attr_set(s.get('host_routes')):
+        if attributes.is_attr_set(s.get('host_routes')):
             if len(s['host_routes']) > cfg.CONF.max_subnet_host_routes:
                 raise n_exc.HostRoutesExhausted(
                     subnet_id=s.get('id', _('new subnet')),
@@ -517,12 +520,12 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 self._validate_host_route(rt, ip_ver)
 
         if ip_ver == 4:
-            if validators.is_attr_set(s.get('ipv6_ra_mode')):
-                raise exc.InvalidInput(
+            if attributes.is_attr_set(s.get('ipv6_ra_mode')):
+                raise n_exc.InvalidInput(
                     error_message=(_("ipv6_ra_mode is not valid when "
                                      "ip_version is 4")))
-            if validators.is_attr_set(s.get('ipv6_address_mode')):
-                raise exc.InvalidInput(
+            if attributes.is_attr_set(s.get('ipv6_address_mode')):
+                raise n_exc.InvalidInput(
                     error_message=(_("ipv6_address_mode is not valid when "
                                      "ip_version is 4")))
         if ip_ver == 6:
@@ -533,22 +536,22 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         if (subnet.get('ip_version') != constants.IP_VERSION_6):
             reason = _("Prefix Delegation can only be used with IPv6 "
                        "subnets.")
-            raise exc.BadRequest(resource='subnets', msg=reason)
+            raise n_exc.BadRequest(resource='subnets', msg=reason)
 
-        mode_list = [n_const.IPV6_SLAAC,
-                     n_const.DHCPV6_STATELESS]
+        mode_list = [constants.IPV6_SLAAC,
+                     constants.DHCPV6_STATELESS]
 
         ra_mode = subnet.get('ipv6_ra_mode')
         if ra_mode not in mode_list:
             reason = _("IPv6 RA Mode must be SLAAC or Stateless for "
                        "Prefix Delegation.")
-            raise exc.BadRequest(resource='subnets', msg=reason)
+            raise n_exc.BadRequest(resource='subnets', msg=reason)
 
         address_mode = subnet.get('ipv6_address_mode')
         if address_mode not in mode_list:
             reason = _("IPv6 Address Mode must be SLAAC or Stateless for "
                        "Prefix Delegation.")
-            raise exc.BadRequest(resource='subnets', msg=reason)
+            raise n_exc.BadRequest(resource='subnets', msg=reason)
 
     def _update_router_gw_ports(self, context, network, subnet):
         l3plugin = manager.NeutronManager.get_service_plugins().get(
@@ -610,16 +613,16 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         :param subnet: The subnet dict from the request
         """
         use_default_subnetpool = subnet.get('use_default_subnetpool')
-        if use_default_subnetpool == constants.ATTR_NOT_SPECIFIED:
+        if use_default_subnetpool == attributes.ATTR_NOT_SPECIFIED:
             use_default_subnetpool = False
         subnetpool_id = subnet.get('subnetpool_id')
-        if subnetpool_id == constants.ATTR_NOT_SPECIFIED:
+        if subnetpool_id == attributes.ATTR_NOT_SPECIFIED:
             subnetpool_id = None
 
         if use_default_subnetpool and subnetpool_id:
             msg = _('subnetpool_id and use_default_subnetpool cannot both be '
                     'specified')
-            raise exc.BadRequest(resource='subnets', msg=msg)
+            raise n_exc.BadRequest(resource='subnets', msg=msg)
 
         if subnetpool_id:
             return subnetpool_id
@@ -628,14 +631,14 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             return
 
         cidr = subnet.get('cidr')
-        if validators.is_attr_set(cidr):
+        if attributes.is_attr_set(cidr):
             ip_version = netaddr.IPNetwork(cidr).version
         else:
             ip_version = subnet.get('ip_version')
-            if not validators.is_attr_set(ip_version):
+            if not attributes.is_attr_set(ip_version):
                 msg = _('ip_version must be specified in the absence of '
                         'cidr and subnetpool_id')
-                raise exc.BadRequest(resource='subnets', msg=msg)
+                raise n_exc.BadRequest(resource='subnets', msg=msg)
 
         if ip_version == 6 and cfg.CONF.ipv6_pd_enabled:
             return constants.IPV6_PD_POOL_ID
@@ -653,19 +656,19 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             return cfg.CONF.default_ipv6_subnet_pool
 
         msg = _('No default subnetpool found for IPv%s') % ip_version
-        raise exc.BadRequest(resource='subnets', msg=msg)
+        raise n_exc.BadRequest(resource='subnets', msg=msg)
 
     def create_subnet(self, context, subnet):
 
         s = subnet['subnet']
-        cidr = s.get('cidr', constants.ATTR_NOT_SPECIFIED)
-        prefixlen = s.get('prefixlen', constants.ATTR_NOT_SPECIFIED)
-        has_cidr = validators.is_attr_set(cidr)
-        has_prefixlen = validators.is_attr_set(prefixlen)
+        cidr = s.get('cidr', attributes.ATTR_NOT_SPECIFIED)
+        prefixlen = s.get('prefixlen', attributes.ATTR_NOT_SPECIFIED)
+        has_cidr = attributes.is_attr_set(cidr)
+        has_prefixlen = attributes.is_attr_set(prefixlen)
 
         if has_cidr and has_prefixlen:
             msg = _('cidr and prefixlen must not be supplied together')
-            raise exc.BadRequest(resource='subnets', msg=msg)
+            raise n_exc.BadRequest(resource='subnets', msg=msg)
 
         if has_cidr:
             # turn the CIDR into a proper subnet
@@ -675,7 +678,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         subnetpool_id = self._get_subnetpool_id(context, s)
         if not subnetpool_id and not has_cidr:
             msg = _('a subnetpool must be specified in the absence of a cidr')
-            raise exc.BadRequest(resource='subnets', msg=msg)
+            raise n_exc.BadRequest(resource='subnets', msg=msg)
 
         if subnetpool_id:
             self.ipam.validate_pools_with_subnetpool(s)
@@ -687,14 +690,14 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                     subnetpool_id = None
                     self._validate_subnet(context, s)
                 else:
-                    prefix = n_const.PROVISIONAL_IPV6_PD_PREFIX
+                    prefix = constants.PROVISIONAL_IPV6_PD_PREFIX
                     subnet['subnet']['cidr'] = prefix
                     self._validate_subnet_for_pd(s)
         else:
             if not has_cidr:
                 msg = _('A cidr must be specified in the absence of a '
                         'subnet pool')
-                raise exc.BadRequest(resource='subnets', msg=msg)
+                raise n_exc.BadRequest(resource='subnets', msg=msg)
             self._validate_subnet(context, s)
 
         return self._create_subnet(context, subnet, subnetpool_id)
@@ -773,24 +776,22 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         if update_ports_needed:
             # Find ports that have not yet been updated
             # with an IP address by Prefix Delegation, and update them
-            filters = {'fixed_ips': {'subnet_id': [s['id']]}}
-            ports = self.get_ports(context, filters=filters)
+            ports = self.get_ports(context)
             routers = []
             for port in ports:
+                fixed_ips = []
+                new_port = {'port': port}
                 for ip in port['fixed_ips']:
                     if ip['subnet_id'] == s['id']:
-                        if (port['device_owner'] in
-                            constants.ROUTER_INTERFACE_OWNERS):
+                        fixed_ip = {'subnet_id': s['id']}
+                        if "router_interface" in port['device_owner']:
                             routers.append(port['device_id'])
-                            ip['ip_address'] = s['gateway_ip']
-                        else:
-                            # We remove ip_address and pass only PD subnet_id
-                            # in port's fixed_ip for port_update. Later, IPAM
-                            # drivers will allocate eui64 address with new
-                            # prefix when they find PD subnet_id in port's
-                            # fixed_ip.
-                            ip.pop('ip_address', None)
-                self.update_port(context, port['id'], {'port': port})
+                            fixed_ip['ip_address'] = s['gateway_ip']
+                        fixed_ips.append(fixed_ip)
+                if fixed_ips:
+                    new_port['port']['fixed_ips'] = fixed_ips
+                    self.update_port(context, port['id'], new_port)
+
             # Send router_update to l3_agent
             if routers:
                 l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
@@ -830,7 +831,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         if allocs:
             LOG.debug("Subnet %s still has internal router ports, "
                       "cannot delete", subnet_id)
-            raise exc.SubnetInUse(subnet_id=subnet_id)
+            raise n_exc.SubnetInUse(subnet_id=id)
 
     def delete_subnet(self, context, id):
         with context.session.begin(subtransactions=True):
@@ -874,7 +875,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                              {'ip': alloc.ip_address,
                               'port_id': alloc.port_id,
                               'subnet': id})
-                    raise exc.SubnetInUse(subnet_id=id)
+                    raise n_exc.SubnetInUse(subnet_id=id)
 
             context.session.delete(subnet)
             # Delete related ipam subnet manually,
@@ -918,7 +919,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
           - the address family of the subnetpool and address scope
             are the same
         """
-        if not validators.is_attr_set(address_scope_id):
+        if not attributes.is_attr_set(address_scope_id):
             return
 
         if not self.is_address_scope_owned_by_tenant(context,
@@ -971,14 +972,14 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         if self.get_default_subnetpool(context, ip_version):
             msg = _("A default subnetpool for this IP family has already "
                     "been set. Only one default may exist per IP family")
-            raise exc.InvalidInput(error_message=msg)
+            raise n_exc.InvalidInput(error_message=msg)
 
     def create_subnetpool(self, context, subnetpool):
         """Create a subnetpool"""
 
         sp = subnetpool['subnetpool']
         sp_reader = subnet_alloc.SubnetPoolReader(sp)
-        if sp_reader.address_scope_id is constants.ATTR_NOT_SPECIFIED:
+        if sp_reader.address_scope_id is attributes.ATTR_NOT_SPECIFIED:
             sp_reader.address_scope_id = None
         if sp_reader.is_default:
             self._check_default_subnetpool_exists(context,
@@ -1020,9 +1021,9 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
 
     def _updated_subnetpool_dict(self, model, new_pool):
         updated = {}
-        new_prefixes = new_pool.get('prefixes', constants.ATTR_NOT_SPECIFIED)
+        new_prefixes = new_pool.get('prefixes', attributes.ATTR_NOT_SPECIFIED)
         orig_prefixes = [str(x.cidr) for x in model['prefixes']]
-        if new_prefixes is not constants.ATTR_NOT_SPECIFIED:
+        if new_prefixes is not attributes.ATTR_NOT_SPECIFIED:
             orig_set = netaddr.IPSet(orig_prefixes)
             new_set = netaddr.IPSet(new_prefixes)
             if not orig_set.issubset(new_set):
@@ -1042,8 +1043,8 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         return updated
 
     def _write_key(self, key, update, orig, new_dict):
-        new_val = new_dict.get(key, constants.ATTR_NOT_SPECIFIED)
-        if new_val is not constants.ATTR_NOT_SPECIFIED:
+        new_val = new_dict.get(key, attributes.ATTR_NOT_SPECIFIED)
+        if new_val is not attributes.ATTR_NOT_SPECIFIED:
             update[key] = new_dict[key]
         else:
             update[key] = orig[key]
@@ -1185,7 +1186,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 context.session.add(db_port)
                 return db_port
         except db_exc.DBDuplicateEntry:
-            raise exc.MacAddressInUse(net_id=network_id, mac=mac_address)
+            raise n_exc.MacAddressInUse(net_id=network_id, mac=mac_address)
 
     def _create_port(self, context, network_id, port_data):
         max_retries = cfg.CONF.mac_generation_retries
@@ -1194,7 +1195,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             try:
                 return self._create_port_with_mac(
                     context, network_id, port_data, mac)
-            except exc.MacAddressInUse:
+            except n_exc.MacAddressInUse:
                 LOG.debug('Generated mac %(mac_address)s exists on '
                           'network %(network_id)s',
                           {'mac_address': mac, 'network_id': network_id})
@@ -1237,7 +1238,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             self._get_network(context, network_id)
 
             # Create the port
-            if p['mac_address'] is constants.ATTR_NOT_SPECIFIED:
+            if p['mac_address'] is attributes.ATTR_NOT_SPECIFIED:
                 db_port = self._create_port(context, network_id, port_data)
                 p['mac_address'] = db_port['mac_address']
             else:
@@ -1288,37 +1289,22 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         new_port = port['port']
 
         with context.session.begin(subtransactions=True):
-            db_port = self._get_port(context, id)
+            port = self._get_port(context, id)
             if 'dns-integration' in self.supported_extension_aliases:
-                original_ips = self._make_fixed_ip_dict(db_port['fixed_ips'])
-                original_dns_name = db_port.get('dns_name', '')
+                original_ips = self._make_fixed_ip_dict(port['fixed_ips'])
+                original_dns_name = port.get('dns_name', '')
                 request_dns_name = self._get_request_dns_name(new_port)
                 if 'dns_name' in new_port and not request_dns_name:
                     new_port['dns_name'] = ''
             new_mac = new_port.get('mac_address')
-            self._validate_port_for_update(context, db_port, new_port, new_mac)
-            # Note: _make_port_dict is called here to load extension data
-            # (specifically host binding).  The IPAM plugin is separate from
-            # the core plugin, so extensions are not loaded.
-            #
-            # The IPAM code could cheat and get it directly from db_port but it
-            # would have to know about the implementation (remember ml2 has its
-            # own port binding schema that differs from the generic one)
-            #
-            # This code could extract just the port binding host here and pass
-            # that in.  The problem is that db_base_plugin_common shouldn't
-            # know anything about port binding.  This compromise sends IPAM a
-            # port_dict with all of the extension data loaded.
-            changes = self.ipam.update_port(
-                context,
-                old_port_db=db_port,
-                old_port=self._make_port_dict(db_port),
-                new_port=new_port)
+            self._validate_port_for_update(context, port, new_port, new_mac)
+            changes = self.ipam.update_port_with_ips(context, port,
+                                                     new_port, new_mac)
             if 'dns-integration' in self.supported_extension_aliases:
                 dns_assignment = self._get_dns_names_for_updated_port(
                     context, original_ips, original_dns_name,
                     request_dns_name, changes)
-        result = self._make_port_dict(db_port)
+        result = self._make_port_dict(port)
         # Keep up with fields that changed
         if changes.original or changes.add or changes.remove:
             result['fixed_ips'] = self._make_fixed_ip_dict(
@@ -1341,7 +1327,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         for port_id in port_ids:
             try:
                 self.delete_port(context, port_id)
-            except exc.PortNotFound:
+            except n_exc.PortNotFound:
                 # Don't raise if something else concurrently deleted the port
                 LOG.debug("Ignoring PortNotFound when deleting port '%s'. "
                           "The port has already been deleted.",
@@ -1383,13 +1369,10 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 query = query.filter(IPAllocation.subnet_id.in_(subnet_ids))
 
         query = self._apply_filters_to_query(query, Port, filters, context)
-        if sorts:
-            sort_keys = db_utils.get_and_validate_sort_keys(sorts, Port)
-            sort_dirs = db_utils.get_sort_dirs(sorts, page_reverse)
-            query = sa_utils.paginate_query(query, Port, limit,
-                                            marker=marker_obj,
-                                            sort_keys=sort_keys,
-                                            sort_dirs=sort_dirs)
+        if limit and page_reverse and sorts:
+            sorts = [(s[0], not s[1]) for s in sorts]
+        query = sqlalchemyutils.paginate_query(query, Port, limit,
+                                               sorts, marker_obj)
         return query
 
     def get_ports(self, context, filters=None, fields=None,

@@ -15,7 +15,6 @@
 import abc
 import itertools
 
-from neutron_lib import exceptions as lib_exc
 from six import add_metaclass
 from sqlalchemy import and_
 
@@ -168,7 +167,7 @@ class RbacNeutronDbObjectMixin(rbac_db_mixin.RbacPluginMixin,
                     db_obj['tenant_id'] != context.tenant_id):
                 msg = _("Only admins can manipulate policies on objects "
                         "they do not own")
-                raise lib_exc.InvalidInput(error_message=msg)
+                raise n_exc.InvalidInput(error_message=msg)
         callback_map = {events.BEFORE_UPDATE: cls.validate_rbac_policy_update,
                         events.BEFORE_DELETE: cls.validate_rbac_policy_delete}
         if event in callback_map:
@@ -182,10 +181,10 @@ class RbacNeutronDbObjectMixin(rbac_db_mixin.RbacPluginMixin,
                                        'tenant_id': tenant_id,
                                        'object_type': obj_type,
                                        'action': models.ACCESS_SHARED}}
-        return self.create_rbac_policy(self.obj_context, rbac_policy)
+        return self.create_rbac_policy(self._context, rbac_policy)
 
     def update_shared(self, is_shared_new, obj_id):
-        admin_context = self.obj_context.elevated()
+        admin_context = self._context.elevated()
         shared_prev = obj_db_api.get_object(admin_context, self.rbac_db_model,
                                         object_id=obj_id, target_tenant='*',
                                         action=models.ACCESS_SHARED)
@@ -195,13 +194,13 @@ class RbacNeutronDbObjectMixin(rbac_db_mixin.RbacPluginMixin,
 
         # 'shared' goes False -> True
         if not is_shared_prev and is_shared_new:
-            self.attach_rbac(obj_id, self.obj_context.tenant_id)
+            self.attach_rbac(obj_id, self._context.tenant_id)
             return
 
         # 'shared' goes True -> False is actually an attempt to delete
         # rbac rule for sharing obj_id with target_tenant = '*'
-        self._validate_rbac_policy_delete(self.obj_context, obj_id, '*')
-        return self.obj_context.session.delete(shared_prev)
+        self._validate_rbac_policy_delete(self._context, obj_id, '*')
+        return self._context.session.delete(shared_prev)
 
 
 def _update_post(self):
@@ -209,27 +208,27 @@ def _update_post(self):
 
 
 def _update_hook(self, update_orig):
-    with db_api.autonested_transaction(self.obj_context.session):
+    with db_api.autonested_transaction(self._context.session):
         update_orig(self)
         _update_post(self)
 
 
 def _create_post(self):
     if self.shared:
-        self.attach_rbac(self.id, self.obj_context.tenant_id)
+        self.attach_rbac(self.id, self._context.tenant_id)
 
 
 def _create_hook(self, orig_create):
-    with db_api.autonested_transaction(self.obj_context.session):
+    with db_api.autonested_transaction(self._context.session):
         orig_create(self)
         _create_post(self)
 
 
 def _to_dict_hook(self, to_dict_orig):
     dct = to_dict_orig(self)
-    dct['shared'] = self.is_shared_with_tenant(self.obj_context,
+    dct['shared'] = self.is_shared_with_tenant(self._context,
                                                self.id,
-                                               self.obj_context.tenant_id)
+                                               self._context.tenant_id)
     return dct
 
 

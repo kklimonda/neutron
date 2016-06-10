@@ -7,5 +7,4 @@
 
    README.rst
    liberty
-   mitaka
    unreleased

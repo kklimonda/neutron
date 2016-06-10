@@ -27,7 +27,6 @@ import subprocess
 
 import fixtures
 import netaddr
-from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
@@ -38,6 +37,7 @@ from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
+from neutron.common import constants as n_const
 from neutron.db import db_base_plugin_common
 from neutron.plugins.ml2.drivers.linuxbridge.agent import \
     linuxbridge_neutron_agent as linuxbridge_agent
@@ -63,7 +63,7 @@ MACVTAP_PREFIX = 'macvtap'
 LB_DEVICE_NAME_MAX_LEN = 10
 
 SS_SOURCE_PORT_PATTERN = re.compile(
-    r'^.*\s+\d+\s+.*:(?P<port>\d+)\s+[^\s]+:.*')
+    r'^.*\s+\d+\s+.*:(?P<port>\d+)\s+[0-9:].*')
 
 READ_TIMEOUT = os.environ.get('OS_TEST_READ_TIMEOUT', 5)
 
@@ -155,7 +155,7 @@ def _get_source_ports_from_ss_output(output):
     for line in output.splitlines():
         match = SS_SOURCE_PORT_PATTERN.match(line)
         if match:
-            ports.add(int(match.group('port')))
+            ports.add(match.group('port'))
     return ports
 
 
@@ -250,7 +250,7 @@ class RootHelperProcess(subprocess.Popen):
                                 sleep=CHILD_PROCESS_SLEEP):
         def child_is_running():
             child_pid = utils.get_root_helper_child_pid(
-                self.pid, self.cmd, run_as_root=True)
+                self.pid, run_as_root=True)
             if utils.pid_invoked_with_cmdline(child_pid, self.cmd):
                 return True
 
@@ -260,7 +260,7 @@ class RootHelperProcess(subprocess.Popen):
             exception=RuntimeError("Process %s hasn't been spawned "
                                    "in %d seconds" % (self.cmd, timeout)))
         self.child_pid = utils.get_root_helper_child_pid(
-            self.pid, self.cmd, run_as_root=True)
+            self.pid, run_as_root=True)
 
     @property
     def is_running(self):

@@ -18,14 +18,13 @@ import socket
 import ssl
 
 import mock
-from neutron_lib import exceptions as exception
 from oslo_config import cfg
 import six.moves.urllib.request as urlrequest
 import testtools
 import webob
 import webob.exc
 
-from neutron.common import exceptions as n_exc
+from neutron.common import exceptions as exception
 from neutron.db import api
 from neutron.tests import base
 from neutron.tests.common import helpers
@@ -157,7 +156,7 @@ class TestWSGIServer(base.BaseTestCase):
                     ])
 
     def test_app(self):
-        greetings = b'Hello, World!!!'
+        greetings = 'Hello, World!!!'
 
         def hello_world(env, start_response):
             if env['PATH_INFO'] != '/':
@@ -172,7 +171,7 @@ class TestWSGIServer(base.BaseTestCase):
 
         response = open_no_proxy('http://127.0.0.1:%d/' % server.port)
 
-        self.assertEqual(greetings, response.read())
+        self.assertEqual(greetings.encode('utf-8'), response.read())
 
         server.stop()
 
@@ -577,7 +576,7 @@ class JSONDeserializerTest(base.BaseTestCase):
         deserializer = wsgi.JSONDeserializer()
 
         self.assertRaises(
-            n_exc.MalformedRequestBody, deserializer.default, data_string)
+            exception.MalformedRequestBody, deserializer.default, data_string)
 
     def test_json_with_utf8(self):
         data = b'{"a": "\xe7\xbd\x91\xe7\xbb\x9c"}'

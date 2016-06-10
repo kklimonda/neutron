@@ -21,7 +21,6 @@ from neutron.agent.l3 import link_local_allocator as lla
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
-from neutron.common import constants
 from neutron.common import utils as common_utils
 from neutron.ipam import utils as ipam_utils
 
@@ -33,6 +32,7 @@ FIP_2_ROUTER_DEV_PREFIX = 'fpr-'
 ROUTER_2_FIP_DEV_PREFIX = namespaces.ROUTER_2_FIP_DEV_PREFIX
 # Route Table index for FIPs
 FIP_RT_TBL = 16
+FIP_LL_SUBNET = '169.254.64.0/18'
 # Rule priority range for FIPs
 FIP_PR_START = 32768
 FIP_PR_END = FIP_PR_START + 40000
@@ -59,8 +59,7 @@ class FipNamespace(namespaces.Namespace):
             namespace=self.get_name(),
             use_ipv6=self.use_ipv6)
         path = os.path.join(agent_conf.state_path, 'fip-linklocal-networks')
-        self.local_subnets = lla.LinkLocalAllocator(
-            path, constants.DVR_FIP_LL_CIDR)
+        self.local_subnets = lla.LinkLocalAllocator(path, FIP_LL_SUBNET)
         self.destroyed = False
 
     @classmethod
@@ -265,6 +264,8 @@ class FipNamespace(namespaces.Namespace):
 
         # add default route for the link local interface
         rtr_2_fip_dev.route.add_gateway(str(fip_2_rtr.ip), table=FIP_RT_TBL)
+        #setup the NAT rules and chains
+        ri._handle_fip_nat_rules(rtr_2_fip_name)
 
     def scan_fip_ports(self, ri):
         # don't scan if not dvr or count is not None
@@ -276,4 +277,11 @@ class FipNamespace(namespaces.Namespace):
         rtr_2_fip_interface = self.get_rtr_ext_device_name(ri.router_id)
         device = ip_lib.IPDevice(rtr_2_fip_interface, namespace=ri.ns_name)
         if device.exists():
-            ri.dist_fip_count = len(ri.get_router_cidrs(device))
+            existing_cidrs = [addr['cidr'] for addr in device.addr.list()]
+            fip_cidrs = [c for c in existing_cidrs if
+                         common_utils.is_cidr_host(c)]
+            for fip_cidr in fip_cidrs:
+                fip_ip = fip_cidr.split('/')[0]
+                rule_pr = self._rule_priorities.allocate(fip_ip)
+                ri.floating_ips_dict[fip_ip] = rule_pr
+            ri.dist_fip_count = len(fip_cidrs)

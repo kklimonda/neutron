@@ -24,15 +24,10 @@ import warnings
 
 import fixtures
 import mock
-import netaddr
-from neutron_lib import constants
 import six
-import unittest2
 
 import neutron
 from neutron.api.v2 import attributes
-from neutron.common import constants as n_const
-from neutron.common import ipv6_utils
 
 
 class AttributeMapMemento(fixtures.Fixture):
@@ -119,6 +114,8 @@ class SafeCleanupFixture(fixtures.Fixture):
         self.addCleanup(cleanUp)
 
 
+import unittest
+
 from neutron.common import utils
 
 
@@ -175,7 +172,7 @@ def fail(msg=None):
     This method is equivalent to TestCase.fail without requiring a
     testcase instance (usefully for reducing coupling).
     """
-    raise unittest2.TestCase.failureException(msg)
+    raise unittest.TestCase.failureException(msg)
 
 
 class UnorderedList(list):
@@ -233,23 +230,12 @@ def get_random_integer(range_begin=0, range_end=1000):
     return random.randint(range_begin, range_end)
 
 
-def get_random_prefixlen(version=4):
-    maxlen = constants.IPv4_BITS
-    if version == 6:
-        maxlen = constants.IPv6_BITS
-    return random.randint(0, maxlen)
-
-
-def get_random_ip_version():
-    return random.choice(n_const.IP_ALLOWED_VERSIONS)
-
-
 def get_random_cidr(version=4):
     if version == 4:
         return '10.%d.%d.0/%d' % (random.randint(3, 254),
                                   random.randint(3, 254),
                                   24)
-    return '2001:db8:%x::/%d' % (random.getrandbits(16), 64)
+    return '2001:db8:%x::/&d' % (random.getrandbits(16), 64)
 
 
 def get_random_mac():
@@ -259,26 +245,6 @@ def get_random_mac():
         random.randint(0x00, 0xff),
         random.randint(0x00, 0xff)]
     return ':'.join(map(lambda x: "%02x" % x, mac))
-
-
-def get_random_EUI():
-    return netaddr.EUI(get_random_mac())
-
-
-def get_random_ip_network(version=4):
-    return netaddr.IPNetwork(get_random_cidr(version=version))
-
-
-def get_random_ip_address(version=4):
-    if version == 4:
-        ip_string = '10.%d.%d.%d' % (random.randint(3, 254),
-                                     random.randint(3, 254),
-                                     random.randint(3, 254))
-        return netaddr.IPAddress(ip_string)
-    else:
-        ip = ipv6_utils.get_ipv6_addr_by_EUI64('2001:db8::/64',
-                                               get_random_mac())
-        return ip
 
 
 def is_bsd():
@@ -300,7 +266,3 @@ def reset_random_seed():
     # at the same time get the same values from RNG
     seed = time.time() + os.getpid()
     random.seed(seed)
-
-
-def get_random_ipv6_mode():
-    return random.choice(n_const.IPV6_MODES)

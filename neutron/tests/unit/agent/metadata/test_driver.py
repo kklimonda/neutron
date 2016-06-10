@@ -115,6 +115,7 @@ class TestMetadataDriverProcess(base.BaseTestCase):
                 '--metadata_proxy_user=%s' % expected_user,
                 '--metadata_proxy_group=%s' % expected_group,
                 '--debug',
+                '--verbose',
                 '--log-file=neutron-ns-metadata-proxy-%s.log' %
                 router_id]
             if not watch_log:

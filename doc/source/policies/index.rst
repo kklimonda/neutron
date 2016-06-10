@@ -30,5 +30,4 @@ items.
    neutron-teams
    gate-failure-triage
    code-reviews
-   release-checklist
    thirdparty-ci

@@ -22,10 +22,9 @@ class FlavorsPlugin(service_base.ServicePluginBase,
                     flavors_db.FlavorsDbMixin):
     """Implements Neutron Flavors Service plugin."""
 
-    supported_extension_aliases = ['flavors', 'service-type']
+    supported_extension_aliases = ['flavors']
 
-    @classmethod
-    def get_plugin_type(cls):
+    def get_plugin_type(self):
         return constants.FLAVORS
 
     def get_plugin_description(self):

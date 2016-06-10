@@ -14,16 +14,12 @@
 # limitations under the License.
 
 import mock
-from neutron_lib import constants
-from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
 
 from neutron.api.rpc.handlers import dhcp_rpc
-from neutron.callbacks import resources
-from neutron.common import constants as n_const
-from neutron.common import exceptions
+from neutron.common import constants
+from neutron.common import exceptions as n_exc
 from neutron.common import utils
-from neutron.db import provisioning_blocks
 from neutron.extensions import portbindings
 from neutron.tests import base
 
@@ -185,7 +181,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
             self.assertEqual(expected_port, port)
 
         self.plugin.get_port.return_value = {
-            'device_id': n_const.DEVICE_ID_RESERVED_DHCP_PORT}
+            'device_id': constants.DEVICE_ID_RESERVED_DHCP_PORT}
         self.callbacks._port_action = _fake_port_action
         self.callbacks.update_dhcp_port(mock.Mock(),
                                         host='foo_host',
@@ -217,7 +213,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
 
         self.plugin.get_port.return_value = {
             'device_id': 'other_id'}
-        self.assertRaises(exceptions.DhcpPortInUse,
+        self.assertRaises(n_exc.DhcpPortInUse,
                           self.callbacks.update_dhcp_port,
                           mock.Mock(),
                           host='foo_host',
@@ -237,7 +233,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
                          'id': 'foo_port_id'
                          }
         self.plugin.get_port.return_value = {
-            'device_id': n_const.DEVICE_ID_RESERVED_DHCP_PORT}
+            'device_id': constants.DEVICE_ID_RESERVED_DHCP_PORT}
         self.callbacks.update_dhcp_port(mock.Mock(),
                                         host='foo_host',
                                         port_id='foo_port_id',
@@ -254,14 +250,3 @@ class TestDhcpRpcCallback(base.BaseTestCase):
 
         self.plugin.assert_has_calls([
             mock.call.delete_ports_by_device_id(mock.ANY, 'devid', 'netid')])
-
-    def test_dhcp_ready_on_ports(self):
-        context = mock.Mock()
-        port_ids = range(10)
-        with mock.patch.object(provisioning_blocks,
-                               'provisioning_complete') as pc:
-            self.callbacks.dhcp_ready_on_ports(context, port_ids)
-        calls = [mock.call(context, port_id, resources.PORT,
-                           provisioning_blocks.DHCP_ENTITY)
-                 for port_id in port_ids]
-        pc.assert_has_calls(calls)

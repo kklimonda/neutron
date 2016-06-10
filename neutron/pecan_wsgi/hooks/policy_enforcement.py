@@ -21,6 +21,7 @@ from pecan import hooks
 import webob
 
 from neutron._i18n import _
+from neutron.api.v2 import attributes as v2_attributes
 from neutron.common import constants as const
 from neutron.extensions import quotasv2
 from neutron import manager
@@ -35,10 +36,8 @@ def _custom_getter(resource, resource_id):
         return quota.get_tenant_quotas(resource_id)[quotasv2.RESOURCE_NAME]
 
 
-def fetch_resource(neutron_context, collection, resource, resource_id):
-    controller = manager.NeutronManager.get_controller_for_resource(
-        collection)
-    attrs = controller.resource_info
+def fetch_resource(neutron_context, resource, resource_id):
+    attrs = v2_attributes.get_resource_info(resource)
     if not attrs:
         # this isn't a request for a normal resource. it could be
         # an action like removing a network from a dhcp agent.
@@ -97,7 +96,7 @@ class PolicyHook(hooks.PecanHook):
                 # Ops... this was a delete after all!
                 item = {}
             resource_id = state.request.context.get('resource_id')
-            resource_obj = fetch_resource(neutron_context, collection,
+            resource_obj = fetch_resource(neutron_context,
                                           resource, resource_id)
             if resource_obj:
                 original_resources.append(resource_obj)
@@ -141,8 +140,6 @@ class PolicyHook(hooks.PecanHook):
             data = state.response.json
         except ValueError:
             return
-        if state.request.method not in pecan_constants.ACTION_MAP:
-            return
         action = '%s_%s' % (pecan_constants.ACTION_MAP[state.request.method],
                             resource)
         if not data or (resource not in data and collection not in data):
@@ -179,9 +176,9 @@ class PolicyHook(hooks.PecanHook):
         return self._filter_attributes(request, data, to_exclude)
 
     def _filter_attributes(self, request, data, fields_to_strip):
-        # This routine will remove the fields that were requested to the
-        # plugin for policy evaluation but were not specified in the
-        # API request
+        # TODO(kevinbenton): this works but we didn't allow the plugin to
+        # only fetch the fields we are interested in. consider moving this
+        # to the call
         user_fields = request.params.getall('fields')
         return dict(item for item in data.items()
                     if (item[0] not in fields_to_strip and
@@ -197,9 +194,8 @@ class PolicyHook(hooks.PecanHook):
         """
         attributes_to_exclude = []
         for attr_name in data.keys():
-            controller = manager.NeutronManager.get_controller_for_resource(
-                collection)
-            attr_data = controller.resource_info.get(attr_name)
+            attr_data = v2_attributes.get_resource_info(
+                resource).get(attr_name)
             if attr_data and attr_data['is_visible']:
                 if policy.check(
                     context,

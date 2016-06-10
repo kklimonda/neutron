@@ -14,8 +14,6 @@
 #    under the License.
 
 import netaddr
-from neutron_lib import constants
-from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from sqlalchemy import and_
@@ -23,11 +21,12 @@ from sqlalchemy import orm
 from sqlalchemy.orm import exc
 
 from neutron._i18n import _
-from neutron.common import constants as n_const
+from neutron.api.v2 import attributes
+from neutron.common import constants
+from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.db import ipam_backend_mixin
 from neutron.db import models_v2
-from neutron.extensions import portbindings
 from neutron.ipam import requests as ipam_req
 from neutron.ipam import subnet_alloc
 
@@ -211,14 +210,14 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                                           subnet_id, port_id)
         return ips
 
-    def update_port_with_ips(self, context, host, db_port, new_port, new_mac):
+    def update_port_with_ips(self, context, db_port, new_port, new_mac):
         changes = self.Changes(add=[], original=[], remove=[])
         # Check if the IPs need to be updated
         network_id = db_port['network_id']
         if 'fixed_ips' in new_port:
             original = self._make_port_dict(db_port, process_extensions=False)
             changes = self._update_ips_for_port(
-                context, network_id, host,
+                context, network_id,
                 original["fixed_ips"], new_port['fixed_ips'],
                 original['mac_address'], db_port['device_owner'])
 
@@ -231,7 +230,7 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
         return changes
 
     def _test_fixed_ips_for_port(self, context, network_id, fixed_ips,
-                                 device_owner, subnets):
+                                 device_owner):
         """Test fixed IPs for port.
 
         Check that configured subnets are valid prior to allocating any
@@ -243,11 +242,11 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
         """
         fixed_ip_set = []
         for fixed in fixed_ips:
-            subnet = self._get_subnet_for_fixed_ip(context, fixed, subnets)
+            subnet = self._get_subnet_for_fixed_ip(context, fixed, network_id)
 
             is_auto_addr_subnet = ipv6_utils.is_auto_address_subnet(subnet)
             if ('ip_address' in fixed and
-                subnet['cidr'] != n_const.PROVISIONAL_IPV6_PD_PREFIX):
+                subnet['cidr'] != constants.PROVISIONAL_IPV6_PD_PREFIX):
                 # Ensure that the IP's are unique
                 if not IpamNonPluggableBackend._check_unique_ip(
                         context, network_id,
@@ -313,23 +312,15 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                                 'subnet_id': result['subnet_id']})
         return ips
 
-    def _update_ips_for_port(self, context, network_id, host, original_ips,
+    def _update_ips_for_port(self, context, network_id, original_ips,
                              new_ips, mac_address, device_owner):
         """Add or remove IPs from the port."""
         added = []
         changes = self._get_changed_ips_for_port(context, original_ips,
                                                  new_ips, device_owner)
-        subnets = self._ipam_get_subnets(
-            context, network_id=network_id, host=host)
         # Check if the IP's to add are OK
         to_add = self._test_fixed_ips_for_port(context, network_id,
-                                               changes.add, device_owner,
-                                               subnets)
-
-        if device_owner not in constants.ROUTER_INTERFACE_OWNERS:
-            to_add += self._update_ips_for_pd_subnet(
-                context, subnets, changes.add)
-
+                                               changes.add, device_owner)
         for ip in changes.remove:
             LOG.debug("Port update. Hold %s", ip)
             IpamNonPluggableBackend._delete_ip_allocation(context,
@@ -352,26 +343,41 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
         a subnet_id then allocate an IP address accordingly.
         """
         p = port['port']
-        subnets = self._ipam_get_subnets(context,
-                                         network_id=p['network_id'],
-                                         host=p.get(portbindings.HOST_ID))
+        ips = []
+        v6_stateless = []
+        net_id_filter = {'network_id': [p['network_id']]}
+        subnets = self._get_subnets(context, filters=net_id_filter)
+        is_router_port = (
+            p['device_owner'] in constants.ROUTER_INTERFACE_OWNERS_SNAT)
 
-        v4, v6_stateful, v6_stateless = self._classify_subnets(
-            context, subnets)
-
-        fixed_configured = p['fixed_ips'] is not constants.ATTR_NOT_SPECIFIED
+        fixed_configured = p['fixed_ips'] is not attributes.ATTR_NOT_SPECIFIED
         if fixed_configured:
             configured_ips = self._test_fixed_ips_for_port(context,
                                                            p["network_id"],
                                                            p['fixed_ips'],
-                                                           p['device_owner'],
-                                                           subnets)
+                                                           p['device_owner'])
             ips = self._allocate_fixed_ips(context,
                                            configured_ips,
                                            p['mac_address'])
 
+            # For ports that are not router ports, implicitly include all
+            # auto-address subnets for address association.
+            if not is_router_port:
+                v6_stateless += [subnet for subnet in subnets
+                                 if ipv6_utils.is_auto_address_subnet(subnet)]
         else:
-            ips = []
+            # Split into v4, v6 stateless and v6 stateful subnets
+            v4 = []
+            v6_stateful = []
+            for subnet in subnets:
+                if subnet['ip_version'] == 4:
+                    v4.append(subnet)
+                elif ipv6_utils.is_auto_address_subnet(subnet):
+                    if not is_router_port:
+                        v6_stateless.append(subnet)
+                else:
+                    v6_stateful.append(subnet)
+
             version_subnets = [v4, v6_stateful]
             for subnets in version_subnets:
                 if subnets:
@@ -380,16 +386,13 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     ips.append({'ip_address': result['ip_address'],
                                 'subnet_id': result['subnet_id']})
 
-        is_router_port = (
-            p['device_owner'] in constants.ROUTER_INTERFACE_OWNERS_SNAT)
-        if not is_router_port:
+        for subnet in v6_stateless:
             # IP addresses for IPv6 SLAAC and DHCPv6-stateless subnets
-            # are generated and implicitly included.
-            for subnet in v6_stateless:
-                ip_address = self._calculate_ipv6_eui64_addr(
-                    context, subnet, p['mac_address'])
-                ips.append({'ip_address': ip_address.format(),
-                            'subnet_id': subnet['id']})
+            # are implicitly included.
+            ip_address = self._calculate_ipv6_eui64_addr(context, subnet,
+                                                         p['mac_address'])
+            ips.append({'ip_address': ip_address.format(),
+                        'subnet_id': subnet['id']})
 
         return ips
 
@@ -442,7 +445,7 @@ class IpamNonPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
 
         # gateway_ip and allocation pools should be validated or generated
         # only for specific request
-        if subnet['cidr'] is not constants.ATTR_NOT_SPECIFIED:
+        if subnet['cidr'] is not attributes.ATTR_NOT_SPECIFIED:
             subnet['gateway_ip'] = self._gateway_ip_str(subnet,
                                                         subnet['cidr'])
             # allocation_pools are converted to list of IPRanges

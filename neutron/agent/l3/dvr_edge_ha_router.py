@@ -13,8 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-
 from neutron.agent.l3.dvr_edge_router import DvrEdgeRouter
 from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3.ha_router import HaRouter
@@ -77,7 +75,7 @@ class DvrEdgeHaRouter(DvrEdgeRouter, HaRouter):
             snat_interface = self._get_snat_int_device_name(port['id'])
             self.driver.unplug(snat_interface,
                                namespace=self.ha_namespace,
-                               prefix=constants.SNAT_INT_DEV_PREFIX)
+                               prefix=l3_constants.SNAT_INT_DEV_PREFIX)
             self._clear_vips(snat_interface)
         super(DvrEdgeHaRouter, self)._external_gateway_removed(
             ex_gw_port, interface_name)

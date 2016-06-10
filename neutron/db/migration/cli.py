@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
-from logging import config as logging_config
 import os
 
 from alembic import command as alembic_command
@@ -22,6 +20,7 @@ from alembic import environment
 from alembic import migration as alembic_migration
 from alembic import script as alembic_script
 from alembic import util as alembic_util
+import debtcollector
 from oslo_config import cfg
 from oslo_utils import fileutils
 from oslo_utils import importutils
@@ -39,11 +38,10 @@ HEADS_FILENAME = 'HEADS'
 CONTRACT_HEAD_FILENAME = 'CONTRACT_HEAD'
 EXPAND_HEAD_FILENAME = 'EXPAND_HEAD'
 
-CURRENT_RELEASE = migration.NEWTON
+CURRENT_RELEASE = migration.MITAKA
 RELEASES = (
     migration.LIBERTY,
     migration.MITAKA,
-    migration.NEWTON,
 )
 
 EXPAND_BRANCH = 'expand'
@@ -57,8 +55,10 @@ migration_entrypoints = {
 }
 
 
-neutron_alembic_ini = os.path.join(os.path.dirname(__file__), 'alembic.ini')
+BRANCHLESS_WARNING = 'Branchless migration chains are deprecated as of Mitaka.'
 
+
+neutron_alembic_ini = os.path.join(os.path.dirname(__file__), 'alembic.ini')
 
 VALID_SERVICES = ['fwaas', 'lbaas', 'vpnaas']
 INSTALLED_SERVICES = [service_ for service_ in VALID_SERVICES
@@ -86,6 +86,13 @@ _core_opts = [
                 help=_("Enforce using split branches file structure."))
 ]
 
+_quota_opts = [
+    cfg.StrOpt('quota_driver',
+               default='',
+               help=_('Neutron quota driver class'),
+               deprecated_for_removal=True),
+]
+
 _db_opts = [
     cfg.StrOpt('connection',
                deprecated_name='sql_connection',
@@ -101,6 +108,7 @@ _db_opts = [
 CONF = cfg.ConfigOpts()
 CONF.register_cli_opts(_core_opts)
 CONF.register_cli_opts(_db_opts, 'database')
+CONF.register_opts(_quota_opts, 'QUOTAS')
 
 
 def do_alembic_command(config, cmd, revision=None, desc=None, **kwargs):
@@ -136,7 +144,7 @@ def do_generic_show(config, cmd):
 def do_check_migration(config, cmd):
     do_alembic_command(config, 'branches')
     validate_revisions(config)
-    validate_head_files(config)
+    validate_head_file(config)
 
 
 def add_alembic_subparser(sub, cmd):
@@ -147,7 +155,6 @@ def add_branch_options(parser):
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--expand', action='store_true')
     group.add_argument('--contract', action='store_true')
-    return group
 
 
 def _find_milestone_revisions(config, milestone, branch=None):
@@ -247,28 +254,16 @@ def do_revision(config, cmd):
         'autogenerate': CONF.command.autogenerate,
         'sql': CONF.command.sql,
     }
-    branches = []
     if CONF.command.expand:
         kwargs['head'] = 'expand@head'
-        branches.append(EXPAND_BRANCH)
     elif CONF.command.contract:
         kwargs['head'] = 'contract@head'
-        branches.append(CONTRACT_BRANCH)
-    else:
-        branches = MIGRATION_BRANCHES
 
-    if not CONF.command.autogenerate:
-        for branch in branches:
-            args = copy.copy(kwargs)
-            version_path = _get_version_branch_path(
-                config, release=CURRENT_RELEASE, branch=branch)
-            _check_bootstrap_new_branch(branch, version_path, args)
-            do_alembic_command(config, cmd, **args)
+    do_alembic_command(config, cmd, **kwargs)
+    if _use_separate_migration_branches(config):
+        update_head_files(config)
     else:
-        # autogeneration code will take care of enforcing proper directories
-        do_alembic_command(config, cmd, **kwargs)
-
-    update_head_files(config)
+        update_head_file(config)
 
 
 def _get_release_labels(labels):
@@ -358,6 +353,32 @@ def _get_branch_points(script):
     return branchpoints
 
 
+def validate_head_file(config):
+    '''Check that HEAD file contains the latest head for the branch.'''
+    if _use_separate_migration_branches(config):
+        _validate_head_files(config)
+    else:
+        _validate_head_file(config)
+
+
+@debtcollector.removals.remove(message=BRANCHLESS_WARNING)
+def _validate_head_file(config):
+    '''Check that HEAD file contains the latest head for the branch.'''
+    script = alembic_script.ScriptDirectory.from_config(config)
+    expected_head = script.get_heads()
+    head_path = _get_head_file_path(config)
+    try:
+        with open(head_path) as file_:
+            observed_head = file_.read().split()
+            if observed_head == expected_head:
+                return
+    except IOError:
+        pass
+    alembic_util.err(
+        _('HEAD file does not match migration timeline head, expected: %s')
+        % expected_head)
+
+
 def _get_heads_map(config):
     script = alembic_script.ScriptDirectory.from_config(config)
     heads = script.get_heads()
@@ -384,7 +405,7 @@ def _check_head(branch_name, head_file, head):
                                                  'head': head})
 
 
-def validate_head_files(config):
+def _validate_head_files(config):
     '''Check that HEAD files contain the latest head for the branch.'''
     contract_head = _get_contract_head_file_path(config)
     expand_head = _get_expand_head_file_path(config)
@@ -411,6 +432,14 @@ def update_head_files(config):
     old_heads_file = _get_heads_file_path(config)
     for file_ in (old_head_file, old_heads_file):
         fileutils.delete_if_exists(file_)
+
+
+@debtcollector.removals.remove(message=BRANCHLESS_WARNING)
+def update_head_file(config):
+    script = alembic_script.ScriptDirectory.from_config(config)
+    head = script.get_heads()
+    with open(_get_head_file_path(config), 'w+') as f:
+        f.write('\n'.join(head))
 
 
 def _get_current_database_heads(config):
@@ -476,9 +505,9 @@ def add_command_parsers(subparsers):
 
     parser = add_alembic_subparser(subparsers, 'revision')
     parser.add_argument('-m', '--message')
+    parser.add_argument('--autogenerate', action='store_true')
     parser.add_argument('--sql', action='store_true')
-    group = add_branch_options(parser)
-    group.add_argument('--autogenerate', action='store_true')
+    add_branch_options(parser)
     parser.set_defaults(func=do_revision)
 
     parser = subparsers.add_parser(
@@ -712,10 +741,6 @@ def get_engine_config():
 
 
 def main():
-    # Interpret the config file for Python logging.
-    # This line sets up loggers basically.
-    logging_config.fileConfig(neutron_alembic_ini)
-
     CONF(project='neutron')
     validate_cli_options()
     return_val = False

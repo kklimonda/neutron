@@ -113,7 +113,7 @@ Neutron makes use of alembic branches for two purposes.
 1. Independent Sub-Project Tables
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Various `sub-projects <../stadium/sub_projects.html>`_ can be installed with Neutron. Each
+Various `sub-projects <sub_projects.html>`_ can be installed with Neutron. Each
 sub-project registers its own alembic branch which is responsible for migrating
 the schemas of the tables owned by the sub-project.
 
@@ -249,7 +249,7 @@ a virtualenv + testdb environment as described in
 :ref:`neutron-db-manage-without-devstack`.
 
 Stop the neutron service. Work from the base directory of the neutron (or
-sub-project) repo. Check out the master branch and do ``git pull`` to
+sub-project) repo. Check out the master branch and and do ``git pull`` to
 ensure it is fully up to date. Check out your development branch and rebase to
 master.
 

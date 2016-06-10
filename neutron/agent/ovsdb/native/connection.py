@@ -29,10 +29,8 @@ class TransactionQueue(Queue.Queue, object):
     def __init__(self, *args, **kwargs):
         super(TransactionQueue, self).__init__(*args, **kwargs)
         alertpipe = os.pipe()
-        # NOTE(ivasilevskaya) python 3 doesn't allow unbuffered I/O. Will get
-        # around this constraint by using binary mode.
-        self.alertin = os.fdopen(alertpipe[0], 'rb', 0)
-        self.alertout = os.fdopen(alertpipe[1], 'wb', 0)
+        self.alertin = os.fdopen(alertpipe[0], 'r', 0)
+        self.alertout = os.fdopen(alertpipe[1], 'w', 0)
 
     def get_nowait(self, *args, **kwargs):
         try:
@@ -61,14 +59,7 @@ class Connection(object):
         self.lock = threading.Lock()
         self.schema_name = schema_name
 
-    def start(self, table_name_list=None):
-        """
-        :param table_name_list: A list of table names for schema_helper to
-                register. When this parameter is given, schema_helper will only
-                register tables which name are in list. Otherwise,
-                schema_helper will register all tables for given schema_name as
-                default.
-        """
+    def start(self):
         with self.lock:
             if self.idl is not None:
                 return
@@ -88,11 +79,7 @@ class Connection(object):
                                                       self.schema_name)
                 helper = do_get_schema_helper()
 
-            if table_name_list is None:
-                helper.register_all()
-            else:
-                for table_name in table_name_list:
-                    helper.register_table(table_name)
+            helper.register_all()
             self.idl = idl.Idl(self.connection, helper)
             idlutils.wait_for_change(self.idl, self.timeout)
             self.poller = poller.Poller()
@@ -104,9 +91,6 @@ class Connection(object):
         while True:
             self.idl.wait(self.poller)
             self.poller.fd_wait(self.txns.alert_fileno, poller.POLLIN)
-            #TODO(jlibosva): Remove next line once losing connection to ovsdb
-            #                is solved.
-            self.poller.timer_wait(self.timeout)
             self.poller.block()
             self.idl.run()
             txn = self.txns.get_nowait()
