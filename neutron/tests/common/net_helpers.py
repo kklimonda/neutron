@@ -63,7 +63,7 @@ MACVTAP_PREFIX = 'macvtap'
 LB_DEVICE_NAME_MAX_LEN = 10
 
 SS_SOURCE_PORT_PATTERN = re.compile(
-    r'^.*\s+\d+\s+.*:(?P<port>\d+)\s+[0-9:].*')
+    r'^.*\s+\d+\s+.*:(?P<port>\d+)\s+[^\s]+:.*')
 
 READ_TIMEOUT = os.environ.get('OS_TEST_READ_TIMEOUT', 5)
 
@@ -155,7 +155,7 @@ def _get_source_ports_from_ss_output(output):
     for line in output.splitlines():
         match = SS_SOURCE_PORT_PATTERN.match(line)
         if match:
-            ports.add(match.group('port'))
+            ports.add(int(match.group('port')))
     return ports
 
 

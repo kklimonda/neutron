@@ -1241,6 +1241,8 @@ neutron/tests/unit/tests/__init__.py
 neutron/tests/unit/tests/test_base.py
 neutron/tests/unit/tests/test_post_mortem_debug.py
 neutron/tests/unit/tests/test_tools.py
+neutron/tests/unit/tests/common/__init__.py
+neutron/tests/unit/tests/common/test_net_helpers.py
 neutron/tests/unit/tests/example/README
 neutron/tests/unit/tests/example/__init__.py
 neutron/tests/unit/tests/example/dir/__init__.py
@@ -1260,6 +1262,7 @@ releasenotes/notes/1500-default-segment-mtu-54e2cf6aea9602d5.yaml
 releasenotes/notes/QoS-for-linuxbridge-agent-bdb13515aac4e555.yaml
 releasenotes/notes/access_as_external_rbac-455dc74b9fa22761.yaml
 releasenotes/notes/add-availability-zone-4440cf00be7c54ba.yaml
+releasenotes/notes/add-designate-driver-ssl-options-169c299c96f2aff0.yaml
 releasenotes/notes/add-get-me-a-network-56321aeef5389001.yaml
 releasenotes/notes/add-integration-with-external-dns-f56ec8a4993b1fc4.yaml
 releasenotes/notes/add-ip-protocols-in-sg-60467a073e771aee.yaml
