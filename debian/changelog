@@ -1,4 +1,4 @@
-neutron (2:7.0.5~dev99-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:7.1.1-0ubuntu1) UNRELEASED; urgency=medium
 
   [ James Page ]
   * New upstream version.
@@ -11,7 +11,10 @@ neutron (2:7.0.5~dev99-0ubuntu1) UNRELEASED; urgency=medium
   * d/control, d/neutron-plugin-midonet.install, d/t/midonet-plugin:
     Drop MidonetInterfaceDriver as it has moved out of tree.
 
- -- Corey Bryant <corey.bryant@canonical.com>  Thu, 19 May 2016 12:39:02 -0400
+  [ David Della Vecchia ]
+  * New upstream stable point release for OpenStack Liberty (LP: #1594867).
+
+ -- David Della Vecchia <ddv@canonical.com>  Tue, 21 Jun 2016 12:14:50 -0400
 
 neutron (2:7.0.4-0ubuntu1) wily; urgency=medium
 
