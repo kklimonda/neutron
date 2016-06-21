@@ -107,6 +107,12 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
             subnet_id=subnet_id
         )
         context.session.add(allocated)
+        # NOTE(kevinbenton): We add this to the session info so the sqlalchemy
+        # object isn't immediately garbage collected. Otherwise when the
+        # fixed_ips relationship is referenced a new persistent object will be
+        # added to the session that will interfere with retry operations.
+        # See bug 1556178 for details.
+        context.session.info.setdefault('allocated_ips', []).append(allocated)
 
     def _make_subnet_dict(self, subnet, fields=None, context=None):
         res = {'id': subnet['id'],
@@ -314,3 +320,21 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         return [{'subnet_id': ip["subnet_id"],
                  'ip_address': ip["ip_address"]}
                 for ip in ips]
+
+    def _port_filter_hook(self, context, original_model, conditions):
+        # Apply the port filter only in non-admin and non-advsvc context
+        if self.model_query_scope(context, original_model):
+            conditions |= (
+                (context.tenant_id == models_v2.Network.tenant_id) &
+                (models_v2.Network.id == models_v2.Port.network_id))
+        return conditions
+
+    def _port_query_hook(self, context, original_model, query):
+        # we need to outerjoin to networks if the model query scope
+        # is necessary so we can filter based on network id. without
+        # this the conditions in the filter hook cause the networks
+        # table to be added to the FROM statement so we get lots of
+        # duplicated rows that break the COUNT operation
+        if self.model_query_scope(context, original_model):
+            query = query.outerjoin(models_v2.Network)
+        return query

@@ -1082,6 +1082,8 @@ neutron/tests/unit/db/test_l3_db.py
 neutron/tests/unit/db/test_l3_dvr_db.py
 neutron/tests/unit/db/test_l3_hamode_db.py
 neutron/tests/unit/db/test_migration.py
+neutron/tests/unit/db/test_portsecurity_db.py
+neutron/tests/unit/db/test_portsecurity_db_common.py
 neutron/tests/unit/db/test_securitygroups_db.py
 neutron/tests/unit/db/metering/__init__.py
 neutron/tests/unit/db/metering/test_metering_db.py
@@ -1269,10 +1271,12 @@ releasenotes/notes/clear-allowed-address-pairs-with-none-4757bcca78076c9e.yaml
 releasenotes/notes/deprecated-features-96c51d46f3498fad.yaml
 releasenotes/notes/deprecated-plugins-and-drivers-292865277ee1d182.yaml
 releasenotes/notes/dvr-ovs-agent-6052a8d60fddde22.yaml
+releasenotes/notes/end-to-end-mtu-00345fc4282cb8fb.yaml
 releasenotes/notes/ipv6-prefix-delegation-a2a342e5e34534c7.yaml
 releasenotes/notes/lbaas-v2-1628fe34700148f6.yaml
 releasenotes/notes/linuxbridge_vxlan_arp_responder-e9ea91552e1b62a7.yaml
 releasenotes/notes/macvtap_assigned_vf_check-f4d07660ffd82a24.yaml
+releasenotes/notes/mtu-selection-and-advertisement-ab29f9ec43140224.yaml
 releasenotes/notes/neutron-rbac-516b499743b57d1f.yaml
 releasenotes/notes/ovs-agent-6137f5f82e10135c.yaml
 releasenotes/notes/performance-considerations-a76dd11d35f1df6a.yaml

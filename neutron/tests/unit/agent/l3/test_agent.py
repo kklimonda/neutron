@@ -74,11 +74,15 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
         agent_config.register_process_monitor_opts(self.conf)
         self.conf.register_opts(interface.OPTS)
         self.conf.register_opts(external_process.OPTS)
+        self.conf.register_opts(pd.OPTS)
+        self.conf.register_opts(ra.OPTS)
         self.conf.set_override('router_id', 'fake_id')
         self.conf.set_override('interface_driver',
                                'neutron.agent.linux.interface.NullDriver')
         self.conf.set_override('send_arp_for_ha', 1)
         self.conf.set_override('state_path', '')
+        self.conf.set_override('ra_confs', '/tmp')
+        self.conf.set_override('pd_dhcp_driver', '')
 
         self.device_exists_p = mock.patch(
             'neutron.agent.linux.ip_lib.device_exists')
@@ -169,7 +173,8 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
             ri.radvd = ra.DaemonMonitor(router['id'],
                                         ri.ns_name,
                                         agent.process_monitor,
-                                        ri.get_internal_device_name)
+                                        ri.get_internal_device_name,
+                                        self.conf)
         ri.process(agent)
 
 
@@ -380,7 +385,8 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
                 sn_port['fixed_ips'],
                 sn_port['mac_address'],
                 ri._get_snat_int_device_name(sn_port['id']),
-                dvr_snat_ns.SNAT_INT_DEV_PREFIX)
+                dvr_snat_ns.SNAT_INT_DEV_PREFIX,
+                mtu=None)
         elif action == 'remove':
             self.device_exists.return_value = False
             ri.get_snat_port_for_internal_port = mock.Mock(
@@ -1232,7 +1238,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         return expected_calls
 
     def _process_router_ipv6_subnet_added(
-            self, router, ipv6_subnet_modes=None):
+            self, router, ipv6_subnet_modes=None, network_mtu=0):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         ri = l3router.RouterInfo(router['id'], router, **self.ri_kwargs)
         agent.external_gateway_added = mock.Mock()
@@ -1243,7 +1249,8 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             router,
             count=len(ipv6_subnet_modes),
             ip_version=6,
-            ipv6_subnet_modes=ipv6_subnet_modes)
+            ipv6_subnet_modes=ipv6_subnet_modes,
+            network_mtu=network_mtu)
         # Reassign the router object to RouterInfo
         self._process_router_instance_for_agent(agent, ri, router)
         return ri
@@ -1263,8 +1270,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         ri = self._process_router_ipv6_interface_added(router)
         self._assert_ri_process_enabled(ri)
         # Expect radvd configured without prefix
-        self.assertNotIn('prefix',
-                         self.utils_replace_file.call_args[0][1].split())
+        self.assertNotIn('prefix', self.utils_replace_file.call_args[0][1])
 
     def test_process_router_ipv6_slaac_interface_added(self):
         router = l3_test_common.prepare_router_data()
@@ -1272,8 +1278,19 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             router, ra_mode=l3_constants.IPV6_SLAAC)
         self._assert_ri_process_enabled(ri)
         # Expect radvd configured with prefix
-        self.assertIn('prefix',
-                      self.utils_replace_file.call_args[0][1].split())
+        radvd_config_str = self.utils_replace_file.call_args[0][1]
+        self.assertIn('prefix', radvd_config_str)
+        self.assertIn('AdvAutonomous on', radvd_config_str)
+
+    def test_process_router_ipv6_dhcpv6_stateful_interface_added(self):
+        router = l3_test_common.prepare_router_data()
+        ri = self._process_router_ipv6_interface_added(
+            router, ra_mode=l3_constants.DHCPV6_STATEFUL)
+        self._assert_ri_process_enabled(ri)
+        # Expect radvd configured with prefix
+        radvd_config_str = self.utils_replace_file.call_args[0][1]
+        self.assertIn('prefix', radvd_config_str)
+        self.assertIn('AdvAutonomous off', radvd_config_str)
 
     def test_process_router_ipv6_subnets_added(self):
         router = l3_test_common.prepare_router_data()
@@ -1285,11 +1302,13 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             {'ra_mode': l3_constants.DHCPV6_STATEFUL,
              'address_mode': l3_constants.DHCPV6_STATEFUL}])
         self._assert_ri_process_enabled(ri)
-        radvd_config = self.utils_replace_file.call_args[0][1].split()
+        radvd_config_str = self.utils_replace_file.call_args[0][1]
         # Assert we have a prefix from IPV6_SLAAC and a prefix from
         # DHCPV6_STATELESS on one interface
-        self.assertEqual(2, radvd_config.count("prefix"))
-        self.assertEqual(1, radvd_config.count("interface"))
+        self.assertEqual(3, radvd_config_str.count("prefix"))
+        self.assertEqual(1, radvd_config_str.count("interface"))
+        self.assertEqual(2, radvd_config_str.count("AdvAutonomous on"))
+        self.assertEqual(1, radvd_config_str.count("AdvAutonomous off"))
 
     def test_process_router_ipv6_subnets_added_to_existing_port(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
@@ -2211,7 +2230,8 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             router['id'],
             namespaces.RouterNamespace._get_ns_name(router['id']),
             agent.process_monitor,
-            l3_test_common.FakeDev)
+            l3_test_common.FakeDev,
+            self.conf)
         radvd.enable(router['_interfaces'])
 
         cmd = execute.call_args[0][0]
@@ -2224,6 +2244,24 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         self.assertIn(_join('-C', conffile), cmd)
         self.assertIn(_join('-p', pidfile), cmd)
         self.assertIn(_join('-m', 'syslog'), cmd)
+
+    def test_generate_radvd_mtu_conf(self):
+        router = l3_test_common.prepare_router_data()
+        ipv6_subnet_modes = [{'ra_mode': l3_constants.IPV6_SLAAC,
+                             'address_mode': l3_constants.IPV6_SLAAC}]
+        network_mtu = '1446'
+        ri = self._process_router_ipv6_subnet_added(router,
+                                                    ipv6_subnet_modes,
+                                                    network_mtu)
+        expected = "AdvLinkMTU 1446"
+        ri.agent_conf.set_override('advertise_mtu', False)
+        ri.radvd._generate_radvd_conf(router[l3_constants.INTERFACE_KEY])
+        self.assertNotIn(expected, self.utils_replace_file.call_args[0][1])
+
+        # Verify that MTU is advertised when advertise_mtu is True
+        ri.agent_conf.set_override('advertise_mtu', True)
+        ri.radvd._generate_radvd_conf(router[l3_constants.INTERFACE_KEY])
+        self.assertIn(expected, self.utils_replace_file.call_args[0][1])
 
     def test_generate_radvd_conf_other_and_managed_flag(self):
         # expected = {ra_mode: (AdvOtherConfigFlag, AdvManagedFlag), ...}
@@ -2289,7 +2327,8 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             ri.radvd = ra.DaemonMonitor(router['id'],
                                         ri.ns_name,
                                         agent.process_monitor,
-                                        ri.get_internal_device_name)
+                                        ri.get_internal_device_name,
+                                        self.conf)
         return agent, router, ri
 
     def _pd_remove_gw_interface(self, intfs, agent, router, ri):

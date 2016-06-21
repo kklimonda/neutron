@@ -23,6 +23,7 @@ from oslo_utils import excutils
 from oslo_utils import uuidutils
 from sqlalchemy import and_
 from sqlalchemy import event
+from sqlalchemy import not_
 
 from neutron.api.rpc.agentnotifiers import l3_rpc_agent_api
 from neutron.api.v2 import attributes
@@ -208,13 +209,9 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         if updated['shared'] == original.shared or updated['shared']:
             return
         ports = self._model_query(
-            context, models_v2.Port).filter(
-                and_(
-                    models_v2.Port.network_id == id,
-                    models_v2.Port.device_owner !=
-                    constants.DEVICE_OWNER_ROUTER_GW,
-                    models_v2.Port.device_owner !=
-                    constants.DEVICE_OWNER_FLOATINGIP))
+            context, models_v2.Port).filter(models_v2.Port.network_id == id)
+        ports = ports.filter(not_(models_v2.Port.device_owner.startswith(
+            constants.DEVICE_OWNER_NETWORK_PREFIX)))
         subnets = self._model_query(
             context, models_v2.Subnet).filter(
                 models_v2.Subnet.network_id == id)
@@ -522,8 +519,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             raise n_exc.BadRequest(resource='subnets', msg=reason)
 
         mode_list = [constants.IPV6_SLAAC,
-                     constants.DHCPV6_STATELESS,
-                     attributes.ATTR_NOT_SPECIFIED]
+                     constants.DHCPV6_STATELESS]
 
         ra_mode = subnet.get('ipv6_ra_mode')
         if ra_mode not in mode_list:
@@ -1339,3 +1335,10 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                             device_id=device_id)
                 if tenant_id != router['tenant_id']:
                     raise n_exc.DeviceIDNotOwnedByTenant(device_id=device_id)
+
+    db_base_plugin_common.DbBasePluginCommon.register_model_query_hook(
+        models_v2.Port,
+        "port",
+        '_port_query_hook',
+        '_port_filter_hook',
+        None)

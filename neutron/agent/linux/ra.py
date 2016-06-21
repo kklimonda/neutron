@@ -35,13 +35,15 @@ OPTS = [
                help=_('Location to store IPv6 RA config files')),
 ]
 
-cfg.CONF.register_opts(OPTS)
-
 CONFIG_TEMPLATE = jinja2.Template("""interface {{ interface_name }}
 {
    AdvSendAdvert on;
    MinRtrAdvInterval 3;
    MaxRtrAdvInterval 10;
+
+   {% if network_mtu >= constants.IPV6_MIN_MTU %}
+   AdvLinkMTU {{network_mtu}};
+   {% endif %}
 
    {% if constants.DHCPV6_STATELESS in ra_modes %}
    AdvOtherConfigFlag on;
@@ -51,11 +53,19 @@ CONFIG_TEMPLATE = jinja2.Template("""interface {{ interface_name }}
    AdvManagedFlag on;
    {% endif %}
 
-   {% for prefix in prefixes %}
+   {% for prefix in auto_config_prefixes %}
    prefix {{ prefix }}
    {
         AdvOnLink on;
         AdvAutonomous on;
+   };
+   {% endfor %}
+
+   {% for prefix in stateful_config_prefixes %}
+   prefix {{ prefix }}
+   {
+        AdvOnLink on;
+        AdvAutonomous off;
    };
    {% endfor %}
 };
@@ -65,18 +75,21 @@ CONFIG_TEMPLATE = jinja2.Template("""interface {{ interface_name }}
 class DaemonMonitor(object):
     """Manage the data and state of an radvd process."""
 
-    def __init__(self, router_id, router_ns, process_monitor, dev_name_helper):
+    def __init__(self, router_id, router_ns, process_monitor, dev_name_helper,
+                 agent_conf):
         self._router_id = router_id
         self._router_ns = router_ns
         self._process_monitor = process_monitor
         self._dev_name_helper = dev_name_helper
+        self._agent_conf = agent_conf
 
     def _generate_radvd_conf(self, router_ports):
-        radvd_conf = utils.get_conf_file_name(cfg.CONF.ra_confs,
+        radvd_conf = utils.get_conf_file_name(self._agent_conf.ra_confs,
                                               self._router_id,
                                               'radvd.conf',
                                               True)
         buf = six.StringIO()
+        network_mtu = 0
         for p in router_ports:
             subnets = p.get('subnets', [])
             v6_subnets = [subnet for subnet in subnets if
@@ -87,12 +100,19 @@ class DaemonMonitor(object):
             auto_config_prefixes = [subnet['cidr'] for subnet in v6_subnets if
                     subnet['ipv6_ra_mode'] == constants.IPV6_SLAAC or
                     subnet['ipv6_ra_mode'] == constants.DHCPV6_STATELESS]
+            stateful_config_prefixes = [subnet['cidr'] for subnet in v6_subnets
+                    if subnet['ipv6_ra_mode'] == constants.DHCPV6_STATEFUL]
             interface_name = self._dev_name_helper(p['id'])
+            if self._agent_conf.advertise_mtu:
+                network_mtu = p.get('mtu', 0)
+
             buf.write('%s' % CONFIG_TEMPLATE.render(
                 ra_modes=list(ra_modes),
                 interface_name=interface_name,
-                prefixes=auto_config_prefixes,
-                constants=constants))
+                auto_config_prefixes=auto_config_prefixes,
+                stateful_config_prefixes=stateful_config_prefixes,
+                constants=constants,
+                network_mtu=int(network_mtu)))
 
         utils.replace_file(radvd_conf, buf.getvalue())
         return radvd_conf
@@ -103,7 +123,7 @@ class DaemonMonitor(object):
             default_cmd_callback=callback,
             namespace=self._router_ns,
             service=RADVD_SERVICE_NAME,
-            conf=cfg.CONF,
+            conf=self._agent_conf,
             run_as_root=True)
 
     def _spawn_radvd(self, radvd_conf):
@@ -143,7 +163,7 @@ class DaemonMonitor(object):
                                          service_name=RADVD_SERVICE_NAME)
         pm = self._get_radvd_process_manager()
         pm.disable()
-        utils.remove_conf_files(cfg.CONF.ra_confs, self._router_id)
+        utils.remove_conf_files(self._agent_conf.ra_confs, self._router_id)
         LOG.debug("radvd disabled for router %s", self._router_id)
 
     @property

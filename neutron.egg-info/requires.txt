@@ -1,6 +1,7 @@
 pbr>=1.6
 Paste
 PasteDeploy>=1.5.0
+Routes!=2.0,!=2.1,!=2.3.0,>=1.12.3
 debtcollector>=0.3.0
 eventlet>=0.17.4
 pecan>=1.0.0
@@ -37,9 +38,6 @@ python-novaclient!=2.33.0,>=2.28.1
 
 [:(python_version!='2.7')]
 Routes!=2.0,!=2.3.0,>=1.12.3
-
-[:(python_version=='2.7')]
-Routes!=2.0,!=2.1,!=2.3.0,>=1.12.3
 
 [:(sys_platform=='win32')]
 pywin32
