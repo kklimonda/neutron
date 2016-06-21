@@ -1,6 +1,8 @@
 CHANGES
 =======
 
+* tests: clean up designate client session mock on test exit
+* ovs: set device MTU after it's moved into a namespace
 * Fix designate dns driver for SSL based endpoints
 * After a migration clean up the floating ip on the source host
 * Updated from global requirements
