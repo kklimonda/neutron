@@ -31,7 +31,7 @@ Forwarded: not-needed
  from neutron.tests import base
  
  # Test variables for BGP Speaker
-@@ -41,6 +49,7 @@
+@@ -41,6 +49,7 @@ FAKE_NEXTHOP = '5.5.5.5'
  
  class TestRyuBgpDriver(base.BaseTestCase):
  

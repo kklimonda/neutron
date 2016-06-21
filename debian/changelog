@@ -1,10 +1,14 @@
-neutron (2:8.1.3~dev6-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:8.1.3~dev9-0ubuntu1) UNRELEASED; urgency=medium
 
+  [ Corey Bryant ]
   * New upstream version.
   * d/p/skip-test-secure-client.patch:  Skip test_secure_client until
     upstream bug is resolved.
 
- -- Corey Bryant <corey.bryant@canonical.com>  Mon, 20 Jun 2016 10:27:24 -0400
+  [ James Page ]
+  * New upstream version.
+
+ -- James Page <james.page@ubuntu.com>  Tue, 21 Jun 2016 09:39:52 +0100
 
 neutron (2:8.1.2-0ubuntu1) xenial; urgency=medium
 
