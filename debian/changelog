@@ -13,6 +13,8 @@ neutron (2:7.1.1-0ubuntu1) UNRELEASED; urgency=medium
 
   [ David Della Vecchia ]
   * New upstream stable point release for OpenStack Liberty (LP: #1594867).
+  * d/p/fix-neutron-configuration.patch: Rebased.
+  * d/p/drop-ryu-dep.patch: Rebased.
 
  -- David Della Vecchia <ddv@canonical.com>  Tue, 21 Jun 2016 12:14:50 -0400
 
