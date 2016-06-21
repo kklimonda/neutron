@@ -1,4 +1,4 @@
-# Copyright (c) 2015 OpenStack Foundation
+# Copyright (c) 2015 Openstack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -14,6 +14,7 @@
 
 import mock
 import netaddr
+
 from oslo_log import log
 from oslo_utils import uuidutils
 
@@ -30,7 +31,6 @@ from neutron.agent.linux import ip_lib
 from neutron.common import config as base_config
 from neutron.common import constants as l3_constants
 from neutron.common import utils as common_utils
-from neutron.extensions import portbindings
 from neutron.tests import base
 from neutron.tests.common import l3_test_common
 
@@ -51,6 +51,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.conf.register_opts(l3_config.OPTS)
         self.conf.register_opts(ha.OPTS)
         agent_config.register_interface_driver_opts_helper(self.conf)
+        agent_config.register_use_namespaces_opts_helper(self.conf)
         agent_config.register_process_monitor_opts(self.conf)
         self.conf.register_opts(interface.OPTS)
         self.conf.register_opts(external_process.OPTS)
@@ -74,7 +75,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.utils_exec = self.utils_exec_p.start()
 
         self.utils_replace_file_p = mock.patch(
-            'neutron.common.utils.replace_file')
+            'neutron.agent.linux.utils.replace_file')
         self.utils_replace_file = self.utils_replace_file_p.start()
 
         self.external_process_p = mock.patch(
@@ -123,8 +124,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
                                          'gateway_ip': '152.2.0.1',
                                          'id': subnet_id_1}],
                            'network_id': _uuid(),
-                           'device_owner':
-                           l3_constants.DEVICE_OWNER_ROUTER_SNAT,
+                           'device_owner': 'network:router_centralized_snat',
                            'mac_address': 'fa:16:3e:80:8d:80',
                            'fixed_ips': [{'subnet_id': subnet_id_1,
                                           'ip_address': '152.2.0.13',
@@ -134,8 +134,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
                                         'gateway_ip': '152.10.0.1',
                                         'id': subnet_id_2}],
                            'network_id': _uuid(),
-                           'device_owner':
-                           l3_constants.DEVICE_OWNER_ROUTER_SNAT,
+                           'device_owner': 'network:router_centralized_snat',
                            'mac_address': 'fa:16:3e:80:8d:80',
                            'fixed_ips': [{'subnet_id': subnet_id_2,
                                          'ip_address': '152.10.0.13',
@@ -264,6 +263,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         mIPRule().rule.delete.assert_called_with(
             ip=str(netaddr.IPNetwork(fip_cidr).ip), table=16, priority=FIP_PRI)
         mIPDevice().route.delete_route.assert_called_with(fip_cidr, str(s.ip))
+        self.assertFalse(ri.fip_ns.unsubscribe.called)
         ri.fip_ns.local_subnets.allocate.assert_not_called()
 
         ri.dist_fip_count = 1
@@ -278,8 +278,8 @@ class TestDvrRouterOperations(base.BaseTestCase):
             fip_ns.get_int_device_name(router['id']))
         mIPDevice().route.delete_gateway.assert_called_once_with(
             str(fip_to_rtr.ip), table=16)
-        self.assertFalse(ri.fip_ns.unsubscribe.called)
-        ri.fip_ns.local_subnets.allocate.assert_called_once_with(ri.router_id)
+        fip_ns.unsubscribe.assert_called_once_with(ri.router_id)
+        fip_ns.local_subnets.allocate.assert_called_once_with(ri.router_id)
 
     def _test_add_floating_ip(self, ri, fip, is_failure):
         ri._add_fip_addr_to_device = mock.Mock(return_value=is_failure)
@@ -331,7 +331,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         port = {'fixed_ips': [{'subnet_id': mock.sentinel.subnet_id}]}
         router_ports = [port]
         ri.router.get.return_value = router_ports
-        self.assertIsNone(ri._get_internal_port(mock.sentinel.subnet_id2))
+        self.assertEqual(None, ri._get_internal_port(mock.sentinel.subnet_id2))
 
     def test__get_snat_idx_ipv4(self):
         ip_cidr = '101.12.13.00/24'
@@ -364,7 +364,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         ports = ri.router.get(l3_constants.INTERFACE_KEY, [])
         subnet_id = l3_test_common.get_subnet_id(ports[0])
         test_ports = [{'mac_address': '00:11:22:33:44:55',
-                      'device_owner': l3_constants.DEVICE_OWNER_DHCP,
+                      'device_owner': 'network:dhcp',
                       'fixed_ips': [{'ip_address': '1.2.3.4',
                                      'prefixlen': 24,
                                      'subnet_id': subnet_id}]}]
@@ -441,7 +441,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         state = True
         with mock.patch.object(l3_agent.ip_lib, 'IPDevice') as rtrdev,\
                 mock.patch.object(ri, '_cache_arp_entry') as arp_cache:
-                rtrdev.return_value.exists.return_value = False
+                self.device_exists.return_value = False
                 state = ri._update_arp_entry(
                     mock.ANY, mock.ANY, subnet_id, 'add')
         self.assertFalse(state)
@@ -499,8 +499,8 @@ class TestDvrRouterOperations(base.BaseTestCase):
                            'cidr': '20.0.0.0/24',
                            'gateway_ip': '20.0.0.1'}],
               'id': _uuid(),
-              portbindings.HOST_ID: 'myhost',
-              'device_owner': l3_constants.DEVICE_OWNER_AGENT_GW,
+              'binding:host_id': 'myhost',
+              'device_owner': 'network:floatingip_agent_gateway',
               'network_id': fake_network_id,
               'mac_address': 'ca:fe:de:ad:be:ef'}]
         )

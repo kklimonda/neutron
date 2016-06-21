@@ -13,7 +13,6 @@
 # under the License.
 #
 
-from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes
 from neutron.common import constants
@@ -30,33 +29,9 @@ EXTENDED_ATTRIBUTES_2_0 = {
 }
 
 
-class HAmodeUpdateOfDvrNotSupported(NotImplementedError):
-    message = _("Currently update of HA mode for a distributed router is "
+class DistributedHARouterNotSupported(NotImplementedError):
+    message = _("Currently distributed HA routers are "
                 "not supported.")
-
-
-class DVRmodeUpdateOfHaNotSupported(NotImplementedError):
-    message = _("Currently update of distributed mode for an HA router is "
-                "not supported.")
-
-
-class HAmodeUpdateOfDvrHaNotSupported(NotImplementedError):
-    message = _("Currently update of HA mode for a DVR/HA router is "
-                "not supported.")
-
-
-class DVRmodeUpdateOfDvrHaNotSupported(NotImplementedError):
-    message = _("Currently update of distributed mode for a DVR/HA router "
-                "is not supported")
-
-
-class UpdateToDvrHamodeNotSupported(NotImplementedError):
-    message = _("Currently updating a router to DVR/HA is not supported.")
-
-
-class UpdateToNonDvrHamodeNotSupported(NotImplementedError):
-    message = _("Currently updating a router from DVR/HA to non-DVR "
-                " non-HA is not supported.")
 
 
 class MaxVRIDAllocationTriesReached(exceptions.NeutronException):

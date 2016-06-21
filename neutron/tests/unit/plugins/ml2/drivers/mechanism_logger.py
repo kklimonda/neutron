@@ -15,7 +15,6 @@
 
 from oslo_log import log
 
-from neutron._i18n import _
 from neutron.plugins.ml2 import driver_api as api
 
 LOG = log.getLogger(__name__)

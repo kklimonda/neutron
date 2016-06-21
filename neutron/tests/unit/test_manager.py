@@ -13,18 +13,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import weakref
-
 import fixtures
 from oslo_config import cfg
+from oslo_log import log as logging
 
 from neutron import manager
 from neutron.plugins.common import constants
 from neutron.tests import base
 from neutron.tests.unit import dummy_plugin
-from neutron.tests.unit import testlib_api
 
 
+LOG = logging.getLogger(__name__)
 DB_PLUGIN_KLASS = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
 
 
@@ -106,19 +105,10 @@ class NeutronManagerTestCase(base.BaseTestCase):
                               "MultiServiceCorePlugin")
         mgr = manager.NeutronManager.get_instance()
         svc_plugins = mgr.get_service_plugins()
-        self.assertEqual(3, len(svc_plugins))
+        self.assertEqual(4, len(svc_plugins))
         self.assertIn(constants.CORE, svc_plugins.keys())
         self.assertIn(constants.LOADBALANCER, svc_plugins.keys())
         self.assertIn(constants.DUMMY, svc_plugins.keys())
-
-    def test_load_default_service_plugins(self):
-        self.patched_default_svc_plugins.return_value = {
-            'neutron.tests.unit.dummy_plugin.DummyServicePlugin': 'DUMMY'
-        }
-        cfg.CONF.set_override("core_plugin", DB_PLUGIN_KLASS)
-        mgr = manager.NeutronManager.get_instance()
-        svc_plugins = mgr.get_service_plugins()
-        self.assertIn('DUMMY', svc_plugins)
 
     def test_post_plugin_validation(self):
         cfg.CONF.import_opt('dhcp_agents_per_network',
@@ -149,29 +139,3 @@ class NeutronManagerTestCase(base.BaseTestCase):
                     'dummy': 'dummy_agent_notifier'}
         core_plugin = manager.NeutronManager.get_plugin()
         self.assertEqual(expected, core_plugin.agent_notifiers)
-
-    def test_load_class_for_provider(self):
-        manager.NeutronManager.load_class_for_provider(
-            'neutron.core_plugins', 'ml2')
-
-    def test_load_class_for_provider_wrong_plugin(self):
-        with testlib_api.ExpectedException(ImportError):
-            manager.NeutronManager.load_class_for_provider(
-                    'neutron.core_plugins', 'ml2XXXXXX')
-
-    def test_get_service_plugin_by_path_prefix_3(self):
-        cfg.CONF.set_override("core_plugin", DB_PLUGIN_KLASS)
-        nm = manager.NeutronManager.get_instance()
-
-        class pclass(object):
-            def __init__(self, path_prefix):
-                self.path_prefix = path_prefix
-
-        x_plugin, y_plugin = pclass('xpa'), pclass('ypa')
-        nm.service_plugins['x'], nm.service_plugins['y'] = x_plugin, y_plugin
-
-        self.assertEqual(weakref.proxy(x_plugin),
-                         nm.get_service_plugin_by_path_prefix('xpa'))
-        self.assertEqual(weakref.proxy(y_plugin),
-                         nm.get_service_plugin_by_path_prefix('ypa'))
-        self.assertIsNone(nm.get_service_plugin_by_path_prefix('abc'))

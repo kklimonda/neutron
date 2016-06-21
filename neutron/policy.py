@@ -13,6 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+"""
+Policy engine for neutron.  Largely copied from nova.
+"""
+
 import collections
 import re
 
@@ -24,10 +28,10 @@ from oslo_utils import excutils
 from oslo_utils import importutils
 import six
 
-from neutron._i18n import _, _LE, _LW
 from neutron.api.v2 import attributes
 from neutron.common import constants as const
 from neutron.common import exceptions
+from neutron.i18n import _LE, _LW
 
 
 LOG = logging.getLogger(__name__)
@@ -112,9 +116,8 @@ def _build_subattr_match_rule(attr_name, attr, action, target):
     validate = attr['validate']
     key = list(filter(lambda k: k.startswith('type:dict'), validate.keys()))
     if not key:
-        LOG.warning(_LW("Unable to find data type descriptor "
-                        "for attribute %s"),
-                    attr_name)
+        LOG.warn(_LW("Unable to find data type descriptor for attribute %s"),
+                 attr_name)
         return
     data = validate[key[0]]
     if not isinstance(data, dict):
@@ -422,3 +425,13 @@ def check_is_advsvc(context):
     if ADVSVC_CTX_POLICY not in _ENFORCER.rules:
         return False
     return _ENFORCER.enforce(ADVSVC_CTX_POLICY, credentials, credentials)
+
+
+def _extract_roles(rule, roles):
+    if isinstance(rule, policy.RoleCheck):
+        roles.append(rule.match.lower())
+    elif isinstance(rule, policy.RuleCheck):
+        _extract_roles(_ENFORCER.rules[rule.match], roles)
+    elif hasattr(rule, 'rules'):
+        for rule in rule.rules:
+            _extract_roles(rule, roles)

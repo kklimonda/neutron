@@ -960,8 +960,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                          mock.call.add_rule('ofake_dev',
                                             '-s ::/128 -d ff02::/16 '
                                             '-p ipv6-icmp -m icmp6 '
-                                            '--icmpv6-type %s -j RETURN' %
-                                            constants.ICMPV6_TYPE_NC,
+                                            '--icmpv6-type 135 -j RETURN',
                                             comment=None),
                          mock.call.add_rule('ofake_dev',
                                             '-s ::/128 -d ff02::/16 '
@@ -1340,7 +1339,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
     def test_remove_unknown_port(self):
         port = self._fake_port()
         self.firewall.remove_port_filter(port)
-        # checking no exception occurs
+        # checking no exception occures
         self.assertFalse(self.v4filter_inst.called)
 
     def test_defer_apply(self):
@@ -1595,7 +1594,7 @@ class IptablesFirewallEnhancedIpsetTestCase(BaseIptablesFirewallTestCase):
         self.firewall.ipset = mock.Mock()
         self.firewall.ipset.get_name.side_effect = (
             ipset_manager.IpsetManager.get_name)
-        self.firewall.ipset.set_name_exists.return_value = True
+        self.firewall.ipset.set_exists.return_value = True
 
     def _fake_port(self, sg_id=FAKE_SGID):
         return {'device': 'tapfake_dev',
@@ -1808,9 +1807,9 @@ class IptablesFirewallEnhancedIpsetTestCase(BaseIptablesFirewallTestCase):
             mock.call.set_members('fake_sgid', 'IPv4', ['10.0.0.1']),
             mock.call.set_members('fake_sgid', 'IPv6', ['fe80::1']),
             mock.call.get_name('fake_sgid', 'IPv4'),
-            mock.call.set_name_exists('NIPv4fake_sgid'),
+            mock.call.set_exists('fake_sgid', 'IPv4'),
             mock.call.get_name('fake_sgid', 'IPv6'),
-            mock.call.set_name_exists('NIPv6fake_sgid'),
+            mock.call.set_exists('fake_sgid', 'IPv6'),
             mock.call.destroy('fake_sgid', 'IPv4'),
             mock.call.destroy('fake_sgid', 'IPv6')]
 
@@ -1909,7 +1908,7 @@ class OVSHybridIptablesFirewallTestCase(BaseIptablesFirewallTestCase):
     def setUp(self):
         super(OVSHybridIptablesFirewallTestCase, self).setUp()
         self.firewall = iptables_firewall.OVSHybridIptablesFirewallDriver()
-        # initial data has 1, 2, and 9 in use, see RAW_TABLE_OUTPUT above.
+        # inital data has 1, 2, and 9 in use, see RAW_TABLE_OUTPUT above.
         self._dev_zone_map = {'61634509-31': 2, '8f46cf18-12': 9,
                               '95c24827-02': 2, 'e804433b-61': 1}
 
@@ -1917,7 +1916,7 @@ class OVSHybridIptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         self.assertEqual(self._dev_zone_map, self.firewall._device_zone_map)
 
     def test__generate_device_zone(self):
-        # initial data has 1, 2, and 9 in use.
+        # inital data has 1, 2, and 9 in use.
         # we fill from top up first.
         self.assertEqual(10, self.firewall._generate_device_zone('test'))
 

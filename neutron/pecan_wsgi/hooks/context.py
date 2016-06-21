@@ -24,10 +24,8 @@ class ContextHook(hooks.PecanHook):
     The following HTTP request headers are used:
     X-User-Id or X-User:
         Used for context.user_id.
-    X-Project-Id:
-        Used for context.tenant_id.
-    X-Project-Name:
-        Used for context.tenant_name.
+    X-Tenant-Id or X-Tenant:
+        Used for context.tenant.
     X-Auth-Token:
         Used for context.auth_token.
     X-Roles:
@@ -42,8 +40,8 @@ class ContextHook(hooks.PecanHook):
         user_id = state.request.headers.get('X-User-Id')
         user_id = state.request.headers.get('X-User', user_id)
         user_name = state.request.headers.get('X-User-Name', '')
-        tenant_id = state.request.headers.get('X-Project-Id')
-        tenant_name = state.request.headers.get('X-Project-Name')
+        tenant_id = state.request.headers.get('X-Tenant-Id')
+        tenant_name = state.request.headers.get('X-Tenant-Name')
         auth_token = state.request.headers.get('X-Auth-Token')
         roles = state.request.headers.get('X-Roles', '').split(',')
         roles = [r.strip() for r in roles]

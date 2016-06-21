@@ -13,16 +13,11 @@
 #    under the License.
 
 import contextlib
-
-import mock
 import netaddr
+
 import webob.exc
 
 from neutron.api.v2 import attributes as attr
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
-from neutron.common import constants
 from neutron import context
 from neutron.db import address_scope_db
 from neutron.db import db_base_plugin_v2
@@ -53,10 +48,9 @@ class AddressScopeTestExtensionManager(object):
 
 class AddressScopeTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
-    def _create_address_scope(self, fmt, ip_version=constants.IP_VERSION_4,
-                              expected_res_status=None, admin=False, **kwargs):
+    def _create_address_scope(self, fmt, expected_res_status=None,
+                              admin=False, **kwargs):
         address_scope = {'address_scope': {}}
-        address_scope['address_scope']['ip_version'] = ip_version
         for k, v in kwargs.items():
             address_scope['address_scope'][k] = str(v)
 
@@ -70,30 +64,24 @@ class AddressScopeTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
         address_scope_res = address_scope_req.get_response(self.ext_api)
         if expected_res_status:
-            self.assertEqual(expected_res_status, address_scope_res.status_int)
+            self.assertEqual(address_scope_res.status_int, expected_res_status)
         return address_scope_res
 
-    def _make_address_scope(self, fmt, ip_version, admin=False, **kwargs):
-        res = self._create_address_scope(fmt, ip_version,
-                                         admin=admin, **kwargs)
+    def _make_address_scope(self, fmt, admin=False, **kwargs):
+        res = self._create_address_scope(fmt, admin=admin, **kwargs)
         if res.status_int >= webob.exc.HTTPClientError.code:
             raise webob.exc.HTTPClientError(code=res.status_int)
         return self.deserialize(fmt, res)
 
     @contextlib.contextmanager
-    def address_scope(self, ip_version=constants.IP_VERSION_4,
-                      admin=False, **kwargs):
-        addr_scope = self._make_address_scope(self.fmt, ip_version,
-                                              admin, **kwargs)
+    def address_scope(self, admin=False, **kwargs):
+        addr_scope = self._make_address_scope(self.fmt, admin, **kwargs)
         yield addr_scope
 
-    def _test_create_address_scope(self, ip_version=constants.IP_VERSION_4,
-                                   admin=False, expected=None, **kwargs):
+    def _test_create_address_scope(self, admin=False, expected=None, **kwargs):
         keys = kwargs.copy()
         keys.setdefault('tenant_id', self._tenant_id)
-        with self.address_scope(ip_version,
-                                admin=admin, **keys) as addr_scope:
-            keys['ip_version'] = ip_version
+        with self.address_scope(admin=admin, **keys) as addr_scope:
             self._validate_resource(addr_scope, keys, 'address_scope')
             if expected:
                 self._compare_resource(addr_scope, expected, 'address_scope')
@@ -131,21 +119,11 @@ class TestAddressScope(AddressScopeTestCase):
         ext_mgr = AddressScopeTestExtensionManager()
         super(TestAddressScope, self).setUp(plugin=plugin, ext_mgr=ext_mgr)
 
-    def test_create_address_scope_ipv4(self):
+    def test_create_address_scope(self):
         expected_addr_scope = {'name': 'foo-address-scope',
                                'tenant_id': self._tenant_id,
-                               'shared': False,
-                               'ip_version': constants.IP_VERSION_4}
+                               'shared': False}
         self._test_create_address_scope(name='foo-address-scope',
-                                        expected=expected_addr_scope)
-
-    def test_create_address_scope_ipv6(self):
-        expected_addr_scope = {'name': 'foo-address-scope',
-                               'tenant_id': self._tenant_id,
-                               'shared': False,
-                               'ip_version': constants.IP_VERSION_6}
-        self._test_create_address_scope(constants.IP_VERSION_6,
-                                        name='foo-address-scope',
                                         expected=expected_addr_scope)
 
     def test_create_address_scope_empty_name(self):
@@ -238,8 +216,7 @@ class TestAddressScope(AddressScopeTestCase):
 
     def test_list_address_scopes(self):
         self._test_create_address_scope(name='foo-address-scope')
-        self._test_create_address_scope(constants.IP_VERSION_6,
-                                        name='bar-address-scope')
+        self._test_create_address_scope(name='bar-address-scope')
         res = self._list('address-scopes')
         self.assertEqual(2, len(res['address_scopes']))
 
@@ -254,8 +231,7 @@ class TestAddressScope(AddressScopeTestCase):
         self.assertEqual(1, len(mortal_res['address_scopes']))
 
     def test_list_address_scopes_different_tenants_not_shared(self):
-        self._test_create_address_scope(constants.IP_VERSION_6,
-                                        name='foo-address-scope')
+        self._test_create_address_scope(name='foo-address-scope')
         admin_res = self._list('address-scopes')
         mortal_res = self._list(
             'address-scopes',
@@ -374,108 +350,6 @@ class TestSubnetPoolsWithAddressScopes(AddressScopeTestCase):
                 self._compare_resource(res, update_data['subnetpool'],
                                        'subnetpool')
 
-    def _test_update_subnetpool_address_scope_notify(self, as_change=True):
-        with self.address_scope(name='foo-address-scope') as addr_scope:
-            foo_as_id = addr_scope['address_scope']['id']
-            subnet = netaddr.IPNetwork('10.10.10.0/24')
-            initial_subnetpool = self._test_create_subnetpool(
-                [subnet.cidr], name='foo-sp',
-                min_prefixlen='21', address_scope_id=foo_as_id)
-            subnetpool_id = initial_subnetpool['subnetpool']['id']
-            with self.address_scope(name='bar-address-scope') as other_as, \
-                    self.network() as network:
-                data = {'subnet': {
-                        'network_id': network['network']['id'],
-                        'subnetpool_id': subnetpool_id,
-                        'prefixlen': 24,
-                        'ip_version': 4,
-                        'tenant_id': network['network']['tenant_id']}}
-                req = self.new_create_request('subnets', data)
-                subnet = self.deserialize(self.fmt,
-                                          req.get_response(self.api))
-
-                with mock.patch.object(registry, 'notify') as notify:
-                    plugin = db_base_plugin_v2.NeutronDbPluginV2()
-                    plugin.is_address_scope_owned_by_tenant = mock.Mock(
-                        return_value=True)
-                    plugin._validate_address_scope_id = mock.Mock()
-                    ctx = context.get_admin_context()
-
-                    bar_as_id = other_as['address_scope']['id']
-                    data = {'subnetpool': {
-                            'name': 'bar-sp'}}
-                    if as_change:
-                        data['subnetpool']['address_scope_id'] = bar_as_id
-
-                    updated_sp = plugin.update_subnetpool(
-                        ctx, subnetpool_id, data)
-
-                    self.assertEqual('bar-sp', updated_sp['name'])
-                    if as_change:
-                        self.assertEqual(bar_as_id,
-                                         updated_sp['address_scope_id'])
-                        notify.assert_called_once_with(
-                            resources.SUBNETPOOL_ADDRESS_SCOPE,
-                            events.AFTER_UPDATE,
-                            plugin.update_subnetpool, context=ctx,
-                            subnetpool_id=subnetpool_id)
-                    else:
-                        self.assertEqual(foo_as_id,
-                                         updated_sp['address_scope_id'])
-                        self.assertFalse(notify.called)
-
-    def test_update_subnetpool_address_scope_notify(self):
-        self._test_update_subnetpool_address_scope_notify()
-
-    def test_not_update_subnetpool_address_scope_not_notify(self):
-        self._test_update_subnetpool_address_scope_notify(False)
-
-    def test_network_create_contain_address_scope_attr(self):
-        with self.network() as network:
-            result = self._show('networks', network['network']['id'])
-            keys = [ext_address_scope.IPV4_ADDRESS_SCOPE,
-                    ext_address_scope.IPV6_ADDRESS_SCOPE]
-            for k in keys:
-                # Correlated address scopes should initially be None
-                self.assertIsNone(result['network'][k])
-
-    def test_correlate_network_with_address_scope(self):
-        with self.address_scope(name='v4-as') as v4_addr_scope, \
-                self.address_scope(
-                    name='v6-as',
-                    ip_version=constants.IP_VERSION_6) as v6_addr_scope, \
-                self.network() as network:
-            v4_as_id = v4_addr_scope['address_scope']['id']
-            subnet = netaddr.IPNetwork('10.10.10.0/24')
-            v4_subnetpool = self._test_create_subnetpool(
-                [subnet.cidr], name='v4-sp',
-                min_prefixlen='24', address_scope_id=v4_as_id)
-            v4_subnetpool_id = v4_subnetpool['subnetpool']['id']
-            v6_as_id = v6_addr_scope['address_scope']['id']
-            subnet = netaddr.IPNetwork('fd5c:6ee1:c7ae::/64')
-            v6_subnetpool = self._test_create_subnetpool(
-                [subnet.cidr], name='v6-sp',
-                min_prefixlen='64', address_scope_id=v6_as_id)
-            v6_subnetpool_id = v6_subnetpool['subnetpool']['id']
-            data = {'subnet': {
-                    'network_id': network['network']['id'],
-                    'subnetpool_id': v4_subnetpool_id,
-                    'ip_version': 4,
-                    'tenant_id': network['network']['tenant_id']}}
-            req = self.new_create_request('subnets', data)
-            self.deserialize(self.fmt, req.get_response(self.api))
-            data['subnet']['subnetpool_id'] = v6_subnetpool_id
-            data['subnet']['ip_version'] = 6
-            req = self.new_create_request('subnets', data)
-            self.deserialize(self.fmt, req.get_response(self.api))
-            result = self._show('networks', network['network']['id'])
-            self.assertEqual(
-                v4_as_id,
-                result['network'][ext_address_scope.IPV4_ADDRESS_SCOPE])
-            self.assertEqual(
-                v6_as_id,
-                result['network'][ext_address_scope.IPV6_ADDRESS_SCOPE])
-
     def test_delete_address_scope_in_use(self):
         with self.address_scope(name='foo-address-scope') as addr_scope:
             address_scope_id = addr_scope['address_scope']['id']
@@ -487,36 +361,3 @@ class TestSubnetPoolsWithAddressScopes(AddressScopeTestCase):
                                          address_scope_id=address_scope_id)
             self._delete('address-scopes', address_scope_id,
                          expected_code=webob.exc.HTTPConflict.code)
-
-    def test_add_subnetpool_address_scope_wrong_address_family(self):
-        with self.address_scope(constants.IP_VERSION_6,
-                                name='foo-address-scope') as addr_scope:
-            address_scope_id = addr_scope['address_scope']['id']
-            subnet = netaddr.IPNetwork('10.10.10.0/24')
-            self.assertRaises(webob.exc.HTTPClientError,
-                              self._test_create_subnetpool,
-                              [subnet.cidr], name='foo-subnetpool',
-                              min_prefixlen='21',
-                              address_scope_id=address_scope_id)
-
-    def test_update_subnetpool_associate_address_scope_wrong_family(self):
-        with self.address_scope(constants.IP_VERSION_6,
-                                name='foo-address-scope') as addr_scope:
-            address_scope_id = addr_scope['address_scope']['id']
-            subnet = netaddr.IPNetwork('2001:db8::/64')
-            expected = {'address_scope_id': address_scope_id}
-            initial_subnetpool = self._test_create_subnetpool(
-                [subnet.cidr], expected=expected, name='foo-sp',
-                min_prefixlen='64', address_scope_id=address_scope_id)
-
-            with self.address_scope(name='foo-address-scope') as other_a_s:
-                other_a_s_id = other_a_s['address_scope']['id']
-                update_data = {'subnetpool': {'address_scope_id':
-                                              other_a_s_id}}
-                req = self.new_update_request(
-                    'subnetpools', update_data,
-                    initial_subnetpool['subnetpool']['id'])
-                api = self._api_for_resource('subnetpools')
-                res = req.get_response(api)
-                self.assertEqual(webob.exc.HTTPBadRequest.code,
-                                 res.status_int)

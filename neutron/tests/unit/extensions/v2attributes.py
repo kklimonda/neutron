@@ -13,9 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron.api import extensions
-
-
 EXTENDED_ATTRIBUTES_2_0 = {
     'networks': {
         'v2attrs:something': {'allow_post': False,
@@ -28,7 +25,7 @@ EXTENDED_ATTRIBUTES_2_0 = {
 }
 
 
-class V2attributes(extensions.ExtensionDescriptor):
+class V2attributes(object):
     def get_name(self):
         return "V2 Extended Attributes Example"
 

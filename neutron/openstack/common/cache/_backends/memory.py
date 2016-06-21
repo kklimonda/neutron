@@ -14,8 +14,8 @@
 
 import collections
 
-from oslo_concurrency import lockutils
 from oslo_utils import timeutils
+from oslo_concurrency import lockutils
 
 from neutron.openstack.common.cache import backends
 

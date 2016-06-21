@@ -17,7 +17,6 @@ import functools
 import fixtures
 from neutronclient.common import exceptions
 
-from neutron.extensions import portbindings
 from neutron.tests import base
 
 
@@ -82,7 +81,7 @@ class ClientFixture(fixtures.Fixture):
         spec = {
             'network_id': network_id,
             'tenant_id': tenant_id,
-            portbindings.HOST_ID: hostname,
+            'binding:host_id': hostname,
         }
         if qos_policy_id:
             spec['qos_policy_id'] = qos_policy_id

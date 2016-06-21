@@ -13,7 +13,6 @@
 #    under the License.
 
 import collections
-
 import mock
 from oslo_serialization import jsonutils
 from oslo_utils import uuidutils
@@ -325,7 +324,7 @@ class OVS_Lib_Test(base.BaseTestCase):
         run_ofctl = mock.patch.object(self.br, 'run_ofctl').start()
         run_ofctl.side_effect = ['']
         retflows = self.br.dump_flows_for_table(table)
-        self.assertIsNone(retflows)
+        self.assertEqual(None, retflows)
 
     def test_mod_flow_with_priority_set(self):
         params = {'in_port': '1',
@@ -906,20 +905,15 @@ class TestDeferredOVSBridge(base.BaseTestCase):
         with ovs_lib.DeferredOVSBridge(self.br) as deferred_br:
             self.assertRaises(AttributeError, getattr, deferred_br, 'failure')
 
-    def test_default_cookie(self):
-        self.br = ovs_lib.OVSBridge("br-tun")
-        uuid_stamp1 = self.br.default_cookie
-        self.assertEqual(uuid_stamp1, self.br.default_cookie)
-
     def test_cookie_passed_to_addmod(self):
         self.br = ovs_lib.OVSBridge("br-tun")
-        stamp = str(self.br.default_cookie)
+        self.br.set_agent_uuid_stamp(1234)
         expected_calls = [
             mock.call('add-flows', ['-'],
                       'hard_timeout=0,idle_timeout=0,priority=1,'
-                      'cookie=' + stamp + ',actions=drop'),
+                      'cookie=1234,actions=drop'),
             mock.call('mod-flows', ['-'],
-                      'cookie=' + stamp + ',actions=drop')
+                      'cookie=1234,actions=drop')
         ]
         with mock.patch.object(self.br, 'run_ofctl') as f:
             with ovs_lib.DeferredOVSBridge(self.br) as deferred_br:

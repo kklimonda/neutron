@@ -14,7 +14,6 @@
 #    under the License.
 
 import abc
-
 import six
 
 # The following keys are used in the segment dictionaries passed via

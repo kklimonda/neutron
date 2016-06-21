@@ -16,9 +16,9 @@ import eventlet
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 
-from neutron._i18n import _LE
 from neutron.agent.linux import async_process
 from neutron.agent.ovsdb import api as ovsdb
+from neutron.i18n import _LE
 
 
 LOG = logging.getLogger(__name__)
@@ -61,6 +61,7 @@ class SimpleInterfaceMonitor(OvsdbMonitor):
             format='json',
             respawn_interval=respawn_interval,
         )
+        self.data_received = False
         self.new_events = {'added': [], 'removed': []}
 
     @property
@@ -116,3 +117,13 @@ class SimpleInterfaceMonitor(OvsdbMonitor):
             with eventlet.timeout.Timeout(timeout):
                 while not self.is_active():
                     eventlet.sleep()
+
+    def _kill(self, *args, **kwargs):
+        self.data_received = False
+        super(SimpleInterfaceMonitor, self)._kill(*args, **kwargs)
+
+    def _read_stdout(self):
+        data = super(SimpleInterfaceMonitor, self)._read_stdout()
+        if data and not self.data_received:
+            self.data_received = True
+        return data

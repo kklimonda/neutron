@@ -14,9 +14,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-tools_path=${tools_path:-$(dirname $0)}
-venv_path=${venv_path:-${tools_path}}
-venv_dir=${venv_name:-/../.venv}
-TOOLS=${tools_path}
-VENV=${venv:-${venv_path}/${venv_dir}}
+TOOLS=`dirname $0`
+VENV=$TOOLS/../.venv
 source $VENV/bin/activate && "$@"

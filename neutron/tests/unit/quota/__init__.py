@@ -15,13 +15,14 @@
 import sqlalchemy as sa
 
 from neutron.db import model_base
+from neutron.db import models_v2
 
 # Model classes for test resources
 
 
-class MehModel(model_base.BASEV2, model_base.HasTenant):
+class MehModel(model_base.BASEV2, models_v2.HasTenant):
     meh = sa.Column(sa.String(8), primary_key=True)
 
 
-class OtherMehModel(model_base.BASEV2, model_base.HasTenant):
+class OtherMehModel(model_base.BASEV2, models_v2.HasTenant):
     othermeh = sa.Column(sa.String(8), primary_key=True)

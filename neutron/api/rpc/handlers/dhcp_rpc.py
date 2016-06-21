@@ -23,13 +23,13 @@ from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
 
-from neutron._i18n import _, _LW
 from neutron.api.v2 import attributes
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.db import api as db_api
 from neutron.extensions import portbindings
+from neutron.i18n import _LW
 from neutron import manager
 from neutron.plugins.common import utils as p_utils
 from neutron.quota import resource_registry
@@ -57,12 +57,9 @@ class DhcpRpcCallback(object):
     #           RPC client for many releases, it should be OK to bump the
     #           minor release instead and claim RPC compatibility with the
     #           last few client versions.
-    #     1.3 - Removed release_port_fixed_ip. It's not used by reference DHCP
-    #           agent since Juno, so similar rationale for not bumping the
-    #           major version as above applies here too.
     target = oslo_messaging.Target(
         namespace=constants.RPC_NAMESPACE_DHCP_PLUGIN,
-        version='1.3')
+        version='1.2')
 
     def _get_active_networks(self, context, **kwargs):
         """Retrieve and return a list of the active networks."""
@@ -104,9 +101,9 @@ class DhcpRpcCallback(object):
                     else:
                         ctxt.reraise = True
                 net_id = port['port']['network_id']
-                LOG.warning(_LW("Action %(action)s for network %(net_id)s "
-                                "could not complete successfully: %(reason)s"),
-                            {"action": action, "net_id": net_id, 'reason': e})
+                LOG.warn(_LW("Action %(action)s for network %(net_id)s "
+                             "could not complete successfully: %(reason)s"),
+                         {"action": action, "net_id": net_id, 'reason': e})
 
     def get_active_networks(self, context, **kwargs):
         """Retrieve and return a list of the active network ids."""
@@ -150,7 +147,7 @@ class DhcpRpcCallback(object):
         return networks
 
     def get_network_info(self, context, **kwargs):
-        """Retrieve and return extended information about a network."""
+        """Retrieve and return a extended information about a network."""
         network_id = kwargs.get('network_id')
         host = kwargs.get('host')
         LOG.debug('Network %(network_id)s requested from '
@@ -185,6 +182,31 @@ class DhcpRpcCallback(object):
                   {'network_id': network_id, 'host': host})
         plugin = manager.NeutronManager.get_plugin()
         plugin.delete_ports_by_device_id(context, device_id, network_id)
+
+    @db_api.retry_db_errors
+    def release_port_fixed_ip(self, context, **kwargs):
+        """Release the fixed_ip associated the subnet on a port."""
+        host = kwargs.get('host')
+        network_id = kwargs.get('network_id')
+        device_id = kwargs.get('device_id')
+        subnet_id = kwargs.get('subnet_id')
+
+        LOG.debug('DHCP port remove fixed_ip for %(subnet_id)s request '
+                  'from %(host)s',
+                  {'subnet_id': subnet_id, 'host': host})
+        plugin = manager.NeutronManager.get_plugin()
+        filters = dict(network_id=[network_id], device_id=[device_id])
+        ports = plugin.get_ports(context, filters=filters)
+
+        if ports:
+            port = ports[0]
+
+            fixed_ips = port.get('fixed_ips', [])
+            for i in range(len(fixed_ips)):
+                if fixed_ips[i]['subnet_id'] == subnet_id:
+                    del fixed_ips[i]
+                    break
+            plugin.update_port(context, port['id'], dict(port=port))
 
     def update_lease_expiration(self, context, **kwargs):
         """Release the fixed_ip associated the subnet on a port."""

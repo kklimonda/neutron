@@ -24,39 +24,27 @@ import decimal
 import errno
 import functools
 import hashlib
-import math
 import multiprocessing
+import netaddr
 import os
 import random
 import signal
 import socket
-import sys
 import tempfile
-import time
 import uuid
 
-import debtcollector
 from eventlet.green import subprocess
-import netaddr
 from oslo_concurrency import lockutils
 from oslo_config import cfg
-from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from oslo_utils import excutils
-from oslo_utils import importutils
-from oslo_utils import reflection
 import six
-from stevedore import driver
 
-from neutron._i18n import _, _LE
 from neutron.common import constants as n_const
-from neutron.db import api as db_api
 
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 LOG = logging.getLogger(__name__)
 SYNCHRONIZED_PREFIX = 'neutron-'
-# Unsigned 16 bit MAX.
-MAX_UINT16 = 0xffff
 
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
 
@@ -71,11 +59,9 @@ class cache_method_results(object):
         self._not_cached = object()
 
     def _get_from_cache(self, target_self, *args, **kwargs):
-        target_self_cls_name = reflection.get_class_name(target_self,
-                                                         fully_qualified=False)
         func_name = "%(module)s.%(class)s.%(func_name)s" % {
             'module': target_self.__module__,
-            'class': target_self_cls_name,
+            'class': target_self.__class__.__name__,
             'func_name': self.func.__name__,
         }
         key = (func_name,) + args
@@ -99,21 +85,19 @@ class cache_method_results(object):
         return item
 
     def __call__(self, target_self, *args, **kwargs):
-        target_self_cls_name = reflection.get_class_name(target_self,
-                                                         fully_qualified=False)
         if not hasattr(target_self, '_cache'):
             raise NotImplementedError(
-                _("Instance of class %(module)s.%(class)s must contain _cache "
-                  "attribute") % {
+                "Instance of class %(module)s.%(class)s must contain _cache "
+                "attribute" % {
                     'module': target_self.__module__,
-                    'class': target_self_cls_name})
+                    'class': target_self.__class__.__name__})
         if not target_self._cache:
             if self._first_call:
                 LOG.debug("Instance of class %(module)s.%(class)s doesn't "
                           "contain attribute _cache therefore results "
                           "cannot be cached for %(func_name)s.",
                           {'module': target_self.__module__,
-                           'class': target_self_cls_name,
+                           'class': target_self.__class__.__name__,
                            'func_name': self.func.__name__})
                 self._first_call = False
             return self.func(target_self, *args, **kwargs)
@@ -123,7 +107,6 @@ class cache_method_results(object):
         return functools.partial(self.__call__, obj)
 
 
-@debtcollector.removals.remove(message="This will removed in the N cycle.")
 def read_cached_file(filename, cache_info, reload_func=None):
     """Read from a file if it has been modified.
 
@@ -145,7 +128,6 @@ def read_cached_file(filename, cache_info, reload_func=None):
     return cache_info['data']
 
 
-@debtcollector.removals.remove(message="This will removed in the N cycle.")
 def find_config_file(options, config_file):
     """Return the first config file found.
 
@@ -217,14 +199,12 @@ def subprocess_popen(args, stdin=None, stdout=None, stderr=None, shell=False,
                             close_fds=close_fds, env=env)
 
 
-def parse_mappings(mapping_list, unique_values=True, unique_keys=True):
+def parse_mappings(mapping_list, unique_values=True):
     """Parse a list of mapping strings into a dictionary.
 
     :param mapping_list: a list of strings of the form '<key>:<value>'
     :param unique_values: values must be unique if True
-    :param unique_keys: keys must be unique if True, else implies that keys
-    and values are not unique
-    :returns: a dict mapping keys to values or to list of values
+    :returns: a dict mapping keys to values
     """
     mappings = {}
     for mapping in mapping_list:
@@ -240,20 +220,14 @@ def parse_mappings(mapping_list, unique_values=True, unique_keys=True):
         value = split_result[1].strip()
         if not value:
             raise ValueError(_("Missing value in mapping: '%s'") % mapping)
-        if unique_keys:
-            if key in mappings:
-                raise ValueError(_("Key %(key)s in mapping: '%(mapping)s' not "
-                                   "unique") % {'key': key,
+        if key in mappings:
+            raise ValueError(_("Key %(key)s in mapping: '%(mapping)s' not "
+                               "unique") % {'key': key, 'mapping': mapping})
+        if unique_values and value in mappings.values():
+            raise ValueError(_("Value %(value)s in mapping: '%(mapping)s' "
+                               "not unique") % {'value': value,
                                                 'mapping': mapping})
-            if unique_values and value in mappings.values():
-                raise ValueError(_("Value %(value)s in mapping: '%(mapping)s' "
-                                   "not unique") % {'value': value,
-                                                    'mapping': mapping})
-            mappings[key] = value
-        else:
-            mappings.setdefault(key, [])
-            if value not in mappings[key]:
-                mappings[key].append(value)
+        mappings[key] = value
     return mappings
 
 
@@ -346,7 +320,7 @@ def get_random_string(length):
 
 def get_dhcp_agent_device_id(network_id, host):
     # Split host so as to always use only the hostname and
-    # not the domain name. This will guarantee consistency
+    # not the domain name. This will guarantee consistentcy
     # whether a local hostname or an fqdn is passed in.
     local_hostname = host.split('.')[0]
     host_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, str(local_hostname))
@@ -406,11 +380,10 @@ def is_dvr_serviced(device_owner):
     if they are required for DVR or any service directly or
     indirectly associated with DVR.
     """
-    return (device_owner.startswith(n_const.DEVICE_OWNER_COMPUTE_PREFIX) or
+    return (device_owner.startswith('compute:') or
             device_owner in get_other_dvr_serviced_device_owners())
 
 
-@debtcollector.removals.remove(message="This will removed in the N cycle.")
 def get_keystone_url(conf):
     if conf.auth_uri:
         auth_uri = conf.auth_uri.rstrip('/')
@@ -476,7 +449,7 @@ def is_port_trusted(port):
     Trust is currently based on the device_owner field starting with 'network:'
     since we restrict who can use that in the default policy.json file.
     """
-    return port['device_owner'].startswith(n_const.DEVICE_OWNER_NETWORK_PREFIX)
+    return port['device_owner'].startswith('network:')
 
 
 class DelayedStringRenderer(object):
@@ -507,7 +480,7 @@ def round_val(val):
                                              rounding=decimal.ROUND_HALF_UP))
 
 
-def replace_file(file_name, data, file_mode=0o644):
+def replace_file(file_name, data):
     """Replaces the contents of file_name with data in a safe manner.
 
     First write to a temp file and then rename. Since POSIX renames are
@@ -521,223 +494,5 @@ def replace_file(file_name, data, file_mode=0o644):
                                      dir=base_dir,
                                      delete=False) as tmp_file:
         tmp_file.write(data)
-    os.chmod(tmp_file.name, file_mode)
+    os.chmod(tmp_file.name, 0o644)
     os.rename(tmp_file.name, file_name)
-
-
-def load_class_by_alias_or_classname(namespace, name):
-    """Load class using stevedore alias or the class name
-    :param namespace: namespace where the alias is defined
-    :param name: alias or class name of the class to be loaded
-    :returns class if calls can be loaded
-    :raises ImportError if class cannot be loaded
-    """
-
-    if not name:
-        LOG.error(_LE("Alias or class name is not set"))
-        raise ImportError(_("Class not found."))
-    try:
-        # Try to resolve class by alias
-        mgr = driver.DriverManager(namespace, name)
-        class_to_load = mgr.driver
-    except RuntimeError:
-        e1_info = sys.exc_info()
-        # Fallback to class name
-        try:
-            class_to_load = importutils.import_class(name)
-        except (ImportError, ValueError):
-            LOG.error(_LE("Error loading class by alias"),
-                      exc_info=e1_info)
-            LOG.error(_LE("Error loading class by class name"),
-                      exc_info=True)
-            raise ImportError(_("Class not found."))
-    return class_to_load
-
-
-def safe_decode_utf8(s):
-    if six.PY3 and isinstance(s, bytes):
-        return s.decode('utf-8', 'surrogateescape')
-    return s
-
-
-#TODO(jlibosva): Move this to neutron-lib and reuse in networking-ovs-dpdk
-def _create_mask(lsb_mask):
-    return (MAX_UINT16 << int(math.floor(math.log(lsb_mask, 2)))) \
-           & MAX_UINT16
-
-
-def _reduce_mask(mask, step=1):
-    mask <<= step
-    return mask & MAX_UINT16
-
-
-def _increase_mask(mask, step=1):
-    for index in range(step):
-        mask >>= 1
-        mask |= 0x8000
-    return mask
-
-
-def _hex_format(number):
-    return format(number, '#06x')
-
-
-def port_rule_masking(port_min, port_max):
-    # Check port_max >= port_min.
-    if port_max < port_min:
-        raise ValueError(_("'port_max' is smaller than 'port_min'"))
-
-    # Rules to be added to OVS.
-    rules = []
-
-    # Loop from the lower part. Increment port_min.
-    bit_right = 1
-    mask = MAX_UINT16
-    t_port_min = port_min
-    while True:
-        # Obtain last significative bit.
-        bit_min = port_min & bit_right
-        # Take care of first bit.
-        if bit_right == 1:
-            if bit_min > 0:
-                rules.append("%s" % (_hex_format(t_port_min)))
-            else:
-                mask = _create_mask(2)
-                rules.append("%s/%s" % (_hex_format(t_port_min & mask),
-                                        _hex_format(mask)))
-        elif bit_min == 0:
-            mask = _create_mask(bit_right)
-            t_port_min += bit_right
-            # If the temporal variable we are using exceeds the
-            # port_max value, exit the loop.
-            if t_port_min > port_max:
-                break
-            rules.append("%s/%s" % (_hex_format(t_port_min & mask),
-                                    _hex_format(mask)))
-
-        # If the temporal variable we are using exceeds the
-        # port_max value, exit the loop.
-        if t_port_min > port_max:
-            break
-        bit_right <<= 1
-
-    # Loop from the higher part.
-    bit_position = int(round(math.log(port_max, 2)))
-    bit_left = 1 << bit_position
-    mask = MAX_UINT16
-    mask = _reduce_mask(mask, bit_position)
-    # Find the most significative bit of port_max, higher
-    # than the most significative bit of port_min.
-    while mask < MAX_UINT16:
-        bit_max = port_max & bit_left
-        bit_min = port_min & bit_left
-        if bit_max > bit_min:
-            # Difference found.
-            break
-        # Rotate bit_left to the right and increase mask.
-        bit_left >>= 1
-        mask = _increase_mask(mask)
-
-    while bit_left > 1:
-        # Obtain next most significative bit.
-        bit_left >>= 1
-        bit_max = port_max & bit_left
-        if bit_left == 1:
-            if bit_max == 0:
-                rules.append("%s" % (_hex_format(port_max)))
-            else:
-                mask = _create_mask(2)
-                rules.append("%s/%s" % (_hex_format(port_max & mask),
-                                        _hex_format(mask)))
-        elif bit_max > 0:
-            t_port_max = port_max - bit_max
-            mask = _create_mask(bit_left)
-            rules.append("%s/%s" % (_hex_format(t_port_max),
-                                    _hex_format(mask)))
-
-    return rules
-
-
-def create_object_with_dependency(creator, dep_getter, dep_creator,
-                                  dep_id_attr):
-    """Creates an object that binds to a dependency while handling races.
-
-    creator is a function that expected to take the result of either
-    dep_getter or dep_creator.
-
-    The result of dep_getter and dep_creator must have an attribute of
-    dep_id_attr be used to determine if the dependency changed during object
-    creation.
-
-    dep_getter should return None if the dependency does not exist
-
-    dep_creator can raise a DBDuplicateEntry to indicate that a concurrent
-    create of the dependency occured and the process will restart to get the
-    concurrently created one
-
-    This function will return both the created object and the dependency it
-    used/created.
-
-    This function protects against all of the cases where the dependency can
-    be concurrently removed by catching exceptions and restarting the
-    process of creating the dependency if one no longer exists. It will
-    give up after neutron.db.api.MAX_RETRIES and raise the exception it
-    encounters after that.
-
-    TODO(kevinbenton): currently this does not try to delete the dependency
-    it created. This matches the semantics of the HA network logic it is used
-    for but it should be modified to cleanup in the future.
-    """
-    result, dependency, dep_id = None, None, None
-    for attempts in range(1, db_api.MAX_RETRIES + 1):
-        # we go to max + 1 here so the exception handlers can raise their
-        # errors at the end
-        try:
-            dependency = dep_getter() or dep_creator()
-            dep_id = getattr(dependency, dep_id_attr)
-        except db_exc.DBDuplicateEntry:
-            # dependency was concurrently created.
-            with excutils.save_and_reraise_exception() as ctx:
-                if attempts < db_api.MAX_RETRIES:
-                    # sleep for a random time between 0 and 1 second to
-                    # make sure a concurrent worker doesn't retry again
-                    # at exactly the same time
-                    time.sleep(random.uniform(0, 1))
-                    ctx.reraise = False
-                    continue
-        try:
-            result = creator(dependency)
-            break
-        except Exception:
-            with excutils.save_and_reraise_exception() as ctx:
-                # check if dependency we tried to use was removed during
-                # object creation
-                if attempts < db_api.MAX_RETRIES:
-                    dependency = dep_getter()
-                    if not dependency or dep_id != getattr(dependency,
-                                                           dep_id_attr):
-                        ctx.reraise = False
-    return result, dependency
-
-
-def transaction_guard(f):
-    """Ensures that the context passed in is not in a transaction.
-
-    Various Neutron methods modifying resources have assumptions that they will
-    not be called inside of a transaction because they perform operations that
-    expect all data to be committed to the database (e.g. ML2 postcommit calls)
-    and/or they have side effects on external systems.
-    So calling them in a transaction can lead to consistency errors on failures
-    since the side effect will not be reverted on a DB rollback.
-
-    If you receive this error, you must alter your code to handle the fact that
-    the thing you are calling can have side effects so using transactions to
-    undo on failures is not possible.
-    """
-    @functools.wraps(f)
-    def inner(self, context, *args, **kwargs):
-        if context.session.is_active:
-            raise RuntimeError(_("Method cannot be called within a "
-                                 "transaction."))
-        return f(self, context, *args, **kwargs)
-    return inner

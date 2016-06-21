@@ -16,12 +16,9 @@
 import eventlet
 import fixtures
 import mock
-import testscenarios
 
 from oslo_config import cfg
-from oslo_serialization import jsonutils
 from oslo_utils import importutils
-from testtools.content import text_content
 
 from neutron.agent.linux import ip_lib
 from neutron.cmd.sanity import checks
@@ -40,26 +37,18 @@ cfg.CONF.import_group('OVS', 'neutron.plugins.ml2.drivers.openvswitch.agent.'
                       'common.config')
 
 
-class OVSAgentTestBase(test_ovs_lib.OVSBridgeTestBase,
-                       base.BaseSudoTestCase):
-    scenarios = testscenarios.multiply_scenarios([
-        ('ofctl', {'main_module': ('neutron.plugins.ml2.drivers.openvswitch.'
-                                  'agent.openflow.ovs_ofctl.main')}),
-        ('native', {'main_module': ('neutron.plugins.ml2.drivers.openvswitch.'
-                                  'agent.openflow.native.main')})],
-        test_ovs_lib.OVSBridgeTestBase.scenarios)
-
+class _OVSAgentTestBase(test_ovs_lib.OVSBridgeTestBase,
+                        base.BaseSudoTestCase):
     def setUp(self):
-        super(OVSAgentTestBase, self).setUp()
+        super(_OVSAgentTestBase, self).setUp()
         self.br = self.useFixture(net_helpers.OVSBridgeFixture()).bridge
-        self.of_interface_mod = importutils.import_module(self.main_module)
+        self.of_interface_mod = importutils.import_module(self._MAIN_MODULE)
         self.br_int_cls = None
         self.br_tun_cls = None
         self.br_phys_cls = None
         self.br_int = None
         self.init_done = False
         self.init_done_ev = eventlet.event.Event()
-        self.main_ev = eventlet.event.Event()
         self.addCleanup(self._kill_main)
         retry_count = 3
         while True:
@@ -94,7 +83,7 @@ class OVSAgentTestBase(test_ovs_lib.OVSBridgeTestBase,
             self.of_interface_mod.main()
 
     def _kill_main(self):
-        self.main_ev.send()
+        self._main_thread.kill()
         self._main_thread.wait()
 
     def _agent_main(self, bridge_classes):
@@ -110,16 +99,23 @@ class OVSAgentTestBase(test_ovs_lib.OVSBridgeTestBase,
         self.init_done = True
         self.init_done_ev.send()
 
-        self.main_ev.wait()
+
+class _OVSAgentOFCtlTestBase(_OVSAgentTestBase):
+    _MAIN_MODULE = ('neutron.plugins.ml2.drivers.openvswitch.agent.'
+                    'openflow.ovs_ofctl.main')
 
 
-class ARPSpoofTestCase(OVSAgentTestBase):
+class _OVSAgentNativeTestBase(_OVSAgentTestBase):
+    _MAIN_MODULE = ('neutron.plugins.ml2.drivers.openvswitch.agent.'
+                    'openflow.native.main')
+
+
+class _ARPSpoofTestCase(object):
     def setUp(self):
         # NOTE(kevinbenton): it would be way cooler to use scapy for
         # these but scapy requires the python process to be running as
         # root to bind to the ports.
-        self.addOnException(self.collect_flows_and_ports)
-        super(ARPSpoofTestCase, self).setUp()
+        super(_ARPSpoofTestCase, self).setUp()
         self.skip_without_arp_support()
         self.src_addr = '192.168.0.1'
         self.dst_addr = '192.168.0.2'
@@ -133,21 +129,6 @@ class ARPSpoofTestCase(OVSAgentTestBase):
             net_helpers.OVSPortFixture(self.br, self.dst_namespace)).port
         # wait to add IPs until after anti-spoof rules to ensure ARP doesn't
         # happen before
-
-    def collect_flows_and_ports(self, exc_info):
-        nicevif = lambda x: ['%s=%s' % (k, getattr(x, k))
-                             for k in ['ofport', 'port_name', 'switch',
-                                       'vif_id', 'vif_mac']]
-        nicedev = lambda x: ['%s=%s' % (k, getattr(x, k))
-                             for k in ['name', 'namespace']] + x.addr.list()
-        details = {'flows': self.br.dump_all_flows(),
-                   'vifs': map(nicevif, self.br.get_vif_ports()),
-                   'src_ip': self.src_addr,
-                   'dest_ip': self.dst_addr,
-                   'sourt_port': nicedev(self.src_p),
-                   'dest_port': nicedev(self.dst_p)}
-        self.addDetail('arp-test-state',
-                       text_content(jsonutils.dumps(details, indent=5)))
 
     @common_base.no_skip_on_missing_deps
     def skip_without_arp_support(self):
@@ -262,9 +243,8 @@ class ARPSpoofTestCase(OVSAgentTestBase):
         # block first and then disable port security to make sure old rules
         # are cleared
         self._setup_arp_spoof_for_port(self.dst_p.name, ['192.168.0.3'])
-        self._setup_arp_spoof_for_port(
-            self.dst_p.name, ['192.168.0.3'],
-            device_owner=n_const.DEVICE_OWNER_ROUTER_GW)
+        self._setup_arp_spoof_for_port(self.dst_p.name, ['192.168.0.3'],
+                                       device_owner='network:router_gateway')
         self.src_p.addr.add('%s/24' % self.src_addr)
         self.dst_p.addr.add('%s/24' % self.dst_addr)
         net_helpers.assert_ping(self.src_namespace, self.dst_addr, count=2)
@@ -285,7 +265,15 @@ class ARPSpoofTestCase(OVSAgentTestBase):
             self.br_int, vif, details)
 
 
-class CanaryTableTestCase(OVSAgentTestBase):
+class ARPSpoofOFCtlTestCase(_ARPSpoofTestCase, _OVSAgentOFCtlTestBase):
+    pass
+
+
+class ARPSpoofNativeTestCase(_ARPSpoofTestCase, _OVSAgentNativeTestBase):
+    pass
+
+
+class _CanaryTableTestCase(object):
     def test_canary_table(self):
         self.br_int.delete_flows()
         self.assertEqual(constants.OVS_RESTARTED,
@@ -293,3 +281,11 @@ class CanaryTableTestCase(OVSAgentTestBase):
         self.br_int.setup_canary_table()
         self.assertEqual(constants.OVS_NORMAL,
                          self.br_int.check_canary_table())
+
+
+class CanaryTableOFCtlTestCase(_CanaryTableTestCase, _OVSAgentOFCtlTestBase):
+    pass
+
+
+class CanaryTableNativeTestCase(_CanaryTableTestCase, _OVSAgentNativeTestBase):
+    pass

@@ -14,7 +14,6 @@
 #    under the License.
 from oslo_config import cfg
 
-from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
@@ -70,10 +69,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                    # action depends on type so validation has to occur in
                    # the extension
                    'validate': {'type:string': attr.DESCRIPTION_MAX_LEN},
-                   # we set enforce_policy so operators can define policies
-                   # that restrict actions
-                   'is_visible': True, 'enforce_policy': True,
-                   'default': None},
+                   'is_visible': True},
     }
 }
 

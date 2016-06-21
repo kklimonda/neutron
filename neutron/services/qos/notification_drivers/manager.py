@@ -12,13 +12,13 @@
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LI
+from neutron.i18n import _LI
 from neutron import manager
 
 QOS_DRIVER_NAMESPACE = 'neutron.qos.notification_drivers'
 QOS_PLUGIN_OPTS = [
     cfg.ListOpt('notification_drivers',
-                default=['message_queue'],
+                default='message_queue',
                 help=_('Drivers list to use to send the update notification')),
 ]
 

@@ -14,11 +14,9 @@
 #    under the License.
 
 import abc
-
-from oslo_config import cfg
 import six
 
-from neutron._i18n import _
+from oslo_config import cfg
 
 OPTS = [
     cfg.StrOpt('pd_confs',

@@ -15,7 +15,6 @@
 
 """Exceptions used by SRIOV Mechanism Driver."""
 
-from neutron._i18n import _
 from neutron.common import exceptions
 
 

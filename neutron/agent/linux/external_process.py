@@ -15,19 +15,19 @@
 import abc
 import collections
 import os.path
+import six
 
 import eventlet
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import fileutils
-import six
 
-from neutron._i18n import _, _LW, _LE
 from neutron.agent.common import config as agent_cfg
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
 from neutron.common import utils as common_utils
+from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -247,9 +247,10 @@ class ProcessMonitor(object):
         action_function(service_id)
 
     def _respawn_action(self, service_id):
-        LOG.warning(_LW("Respawning %(service)s for uuid %(uuid)s"),
+        # _LE used to avoid dropping translation for the message
+        LOG.warning(_LE("respawning %(service)s for uuid %(uuid)s"),
                     {'service': service_id.service,
-                     'uuid': service_id.uuid})
+                     'uuid': service_id.uuid})  # noqa
         self._monitored_processes[service_id].enable()
 
     def _exit_action(self, service_id):

@@ -18,6 +18,7 @@ from datetime import datetime
 import time
 
 from oslo_config import cfg
+from oslo_log import log as logging
 from oslo_utils import uuidutils
 from webob import exc
 
@@ -32,6 +33,8 @@ from neutron.tests import tools
 from neutron.tests.unit.api.v2 import test_base
 from neutron.tests.unit.db import test_db_base_plugin_v2
 
+
+LOG = logging.getLogger(__name__)
 
 _uuid = uuidutils.generate_uuid
 _get_path = test_base._get_path
@@ -76,7 +79,7 @@ class AgentDBTestMixIn(object):
                                neutron_context=neutron_context,
                                query_params=query_string)
         if expected_res_status:
-            self.assertEqual(expected_res_status, agent_res.status_int)
+            self.assertEqual(agent_res.status_int, expected_res_status)
         return agent_res
 
     def _register_agent_states(self, lbaas_agents=False):
@@ -122,12 +125,6 @@ class AgentDBTestMixIn(object):
             host=L3_HOSTB, agent_mode=constants.L3_AGENT_MODE_DVR)
         return [dvr_snat_agent, dvr_agent]
 
-    def _register_l3_agent(self, host):
-        helpers.register_l3_agent(host)
-
-    def _register_bgp_dragent(self, host):
-        helpers.register_bgp_dragent(host)
-
 
 class AgentDBTestCase(AgentDBTestMixIn,
                       test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
@@ -148,7 +145,7 @@ class AgentDBTestCase(AgentDBTestMixIn,
         _req.environ['neutron.context'] = context.Context(
             '', 'tenant_id')
         res = _req.get_response(self.ext_api)
-        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPBadRequest.code)
 
     def test_list_agent(self):
         agents = self._register_agent_states()

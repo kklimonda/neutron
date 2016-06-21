@@ -1,32 +1,8 @@
-..
-      Licensed under the Apache License, Version 2.0 (the "License"); you may
-      not use this file except in compliance with the License. You may obtain
-      a copy of the License at
-
-          http://www.apache.org/licenses/LICENSE-2.0
-
-      Unless required by applicable law or agreed to in writing, software
-      distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-      WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-      License for the specific language governing permissions and limitations
-      under the License.
-
-
-      Convention for heading levels in Neutron devref:
-      =======  Heading 0 (reserved for the title in a document)
-      -------  Heading 1
-      ~~~~~~~  Heading 2
-      +++++++  Heading 3
-      '''''''  Heading 4
-      (Avoid deeper levels because they do not render well.)
-
-
-.. _rpc_callbacks:
-
+=================================
 Neutron Messaging Callback System
 =================================
 
-Neutron already has a :doc:`callback system <callbacks>` for
+Neutron already has a callback system [link-to: callbacks.rst] for
 in-process resource callbacks where publishers and subscribers are able
 to publish and subscribe for resource events.
 
@@ -57,13 +33,35 @@ agent.
 This publishing/subscription mechanism is highly dependent on the format
 of the resources passed around. This is why the library only allows
 versioned objects to be published and subscribed. Oslo versioned objects
-allow object version down/up conversion. [#vo_mkcompat]_ [#vo_mkcptests]_
+allow object version down/up conversion. #[vo_mkcompat]_ #[vo_mkcptests]_
 
-For the VO's versioning schema look here: [#vo_versioning]_
+For the VO's versioning schema look here: #[vo_versioning]_
 
 versioned_objects serialization/deserialization with the
-obj_to_primitive(target_version=..) and primitive_to_obj() [#ov_serdes]_
+obj_to_primitive(target_version=..) and primitive_to_obj() #[ov_serdes]_
 methods is used internally to convert/retrieve objects before/after messaging.
+
+Considering rolling upgrades, there are several scenarios to look at:
+
+* publisher (generally neutron-server or a service) and subscriber (agent)
+  know the same version of the objects, so they serialize, and deserialize
+  without issues.
+
+* publisher knows (and sends) an older version of the object, subscriber
+  will get the object updated to latest version on arrival before any
+  callback is called.
+
+* publisher sends a newer version of the object, subscriber won't be able
+  to deserialize the object, in this case (PLEASE DISCUSS), we can think of two
+  strategies:
+
+
+The strategy for upgrades will be:
+   During upgrades, we pin neutron-server to a compatible version for resource
+   fanout updates, and the server sends both the old, and the newer version.
+   The new agents process updates, taking the newer version of the resource
+   fanout updates.  When the whole system upgraded, we un-pin the compatible
+   version fanout.
 
 Serialized versioned objects look like::
 
@@ -79,103 +77,8 @@ Serialized versioned objects look like::
                               'name': u'aaa'},
     'versioned_object.namespace': 'versionedobjects'}
 
-Rolling upgrades strategy
--------------------------
-In this section we assume the standard Neutron upgrade process, which means
-upgrade the server first and then upgrade the agents:
-
-:doc:`More information about the upgrade strategy <upgrade>`.
-
-The plan is to provide a semi-automatic method which avoids manual pinning and
-unpinning of versions by the administrator which could be prone to error.
-
-Resource pull requests
-~~~~~~~~~~~~~~~~~~~~~~
-Resource pull requests will always be ok because the underlying resource RPC
-does provide the version of the requested resource id  / ids. The server will
-be upgraded first, so it will always be able to satisfy any version the agents
-request.
-
-Resource push notifications
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Agents will subscribe to the neutron-vo-<resource_type>-<version> fanout queue
-which carries updated objects for the version they know about. The versions
-they know about depend on the runtime Neutron versioned objects they started with.
-
-When the server upgrades, it should be able to instantly calculate a census of
-agent versions per object (we will define a mechanism for this in a later
-section). It will use the census to send fanout messages on all the version
-span a resource type has.
-
-For example, if neutron-server knew it has rpc-callback aware agents with
-versions 1.0, and versions 1.2 of resource type "A", any update would be sent
-to neutron-vo-A_1.0 and neutron-vo-A_1.2.
-
-TODO(mangelajo): Verify that after upgrade is finished any unused messaging
-resources (queues, exchanges, and so on) are released as older agents go away
-and neutron-server stops producing new message casts. Otherwise document the
-need for a neutron-server restart after rolling upgrade has finished if we
-want the queues cleaned up.
-
-
-Leveraging agent state reports for object version discovery
-+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-We would add a row to the agent db for tracking agent known objects and version
-numbers. This would resemble the implementation of the configuration column.
-
-Agents would report at start not only their configuration now, but also
-their subscribed object type / version pairs, that would be stored in the
-database and would be available to any neutron-server requesting it::
-
-    'subscribed_versions': {'QoSPolicy': '1.1',
-                            'SecurityGroup': '1.0',
-                            'Port': '1.0'}
-
-There's a subset of Liberty agents depending on QoSPolicy that will
-require 'QoSPolicy': '1.0' if the qos plugin is installed. We will be able
-to identify those by the binary name (included in the report):
-
-* 'neutron-openvswitch-agent'
-* 'neutron-sriov-nic-agent'
-
-Version discovery
-+++++++++++++++++
-With the above mechanism in place and considering the exception of
-neutron-openvswitch-agent and neutron-sriov-agent requiring QoSpolicy 1.0,
-we could discover the subset of versions to be sent on every push
-notification.
-
-Agents that are in down state would be excluded from this calculation.
-We would use an extended timeout for agents in this calculation to make sure
-we're on the safe side, specially if deployer marked agents with low
-timeouts.
-
-Starting at Mitaka, any agent interested in versioned objects via this API
-should report their resource/version tuples of interest (the resource type/
-version pairs they're subscribed to).
-
-Caching mechanism
-'''''''''''''''''
-The version subset per object will be cached to avoid DB requests on every push
-given that we assume that all old agents are already registered at the time of
-upgrade.
-
-Cached subset will be re-evaluated (to cut down the version sets as agents
-upgrade) after configured TTL.
-
-As a fast path to update this cache on all neutron-servers when upgraded agents
-come up (or old agents revive after a long timeout or even a downgrade) the
-server registering the new status update will notify the other servers about
-the new consumer resource versions via cast.
-
-All notifications for all calculated version sets must be sent, as non-upgraded
-agents would otherwise not receive them.
-
-It is safe to send notifications to any fanout queue as they will be discarded
-if no agent is listening.
-
 Topic names for every resource type RPC endpoint
-------------------------------------------------
+================================================
 
 neutron-vo-<resource_class_name>-<version>
 
@@ -188,7 +91,7 @@ or something equivalent which would allow fine granularity for the receivers
 to only get interesting information to them.
 
 Subscribing to resources
-------------------------
+========================
 
 Imagine that you have agent A, which just got to handle a new port, which
 has an associated security group, and QoS policy.
@@ -240,7 +143,7 @@ We may want to look into that later, to avoid agents receiving resource updates
 which are uninteresting to them.
 
 Unsubscribing from resources
-----------------------------
+============================
 
 To unsubscribe registered callbacks:
 
@@ -249,7 +152,7 @@ To unsubscribe registered callbacks:
 
 
 Sending resource events
------------------------
+=======================
 
 On the server side, resource updates could come from anywhere, a service plugin,
 an extension, anything that updates, creates, or destroys the resource and that
@@ -277,8 +180,8 @@ The server/publisher side may look like::
 
 
 References
-----------
-.. [#ov_serdes] https://github.com/openstack/oslo.versionedobjects/blob/ce00f18f7e9143b5175e889970564813189e3e6d/oslo_versionedobjects/tests/test_objects.py#L410
-.. [#vo_mkcompat] https://github.com/openstack/oslo.versionedobjects/blob/ce00f18f7e9143b5175e889970564813189e3e6d/oslo_versionedobjects/base.py#L474
-.. [#vo_mkcptests] https://github.com/openstack/oslo.versionedobjects/blob/ce00f18f7e9143b5175e889970564813189e3e6d/oslo_versionedobjects/tests/test_objects.py#L114
-.. [#vo_versioning] https://github.com/openstack/oslo.versionedobjects/blob/ce00f18f7e9143b5175e889970564813189e3e6d/oslo_versionedobjects/base.py#L248
+==========
+.. [#ov_serdes] https://github.com/openstack/oslo.versionedobjects/blob/master/oslo_versionedobjects/tests/test_objects.py#L621
+.. [#vo_mkcompat] https://github.com/openstack/oslo.versionedobjects/blob/master/oslo_versionedobjects/base.py#L460
+.. [#vo_mkcptests] https://github.com/openstack/oslo.versionedobjects/blob/master/oslo_versionedobjects/tests/test_objects.py#L111
+.. [#vo_versioning] https://github.com/openstack/oslo.versionedobjects/blob/master/oslo_versionedobjects/base.py#L236

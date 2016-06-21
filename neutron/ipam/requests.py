@@ -11,13 +11,12 @@
 #    under the License.
 
 import abc
-
 import netaddr
+
 from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
 
-from neutron._i18n import _
 from neutron.api.v2 import attributes
 from neutron.common import constants
 from neutron.common import ipv6_utils
@@ -67,9 +66,9 @@ class SubnetRequest(object):
             previous = None
             for pool in allocation_pools:
                 if not isinstance(pool, netaddr.ip.IPRange):
-                    raise TypeError(_("Ranges must be netaddr.IPRange"))
+                    raise TypeError("Ranges must be netaddr.IPRange")
                 if previous and pool.first <= previous.last:
-                    raise ValueError(_("Ranges must not overlap"))
+                    raise ValueError("Ranges must not overlap")
                 previous = pool
             if 1 < len(allocation_pools):
                 # Checks that all the ranges are in the same IP version.
@@ -79,14 +78,13 @@ class SubnetRequest(object):
                 first_version = allocation_pools[0].version
                 last_version = allocation_pools[-1].version
                 if first_version != last_version:
-                    raise ValueError(_("Ranges must be in the same IP "
-                                       "version"))
+                    raise ValueError("Ranges must be in the same IP version")
             self._allocation_pools = allocation_pools
 
         if self.gateway_ip and self.allocation_pools:
             if self.gateway_ip.version != self.allocation_pools[0].version:
-                raise ValueError(_("Gateway IP version inconsistent with "
-                                   "allocation pool version"))
+                raise ValueError("Gateway IP version inconsistent with "
+                                 "allocation pool version")
 
     @property
     def tenant_id(self):
@@ -127,9 +125,9 @@ class SubnetRequest(object):
 class AnySubnetRequest(SubnetRequest):
     """A template for allocating an unspecified subnet from IPAM
 
-    Support for this type of request in a driver is optional. For example, the
-    initial reference implementation will not support this.  The API has no way
-    of creating a subnet without a specific address until subnet-allocation is
+    A driver may not implement this type of request.  For example, The initial
+    reference implementation will not support this.  The API has no way of
+    creating a subnet without a specific address until subnet-allocation is
     implemented.
     """
     WILDCARDS = {constants.IPv4: '0.0.0.0',
@@ -224,7 +222,7 @@ class AutomaticAddressRequest(SpecificAddressRequest):
         if set(kwargs) != set(['prefix', 'mac']):
             raise ipam_exc.AddressCalculationFailure(
                 address_type='eui-64',
-                reason=_('must provide exactly 2 arguments - cidr and MAC'))
+                reason='must provide exactly 2 arguments - cidr and MAC')
         prefix = kwargs['prefix']
         mac_address = kwargs['mac']
         return ipv6_utils.get_ipv6_addr_by_EUI64(prefix, mac_address)
@@ -237,8 +235,8 @@ class AutomaticAddressRequest(SpecificAddressRequest):
         generating it can be passed as optional keyword arguments.
 
         :param address_type: the type of address to generate.
-            It could be an eui-64 address, a random IPv6 address, or
-            an ipv4 link-local address.
+            It could be a eui-64 address, a random IPv6 address, or
+            a ipv4 link-local address.
             For the Kilo release only eui-64 addresses will be supported.
         """
         address_generator = self._address_generators.get(address_type)

@@ -16,12 +16,16 @@
 
 import uuid
 
-from tempest.lib.common.utils import data_utils
-from tempest.lib import exceptions as lib_exc
-from tempest import test
+from tempest_lib import exceptions as lib_exc
 import testtools
 
 from neutron.tests.api import base
+from neutron.tests.api import clients
+from neutron.tests.tempest import config
+from neutron.tests.tempest import test
+from tempest_lib.common.utils import data_utils
+
+CONF = config.CONF
 
 
 class SharedNetworksTest(base.BaseAdminNetworkTest):
@@ -176,15 +180,15 @@ class AllowedAddressPairSharedNetworkTest(base.BaseAdminNetworkTest):
 class RBACSharedNetworksTest(base.BaseAdminNetworkTest):
 
     force_tenant_isolation = True
-    credentials = ['primary', 'alt', 'admin']
 
     @classmethod
     def resource_setup(cls):
         super(RBACSharedNetworksTest, cls).resource_setup()
-        if not test.is_extension_enabled('rbac-policies', 'network'):
-            msg = "rbac-policies extension not enabled."
+        if not test.is_extension_enabled('rbac_policies', 'network'):
+            msg = "rbac extension not enabled."
             raise cls.skipException(msg)
-        cls.client2 = cls.alt_manager.network_client
+        creds = cls.isolated_creds.get_alt_creds()
+        cls.client2 = clients.Manager(credentials=creds).network_client
 
     def _make_admin_net_and_subnet_shared_to_tenant_id(self, tenant_id):
         net = self.admin_client.create_network(
@@ -260,11 +264,11 @@ class RBACSharedNetworksTest(base.BaseAdminNetworkTest):
             action='access_as_shared', target_tenant='*')['rbac_policy']
         self.admin_client.delete_rbac_policy(res['policy']['id'])
 
-        # now that wildcard is the only remaining, it should be subjected to
+        # now that wilcard is the only remainin, it should be subjected to
         # to the same restriction
         with testtools.ExpectedException(lib_exc.Conflict):
             self.admin_client.delete_rbac_policy(wild['id'])
-        # similarly, we can't update the policy to a different tenant
+        # similarily, we can't update the policy to a different tenant
         with testtools.ExpectedException(lib_exc.Conflict):
             self.admin_client.update_rbac_policy(
                 wild['id'], target_tenant=self.client2.tenant_id)
@@ -400,20 +404,16 @@ class RBACSharedNetworksTest(base.BaseAdminNetworkTest):
     def test_filtering_works_with_rbac_records_present(self):
         resp = self._make_admin_net_and_subnet_shared_to_tenant_id(
             self.client.tenant_id)
-        net = resp['network']['id']
-        sub = resp['subnet']['id']
+        net = resp['network']
+        sub = resp['subnet']
         self.admin_client.create_rbac_policy(
-            object_type='network', object_id=net,
+            object_type='network', object_id=net['id'],
             action='access_as_shared', target_tenant='*')
-        self._assert_shared_object_id_listing_presence('subnets', False, sub)
-        self._assert_shared_object_id_listing_presence('subnets', True, sub)
-        self._assert_shared_object_id_listing_presence('networks', False, net)
-        self._assert_shared_object_id_listing_presence('networks', True, net)
-
-    def _assert_shared_object_id_listing_presence(self, resource, shared, oid):
-        lister = getattr(self.admin_client, 'list_%s' % resource)
-        objects = [o['id'] for o in lister(shared=shared)[resource]]
-        if shared:
-            self.assertIn(oid, objects)
-        else:
-            self.assertNotIn(oid, objects)
+        for state, assertion in ((False, self.assertNotIn),
+                                 (True, self.assertIn)):
+            nets = [n['id'] for n in
+                    self.admin_client.list_networks(shared=state)['networks']]
+            assertion(net['id'], nets)
+            subs = [s['id'] for s in
+                    self.admin_client.list_subnets(shared=state)['subnets']]
+            assertion(sub['id'], subs)

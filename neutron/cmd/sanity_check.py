@@ -18,11 +18,11 @@ import sys
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LE, _LW
 from neutron.agent import dhcp_agent
 from neutron.cmd.sanity import checks
 from neutron.common import config
 from neutron.db import l3_hamode_db
+from neutron.i18n import _LE, _LW
 
 
 LOG = logging.getLogger(__name__)
@@ -193,18 +193,6 @@ def check_ovsdb_native():
     return result
 
 
-def check_ovs_conntrack():
-    result = checks.ovs_conntrack_supported()
-    if not result:
-        LOG.error(_LE('Check for Open vSwitch support of conntrack support '
-                      'failed. OVS/CT firewall will not work. A newer '
-                      'version of OVS (2.5+) and linux kernel (4.3+) are '
-                      'required. See '
-                      'https://github.com/openvswitch/ovs/blob/master/FAQ.md'
-                      'for more information.'))
-    return result
-
-
 def check_ebtables():
     result = checks.ebtables_supported()
     if not result:
@@ -254,8 +242,6 @@ OPTS = [
                     help=_('Check minimal dnsmasq version')),
     BoolOptCallback('ovsdb_native', check_ovsdb_native,
                     help=_('Check ovsdb native interface support')),
-    BoolOptCallback('ovs_conntrack', check_ovs_conntrack,
-                    help=_('Check ovs conntrack support')),
     BoolOptCallback('ebtables_installed', check_ebtables,
                     help=_('Check ebtables installation')),
     BoolOptCallback('keepalived_ipv6_support', check_keepalived_ipv6_support,
@@ -275,7 +261,6 @@ def enable_tests_from_config():
     run all necessary tests, just by passing in the appropriate configs.
     """
 
-    cfg.CONF.set_default('vf_management', True)
     if 'vxlan' in cfg.CONF.AGENT.tunnel_types:
         cfg.CONF.set_default('ovs_vxlan', True)
     if 'geneve' in cfg.CONF.AGENT.tunnel_types:
@@ -295,6 +280,8 @@ def enable_tests_from_config():
     if cfg.CONF.AGENT.prevent_arp_spoofing:
         cfg.CONF.set_default('arp_header_match', True)
         cfg.CONF.set_default('icmpv6_header_match', True)
+    if cfg.CONF.ml2_sriov.agent_required:
+        cfg.CONF.set_default('vf_management', True)
     if not cfg.CONF.AGENT.use_helper_for_ns_read:
         cfg.CONF.set_default('read_netns', True)
     if cfg.CONF.dhcp_driver == 'neutron.agent.linux.dhcp.Dnsmasq':
