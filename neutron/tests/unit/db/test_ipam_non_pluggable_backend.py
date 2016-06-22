@@ -14,14 +14,13 @@
 #    under the License.
 
 import mock
+from neutron_lib import constants as n_const
 from oslo_config import cfg
 
-from neutron.api.v2 import attributes
 from neutron.common import constants
-from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
-from neutron.db import db_base_plugin_common
 from neutron.db import db_base_plugin_v2
+from neutron.db import ipam_backend_mixin
 from neutron.db import ipam_non_pluggable_backend as non_ipam
 from neutron.db import models_v2
 from neutron.tests import base
@@ -29,31 +28,6 @@ from neutron.tests import base
 
 class TestIpamNonPluggableBackend(base.BaseTestCase):
     """Unit Tests for non pluggable IPAM Logic."""
-
-    def test_generate_ip(self):
-        with mock.patch.object(non_ipam.IpamNonPluggableBackend,
-                               '_try_generate_ip') as generate:
-            with mock.patch.object(non_ipam.IpamNonPluggableBackend,
-                                   '_rebuild_availability_ranges') as rebuild:
-
-                non_ipam.IpamNonPluggableBackend._generate_ip('c', 's')
-
-        generate.assert_called_once_with('c', 's')
-        self.assertEqual(0, rebuild.call_count)
-
-    def test_generate_ip_exhausted_pool(self):
-        with mock.patch.object(non_ipam.IpamNonPluggableBackend,
-                               '_try_generate_ip') as generate:
-            with mock.patch.object(non_ipam.IpamNonPluggableBackend,
-                                   '_rebuild_availability_ranges') as rebuild:
-
-                exception = n_exc.IpAddressGenerationFailure(net_id='n')
-                # fail first call but not second
-                generate.side_effect = [exception, None]
-                non_ipam.IpamNonPluggableBackend._generate_ip('c', 's')
-
-        self.assertEqual(2, generate.call_count)
-        rebuild.assert_called_once_with('c', 's')
 
     def _validate_rebuild_availability_ranges(self, pools, allocations,
                                               expected):
@@ -143,8 +117,8 @@ class TestIpamNonPluggableBackend(base.BaseTestCase):
         # were not actually created, so no ipam_subnet exists
         cfg.CONF.set_override("ipam_driver", None)
         plugin = db_base_plugin_v2.NeutronDbPluginV2()
-        with mock.patch.object(db_base_plugin_common.DbBasePluginCommon,
-                               '_get_subnets') as get_subnets:
+        with mock.patch.object(ipam_backend_mixin.IpamBackendMixin,
+                               '_ipam_get_subnets') as get_subnets:
             with mock.patch.object(non_ipam.IpamNonPluggableBackend,
                                    '_check_unique_ip') as check_unique:
                 context = mock.Mock()
@@ -175,7 +149,7 @@ class TestIpamNonPluggableBackend(base.BaseTestCase):
                 'ipv6_ra_mode': u'slaac'}]
         port = {'port': {
             'network_id': 'fbb9b578-95eb-4b79-a116-78e5c4927176',
-            'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
+            'fixed_ips': n_const.ATTR_NOT_SPECIFIED,
             'mac_address': '12:34:56:78:44:ab',
             'device_owner': 'compute'}}
         expected = []
@@ -208,7 +182,7 @@ class TestIpamNonPluggableBackend(base.BaseTestCase):
                 'ipv6_ra_mode': 'slaac'}]
         port = {'port': {
             'network_id': 'fbb9b578-95eb-4b79-a116-78e5c4927176',
-            'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
+            'fixed_ips': n_const.ATTR_NOT_SPECIFIED,
             'mac_address': '12:34:56:78:44:ab',
             'device_owner': 'compute'}}
         expected = []

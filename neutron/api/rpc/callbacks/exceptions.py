@@ -10,8 +10,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import exceptions
+
 from neutron._i18n import _
-from neutron.common import exceptions
 
 
 class CallbackWrongResourceType(exceptions.NeutronException):
@@ -26,5 +27,7 @@ class CallbacksMaxLimitReached(exceptions.NeutronException):
     message = _("Cannot add multiple callbacks for %(resource_type)s")
 
 
-class VersionsCallbackNotFound(exceptions.NeutronException):
-    message = _("No versions callback provided in ResourceVersionsManager")
+class NoAgentDbMixinImplemented(exceptions.NeutronException):
+    message = _("RPC callbacks mechanism needs the implementation of "
+                "AgentDbMixin in the plugin, as so far it's only designed "
+                "to work with agents")

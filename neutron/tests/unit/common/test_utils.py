@@ -18,11 +18,12 @@ import re
 import eventlet
 import mock
 import netaddr
+from neutron_lib import constants
+from neutron_lib import exceptions as exc
 from oslo_log import log as logging
 import six
 import testtools
 
-from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.plugins.common import constants as p_const
@@ -103,12 +104,12 @@ class TestParseTunnelRangesMixin(object):
 
     def _check_range_invalid_ranges(self, bad_range, which):
         expected_msg = self._build_invalid_tunnel_range_msg(bad_range, which)
-        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
+        err = self.assertRaises(exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         self.assertEqual(expected_msg, str(err))
 
     def _check_range_reversed(self, bad_range):
-        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
+        err = self.assertRaises(exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         expected_msg = self._build_range_reversed_msg(bad_range)
         self.assertEqual(expected_msg, str(err))
@@ -411,64 +412,6 @@ class TestDictUtils(base.BaseTestCase):
         added, removed = utils.diff_list_of_dict(old_list, new_list)
         self.assertEqual(added, [dict(key4="value4")])
         self.assertEqual(removed, [dict(key3="value3")])
-
-
-class _CachingDecorator(object):
-    def __init__(self):
-        self.func_retval = 'bar'
-        self._cache = mock.Mock()
-
-    @utils.cache_method_results
-    def func(self, *args, **kwargs):
-        return self.func_retval
-
-
-class TestCachingDecorator(base.BaseTestCase):
-    def setUp(self):
-        super(TestCachingDecorator, self).setUp()
-        self.decor = _CachingDecorator()
-        self.func_name = '%(module)s._CachingDecorator.func' % {
-            'module': self.__module__
-        }
-        self.not_cached = self.decor.func.func.__self__._not_cached
-
-    def test_cache_miss(self):
-        expected_key = (self.func_name, 1, 2, ('foo', 'bar'))
-        args = (1, 2)
-        kwargs = {'foo': 'bar'}
-        self.decor._cache.get.return_value = self.not_cached
-        retval = self.decor.func(*args, **kwargs)
-        self.decor._cache.set.assert_called_once_with(
-            expected_key, self.decor.func_retval, None)
-        self.assertEqual(self.decor.func_retval, retval)
-
-    def test_cache_hit(self):
-        expected_key = (self.func_name, 1, 2, ('foo', 'bar'))
-        args = (1, 2)
-        kwargs = {'foo': 'bar'}
-        retval = self.decor.func(*args, **kwargs)
-        self.assertFalse(self.decor._cache.set.called)
-        self.assertEqual(self.decor._cache.get.return_value, retval)
-        self.decor._cache.get.assert_called_once_with(expected_key,
-                                                      self.not_cached)
-
-    def test_get_unhashable(self):
-        expected_key = (self.func_name, [1], 2)
-        self.decor._cache.get.side_effect = TypeError
-        retval = self.decor.func([1], 2)
-        self.assertFalse(self.decor._cache.set.called)
-        self.assertEqual(self.decor.func_retval, retval)
-        self.decor._cache.get.assert_called_once_with(expected_key,
-                                                      self.not_cached)
-
-    def test_missing_cache(self):
-        delattr(self.decor, '_cache')
-        self.assertRaises(NotImplementedError, self.decor.func, (1, 2))
-
-    def test_no_cache(self):
-        self.decor._cache = False
-        retval = self.decor.func((1, 2))
-        self.assertEqual(self.decor.func_retval, retval)
 
 
 class TestDict2Tuples(base.BaseTestCase):
@@ -783,3 +726,27 @@ class TestPortRuleMasking(base.BaseTestCase):
         port_max = 5
         with testtools.ExpectedException(ValueError):
             utils.port_rule_masking(port_min, port_max)
+
+
+class TestAuthenticEUI(base.BaseTestCase):
+
+    def test_retains_original_format(self):
+        for mac_str in ('FA-16-3E-73-A2-E9', 'fa:16:3e:73:a2:e9'):
+            self.assertEqual(mac_str, str(utils.AuthenticEUI(mac_str)))
+
+    def test_invalid_values(self):
+        for mac in ('XXXX', 'ypp', 'g3:vvv'):
+            with testtools.ExpectedException(netaddr.core.AddrFormatError):
+                utils.AuthenticEUI(mac)
+
+
+class TestAuthenticIPNetwork(base.BaseTestCase):
+
+    def test_retains_original_format(self):
+        for addr_str in ('10.0.0.0/24', '10.0.0.10/32', '100.0.0.1'):
+            self.assertEqual(addr_str, str(utils.AuthenticIPNetwork(addr_str)))
+
+    def test_invalid_values(self):
+        for addr in ('XXXX', 'ypp', 'g3:vvv'):
+            with testtools.ExpectedException(netaddr.core.AddrFormatError):
+                utils.AuthenticIPNetwork(addr)

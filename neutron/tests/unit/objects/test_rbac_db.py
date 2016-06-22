@@ -12,13 +12,13 @@
 
 import mock
 
+from neutron_lib import exceptions as n_exc
 from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import fields as obj_fields
 from six import add_metaclass
 import sqlalchemy as sa
 
 from neutron.callbacks import events
-from neutron.common import exceptions as n_exc
 from neutron.db import model_base
 from neutron.db import rbac_db_models
 from neutron.extensions import rbac as ext_rbac
@@ -281,7 +281,7 @@ class RbacNeutronDbObjectTestCase(test_base.BaseObjectIfaceTestCase,
             target_tenant='*', action=rbac_db_models.ACCESS_SHARED)
 
         attach_rbac_mock.assert_called_with(
-            obj_id, test_neutron_obj._context.tenant_id)
+            obj_id, test_neutron_obj.obj_context.tenant_id)
 
     @mock.patch.object(_test_class, 'attach_rbac')
     @mock.patch.object(obj_db_api, 'get_object',

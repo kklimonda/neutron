@@ -13,20 +13,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api import validators
 from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron._i18n import _LE, _LI
-from neutron.api.v2 import attributes
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.db import dns_db
 from neutron.db import models_v2
+from neutron.db import segments_db
 from neutron.extensions import dns
 from neutron import manager
 from neutron.plugins.common import utils as plugin_utils
-from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.services.externaldns import driver
 
@@ -42,7 +42,7 @@ class DNSExtensionDriver(api.ExtensionDriver):
 
     def process_create_network(self, plugin_context, request_data, db_data):
         dns_domain = request_data.get(dns.DNSDOMAIN)
-        if not attributes.is_attr_set(dns_domain):
+        if not validators.is_attr_set(dns_domain):
             return
 
         if dns_domain:
@@ -52,7 +52,7 @@ class DNSExtensionDriver(api.ExtensionDriver):
 
     def process_update_network(self, plugin_context, request_data, db_data):
         new_value = request_data.get(dns.DNSDOMAIN)
-        if not attributes.is_attr_set(new_value):
+        if not validators.is_attr_set(new_value):
             return
 
         current_dns_domain = db_data.get(dns.DNSDOMAIN)
@@ -187,7 +187,8 @@ class DNSExtensionDriverML2(DNSExtensionDriver):
             return True
         if network['router:external']:
             return True
-        segments = db.get_network_segments(context.session, network['id'])
+        segments = segments_db.get_network_segments(context.session,
+                                                    network['id'])
         if len(segments) > 1:
             return False
         provider_net = segments[0]

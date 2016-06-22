@@ -13,19 +13,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import random
+
 import mock
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_utils import importutils
 import testscenarios
 
-from neutron.common import constants
 from neutron import context
 from neutron.db import agentschedulers_db as sched_db
 from neutron.db import common_db_mixin
 from neutron.db import models_v2
+from neutron.db.network_dhcp_agent_binding import models as ndab_model
 from neutron.extensions import dhcpagentscheduler
 from neutron.scheduler import dhcp_agent_scheduler
 from neutron.tests.common import helpers
+from neutron.tests.unit.plugins.ml2 import test_plugin
 from neutron.tests.unit import testlib_api
 
 # Required to generate tests from scenarios. Not compatible with nose.
@@ -66,7 +70,7 @@ class TestDhcpSchedulerBaseTestCase(testlib_api.SqlTestCase):
         scheduler = dhcp_agent_scheduler.ChanceScheduler()
         scheduler.resource_filter.bind(self.ctx, agents, network_id)
         results = self.ctx.session.query(
-            sched_db.NetworkDhcpAgentBinding).filter_by(
+            ndab_model.NetworkDhcpAgentBinding).filter_by(
             network_id=network_id).all()
         self.assertEqual(len(agents), len(results))
         for result in results:
@@ -108,6 +112,8 @@ class TestDhcpScheduler(TestDhcpSchedulerBaseTestCase):
         plugin.get_subnets.return_value = [{"network_id": self.network_id,
                                             "enable_dhcp": True}]
         plugin.get_agents_db.return_value = dead_agent + alive_agent
+        plugin.filter_hosts_with_network_access.side_effect = (
+            lambda context, network_id, hosts: hosts)
         if active_hosts_only:
             plugin.get_dhcp_agents_hosting_networks.return_value = []
             self.assertTrue(
@@ -127,7 +133,7 @@ class TestDhcpScheduler(TestDhcpSchedulerBaseTestCase):
 
     def _get_agent_binding_from_db(self, agent):
         return self.ctx.session.query(
-            sched_db.NetworkDhcpAgentBinding
+            ndab_model.NetworkDhcpAgentBinding
         ).filter_by(dhcp_agent_id=agent[0].id).all()
 
     def _test_auto_reschedule_vs_network_on_dead_agent(self,
@@ -280,7 +286,7 @@ class TestAutoScheduleNetworks(TestDhcpSchedulerBaseTestCase):
             plugin, self.ctx, host)
         self.assertEqual(expected_result, observed_ret_value)
         hosted_agents = self.ctx.session.query(
-            sched_db.NetworkDhcpAgentBinding).all()
+            ndab_model.NetworkDhcpAgentBinding).all()
         self.assertEqual(expected_hosted_agents, len(hosted_agents))
 
 
@@ -340,14 +346,14 @@ class TestNetworksFailover(TestDhcpSchedulerBaseTestCase,
 
     def test_filter_bindings(self):
         bindings = [
-            sched_db.NetworkDhcpAgentBinding(network_id='foo1',
-                                             dhcp_agent={'id': 'id1'}),
-            sched_db.NetworkDhcpAgentBinding(network_id='foo2',
-                                             dhcp_agent={'id': 'id1'}),
-            sched_db.NetworkDhcpAgentBinding(network_id='foo3',
-                                             dhcp_agent={'id': 'id2'}),
-            sched_db.NetworkDhcpAgentBinding(network_id='foo4',
-                                             dhcp_agent={'id': 'id2'})]
+            ndab_model.NetworkDhcpAgentBinding(network_id='foo1',
+                                               dhcp_agent={'id': 'id1'}),
+            ndab_model.NetworkDhcpAgentBinding(network_id='foo2',
+                                               dhcp_agent={'id': 'id1'}),
+            ndab_model.NetworkDhcpAgentBinding(network_id='foo3',
+                                               dhcp_agent={'id': 'id2'}),
+            ndab_model.NetworkDhcpAgentBinding(network_id='foo4',
+                                               dhcp_agent={'id': 'id2'})]
         with mock.patch.object(self, 'agent_starting_up',
                                side_effect=[True, False]):
             res = [b for b in self._filter_bindings(None, bindings)]
@@ -383,70 +389,81 @@ class TestNetworksFailover(TestDhcpSchedulerBaseTestCase,
             self.assertFalse(rn.called)
 
 
-class DHCPAgentWeightSchedulerTestCase(TestDhcpSchedulerBaseTestCase):
+class DHCPAgentWeightSchedulerTestCase(test_plugin.Ml2PluginV2TestCase):
     """Unit test scenarios for WeightScheduler.schedule."""
 
     def setUp(self):
         super(DHCPAgentWeightSchedulerTestCase, self).setUp()
-        DB_PLUGIN_KLASS = 'neutron.plugins.ml2.plugin.Ml2Plugin'
-        self.setup_coreplugin(DB_PLUGIN_KLASS)
-        cfg.CONF.set_override("network_scheduler_driver",
+        weight_scheduler = (
             'neutron.scheduler.dhcp_agent_scheduler.WeightScheduler')
+        cfg.CONF.set_override('network_scheduler_driver', weight_scheduler)
         self.plugin = importutils.import_object('neutron.plugins.ml2.plugin.'
                                                 'Ml2Plugin')
-        self.assertEqual(1, self.patched_dhcp_periodic.call_count)
+        mock.patch.object(
+            self.plugin, 'filter_hosts_with_network_access',
+            side_effect=lambda context, network_id, hosts: hosts).start()
         self.plugin.network_scheduler = importutils.import_object(
-            'neutron.scheduler.dhcp_agent_scheduler.WeightScheduler'
-        )
-        cfg.CONF.set_override('dhcp_agents_per_network', 1)
+            weight_scheduler)
         cfg.CONF.set_override("dhcp_load_type", "networks")
+        self.ctx = context.get_admin_context()
+
+    def _create_network(self):
+        net = self.plugin.create_network(
+            self.ctx,
+            {'network': {'name': 'name',
+                         'tenant_id': 'tenant_one',
+                         'admin_state_up': True,
+                         'shared': True}})
+        return net['id']
 
     def test_scheduler_one_agents_per_network(self):
-        self._save_networks(['1111'])
+        net_id = self._create_network()
         helpers.register_dhcp_agent(HOST_C)
         self.plugin.network_scheduler.schedule(self.plugin, self.ctx,
-                                               {'id': '1111'})
+                                               {'id': net_id})
         agents = self.plugin.get_dhcp_agents_hosting_networks(self.ctx,
-                                                              ['1111'])
+                                                              [net_id])
         self.assertEqual(1, len(agents))
 
     def test_scheduler_two_agents_per_network(self):
         cfg.CONF.set_override('dhcp_agents_per_network', 2)
-        self._save_networks(['1111'])
+        net_id = self._create_network()
         helpers.register_dhcp_agent(HOST_C)
         helpers.register_dhcp_agent(HOST_D)
         self.plugin.network_scheduler.schedule(self.plugin, self.ctx,
-                                               {'id': '1111'})
+                                               {'id': net_id})
         agents = self.plugin.get_dhcp_agents_hosting_networks(self.ctx,
-                                                              ['1111'])
+                                                              [net_id])
         self.assertEqual(2, len(agents))
 
     def test_scheduler_no_active_agents(self):
-        self._save_networks(['1111'])
+        net_id = self._create_network()
         self.plugin.network_scheduler.schedule(self.plugin, self.ctx,
-                                               {'id': '1111'})
+                                               {'id': net_id})
         agents = self.plugin.get_dhcp_agents_hosting_networks(self.ctx,
-                                                              ['1111'])
+                                                              [net_id])
         self.assertEqual(0, len(agents))
 
     def test_scheduler_equal_distribution(self):
-        self._save_networks(['1111', '2222', '3333'])
+        net_id_1 = self._create_network()
+        net_id_2 = self._create_network()
+        net_id_3 = self._create_network()
         helpers.register_dhcp_agent(HOST_C)
         helpers.register_dhcp_agent(HOST_D, networks=1)
         self.plugin.network_scheduler.schedule(
-            self.plugin, context.get_admin_context(), {'id': '1111'})
+            self.plugin, context.get_admin_context(), {'id': net_id_1})
         helpers.register_dhcp_agent(HOST_D, networks=2)
         self.plugin.network_scheduler.schedule(
-            self.plugin, context.get_admin_context(), {'id': '2222'})
+            self.plugin, context.get_admin_context(), {'id': net_id_2})
         helpers.register_dhcp_agent(HOST_C, networks=4)
         self.plugin.network_scheduler.schedule(
-            self.plugin, context.get_admin_context(), {'id': '3333'})
+            self.plugin, context.get_admin_context(), {'id': net_id_3})
         agent1 = self.plugin.get_dhcp_agents_hosting_networks(
-            self.ctx, ['1111'])
+            self.ctx, [net_id_1])
         agent2 = self.plugin.get_dhcp_agents_hosting_networks(
-            self.ctx, ['2222'])
+            self.ctx, [net_id_2])
         agent3 = self.plugin.get_dhcp_agents_hosting_networks(
-            self.ctx, ['3333'])
+            self.ctx, [net_id_3])
         self.assertEqual('host-c', agent1[0]['host'])
         self.assertEqual('host-c', agent2[0]['host'])
         self.assertEqual('host-d', agent3[0]['host'])
@@ -458,9 +475,11 @@ class TestDhcpSchedulerFilter(TestDhcpSchedulerBaseTestCase,
         agents = self._create_and_set_agents_down(['host-a', 'host-b'], 1)
         agents += self._create_and_set_agents_down(['host-c', 'host-d'], 1,
                                                    admin_state_up=False)
-        self._test_schedule_bind_network(agents, self.network_id)
+        networks = kwargs.pop('networks', [self.network_id])
+        for network in networks:
+            self._test_schedule_bind_network(agents, network)
         agents = self.get_dhcp_agents_hosting_networks(self.ctx,
-                                                       [self.network_id],
+                                                       networks,
                                                        **kwargs)
         host_ids = set(a['host'] for a in agents)
         self.assertEqual(expected, host_ids)
@@ -491,6 +510,14 @@ class TestDhcpSchedulerFilter(TestDhcpSchedulerBaseTestCase,
                                                     active=True,
                                                     admin_state_up=False)
 
+    def test_get_dhcp_agents_hosting_many_networks(self):
+        net_id = 'another-net-id'
+        self._save_networks([net_id])
+        networks = [net_id, self.network_id]
+        self._test_get_dhcp_agents_hosting_networks({'host-a', 'host-b',
+                                                     'host-c', 'host-d'},
+                                                    networks=networks)
+
 
 class DHCPAgentAZAwareWeightSchedulerTestCase(TestDhcpSchedulerBaseTestCase):
 
@@ -502,6 +529,9 @@ class DHCPAgentAZAwareWeightSchedulerTestCase(TestDhcpSchedulerBaseTestCase):
             'neutron.scheduler.dhcp_agent_scheduler.AZAwareWeightScheduler')
         self.plugin = importutils.import_object('neutron.plugins.ml2.plugin.'
                                                 'Ml2Plugin')
+        mock.patch.object(
+            self.plugin, 'filter_hosts_with_network_access',
+            side_effect=lambda context, network_id, hosts: hosts).start()
         cfg.CONF.set_override('dhcp_agents_per_network', 1)
         cfg.CONF.set_override("dhcp_load_type", "networks")
 
@@ -568,8 +598,9 @@ class DHCPAgentAZAwareWeightSchedulerTestCase(TestDhcpSchedulerBaseTestCase):
         hosts = set([a['host'] for a in agents])
         self.assertEqual(expected_hosts, hosts)
 
-    def test_az_scheduler_no_az_hints(self):
-        cfg.CONF.set_override('dhcp_agents_per_network', 2)
+    def _test_az_scheduler_no_az_hints(self, multiple_agent=False):
+        num_agent = 2 if multiple_agent else 1
+        cfg.CONF.set_override('dhcp_agents_per_network', num_agent)
         self._save_networks(['1111'])
         helpers.register_dhcp_agent('az1-host1', networks=2, az='az1')
         helpers.register_dhcp_agent('az1-host2', networks=3, az='az1')
@@ -579,7 +610,53 @@ class DHCPAgentAZAwareWeightSchedulerTestCase(TestDhcpSchedulerBaseTestCase):
             {'id': '1111', 'availability_zone_hints': []})
         agents = self.plugin.get_dhcp_agents_hosting_networks(self.ctx,
                                                               ['1111'])
-        self.assertEqual(2, len(agents))
-        expected_hosts = set(['az1-host1', 'az2-host2'])
+        self.assertEqual(num_agent, len(agents))
+        if multiple_agent:
+            expected_hosts = set(['az1-host1', 'az2-host2'])
+        else:
+            expected_hosts = set(['az2-host2'])
         hosts = {a['host'] for a in agents}
         self.assertEqual(expected_hosts, hosts)
+
+    def test_az_scheduler_no_az_hints_multiple_agent(self):
+        self._test_az_scheduler_no_az_hints(multiple_agent=True)
+
+    def test_az_scheduler_no_az_hints_one_agent(self):
+        self._test_az_scheduler_no_az_hints()
+
+    def test_az_scheduler_select_az_with_least_weight(self):
+        self._save_networks(['1111'])
+        dhcp_agents = []
+        # Register 6 dhcp agents in 3 AZs, every AZ will have 2 agents.
+        dhcp_agents.append(
+            helpers.register_dhcp_agent('az1-host1', networks=6, az='az1'))
+        dhcp_agents.append(
+            helpers.register_dhcp_agent('az1-host2', networks=5, az='az1'))
+        dhcp_agents.append(
+            helpers.register_dhcp_agent('az2-host1', networks=4, az='az2'))
+        dhcp_agents.append(
+            helpers.register_dhcp_agent('az2-host2', networks=3, az='az2'))
+        dhcp_agents.append(
+            helpers.register_dhcp_agent('az3-host1', networks=2, az='az3'))
+        dhcp_agents.append(
+            helpers.register_dhcp_agent('az3-host2', networks=1, az='az3'))
+
+        # Try multiple times to verify that the select of AZ scheduler will
+        # output stably.
+        for i in range(3):
+            # Shuffle the agents
+            random.shuffle(dhcp_agents)
+            # Select agents with empty resource_hosted_agents. This means each
+            # AZ will have same amount of agents scheduled (0 in this case)
+            agents_select = self.plugin.network_scheduler.select(
+                self.plugin, self.ctx, dhcp_agents, [], 2)
+
+            self.assertEqual(2, len(agents_select))
+            # The agent and az with least weight should always be selected
+            # first
+            self.assertEqual('az3-host2', agents_select[0]['host'])
+            self.assertEqual('az3', agents_select[0]['availability_zone'])
+            # The second selected agent should be the agent with least weight,
+            # which is also not in the same az as the first selected agent.
+            self.assertEqual('az2-host2', agents_select[1]['host'])
+            self.assertEqual('az2', agents_select[1]['availability_zone'])

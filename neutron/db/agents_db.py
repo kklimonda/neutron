@@ -16,6 +16,8 @@
 import datetime
 
 from eventlet import greenthread
+from neutron_lib.api import converters
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
@@ -34,7 +36,7 @@ from neutron.api.v2 import attributes
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants
+from neutron.common import constants as n_const
 from neutron import context
 from neutron.db import api as db_api
 from neutron.db import model_base
@@ -177,11 +179,6 @@ class AgentAvailabilityZoneMixin(az_ext.AvailabilityZonePluginBase):
 class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
     """Mixin class to add agent extension to db_base_plugin_v2."""
 
-    def __init__(self, *args, **kwargs):
-        version_manager.set_consumer_versions_callback(
-            self._get_agents_resource_versions)
-        super(AgentDbMixin, self).__init__(*args, **kwargs)
-
     def _get_agent(self, context, id):
         try:
             agent = self._get_by_id(context, Agent, id)
@@ -281,7 +278,7 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                                       filters=filters, fields=fields)
         alive = filters and filters.get('alive', None)
         if alive:
-            alive = attributes.convert_to_boolean(alive[0])
+            alive = converters.convert_to_boolean(alive[0])
             agents = [agent for agent in agents if agent['alive'] == alive]
         return agents
 
@@ -322,6 +319,18 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
         agent = self._get_agent(context, id)
         return self._make_agent_dict(agent, fields)
 
+    def filter_hosts_with_network_access(
+            self, context, network_id, candidate_hosts):
+        """Filter hosts with access to network_id.
+
+        This method returns a subset of candidate_hosts with the ones with
+        network access to network_id.
+
+        A plugin can overload this method to define its own host network_id
+        based filter.
+        """
+        return candidate_hosts
+
     def _log_heartbeat(self, state, agent_db, agent_conf):
         if agent_conf.get('log_agent_heartbeats'):
             delta = timeutils.utcnow() - agent_db.heartbeat_timestamp
@@ -338,7 +347,7 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
         Returns agent status from server point of view: alive, new or revived.
         It could be used by agent to do some sync with the server if needed.
         """
-        status = constants.AGENT_ALIVE
+        status = n_const.AGENT_ALIVE
         with context.session.begin(subtransactions=True):
             res_keys = ['agent_type', 'binary', 'host', 'topic']
             res = dict((k, agent_state[k]) for k in res_keys)
@@ -356,7 +365,7 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                 agent_db = self._get_agent_by_type_and_host(
                     context, agent_state['agent_type'], agent_state['host'])
                 if not agent_db.is_active:
-                    status = constants.AGENT_REVIVED
+                    status = n_const.AGENT_REVIVED
                     if 'resource_versions' not in agent_state:
                         # updating agent_state with resource_versions taken
                         # from db so that
@@ -370,6 +379,7 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                 greenthread.sleep(0)
                 self._log_heartbeat(agent_state, agent_db, configurations_dict)
                 agent_db.update(res)
+                event_type = events.AFTER_UPDATE
             except ext_agent.AgentNotFoundByTypeHost:
                 greenthread.sleep(0)
                 res['created_at'] = current_time
@@ -379,9 +389,14 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                 agent_db = Agent(**res)
                 greenthread.sleep(0)
                 context.session.add(agent_db)
+                event_type = events.AFTER_CREATE
                 self._log_heartbeat(agent_state, agent_db, configurations_dict)
-                status = constants.AGENT_NEW
+                status = n_const.AGENT_NEW
             greenthread.sleep(0)
+
+        registry.notify(resources.AGENT, event_type, self, context=context,
+                        host=agent_state['host'], plugin=self,
+                        agent=agent_state)
         return status
 
     def create_or_update_agent(self, context, agent):
@@ -408,14 +423,15 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                                     filters={'admin_state_up': [True]})
         return filter(self.is_agent_considered_for_versions, up_agents)
 
-    def _get_agents_resource_versions(self, tracker):
+    def get_agents_resource_versions(self, tracker):
         """Get the known agent resource versions and update the tracker.
 
-        Receives a version_manager.ResourceConsumerTracker instance and it's
-        expected to look up in to the database and update every agent resource
-        versions.
+        This function looks up into the database and updates every agent
+        resource versions.
         This method is called from version_manager when the cached information
         has passed TTL.
+
+        :param tracker: receives a version_manager.ResourceConsumerTracker
         """
         for agent in self._get_agents_considered_for_versions():
             resource_versions = agent.get('resource_versions', {})
@@ -440,7 +456,7 @@ class AgentExtRpcCallback(object):
     """
 
     target = oslo_messaging.Target(version='1.1',
-                                   namespace=constants.RPC_NAMESPACE_STATE)
+                                   namespace=n_const.RPC_NAMESPACE_STATE)
     START_TIME = timeutils.utcnow()
 
     def __init__(self, plugin=None):

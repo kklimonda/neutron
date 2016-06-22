@@ -18,6 +18,7 @@ import random
 
 import eventlet
 import mock
+from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_utils import uuidutils
 
@@ -28,7 +29,6 @@ from neutron.agent.linux import interface
 from neutron.agent.linux import polling
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import config as common_config
-from neutron.common import constants as n_const
 from neutron.common import utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import config \
@@ -99,7 +99,8 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
             'br_tun': br_tun.OVSTunnelBridge
         }
 
-    def create_agent(self, create_tunnels=True, ancillary_bridge=None):
+    def create_agent(self, create_tunnels=True, ancillary_bridge=None,
+                     local_ip='192.168.10.1'):
         if create_tunnels:
             tunnel_types = [p_const.TYPE_VXLAN]
         else:
@@ -108,7 +109,7 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
         self.config.set_override('tunnel_types', tunnel_types, "AGENT")
         self.config.set_override('polling_interval', 1, "AGENT")
         self.config.set_override('prevent_arp_spoofing', False, "AGENT")
-        self.config.set_override('local_ip', '192.168.10.1', "OVS")
+        self.config.set_override('local_ip', local_ip, "OVS")
         self.config.set_override('bridge_mappings', bridge_mappings, "OVS")
         # Physical bridges should be created prior to running
         self._bridge_classes()['br_phys'](self.br_phys).create()

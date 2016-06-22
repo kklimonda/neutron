@@ -14,6 +14,8 @@
 #    under the License.
 
 import mock
+from neutron_lib import constants
+from oslo_log import versionutils
 import testtools
 
 from neutron.agent.common import config
@@ -21,7 +23,6 @@ from neutron.agent.common import ovs_lib
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.common import constants
 from neutron.tests import base
 
 
@@ -90,9 +91,12 @@ class TestABCDriverNoMtu(TestBase):
     def test_plug_with_no_mtu_works(self):
         driver = FakeInterfaceDriverNoMtu(self.conf)
         self.device_exists.return_value = False
-        driver.plug(
-            mock.Mock(), mock.Mock(), mock.Mock(), mock.Mock(), mtu=9000)
+        with mock.patch.object(
+                versionutils, 'report_deprecated_feature') as report:
+            driver.plug(
+                mock.Mock(), mock.Mock(), mock.Mock(), mock.Mock(), mtu=9000)
         self.assertTrue(driver.plug_called)
+        self.assertTrue(report.called)
 
 
 class TestABCDriver(TestBase):
