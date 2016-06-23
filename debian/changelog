@@ -6,6 +6,7 @@ neutron (2:9.0.0.0b2~dev254-1) UNRELEASED; urgency=medium
 
   [ David Della Vecchia ]
   * New upstream version.
+  * d/p/drop-ryu-dep.patch: Rebased.
 
  -- David Della Vecchia <ddv@canonical.com>  Thu, 23 Jun 2016 05:47:04 -0400
 
