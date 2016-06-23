@@ -52,12 +52,6 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
     Changes = collections.namedtuple('Changes', 'add original remove')
 
     @staticmethod
-    def _rebuild_availability_ranges(context, subnets):
-        """Should be redefined for non-ipam backend only
-        """
-        pass
-
-    @staticmethod
     def _gateway_ip_str(subnet, cidr_net):
         if subnet.get('gateway_ip') is const.ATTR_NOT_SPECIFIED:
             return str(netaddr.IPNetwork(cidr_net).network + 1)
@@ -107,12 +101,11 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
     def _update_db_port(self, context, db_port, new_port, network_id, new_mac):
         # Remove all attributes in new_port which are not in the port DB model
         # and then update the port
-        try:
-            db_port.update(self._filter_non_model_columns(new_port,
-                                                          models_v2.Port))
-            context.session.flush()
-        except db_exc.DBDuplicateEntry:
+        if (new_mac and new_mac != db_port.mac_address and
+                self._is_mac_in_use(context, network_id, new_mac)):
             raise exc.MacAddressInUse(net_id=network_id, mac=new_mac)
+        db_port.update(self._filter_non_model_columns(new_port,
+                                                      models_v2.Port))
 
     def _update_subnet_host_routes(self, context, id, s):
 
@@ -177,10 +170,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                                                 subnet_id=subnet_id)
                      for p in pools]
         context.session.add_all(new_pools)
-        # Call static method with self to redefine in child
-        # (non-pluggable backend)
-        if not ipv6_utils.is_ipv6_pd_enabled(s):
-            self._rebuild_availability_ranges(context, [s])
+
         # Gather new pools for result
         result_pools = [{'start': p[0], 'end': p[1]} for p in pools]
         del s['allocation_pools']
@@ -326,12 +316,12 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         if segment_id:
             query = context.session.query(segments_db.NetworkSegment)
             query = query.filter(segments_db.NetworkSegment.id == segment_id)
-            segment = query.one()
-            if segment.network_id != network_id:
+            segment_model = query.one()
+            if segment_model.network_id != network_id:
                 raise segment_exc.NetworkIdsDontMatch(
                     subnet_network=network_id,
                     segment_id=segment_id)
-            if segment.is_dynamic:
+            if segment_model.is_dynamic:
                 raise segment_exc.SubnetCantAssociateToDynamicSegment()
 
     def _get_subnet_for_fixed_ip(self, context, fixed, subnets):
@@ -542,7 +532,10 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
 
         query = self._get_collection_query(context, Subnet)
         query = query.filter(Subnet.network_id == network_id)
-        if not validators.is_attr_set(host):
+        # Note:  This seems redundant, but its not.  It has to cover cases
+        # where host is None, ATTR_NOT_SPECIFIED, or '' due to differences in
+        # host binding implementations.
+        if not validators.is_attr_set(host) or not host:
             query = query.filter(Subnet.segment_id.is_(None))
             return [self._make_subnet_dict(c, context=context) for c in query]
 
@@ -631,6 +624,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         port_copy = copy.deepcopy(old_port)
         port_copy['fixed_ips'] = const.ATTR_NOT_SPECIFIED
         port_copy.update(new_port)
+        context.session.expire(old_port_db, ['fixed_ips'])
         ips = self.allocate_ips_for_port_and_store(
             context, {'port': port_copy}, port_copy['id'])
         return self.Changes(add=ips, original=[], remove=[])

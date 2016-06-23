@@ -283,6 +283,7 @@ class HostSegmentMappingTestCase(SegmentTestCase):
         if not plugin:
             plugin = 'neutron.plugins.ml2.plugin.Ml2Plugin'
         super(HostSegmentMappingTestCase, self).setUp(plugin=plugin)
+        db.subscribe()
 
     def _get_segments_for_host(self, host):
         ctx = context.get_admin_context()
@@ -311,6 +312,30 @@ class HostSegmentMappingTestCase(SegmentTestCase):
                          segments_host_db[segment['id']]['segment_id'])
         self.assertEqual(host, segments_host_db[segment['id']]['host'])
         return segment
+
+
+class TestMl2HostSegmentMappingNoAgent(HostSegmentMappingTestCase):
+
+    def test_update_segment_host_mapping(self):
+        ctx = context.get_admin_context()
+        host = 'host1'
+        physnets = ['phys_net1']
+        with self.network() as network:
+            network = network['network']
+        segment = self._test_create_segment(
+            network_id=network['id'], physical_network='phys_net1',
+            segmentation_id=200, network_type=p_constants.TYPE_VLAN)['segment']
+        self._test_create_segment(
+            network_id=network['id'], physical_network='phys_net2',
+            segmentation_id=201, network_type=p_constants.TYPE_VLAN)['segment']
+        segments = db.get_segments_with_phys_nets(ctx, physnets)
+        segment_ids = {segment['id'] for segment in segments}
+        db.update_segment_host_mapping(ctx, host, segment_ids)
+        segments_host_db = self._get_segments_for_host(host)
+        self.assertEqual(1, len(segments_host_db))
+        self.assertEqual(segment['id'],
+                         segments_host_db[segment['id']]['segment_id'])
+        self.assertEqual(host, segments_host_db[segment['id']]['host'])
 
 
 class TestMl2HostSegmentMappingOVS(HostSegmentMappingTestCase):
@@ -842,3 +867,30 @@ class TestSegmentAwareIpam(SegmentTestCase):
         self.assertEqual(webob.exc.HTTPConflict.code, response.status_int)
         self.assertEqual(segment_exc.HostConnectedToMultipleSegments.__name__,
                          res['NeutronError']['type'])
+
+    def test_port_update_allocate_no_segments(self):
+        """Binding information is provided, subnet created after port"""
+        with self.network() as network:
+            pass
+
+        # Create a bound port with no IP address (since there is not subnet)
+        port = self._create_deferred_ip_port(network)
+
+        # Create the subnet and try to update the port to get an IP
+        with self.subnet(network=network) as subnet:
+            # Try requesting an IP (but the only subnet is on a segment)
+            data = {'port': {
+                'fixed_ips': [{'subnet_id': subnet['subnet']['id']}]}}
+            port_id = port['port']['id']
+            port_req = self.new_update_request('ports', data, port_id)
+            response = port_req.get_response(self.api)
+
+        # Since port is bound and there is a mapping to segment, it succeeds.
+        self.assertEqual(webob.exc.HTTPOk.code, response.status_int)
+        self._assert_one_ip_in_subnet(response, subnet['subnet']['cidr'])
+
+
+class TestSegmentAwareIpamML2(TestSegmentAwareIpam):
+    def setUp(self):
+        super(TestSegmentAwareIpamML2, self).setUp(
+            plugin='neutron.plugins.ml2.plugin.Ml2Plugin')

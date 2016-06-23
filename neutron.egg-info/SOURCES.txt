@@ -17,6 +17,7 @@ setup.cfg
 setup.py
 test-requirements.txt
 tox.ini
+api-ref/README.rst
 bin/neutron-rootwrap-xen-dom0
 devstack/plugin.sh
 devstack/settings
@@ -118,7 +119,6 @@ neutron/__init__.py
 neutron/_i18n.py
 neutron/auth.py
 neutron/context.py
-neutron/i18n.py
 neutron/manager.py
 neutron/neutron_plugin_base_v2.py
 neutron/opts.py
@@ -444,6 +444,7 @@ neutron/db/migration/alembic_migrations/versions/mitaka/expand/b4caf27aae4_add_b
 neutron/db/migration/alembic_migrations/versions/mitaka/expand/c3a73f615e4_add_ip_version_to_address_scope.py
 neutron/db/migration/alembic_migrations/versions/mitaka/expand/dce3ec7a25c9_router_az.py
 neutron/db/migration/alembic_migrations/versions/mitaka/expand/ec7fcfbf72ee_network_az.py
+neutron/db/migration/alembic_migrations/versions/newton/contract/4bcd4df1f426_rename_ml2_dvr_port_bindings.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/7bbb25278f53_device_owner_ha_replicate_int.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/89ab9a816d70_rename_ml2_network_segments.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/8fd3918ef6f4_add_segment_host_mapping.py
@@ -451,9 +452,12 @@ neutron/db/migration/alembic_migrations/versions/newton/contract/c879c5e1ee90_ad
 neutron/db/migration/alembic_migrations/versions/newton/expand/30107ab6a3ee_provisioning_blocks.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/45f8dd33480b_qos_dscp_db_addition.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/5abc0278ca73_add_support_for_vlan_trunking.py
+neutron/db/migration/alembic_migrations/versions/newton/expand/c415aab1c048_add_revisions_column.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/d3435b514502_add_device_id_index_to_port.py
 neutron/db/migration/models/__init__.py
 neutron/db/migration/models/head.py
+neutron/db/network_dhcp_agent_binding/__init__.py
+neutron/db/network_dhcp_agent_binding/models.py
 neutron/db/qos/__init__.py
 neutron/db/qos/api.py
 neutron/db/qos/models.py
@@ -928,6 +932,7 @@ neutron/tests/tempest/api/test_security_groups_negative.py
 neutron/tests/tempest/api/test_service_type_management.py
 neutron/tests/tempest/api/test_subnetpools.py
 neutron/tests/tempest/api/test_subnetpools_negative.py
+neutron/tests/tempest/api/test_subnets.py
 neutron/tests/tempest/api/test_timestamp.py
 neutron/tests/tempest/api/admin/__init__.py
 neutron/tests/tempest/api/admin/test_agent_management.py
@@ -1297,6 +1302,7 @@ releasenotes/notes/404-for-quota-tenant-2c09c16759269b21.yaml
 releasenotes/notes/QoS-for-linuxbridge-agent-bdb13515aac4e555.yaml
 releasenotes/notes/access_as_external_rbac-455dc74b9fa22761.yaml
 releasenotes/notes/add-availability-zone-4440cf00be7c54ba.yaml
+releasenotes/notes/add-designate-driver-ssl-options-169c299c96f2aff0.yaml
 releasenotes/notes/add-get-me-a-network-56321aeef5389001.yaml
 releasenotes/notes/add-integration-with-external-dns-f56ec8a4993b1fc4.yaml
 releasenotes/notes/add-ip-protocols-in-sg-60467a073e771aee.yaml
@@ -1325,6 +1331,7 @@ releasenotes/notes/deprecate_neutron_debug-a578e0adfc9cff4c.yaml
 releasenotes/notes/deprecate_prevent_arp_spoofing_option-a09e673fc8f9fee4.yaml
 releasenotes/notes/deprecated-driver-e368e0befc9bee4c.yaml
 releasenotes/notes/direct-physical-vnic-878d15bdb758b70e.yaml
+releasenotes/notes/dnsmasq_dns_servers-d729c04887ce67b4.yaml
 releasenotes/notes/dscp-qos-77ea9b27d3762e48.yaml
 releasenotes/notes/dvr-ha-support-cc67e84d9380cd0b.yaml
 releasenotes/notes/dvr-ovs-agent-6052a8d60fddde22.yaml

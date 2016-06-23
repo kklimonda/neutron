@@ -1,14 +1,101 @@
 CHANGES
 =======
 
+* Updated from global requirements
+* Remove IP availability range recalculation logic
+* Rename ml2_dvr_port_bindings to make it generic
+* Override 'create' for Trunk and SubPort
+* Retry DBDuplicate errors in retry decorator
+* Complete removing support for unsplit alembic branches
+* Revert "move import to top and rename to make more readable"
+* Make pep8 job great again
+* Disable warnerrors=True in setup.cfg
+* Do not rewrite original exception for IPAM part 2
+* Change addCleanup create_tenant to delete_tenant, fix gate
+* Obsolete mac_generation_retries and deprecate the option
+* Fix minor spelling error in debug log
+* tests: clean up designate client session mock on test exit
+* Remove unnecessary import from segment plugin
+* ovsfw: Fix variable names in UT
+* ovs: set device MTU after it's moved into a namespace
+* Syntax fix
+* Remove deprecated TODO notes in L2 agent extension manager
+* Fix pep8 violations in fullstack qos test
+* Fix release name in deprecating message for agent status checks
+* Typo fix
+* Fix bug with mac generation
+* Mark port as ready after enabling dhcp at agent
+* Add exponential gap to retry decorator
+* Fix designate dns driver for SSL based endpoints
+* Update Neutron documentation with `project`
+* Provide DB isolation for WalkMigrations tests
+* Refactor NetworkDhcpAgentBinding
+* Tempest: fix a typo
+* Check for alembic Add/DropColumn exceptions in migrations
+* objects: switch base plugin class to using subnetpool object
+* Added sorting/pagination tests for subnets
+* DHCP: delete config option dnsmasq_dns_server
+* Refactor update_segment_host_mapping_for_agent for agentless topology
+* OVS agent: remove unused variables
+* Updated from global requirements
+* Remove the plugin import from auto_alloc extension
+* Use neutron-lib constants
+* qos: fix shared filter for policies
+* objects: Add filter query hook to NeutronDbObject
+* Extend utils create methods to accept check_allow_post
+* tests: fetch unshared subnetpools only
+* Cleanup Liberty to Mitaka upgrade corner cases not necessary anymore
+* Fixes variable name confusion
+* Use StringField for tenant_id fields
+* Remove useless str()
+* Add router precommit events
+* Allow self-unsubscribing callbacks
+* Add data model for standard attr revision numbers
+* DVR: Fix allowed_address_pair port binding with delayed fip
+* Update networking-ovn project functionality
+* Revert "Add index on trunk_id in the subports model"
+* Update Neutron server to use only keystoneauth
+* Make segment aware IPAM compatible with ML2
+* Remove MAC duplicate detection for generated macs
+* Pecan: handle single fields query parameter
+* Compute IPAvailabilityRanges in memory during IP allocation
+* Clean up subports model
+* After a migration clean up the floating ip on the source host
+* Check for mysql SAVEPOINT error in retry decorator
+* Check for StaleData errors in retry decorator
+* Use session delete for IPs to trigger events
+* Fix update of shared QoS policy
+* Fixed variable shadowing in ipam_backend_mixin.py
+* Add type information to ObjectNotFound message
+* Add README for api-ref
+* Use next available address for dhcp ports
+* objects: in get_object(s), filter by fields, not model attributes
+* Refactor the rpc callback version discovery mechanism
+* Add index on trunk_id in the subports model
+* Support for MultipleExceptions in db_api decorators
+* Convert multiple exception types in the API
+* Add sanity check for idempotent id's in tempest tests
+* Remove some options from neutron-db-manage
+* tests: added sorting/pagination api tests for subnetpools
+* Drop neutron/i18n.py in favor of neutron/_i18n.py
+* QoS DSCP fullstack tests
 * Hacking: make use of neutron lib
+* Return fixed_ips from port update
+* Deprecate the functions map after segment moving out of ml2
+* Use callback to update SegmentHostMapping
 * Match filter criteria when constructing URI for href based iteration
 * Make service plugins' get_plugin_type classmethods
+* OVS: don't throw KeyError when duplicate VLAN tags exist
+* Revert "DVR: Clear SNAT namespace when agent restarts after router move"
 * objects: Use common plugin _model_query in get_object
 * Tox: Remove neutron/openstack/common from excludes list
+* qos: Add API test for shared policy
 * Imported Translations from Zanata
 * Fix server_default comparison for BigInteger
+* Update ml2 delete_subnet to deallocate via ipam
 * Make IPAM segment aware on port update
+* Make sure AZAwareWeightScheduler base on weight of agent
+* Provide router-id for ROUTER_INTERFACE/BEFORE_DELETE event
 * L3 DB: only read dns 'dns-integration' once
 * Force "out-of-band" controller connection mode
 * Devref: Add inline codeblock to upgrade command
@@ -19,12 +106,14 @@ CHANGES
 * Adding basic connectivity scenario to Neutron
 * Switch to oslo.cache
 * [TrivialFix] Deprecate unused NeutronController class
+* remove unused rpc method get_active_networks
 * Added API tests for page_reverse and href next/previous links
 * Correct hyperlinks to sub_projects documentation
 * DB base plugin: correct typo id to subnet_id
 * Devstack support for macvtap agent
 * Segments: remove log message indicating segments are not supported
 * Updated from global requirements
+* Move dragonflow to affiliated project list
 * Fix getting dhcp agents for multiple networks
 * Pass ha_router_port flag for _snat_router_interfaces ports
 * objects: stop using internal _context attribute
@@ -38,6 +127,7 @@ CHANGES
 * Updated from global requirements
 * Guard against config_dirs not defined on ConfigOpts
 * Macvtap: Allow noop alias as FW driver
+* Generalise the logic of resource auto rescheduling
 * objects: support advanced criteria for get_objects
 * Fix wrong description in the class DhcpAgentNotifyAPI docstring
 * Follow effective Neutron guidelines
@@ -66,10 +156,12 @@ CHANGES
 * Avoid shadowing the method's port argument
 * OVO for VLAN aware VMs
 * tests: cover port with existing sorting/pagination api tests
+* How to support trunk ports with Open vSwitch Agent
 * Introduce official lib tag for neutron-lib issues
 * Pecan: tell the plugin about field selection
 * Add segments to hosts mappings
 * Remove using PROTO_NAME_IPV6_ICMP_LEGACY from neutron.common.constants
+* Prevent adding duplicated sg rules with diff description
 * Updated from global requirements
 * Remove remaining BGP code from neutron
 * DVR: Pings to floatingip returns with fixed-ip on same network
@@ -99,6 +191,7 @@ CHANGES
 * Update unit tests to use correct method being used
 * Deprecate neutron-debug
 * functional: Fix ovsdb-monitor waiting for first events
+* Fix broken URL in Mitaka Neutron release note
 * Remove nested transaction from ipam driver
 * Allow for excepted operations in migrations
 * functional: Run OVSFW tests with ovsdb native interface
@@ -110,6 +203,7 @@ CHANGES
 * Updated from global requirements
 * Segment: remove deprecation warning for converters
 * Add negative API tests that try to remove the resources in use
+* Respond negatively to tenant detachment of enforced QoS policies
 * Check if pool update is needed in reference driver
 * Remove cliff requirement in test-requirements.txt
 * sriov_nic config options were declared under wrong group

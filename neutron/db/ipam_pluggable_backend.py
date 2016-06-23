@@ -314,15 +314,20 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                                                 new_port['fixed_ips'],
                                                 new_mac)
         try:
+            # Expire the fixed_ips of db_port in current transaction, because
+            # it will be changed in the following operation and the latest
+            # data is expected.
+            context.session.expire(db_port, ['fixed_ips'])
+
             # Check if the IPs need to be updated
             network_id = db_port['network_id']
+            for ip in changes.remove:
+                self._delete_ip_allocation(context, network_id,
+                                           ip['subnet_id'], ip['ip_address'])
             for ip in changes.add:
                 self._store_ip_allocation(
                     context, ip['ip_address'], network_id,
                     ip['subnet_id'], db_port.id)
-            for ip in changes.remove:
-                self._delete_ip_allocation(context, network_id,
-                                           ip['subnet_id'], ip['ip_address'])
             self._update_db_port(context, db_port, new_port, network_id,
                                  new_mac)
         except Exception:
@@ -422,7 +427,7 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
         subnetpool = None
 
         if subnetpool_id and not subnetpool_id == constants.IPV6_PD_POOL_ID:
-            subnetpool = self._get_subnetpool(context, subnetpool_id)
+            subnetpool = self._get_subnetpool(context, id=subnetpool_id)
             self._validate_ip_version_with_subnetpool(subnet, subnetpool)
 
         # gateway_ip and allocation pools should be validated or generated
@@ -461,5 +466,7 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
             with excutils.save_and_reraise_exception():
                 LOG.debug("An exception occurred during subnet creation. "
                           "Reverting subnet allocation.")
-                self.delete_subnet(context, subnet_request.subnet_id)
+                self._safe_rollback(self.delete_subnet,
+                                    context,
+                                    subnet_request.subnet_id)
         return subnet, ipam_subnet

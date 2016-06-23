@@ -26,7 +26,7 @@ def get_object(context, model, **kwargs):
 
 
 def _kwargs_to_filters(**kwargs):
-    return {k: [v]
+    return {k: v if isinstance(v, list) else [v]
             for k, v in kwargs.items()}
 
 
@@ -56,9 +56,9 @@ def _safe_get_object(context, model, **kwargs):
     db_obj = get_object(context, model, **kwargs)
 
     if db_obj is None:
-        key = "".join(['%s:: %s ' % (key, value) for (key, value)
-                       in kwargs.items()])
-        raise n_exc.ObjectNotFound(id=key)
+        key = ", ".join(['%s=%s' % (key, value) for (key, value)
+                         in kwargs.items()])
+        raise n_exc.ObjectNotFound(id="%s(%s)" % (model.__name__, key))
     return db_obj
 
 
