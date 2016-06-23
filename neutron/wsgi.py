@@ -19,76 +19,49 @@ Utility methods for working with WSGI servers
 from __future__ import print_function
 
 import errno
-import os
 import socket
-import ssl
 import sys
 import time
 
 import eventlet.wsgi
+from neutron_lib import exceptions as exception
 from oslo_config import cfg
 import oslo_i18n
 from oslo_log import log as logging
-from oslo_log import loggers
 from oslo_serialization import jsonutils
 from oslo_service import service as common_service
+from oslo_service import sslutils
 from oslo_service import systemd
+from oslo_service import wsgi
+from oslo_utils import encodeutils
 from oslo_utils import excutils
-import routes.middleware
 import six
 import webob.dec
 import webob.exc
 
+from neutron._i18n import _, _LE, _LI
 from neutron.common import config
-from neutron.common import exceptions as exception
+from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import api
-from neutron.i18n import _LE, _LI
-from neutron import worker
+from neutron import worker as neutron_worker
 
 socket_opts = [
     cfg.IntOpt('backlog',
                default=4096,
                help=_("Number of backlog requests to configure "
                       "the socket with")),
-    cfg.IntOpt('tcp_keepidle',
-               default=600,
-               help=_("Sets the value of TCP_KEEPIDLE in seconds for each "
-                      "server socket. Not supported on OS X.")),
     cfg.IntOpt('retry_until_window',
                default=30,
                help=_("Number of seconds to keep retrying to listen")),
-    cfg.IntOpt('max_header_line',
-               default=16384,
-               help=_("Max header line to accommodate large tokens")),
     cfg.BoolOpt('use_ssl',
                 default=False,
                 help=_('Enable SSL on the API server')),
-    cfg.StrOpt('ssl_ca_file',
-               help=_("CA certificate file to use to verify "
-                      "connecting clients")),
-    cfg.StrOpt('ssl_cert_file',
-               help=_("Certificate file to use when starting "
-                      "the server securely")),
-    cfg.StrOpt('ssl_key_file',
-               help=_("Private key file to use when starting "
-                      "the server securely")),
-    cfg.BoolOpt('wsgi_keep_alive',
-                default=True,
-                help=_("Determines if connections are allowed to be held "
-                     "open by clients after a request is fulfilled. A value "
-                     "of False will ensure that the socket connection will "
-                     "be explicitly closed once a response has been sent to "
-                     "the client.")),
-    cfg.IntOpt('client_socket_timeout', default=900,
-               help=_("Timeout for client connections socket operations. "
-                    "If an incoming connection is idle for this number of "
-                    "seconds it will be closed. A value of '0' means "
-                    "wait forever.")),
 ]
 
 CONF = cfg.CONF
 CONF.register_opts(socket_opts)
+wsgi.register_opts(CONF)
 
 LOG = logging.getLogger(__name__)
 
@@ -98,14 +71,15 @@ def encode_body(body):
 
     WebOb requires to encode unicode body used to update response body.
     """
-    if isinstance(body, six.text_type):
-        return body.encode('utf-8')
-    return body
+    return encodeutils.to_utf8(body)
 
 
-class WorkerService(worker.NeutronWorker):
+class WorkerService(neutron_worker.NeutronWorker):
     """Wraps a worker to be handled by ProcessLauncher"""
-    def __init__(self, service, application, disable_ssl=False):
+    def __init__(self, service, application, disable_ssl=False,
+                 worker_process_count=0):
+        super(WorkerService, self).__init__(worker_process_count)
+
         self._service = service
         self._application = application
         self._disable_ssl = disable_ssl
@@ -120,7 +94,7 @@ class WorkerService(worker.NeutronWorker):
         # Duplicate a socket object to keep a file descriptor usable.
         dup_sock = self._service._socket.dup()
         if CONF.use_ssl and not self._disable_ssl:
-            dup_sock = self._service.wrap_ssl(dup_sock)
+            dup_sock = sslutils.wrap(CONF, dup_sock)
         self._server = self._service.pool.spawn(self._service._run,
                                                 self._application,
                                                 dup_sock)
@@ -142,10 +116,10 @@ class WorkerService(worker.NeutronWorker):
 class Server(object):
     """Server class to manage multiple WSGI sockets and applications."""
 
-    def __init__(self, name, num_threads=1000, disable_ssl=False):
+    def __init__(self, name, num_threads=None, disable_ssl=False):
         # Raise the default from 8192 to accommodate large tokens
         eventlet.wsgi.MAX_HEADER_LINE = CONF.max_header_line
-        self.num_threads = num_threads
+        self.num_threads = num_threads or CONF.wsgi_default_pool_size
         self.disable_ssl = disable_ssl
         # Pool for a greenthread in which wsgi server will be running
         self.pool = eventlet.GreenPool(1)
@@ -155,7 +129,7 @@ class Server(object):
         # wsgi server to wait forever.
         self.client_socket_timeout = CONF.client_socket_timeout or None
         if CONF.use_ssl and not self.disable_ssl:
-            self._check_ssl_settings()
+            sslutils.is_enabled(CONF)
 
     def _get_socket(self, host, port, backlog):
         bind_addr = (host, port)
@@ -204,37 +178,6 @@ class Server(object):
 
         return sock
 
-    @staticmethod
-    def _check_ssl_settings():
-        if not os.path.exists(CONF.ssl_cert_file):
-            raise RuntimeError(_("Unable to find ssl_cert_file "
-                                 ": %s") % CONF.ssl_cert_file)
-
-        # ssl_key_file is optional because the key may be embedded in the
-        # certificate file
-        if CONF.ssl_key_file and not os.path.exists(CONF.ssl_key_file):
-            raise RuntimeError(_("Unable to find "
-                                 "ssl_key_file : %s") % CONF.ssl_key_file)
-
-        # ssl_ca_file is optional
-        if CONF.ssl_ca_file and not os.path.exists(CONF.ssl_ca_file):
-            raise RuntimeError(_("Unable to find ssl_ca_file "
-                                 ": %s") % CONF.ssl_ca_file)
-
-    @staticmethod
-    def wrap_ssl(sock):
-        ssl_kwargs = {'server_side': True,
-                      'certfile': CONF.ssl_cert_file,
-                      'keyfile': CONF.ssl_key_file,
-                      'cert_reqs': ssl.CERT_NONE,
-                      }
-
-        if CONF.ssl_ca_file:
-            ssl_kwargs['ca_certs'] = CONF.ssl_ca_file
-            ssl_kwargs['cert_reqs'] = ssl.CERT_REQUIRED
-
-        return ssl.wrap_socket(sock, **ssl_kwargs)
-
     def start(self, application, port, host='0.0.0.0', workers=0):
         """Run a WSGI server with the given application."""
         self._host = host
@@ -248,7 +191,7 @@ class Server(object):
         self._launch(application, workers)
 
     def _launch(self, application, workers=0):
-        service = WorkerService(self, application, self.disable_ssl)
+        service = WorkerService(self, application, self.disable_ssl, workers)
         if workers < 1:
             # The API service should run in the current process.
             self._server = service
@@ -266,7 +209,8 @@ class Server(object):
             # wait interval past the default of 0.01s.
             self._server = common_service.ProcessLauncher(cfg.CONF,
                                                           wait_interval=1.0)
-            self._server.launch_service(service, workers=workers)
+            self._server.launch_service(service,
+                                        workers=service.worker_process_count)
 
     @property
     def host(self):
@@ -290,73 +234,12 @@ class Server(object):
         """Start a WSGI server in a new green thread."""
         eventlet.wsgi.server(socket, application,
                              max_size=self.num_threads,
-                             log=loggers.WritableLogger(LOG),
+                             log=LOG,
                              keepalive=CONF.wsgi_keep_alive,
                              socket_timeout=self.client_socket_timeout)
 
 
-class Middleware(object):
-    """Base WSGI middleware wrapper.
-
-    These classes require an application to be initialized that will be called
-    next.  By default the middleware will simply call its wrapped app, or you
-    can override __call__ to customize its behavior.
-    """
-
-    @classmethod
-    def factory(cls, global_config, **local_config):
-        """Used for paste app factories in paste.deploy config files.
-
-        Any local configuration (that is, values under the [filter:APPNAME]
-        section of the paste config) will be passed into the `__init__` method
-        as kwargs.
-
-        A hypothetical configuration would look like:
-
-            [filter:analytics]
-            redis_host = 127.0.0.1
-            paste.filter_factory = nova.api.analytics:Analytics.factory
-
-        which would result in a call to the `Analytics` class as
-
-            import nova.api.analytics
-            analytics.Analytics(app_from_paste, redis_host='127.0.0.1')
-
-        You could of course re-implement the `factory` method in subclasses,
-        but using the kwarg passing it shouldn't be necessary.
-
-        """
-        def _factory(app):
-            return cls(app, **local_config)
-        return _factory
-
-    def __init__(self, application):
-        self.application = application
-
-    def process_request(self, req):
-        """Called on each request.
-
-        If this returns None, the next application down the stack will be
-        executed. If it returns a response then that response will be returned
-        and execution will stop here.
-
-        """
-        return None
-
-    def process_response(self, response):
-        """Do whatever you'd like to the response."""
-        return response
-
-    @webob.dec.wsgify
-    def __call__(self, req):
-        response = self.process_request(req)
-        if response:
-            return response
-        response = req.get_response(self.application)
-        return self.process_response(response)
-
-
-class Request(webob.Request):
+class Request(wsgi.Request):
 
     def best_match_content_type(self):
         """Determine the most acceptable content-type.
@@ -510,7 +393,7 @@ class JSONDeserializer(TextDeserializer):
             return jsonutils.loads(datastring)
         except ValueError:
             msg = _("Cannot understand JSON")
-            raise exception.MalformedRequestBody(reason=msg)
+            raise n_exc.MalformedRequestBody(reason=msg)
 
     def default(self, datastring):
         return {'body': self._from_json(datastring)}
@@ -678,98 +561,6 @@ class Application(object):
         raise NotImplementedError(_('You must implement __call__'))
 
 
-class Debug(Middleware):
-    """Middleware for debugging.
-
-    Helper class that can be inserted into any WSGI application chain
-    to get information about the request and response.
-    """
-
-    @webob.dec.wsgify
-    def __call__(self, req):
-        print(("*" * 40) + " REQUEST ENVIRON")
-        for key, value in req.environ.items():
-            print(key, "=", value)
-        print()
-        resp = req.get_response(self.application)
-
-        print(("*" * 40) + " RESPONSE HEADERS")
-        for (key, value) in six.iteritems(resp.headers):
-            print(key, "=", value)
-        print()
-
-        resp.app_iter = self.print_generator(resp.app_iter)
-
-        return resp
-
-    @staticmethod
-    def print_generator(app_iter):
-        """Print contents of a wrapper string iterator when iterated."""
-        print(("*" * 40) + " BODY")
-        for part in app_iter:
-            sys.stdout.write(part)
-            sys.stdout.flush()
-            yield part
-        print()
-
-
-class Router(object):
-    """WSGI middleware that maps incoming requests to WSGI apps."""
-
-    def __init__(self, mapper):
-        """Create a router for the given routes.Mapper.
-
-        Each route in `mapper` must specify a 'controller', which is a
-        WSGI app to call.  You'll probably want to specify an 'action' as
-        well and have your controller be a wsgi.Controller, who will route
-        the request to the action method.
-
-        Examples:
-          mapper = routes.Mapper()
-          sc = ServerController()
-
-          # Explicit mapping of one route to a controller+action
-          mapper.connect(None, "/svrlist", controller=sc, action="list")
-
-          # Actions are all implicitly defined
-          mapper.resource("network", "networks", controller=nc)
-
-          # Pointing to an arbitrary WSGI app.  You can specify the
-          # {path_info:.*} parameter so the target app can be handed just that
-          # section of the URL.
-          mapper.connect(None, "/v1.0/{path_info:.*}", controller=BlogApp())
-        """
-        self.map = mapper
-        self._router = routes.middleware.RoutesMiddleware(self._dispatch,
-                                                          self.map)
-
-    @webob.dec.wsgify
-    def __call__(self, req):
-        """Route the incoming request to a controller based on self.map.
-
-        If no match, return a 404.
-        """
-        return self._router
-
-    @staticmethod
-    @webob.dec.wsgify(RequestClass=Request)
-    def _dispatch(req):
-        """Dispatch a Request.
-
-        Called by self._router after matching the incoming request to a route
-        and putting the information into req.environ. Either returns 404
-        or the routed WSGI app's response.
-        """
-        match = req.environ['wsgiorg.routing_args'][1]
-        if not match:
-            language = req.best_match_language()
-            msg = _('The resource could not be found.')
-            msg = oslo_i18n.translate(msg, language)
-            return webob.exc.HTTPNotFound(explanation=msg)
-        app = match['controller']
-        return app
-
-
 class Resource(Application):
     """WSGI app that handles (de)serialization and controller dispatch.
 
@@ -815,7 +606,7 @@ class Resource(Application):
             msg = _("Unsupported Content-Type")
             LOG.exception(_LE("InvalidContentType: %s"), msg)
             return Fault(webob.exc.HTTPBadRequest(explanation=msg))
-        except exception.MalformedRequestBody:
+        except n_exc.MalformedRequestBody:
             msg = _("Malformed request body")
             LOG.exception(_LE("MalformedRequestBody: %s"), msg)
             return Fault(webob.exc.HTTPBadRequest(explanation=msg))
@@ -848,15 +639,15 @@ class Resource(Application):
         return response
 
     def dispatch(self, request, action, action_args):
-        """Find action-spefic method on controller and call it."""
+        """Find action-specific method on controller and call it."""
 
         controller_method = getattr(self.controller, action)
         try:
             #NOTE(salvatore-orlando): the controller method must have
             # an argument whose name is 'request'
             return controller_method(request=request, **action_args)
-        except TypeError as exc:
-            LOG.exception(exc)
+        except TypeError:
+            LOG.exception(_LE('Invalid request'))
             return Fault(webob.exc.HTTPBadRequest())
 
 
@@ -957,7 +748,7 @@ class Controller(object):
             raise webob.exc.HTTPNotAcceptable(msg)
 
     def _deserialize(self, data, content_type):
-        """Deserialize the request body to the specefied content type.
+        """Deserialize the request body to the specified content type.
 
         Uses self._serialization_metadata if it exists, which is a dict mapping
         MIME types to information needed to serialize to that type.

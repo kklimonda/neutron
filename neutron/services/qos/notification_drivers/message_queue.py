@@ -12,11 +12,11 @@
 
 from oslo_log import log as logging
 
+from neutron._i18n import _LW
 from neutron.api.rpc.callbacks import events
 from neutron.api.rpc.callbacks.producer import registry
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import resources_rpc
-from neutron.i18n import _LW
 from neutron.objects.qos import policy as policy_object
 from neutron.services.qos.notification_drivers import qos_base
 
@@ -33,7 +33,7 @@ def _get_qos_policy_cb(resource, policy_id, **kwargs):
         )
         return
 
-    policy = policy_object.QosPolicy.get_by_id(context, policy_id)
+    policy = policy_object.QosPolicy.get_object(context, id=policy_id)
     return policy
 
 

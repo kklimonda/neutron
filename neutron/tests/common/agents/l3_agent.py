@@ -12,11 +12,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import mock
 import sys
 
+import mock
 from oslo_config import cfg
 
+from neutron._i18n import _
 from neutron.agent.l3 import agent
 from neutron.agent.l3 import namespaces
 from neutron.agent import l3_agent

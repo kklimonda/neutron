@@ -18,8 +18,8 @@ import random
 
 import eventlet
 import mock
+from neutron_lib import constants as n_const
 from oslo_config import cfg
-from oslo_log import log as logging
 from oslo_utils import uuidutils
 
 from neutron.agent.common import config as agent_config
@@ -29,7 +29,6 @@ from neutron.agent.linux import interface
 from neutron.agent.linux import polling
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import config as common_config
-from neutron.common import constants as n_const
 from neutron.common import utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import config \
@@ -45,8 +44,6 @@ from neutron.plugins.ml2.drivers.openvswitch.agent import ovs_neutron_agent \
     as ovs_agent
 from neutron.tests.common import net_helpers
 from neutron.tests.functional.agent.linux import base
-
-LOG = logging.getLogger(__name__)
 
 
 class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
@@ -102,33 +99,61 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
             'br_tun': br_tun.OVSTunnelBridge
         }
 
-    def create_agent(self, create_tunnels=True):
+    def create_agent(self, create_tunnels=True, ancillary_bridge=None,
+                     local_ip='192.168.10.1'):
         if create_tunnels:
             tunnel_types = [p_const.TYPE_VXLAN]
         else:
             tunnel_types = None
-        local_ip = '192.168.10.1'
-        bridge_mappings = {'physnet': self.br_phys}
+        bridge_mappings = ['physnet:%s' % self.br_phys]
+        self.config.set_override('tunnel_types', tunnel_types, "AGENT")
+        self.config.set_override('polling_interval', 1, "AGENT")
+        self.config.set_override('prevent_arp_spoofing', False, "AGENT")
+        self.config.set_override('local_ip', local_ip, "OVS")
+        self.config.set_override('bridge_mappings', bridge_mappings, "OVS")
         # Physical bridges should be created prior to running
         self._bridge_classes()['br_phys'](self.br_phys).create()
         agent = ovs_agent.OVSNeutronAgent(self._bridge_classes(),
-                                          self.br_int, self.br_tun,
-                                          local_ip, bridge_mappings,
-                                          polling_interval=1,
-                                          tunnel_types=tunnel_types,
-                                          prevent_arp_spoofing=False,
-                                          conf=self.config)
+                                          self.config)
         self.addCleanup(self.ovs.delete_bridge, self.br_int)
         if tunnel_types:
             self.addCleanup(self.ovs.delete_bridge, self.br_tun)
+        self.addCleanup(self.ovs.delete_bridge, self.br_phys)
         agent.sg_agent = mock.Mock()
+        agent.ancillary_brs = []
+        if ancillary_bridge:
+            agent.ancillary_brs.append(ancillary_bridge)
         return agent
 
-    def start_agent(self, agent, unplug_ports=None):
+    def _mock_get_events(self, agent, polling_manager, ports):
+        get_events = polling_manager.get_events
+        p_ids = [p['id'] for p in ports]
+
+        def filter_events():
+            events = get_events()
+            filtered_ports = []
+            for dev in events['added']:
+                iface_id = agent.int_br.portid_from_external_ids(
+                    dev.get('external_ids', []))
+                if iface_id in p_ids:
+                    # if the event is not about a port that was created by
+                    # this test, we filter the event out. Since these tests are
+                    # not run in isolation processing all the events might make
+                    # some test fail ( e.g. the agent might keep resycing
+                    # because it keeps finding not ready ports that are created
+                    # by other tests)
+                    filtered_ports.append(dev)
+            return {'added': filtered_ports, 'removed': events['removed']}
+        polling_manager.get_events = mock.Mock(side_effect=filter_events)
+
+    def start_agent(self, agent, ports=None, unplug_ports=None):
         if unplug_ports is None:
             unplug_ports = []
+        if ports is None:
+            ports = []
         self.setup_agent_rpc_mocks(agent, unplug_ports)
         polling_manager = polling.InterfacePollingMinimizer()
+        self._mock_get_events(agent, polling_manager, ports)
         self.addCleanup(polling_manager.stop)
         polling_manager.start()
         agent_utils.wait_until_true(
@@ -142,6 +167,7 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
             rpc_loop_thread.wait()
 
         self.addCleanup(stop_agent, agent, t)
+        return polling_manager
 
     def _create_test_port_dict(self):
         return {'id': uuidutils.generate_uuid(),
@@ -218,9 +244,10 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
 
     def _expected_plugin_rpc_call(self, call, expected_devices, is_up=True):
         """Helper to check expected rpc call are received
+
         :param call: The call to check
-        :param expected_devices The device for which call is expected
-        :param is_up True if expected_devices are devices that are set up,
+        :param expected_devices: The device for which call is expected
+        :param is_up: True if expected_devices are devices that are set up,
                False if expected_devices are devices that are set down
         """
         if is_up:
@@ -229,7 +256,13 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
         else:
             rpc_devices = [
                 dev for args in call.call_args_list for dev in args[0][2]]
-        return not (set(expected_devices) - set(rpc_devices))
+        for dev in rpc_devices:
+            if dev in expected_devices:
+                expected_devices.remove(dev)
+        # reset mock otherwise if the mock is called again the same call param
+        # will be processed again
+        call.reset_mock()
+        return not expected_devices
 
     def create_test_ports(self, amount=3, **kwargs):
         ports = []
@@ -279,6 +312,53 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
         self.agent.plugin_rpc.update_device_list.side_effect = (
             mock_device_raise_exception)
 
+    def _prepare_failed_dev_up_trigger(self, agent):
+
+        def mock_failed_devices_up(context, devices_up, devices_down,
+                                   agent_id, host=None):
+            failed_devices = []
+            devices = list(devices_up)
+            # first port fails
+            if self.ports[0]['id'] in devices_up:
+                # reassign side_effect so that next RPC call will succeed
+                agent.plugin_rpc.update_device_list.side_effect = (
+                    self._mock_update_device)
+                devices.remove(self.ports[0]['id'])
+                failed_devices.append(self.ports[0]['id'])
+            return {'devices_up': devices,
+                    'failed_devices_up': failed_devices,
+                    'devices_down': [],
+                    'failed_devices_down': []}
+
+        self.agent.plugin_rpc.update_device_list.side_effect = (
+            mock_failed_devices_up)
+
+    def _prepare_failed_dev_down_trigger(self, agent):
+
+        def mock_failed_devices_down(context, devices_up, devices_down,
+                                     agent_id, host=None):
+            # first port fails
+            failed_port_id = self.ports[0]['id']
+            failed_devices_down = []
+            dev_down = [
+                {'device': p['id'], 'exists': True}
+                for p in self.ports if p['id'] in devices_down and (
+                    p['id'] != failed_port_id)]
+            # check if it's the call to set devices down and if the device
+            # that is supposed to fail is in the call then modify the
+            # side_effect so that next RPC call will succeed.
+            if devices_down and failed_port_id in devices_down:
+                agent.plugin_rpc.update_device_list.side_effect = (
+                     self._mock_update_device)
+                failed_devices_down.append(failed_port_id)
+            return {'devices_up': devices_up,
+                    'failed_devices_up': [],
+                    'devices_down': dev_down,
+                    'failed_devices_down': failed_devices_down}
+
+        self.agent.plugin_rpc.update_device_list.side_effect = (
+            mock_failed_devices_down)
+
     def wait_until_ports_state(self, ports, up, timeout=60):
         port_ids = [p['id'] for p in ports]
         agent_utils.wait_until_true(
@@ -287,14 +367,25 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
             timeout=timeout)
 
     def setup_agent_and_ports(self, port_dicts, create_tunnels=True,
-                              trigger_resync=False, network=None):
-        self.agent = self.create_agent(create_tunnels=create_tunnels)
-        self.start_agent(self.agent)
-        self.network = network or self._create_test_network_dict()
+                              ancillary_bridge=None,
+                              trigger_resync=False,
+                              failed_dev_up=False,
+                              failed_dev_down=False,
+                              network=None):
         self.ports = port_dicts
+        self.agent = self.create_agent(create_tunnels=create_tunnels,
+                                       ancillary_bridge=ancillary_bridge)
+        self.polling_manager = self.start_agent(self.agent, ports=self.ports)
+        self.network = network or self._create_test_network_dict()
         if trigger_resync:
             self._prepare_resync_trigger(self.agent)
-        self._plug_ports(self.network, self.ports, self.agent)
+        elif failed_dev_up:
+            self._prepare_failed_dev_up_trigger(self.agent)
+        elif failed_dev_down:
+            self._prepare_failed_dev_down_trigger(self.agent)
+
+        self._plug_ports(self.network, self.ports, self.agent,
+                         bridge=ancillary_bridge)
 
     def plug_ports_to_phys_br(self, network, ports, namespace=None):
         physical_network = network.get('physical_network', 'physnet')

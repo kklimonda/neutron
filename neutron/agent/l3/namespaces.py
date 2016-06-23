@@ -15,8 +15,8 @@
 
 from oslo_log import log as logging
 
+from neutron._i18n import _LE
 from neutron.agent.linux import ip_lib
-from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -76,12 +76,11 @@ class Namespace(object):
             ip_wrapper.netns.execute(cmd)
 
     def delete(self):
-        if self.agent_conf.router_delete_namespaces:
-            try:
-                self.ip_wrapper_root.netns.delete(self.name)
-            except RuntimeError:
-                msg = _LE('Failed trying to delete namespace: %s')
-                LOG.exception(msg, self.name)
+        try:
+            self.ip_wrapper_root.netns.delete(self.name)
+        except RuntimeError:
+            msg = _LE('Failed trying to delete namespace: %s')
+            LOG.exception(msg, self.name)
 
 
 class RouterNamespace(Namespace):

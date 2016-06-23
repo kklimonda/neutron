@@ -316,6 +316,15 @@ class TestIpWrapper(base.BaseTestCase):
                                              run_as_root=True, namespace=None,
                                              log_fail_as_error=True)
 
+    def test_add_macvtap(self):
+        ip_lib.IPWrapper().add_macvtap('macvtap0', 'eth0', 'bridge')
+        self.execute.assert_called_once_with([], 'link',
+                                             ('add', 'link', 'eth0', 'name',
+                                              'macvtap0', 'type', 'macvtap',
+                                              'mode', 'bridge'),
+                                             run_as_root=True, namespace=None,
+                                             log_fail_as_error=True)
+
     def test_del_veth(self):
         ip_lib.IPWrapper().del_veth('fpr-1234')
         self.execute.assert_called_once_with([], 'link',
@@ -395,7 +404,7 @@ class TestIpWrapper(base.BaseTestCase):
                 ip_ns_cmd_cls.assert_has_calls([mock.call().exists('ns')])
                 self.assertNotIn(mock.call().delete('ns'),
                                  ip_ns_cmd_cls.return_value.mock_calls)
-                self.assertEqual(mock_is_empty.mock_calls, [])
+                self.assertEqual([], mock_is_empty.mock_calls)
 
     def test_garbage_collect_namespace_existing_empty_ns(self):
         with mock.patch.object(ip_lib, 'IpNetnsCommand') as ip_ns_cmd_cls:
@@ -481,7 +490,7 @@ class TestIpWrapper(base.BaseTestCase):
     def test_add_device_to_namespace_is_none(self):
         dev = mock.Mock()
         ip_lib.IPWrapper().add_device_to_namespace(dev)
-        self.assertEqual(dev.mock_calls, [])
+        self.assertEqual([], dev.mock_calls)
 
 
 class TestIPDevice(base.BaseTestCase):
@@ -693,6 +702,10 @@ class TestIpLinkCommand(TestIPCmdBase):
         self.link_cmd.set_address('aa:bb:cc:dd:ee:ff')
         self._assert_sudo([], ('set', 'eth0', 'address', 'aa:bb:cc:dd:ee:ff'))
 
+    def test_set_allmulticast_on(self):
+        self.link_cmd.set_allmulticast_on()
+        self._assert_sudo([], ('set', 'eth0', 'allmulticast', 'on'))
+
     def test_set_mtu(self):
         self.link_cmd.set_mtu(1500)
         self._assert_sudo([], ('set', 'eth0', 'mtu', 1500))
@@ -784,6 +797,13 @@ class TestIpAddrCommand(TestIPCmdBase):
                            'scope', 'link',
                            'dev', 'tap0',
                            'brd', '192.168.45.255'))
+
+    def test_add_address_no_broadcast(self):
+        self.addr_cmd.add('192.168.45.100/24', add_broadcast=False)
+        self._assert_sudo([4],
+                          ('add', '192.168.45.100/24',
+                           'scope', 'global',
+                           'dev', 'tap0'))
 
     def test_del_address(self):
         self.addr_cmd.delete('192.168.45.100/24')
@@ -946,42 +966,6 @@ class TestIpRouteCommand(TestIPCmdBase):
             self.assertEqual(self.route_cmd.get_gateway(),
                              test_case['expected'])
 
-    def test_pullup_route(self):
-        # NOTE(brian-haley) Currently we do not have any IPv6-specific usecase
-        # for pullup_route, hence skipping. Revisit, if required, in future.
-        if self.ip_version == 6:
-            return
-        # interface is not the first in the list - requires
-        # deleting and creating existing entries
-        output = [DEVICE_ROUTE_SAMPLE, SUBNET_SAMPLE1]
-
-        def pullup_side_effect(self, *args):
-            result = output.pop(0)
-            return result
-
-        self.parent._run = mock.Mock(side_effect=pullup_side_effect)
-        self.route_cmd.pullup_route('tap1d7888a7-10', ip_version=4)
-        self._assert_sudo([4], ('del', '10.0.0.0/24', 'dev', 'qr-23380d11-d2'))
-        self._assert_sudo([4], ('append', '10.0.0.0/24', 'proto', 'kernel',
-                                'src', '10.0.0.1', 'dev', 'qr-23380d11-d2'))
-
-    def test_pullup_route_first(self):
-        # NOTE(brian-haley) Currently we do not have any IPv6-specific usecase
-        # for pullup_route, hence skipping. Revisit, if required, in future.
-        if self.ip_version == 6:
-            return
-        # interface is first in the list - no changes
-        output = [DEVICE_ROUTE_SAMPLE, SUBNET_SAMPLE2]
-
-        def pullup_side_effect(self, *args):
-            result = output.pop(0)
-            return result
-
-        self.parent._run = mock.Mock(side_effect=pullup_side_effect)
-        self.route_cmd.pullup_route('tap1d7888a7-10', ip_version=4)
-        # Check two calls - device get and subnet get
-        self.assertEqual(len(self.parent._run.mock_calls), 2)
-
     def test_add_route(self):
         self.route_cmd.add_route(self.cidr, self.ip, self.table)
         self._assert_sudo([self.ip_version],
@@ -1004,6 +988,12 @@ class TestIpRouteCommand(TestIPCmdBase):
                            'dev', self.parent.name,
                            'scope', 'link'))
 
+    def test_add_route_no_device(self):
+        self.parent._as_root.side_effect = RuntimeError("Cannot find device")
+        self.assertRaises(exceptions.DeviceNotFoundError,
+                          self.route_cmd.add_route,
+                          self.cidr, self.ip, self.table)
+
     def test_delete_route(self):
         self.route_cmd.delete_route(self.cidr, self.ip, self.table)
         self._assert_sudo([self.ip_version],
@@ -1025,6 +1015,12 @@ class TestIpRouteCommand(TestIPCmdBase):
                           ('del', self.cidr,
                            'dev', self.parent.name,
                            'scope', 'link'))
+
+    def test_delete_route_no_device(self):
+        self.parent._as_root.side_effect = RuntimeError("Cannot find device")
+        self.assertRaises(exceptions.DeviceNotFoundError,
+                          self.route_cmd.delete_route,
+                          self.cidr, self.ip, self.table)
 
     def test_list_routes(self):
         self.parent._run.return_value = (
@@ -1153,12 +1149,6 @@ class TestIPRoute(TestIpRouteCommand):
             args = self._remove_dev_args(args)
         super(TestIPRoute, self)._assert_sudo(options, args)
 
-    def test_pullup_route(self):
-        # This method gets the interface name passed to it as an argument.  So,
-        # don't remove it from the expected arguments.
-        self.check_dev_args = True
-        super(TestIPRoute, self).test_pullup_route()
-
     def test_del_gateway_cannot_find_device(self):
         # This test doesn't make sense for this case since dev won't be passed
         pass
@@ -1253,6 +1243,14 @@ class TestDeviceExists(base.BaseTestCase):
             self.assertTrue(ip_lib.device_exists('eth0'))
             _execute.assert_called_once_with(['o'], 'link', ('show', 'eth0'),
                                              log_fail_as_error=False)
+
+    def test_device_exists_reset_fail(self):
+        device = ip_lib.IPDevice('eth0')
+        device.set_log_fail_as_error(True)
+        with mock.patch.object(ip_lib.IPDevice, '_execute') as _execute:
+            _execute.return_value = LINK_SAMPLE[1]
+            self.assertTrue(device.exists())
+            self.assertTrue(device.get_log_fail_as_error())
 
     def test_device_does_not_exist(self):
         with mock.patch.object(ip_lib.IPDevice, '_execute') as _execute:

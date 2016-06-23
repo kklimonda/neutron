@@ -20,7 +20,7 @@ VPNAAS_TABLES = ['vpnservices', 'ipsecpolicies', 'ipsecpeercidrs',
 
 LBAAS_TABLES = ['vips', 'sessionpersistences', 'pools', 'healthmonitors',
                 'poolstatisticss', 'members', 'poolloadbalanceragentbindings',
-                'embrane_pool_port', 'poolmonitorassociations']
+                'poolmonitorassociations']
 
 FWAAS_TABLES = ['firewall_rules', 'firewalls', 'firewall_policies']
 
@@ -29,6 +29,15 @@ REPO_ARISTA_TABLES = [
     'arista_provisioned_nets',
     'arista_provisioned_vms',
     'arista_provisioned_tenants',
+]
+
+# BGP models in openstack/neutron-dynamic-routing
+REPO_NEUTRON_DYNAMIC_ROUTING_TABLES = [
+    'bgp_speakers',
+    'bgp_peers',
+    'bgp_speaker_network_bindings',
+    'bgp_speaker_peer_bindings',
+    'bgp_speaker_dragent_bindings',
 ]
 
 # Models moved to openstack/networking-cisco
@@ -88,20 +97,34 @@ REPO_VMWARE_TABLES = [
     'vcns_router_bindings',
 ]
 
-# NEC models moved to stackforge/networking-nec
-REPO_NEC_TABLES = [
-    'ofcnetworkmappings',
-    'ofcportmappings',
-    'ofcroutermappings',
-    'ofcfiltermappings',
-    'ofctenantmappings',
-    'portinfos',
-    'routerproviders',
-    'packetfilters',
+# Brocade models are in openstack/networking-brocade
+REPO_BROCADE_TABLES = [
+    'brocadenetworks',
+    'brocadeports',
+    'ml2_brocadenetworks',
+    'ml2_brocadeports',
+]
+
+# BigSwitch models are in openstack/networking-bigswitch
+REPO_BIGSWITCH_TABLES = [
+    'consistencyhashes',
+    'routerrules',
+    'nexthops',
+]
+
+# Nuage models are in github.com/nuagenetworks/nuage-openstack-neutron
+REPO_NUAGE_TABLES = [
+    'nuage_net_partitions',
+    'nuage_net_partition_router_mapping',
+    'nuage_provider_net_bindings',
+    'nuage_subnet_l2dom_mapping',
 ]
 
 TABLES = (FWAAS_TABLES + LBAAS_TABLES + VPNAAS_TABLES +
           REPO_ARISTA_TABLES +
+          REPO_NEUTRON_DYNAMIC_ROUTING_TABLES +
           REPO_CISCO_TABLES +
           REPO_VMWARE_TABLES +
-          REPO_NEC_TABLES)
+          REPO_BROCADE_TABLES +
+          REPO_BIGSWITCH_TABLES +
+          REPO_NUAGE_TABLES)

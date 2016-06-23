@@ -15,7 +15,6 @@
 #    under the License.
 
 import mock
-
 from oslo_utils import importutils
 
 from neutron.tests.unit.plugins.ml2.drivers.openvswitch.agent \
@@ -35,6 +34,7 @@ class OVSBridgeTestBase(ovs_test_base.OVSRyuTestBase):
 
     def setup_bridge_mock(self, name, cls):
         self.br = cls(name)
+        self.stamp = self.br.default_cookie
         self.dp = mock.Mock()
         self.ofp = importutils.import_module(self._OFP_MODULE)
         self.ofpp = importutils.import_module(self._OFPP_MODULE)
@@ -60,7 +60,7 @@ class OVSBridgeTestBase(ovs_test_base.OVSRyuTestBase):
         expected = [
             call._send_msg(
                 ofpp.OFPFlowMod(dp,
-                    cookie=0,
+                    cookie=self.stamp,
                     instructions=[],
                     match=ofpp.OFPMatch(in_port=in_port),
                     priority=2,
@@ -78,7 +78,7 @@ class OVSBridgeTestBase(ovs_test_base.OVSRyuTestBase):
         expected = [
             call._send_msg(
                 ofpp.OFPFlowMod(dp,
-                    cookie=0,
+                    cookie=self.stamp,
                     instructions=[
                         ofpp.OFPInstructionGotoTable(table_id=dest_table_id),
                     ],
@@ -96,7 +96,7 @@ class OVSBridgeTestBase(ovs_test_base.OVSRyuTestBase):
         expected = [
             call._send_msg(
                 ofpp.OFPFlowMod(dp,
-                    cookie=0,
+                    cookie=self.stamp,
                     instructions=[],
                     match=ofpp.OFPMatch(in_port=in_port),
                     priority=priority,
@@ -112,7 +112,7 @@ class OVSBridgeTestBase(ovs_test_base.OVSRyuTestBase):
         expected = [
             call._send_msg(
                 ofpp.OFPFlowMod(dp,
-                    cookie=0,
+                    cookie=self.stamp,
                     instructions=[
                         ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                             ofpp.OFPActionOutput(ofp.OFPP_NORMAL, 0)
@@ -130,6 +130,20 @@ class OVSBridgeTestBase(ovs_test_base.OVSRyuTestBase):
         self.assertEqual('192.168.0.1', f('192.168.0.1/32'))
         self.assertEqual(('192.168.0.0', '255.255.255.0'), f('192.168.0.0/24'))
 
+    def test__setup_controllers__out_of_band(self):
+        cfg = mock.MagicMock()
+        cfg.OVS.of_listen_address = ""
+        cfg.OVS.of_listen_port = ""
+
+        m_set_protocols = mock.patch.object(self.br, 'set_protocols')
+        m_set_controller = mock.patch.object(self.br, 'set_controller')
+        m_set_ccm = mock.patch.object(self.br,
+                                      'set_controllers_connection_mode')
+
+        with m_set_ccm as set_ccm, m_set_controller, m_set_protocols:
+            self.br.setup_controllers(cfg)
+            set_ccm.assert_called_once_with("out-of-band")
+
 
 class OVSDVRProcessTestMixin(object):
     def test_install_dvr_process_ipv4(self):
@@ -140,7 +154,7 @@ class OVSDVRProcessTestMixin(object):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(
                     eth_type=self.ether_types.ETH_TYPE_ARP,
@@ -174,7 +188,7 @@ class OVSDVRProcessTestMixin(object):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(
                     eth_src=gateway_mac,
@@ -214,7 +228,7 @@ class OVSDVRProcessTestMixin(object):
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(
                     eth_dst=vif_mac,
@@ -222,7 +236,7 @@ class OVSDVRProcessTestMixin(object):
                 priority=2,
                 table_id=self.dvr_process_table_id)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionSetField(eth_src=dvr_mac_address),

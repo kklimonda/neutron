@@ -16,17 +16,18 @@
 import abc
 import collections
 
+from neutron_lib import exceptions
 from oslo_concurrency import lockutils
 from oslo_log import log as logging
 import six
 
+from neutron._i18n import _LW, _LI
 from neutron.agent.l2 import agent_extension
+from neutron.agent.linux import tc_lib
 from neutron.api.rpc.callbacks.consumer import registry
 from neutron.api.rpc.callbacks import events
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import resources_rpc
-from neutron.common import exceptions
-from neutron.i18n import _LW, _LI
 from neutron import manager
 
 LOG = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ class QosAgentDriver(object):
     """
 
     # Each QoS driver should define the set of rule types that it supports, and
-    # correspoding handlers that has the following names:
+    # corresponding handlers that has the following names:
     #
     # create_<type>
     # update_<type>
@@ -62,6 +63,15 @@ class QosAgentDriver(object):
         :param qos_policy: the QoS policy to be applied on port.
         """
         self._handle_update_create_rules('create', port, qos_policy)
+
+    def consume_api(self, agent_api):
+        """Consume the AgentAPI instance from the QoSAgentExtension class
+
+        This allows QosAgentDrivers to gain access to resources limited to the
+        NeutronAgent when this method is overridden.
+
+        :param agent_api: An instance of an agent specific API
+        """
 
     def update(self, port, qos_policy):
         """Apply QoS rules on port.
@@ -111,6 +121,15 @@ class QosAgentDriver(object):
             else:
                 LOG.debug("Port %(port)s excluded from QoS rule %(rule)s",
                           {'port': port, 'rule': rule.id})
+
+    def _get_egress_burst_value(self, rule):
+        """Return burst value used for egress bandwidth limitation.
+
+        Because Egress bw_limit is done on ingress qdisc by LB and ovs drivers
+        so it will return burst_value used by tc on as ingress_qdisc.
+        """
+        return tc_lib.TcCommand.get_ingress_qdisc_burst_value(
+                rule.max_kbps, rule.max_burst_kbps)
 
 
 class PortPolicyMap(object):
@@ -176,12 +195,16 @@ class QosAgentExtension(agent_extension.AgentCoreResourceExtension):
         self.resource_rpc = resources_rpc.ResourcesPullRpcApi()
         self.qos_driver = manager.NeutronManager.load_class_for_provider(
             'neutron.qos.agent_drivers', driver_type)()
+        self.qos_driver.consume_api(self.agent_api)
         self.qos_driver.initialize()
 
         self.policy_map = PortPolicyMap()
 
         registry.subscribe(self._handle_notification, resources.QOS_POLICY)
         self._register_rpc_consumers(connection)
+
+    def consume_api(self, agent_api):
+        self.agent_api = agent_api
 
     def _register_rpc_consumers(self, connection):
         endpoints = [resources_rpc.ResourcesPushRpcCallback()]
@@ -237,14 +260,20 @@ class QosAgentExtension(agent_extension.AgentCoreResourceExtension):
     def delete_port(self, context, port):
         self._process_reset_port(port)
 
+    def _policy_rules_modified(self, old_policy, policy):
+        return not (len(old_policy.rules) == len(policy.rules) and
+                    all(i in old_policy.rules for i in policy.rules))
+
     def _process_update_policy(self, qos_policy):
         old_qos_policy = self.policy_map.get_policy(qos_policy.id)
-        for port in self.policy_map.get_ports(qos_policy):
-            #NOTE(QoS): for now, just reflush the rules on the port. Later, we
-            #           may want to apply the difference between the old and
-            #           new rule lists.
-            self.qos_driver.delete(port, old_qos_policy)
-            self.qos_driver.update(port, qos_policy)
+        if old_qos_policy:
+            if self._policy_rules_modified(old_qos_policy, qos_policy):
+                for port in self.policy_map.get_ports(qos_policy):
+                    #NOTE(QoS): for now, just reflush the rules on the port.
+                    #           Later, we may want to apply the difference
+                    #           between the old and new rule lists.
+                    self.qos_driver.delete(port, old_qos_policy)
+                    self.qos_driver.update(port, qos_policy)
             self.policy_map.update_policy(qos_policy)
 
     def _process_reset_port(self, port):

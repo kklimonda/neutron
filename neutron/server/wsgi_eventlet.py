@@ -15,37 +15,33 @@ import eventlet
 
 from oslo_log import log
 
-from neutron.i18n import _LI
-from neutron import server
+from neutron._i18n import _LI
 from neutron import service
 
 LOG = log.getLogger(__name__)
 
 
-def _eventlet_wsgi_server():
-    pool = eventlet.GreenPool()
-
+def eventlet_wsgi_server():
     neutron_api = service.serve_wsgi(service.NeutronApiService)
-    api_thread = pool.spawn(neutron_api.wait)
+    start_api_and_rpc_workers(neutron_api)
 
+
+def start_api_and_rpc_workers(neutron_api):
     try:
-        neutron_rpc = service.serve_rpc()
+        worker_launcher = service.start_all_workers()
+
+        pool = eventlet.GreenPool()
+        api_thread = pool.spawn(neutron_api.wait)
+        plugin_workers_thread = pool.spawn(worker_launcher.wait)
+
+        # api and other workers should die together. When one dies,
+        # kill the other.
+        api_thread.link(lambda gt: plugin_workers_thread.kill())
+        plugin_workers_thread.link(lambda gt: api_thread.kill())
+
+        pool.waitall()
     except NotImplementedError:
         LOG.info(_LI("RPC was already started in parent process by "
                      "plugin."))
-    else:
-        rpc_thread = pool.spawn(neutron_rpc.wait)
 
-        plugin_workers = service.start_plugin_workers()
-        for worker in plugin_workers:
-            pool.spawn(worker.wait)
-
-        # api and rpc should die together.  When one dies, kill the other.
-        rpc_thread.link(lambda gt: api_thread.kill())
-        api_thread.link(lambda gt: rpc_thread.kill())
-
-    pool.waitall()
-
-
-def main():
-    server.boot_server(_eventlet_wsgi_server)
+        neutron_api.wait()

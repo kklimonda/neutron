@@ -16,17 +16,18 @@ import abc
 import itertools
 import operator
 
+from neutron_lib import exceptions as exc
 from oslo_config import cfg
 from oslo_db import api as oslo_db_api
 from oslo_db import exception as db_exc
 from oslo_log import log
+import six
 from six import moves
 from sqlalchemy import or_
 
-from neutron.common import exceptions as exc
+from neutron._i18n import _, _LI, _LW
 from neutron.common import topics
 from neutron.db import api as db_api
-from neutron.i18n import _LI, _LW
 from neutron.plugins.common import utils as plugin_utils
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import helpers
@@ -45,6 +46,7 @@ def chunks(iterable, chunk_size):
         chunk = list(itertools.islice(iterator, 0, chunk_size))
 
 
+@six.add_metaclass(abc.ABCMeta)
 class TunnelTypeDriver(helpers.SegmentTypeDriver):
     """Define stable abstract interface for ML2 type drivers.
 
@@ -137,7 +139,7 @@ class TunnelTypeDriver(helpers.SegmentTypeDriver):
 
     @oslo_db_api.wrap_db_retry(
         max_retries=db_api.MAX_RETRIES,
-        exception_checker=db_api.is_deadlock)
+        exception_checker=db_api.is_retriable)
     def sync_allocations(self):
         # determine current configured allocatable tunnel ids
         tunnel_ids = set()

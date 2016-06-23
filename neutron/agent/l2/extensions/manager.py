@@ -17,7 +17,7 @@ from oslo_config import cfg
 from oslo_log import log
 import stevedore
 
-from neutron.i18n import _LE, _LI
+from neutron._i18n import _, _LE, _LI
 
 LOG = log.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class AgentExtensionsManager(stevedore.named.NamedExtensionManager):
             invoke_on_load=True, name_order=True)
         LOG.info(_LI("Loaded agent extensions: %s"), self.names())
 
-    def initialize(self, connection, driver_type):
+    def initialize(self, connection, driver_type, agent_api=None):
         """Initialize enabled L2 agent extensions.
 
         :param connection: RPC connection that can be reused by extensions to
@@ -51,10 +51,14 @@ class AgentExtensionsManager(stevedore.named.NamedExtensionManager):
         :param driver_type: a string that defines the agent type to the
                             extension. Can be used by the extension to choose
                             the right backend implementation.
+        :param agent_api: an AgentAPI instance that provides an API to
+                          interact with the agent that the manager
+                          is running in.
         """
         # Initialize each agent extension in the list.
         for extension in self:
             LOG.info(_LI("Initializing agent extension '%s'"), extension.name)
+            extension.obj.consume_api(agent_api)
             extension.obj.initialize(connection, driver_type)
 
     def handle_port(self, context, data):
@@ -62,7 +66,6 @@ class AgentExtensionsManager(stevedore.named.NamedExtensionManager):
         for extension in self:
             try:
                 extension.obj.handle_port(context, data)
-            # TODO(QoS) add agent extensions exception and catch them here
             except AttributeError:
                 LOG.exception(
                     _LE("Agent Extension '%(name)s' failed "
@@ -75,8 +78,6 @@ class AgentExtensionsManager(stevedore.named.NamedExtensionManager):
         for extension in self:
             try:
                 extension.obj.delete_port(context, data)
-            # TODO(QoS) add agent extensions exception and catch them here
-            # instead of AttributeError
             except AttributeError:
                 LOG.exception(
                     _LE("Agent Extension '%(name)s' failed "

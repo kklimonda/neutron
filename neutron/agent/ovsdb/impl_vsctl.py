@@ -1,4 +1,4 @@
-# Copyright (c) 2014 Openstack Foundation
+# Copyright (c) 2014 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -20,9 +20,9 @@ from oslo_serialization import jsonutils
 from oslo_utils import excutils
 import six
 
+from neutron._i18n import _LE
 from neutron.agent.common import utils
 from neutron.agent.ovsdb import api as ovsdb
-from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -61,11 +61,12 @@ class Transaction(ovsdb.Transaction):
             # We log our own errors, so never have utils.execute do it
             return utils.execute(full_args, run_as_root=True,
                                  log_fail_as_error=False).rstrip()
-        except Exception:
+        except Exception as e:
             with excutils.save_and_reraise_exception() as ctxt:
                 if self.log_errors:
-                    LOG.exception(_LE("Unable to execute %(cmd)s."),
-                                  {'cmd': full_args})
+                    LOG.error(_LE("Unable to execute %(cmd)s. "
+                                  "Exception: %(exception)s"),
+                              {'cmd': full_args, 'exception': e})
                 if not self.check_error:
                     ctxt.reraise = False
 
@@ -119,11 +120,13 @@ class DbCommand(BaseCommand):
 
         try:
             json = jsonutils.loads(raw_result)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
             # This shouldn't happen, but if it does and we check_errors
             # log and raise.
             with excutils.save_and_reraise_exception():
-                LOG.exception(_LE("Could not parse: %s"), raw_result)
+                LOG.error(_LE("Could not parse: %(raw_result)s. "
+                              "Exception: %(exception)s"),
+                          {'raw_result': raw_result, 'exception': e})
 
         headings = json['headings']
         data = json['data']

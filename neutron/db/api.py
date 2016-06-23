@@ -15,27 +15,51 @@
 
 import contextlib
 
+from debtcollector import moves
 from oslo_config import cfg
 from oslo_db import api as oslo_db_api
 from oslo_db import exception as db_exc
-from oslo_db.sqlalchemy import session
+from oslo_db.sqlalchemy import enginefacade
 from oslo_utils import excutils
-from oslo_utils import uuidutils
-from sqlalchemy import exc
+import osprofiler.sqlalchemy
+import sqlalchemy
+from sqlalchemy.orm import exc
 
-from neutron.common import exceptions as n_exc
-from neutron.db import common_db_mixin
+from neutron.common import exceptions
+from neutron.common import profiler  # noqa
+
+context_manager = enginefacade.transaction_context()
 
 
 _FACADE = None
 
 MAX_RETRIES = 10
-is_deadlock = lambda e: isinstance(e, db_exc.DBDeadlock)
+
+
+def is_retriable(e):
+    if _is_nested_instance(e, (db_exc.DBDeadlock, exc.StaleDataError,
+                               db_exc.DBDuplicateEntry)):
+        return True
+    # looking savepoints mangled by deadlocks. see bug/1590298 for details.
+    return _is_nested_instance(e, db_exc.DBError) and '1305' in str(e)
+
+is_deadlock = moves.moved_function(is_retriable, 'is_deadlock', __name__,
+                                   message='use "is_retriable" instead',
+                                   version='newton', removal_version='ocata')
 retry_db_errors = oslo_db_api.wrap_db_retry(
     max_retries=MAX_RETRIES,
+    retry_interval=0.1,
+    inc_retry_interval=True,
     retry_on_request=True,
-    exception_checker=is_deadlock
+    exception_checker=is_retriable
 )
+
+
+def _is_nested_instance(e, etypes):
+    """Check if exception or its inner excepts are an instance of etypes."""
+    return (isinstance(e, etypes) or
+            isinstance(e, exceptions.MultipleExceptions) and
+            any(_is_nested_instance(i, etypes) for i in e.inner_exceptions))
 
 
 @contextlib.contextmanager
@@ -44,7 +68,7 @@ def exc_to_retry(exceptions):
         yield
     except Exception as e:
         with excutils.save_and_reraise_exception() as ctx:
-            if isinstance(e, exceptions):
+            if _is_nested_instance(e, exceptions):
                 ctx.reraise = False
                 raise db_exc.RetryRequest(e)
 
@@ -53,7 +77,13 @@ def _create_facade_lazily():
     global _FACADE
 
     if _FACADE is None:
-        _FACADE = session.EngineFacade.from_config(cfg.CONF, sqlite_fk=True)
+        context_manager.configure(sqlite_fk=True, **cfg.CONF.database)
+        _FACADE = context_manager._factory.get_legacy_facade()
+
+        if cfg.CONF.profiler.enabled and cfg.CONF.profiler.trace_sqlalchemy:
+            osprofiler.sqlalchemy.add_tracing(sqlalchemy,
+                                              _FACADE.get_engine(),
+                                              "db")
 
     return _FACADE
 
@@ -81,55 +111,9 @@ def get_session(autocommit=True, expire_on_commit=False, use_slave=False):
 @contextlib.contextmanager
 def autonested_transaction(sess):
     """This is a convenience method to not bother with 'nested' parameter."""
-    try:
-        session_context = sess.begin_nested()
-    except exc.InvalidRequestError:
+    if sess.is_active:
+        session_context = sess.begin(nested=True)
+    else:
         session_context = sess.begin(subtransactions=True)
-    finally:
-        with session_context as tx:
-            yield tx
-
-
-# Common database operation implementations
-def get_object(context, model, **kwargs):
-    with context.session.begin(subtransactions=True):
-        return (common_db_mixin.model_query(context, model)
-                .filter_by(**kwargs)
-                .first())
-
-
-def get_objects(context, model, **kwargs):
-    with context.session.begin(subtransactions=True):
-        return (common_db_mixin.model_query(context, model)
-                .filter_by(**kwargs)
-                .all())
-
-
-def create_object(context, model, values):
-    with context.session.begin(subtransactions=True):
-        if 'id' not in values:
-            values['id'] = uuidutils.generate_uuid()
-        db_obj = model(**values)
-        context.session.add(db_obj)
-    return db_obj.__dict__
-
-
-def _safe_get_object(context, model, id):
-    db_obj = get_object(context, model, id=id)
-    if db_obj is None:
-        raise n_exc.ObjectNotFound(id=id)
-    return db_obj
-
-
-def update_object(context, model, id, values):
-    with context.session.begin(subtransactions=True):
-        db_obj = _safe_get_object(context, model, id)
-        db_obj.update(values)
-        db_obj.save(session=context.session)
-    return db_obj.__dict__
-
-
-def delete_object(context, model, id):
-    with context.session.begin(subtransactions=True):
-        db_obj = _safe_get_object(context, model, id)
-        context.session.delete(db_obj)
+    with session_context as tx:
+        yield tx

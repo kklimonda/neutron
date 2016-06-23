@@ -13,16 +13,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import eventlet
 import functools
 import signal
-import six
 
-from stevedore import driver
-
+import eventlet
+from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
+import six
+from stevedore import driver
 
+from neutron._i18n import _
 from neutron.agent.linux import utils as linux_utils
 from neutron.callbacks import events
 from neutron.callbacks import registry
@@ -175,7 +176,7 @@ class PrefixDelegation(object):
 
     @staticmethod
     def _get_lla(mac):
-        lla = ipv6_utils.get_ipv6_addr_by_EUI64(l3_constants.IPV6_LLA_PREFIX,
+        lla = ipv6_utils.get_ipv6_addr_by_EUI64(n_const.IPv6_LLA_PREFIX,
                                                 mac)
         return lla
 
@@ -195,7 +196,7 @@ class PrefixDelegation(object):
                                            router['ns_name'],
                                            'link')
             # There is a delay before the LLA becomes active.
-            # This is because the kernal runs DAD to make sure LLA uniqueness
+            # This is because the kernel runs DAD to make sure LLA uniqueness
             # Spawn a thread to wait for the interface to be ready
             self._spawn_lla_thread(router['gw_interface'],
                                    router['ns_name'],
@@ -277,12 +278,15 @@ class PrefixDelegation(object):
             self.notifier(self.context, prefix_update)
 
     def after_start(self):
-        LOG.debug('SIGHUP signal handler set')
-        signal.signal(signal.SIGHUP, self._handle_sighup)
+        LOG.debug('SIGUSR1 signal handler set')
+        signal.signal(signal.SIGUSR1, self._handle_sigusr1)
 
-    def _handle_sighup(self, signum, frame):
-        # The external DHCPv6 client uses SIGHUP to notify agent
-        # of prefix changes.
+    def _handle_sigusr1(self, signum, frame):
+        """Update PD on receiving SIGUSR1.
+
+        The external DHCPv6 client uses SIGUSR1 to notify agent
+        of prefix changes.
+        """
         self.pd_update_cb()
 
     def _get_sync_data(self):

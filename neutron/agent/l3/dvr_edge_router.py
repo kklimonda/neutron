@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Openstack Foundation
+# Copyright (c) 2015 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -12,14 +12,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants as l3_constants
 from oslo_log import log as logging
 
+from neutron._i18n import _LE
 from neutron.agent.l3 import dvr_local_router
 from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
-from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
                                         self.snat_namespace.name,
                                         preserve_ips=[])
 
-    def external_gateway_removed(self, ex_gw_port, interface_name):
+    def _external_gateway_removed(self, ex_gw_port, interface_name):
         super(DvrEdgeRouter, self).external_gateway_removed(ex_gw_port,
                                                             interface_name)
         if not self._is_this_snat_host() and not self.snat_namespace:
@@ -75,8 +76,12 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
                            bridge=self.agent_conf.external_network_bridge,
                            namespace=self.snat_namespace.name,
                            prefix=router.EXTERNAL_DEV_PREFIX)
-        self.snat_namespace.delete()
-        self.snat_namespace = None
+
+    def external_gateway_removed(self, ex_gw_port, interface_name):
+        self._external_gateway_removed(ex_gw_port, interface_name)
+        if self.snat_namespace:
+            self.snat_namespace.delete()
+            self.snat_namespace = None
 
     def internal_network_added(self, port):
         super(DvrEdgeRouter, self).internal_network_added(port)
@@ -122,26 +127,29 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
             self.driver.unplug(snat_interface, namespace=ns_name,
                                prefix=prefix)
 
+    def _plug_snat_port(self, port):
+        interface_name = self._get_snat_int_device_name(port['id'])
+        self._internal_network_added(
+            self.snat_namespace.name, port['network_id'],
+            port['id'], port['fixed_ips'],
+            port['mac_address'], interface_name,
+            dvr_snat_ns.SNAT_INT_DEV_PREFIX,
+            mtu=port.get('mtu'))
+
     def _create_dvr_gateway(self, ex_gw_port, gw_interface_name):
         """Create SNAT namespace."""
         snat_ns = self._create_snat_namespace()
         # connect snat_ports to br_int from SNAT namespace
         for port in self.get_snat_interfaces():
             # create interface_name
-            interface_name = self._get_snat_int_device_name(port['id'])
-            self._internal_network_added(
-                snat_ns.name, port['network_id'],
-                port['id'], port['fixed_ips'],
-                port['mac_address'], interface_name,
-                dvr_snat_ns.SNAT_INT_DEV_PREFIX,
-                mtu=port.get('mtu'))
+            self._plug_snat_port(port)
         self._external_gateway_added(ex_gw_port, gw_interface_name,
                                      snat_ns.name, preserve_ips=[])
         self.snat_iptables_manager = iptables_manager.IptablesManager(
             namespace=snat_ns.name,
             use_ipv6=self.use_ipv6)
-        # kicks the FW Agent to add rules for the snat namespace
-        self.agent.process_router_add(self)
+
+        self._initialize_address_scope_iptables(self.snat_iptables_manager)
 
     def _create_snat_namespace(self):
         # TODO(mlavalle): in the near future, this method should contain the
@@ -166,6 +174,9 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         return host == self.host
 
     def _handle_router_snat_rules(self, ex_gw_port, interface_name):
+        super(DvrEdgeRouter, self)._handle_router_snat_rules(
+            ex_gw_port, interface_name)
+
         if not self._is_this_snat_host():
             return
         if not self.get_ex_gw_port():
@@ -178,7 +189,8 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         with self.snat_iptables_manager.defer_apply():
             self._empty_snat_chains(self.snat_iptables_manager)
 
-            # NOTE DVR doesn't add the jump to float snat like the super class.
+            # NOTE: DVR adds the jump to float snat via super class,
+            # but that is in the router namespace and not snat.
 
             self._add_snat_rules(ex_gw_port, self.snat_iptables_manager,
                                  interface_name)
@@ -202,3 +214,30 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         super(DvrEdgeRouter, self).delete(agent)
         if self.snat_namespace:
             self.snat_namespace.delete()
+
+    def process_address_scope(self):
+        super(DvrEdgeRouter, self).process_address_scope()
+
+        if not self._is_this_snat_host():
+            return
+        if not self.snat_iptables_manager:
+            LOG.debug("DVR router: no snat rules to be handled")
+            return
+
+        # Prepare address scope iptables rule for dvr snat interfaces
+        internal_ports = self.get_snat_interfaces()
+        ports_scopemark = self._get_port_devicename_scopemark(
+            internal_ports, self._get_snat_int_device_name)
+        # Prepare address scope iptables rule for external port
+        external_port = self.get_ex_gw_port()
+        if external_port:
+            external_port_scopemark = self._get_port_devicename_scopemark(
+                [external_port], self.get_external_device_name)
+            for ip_version in (l3_constants.IP_VERSION_4,
+                               l3_constants.IP_VERSION_6):
+                ports_scopemark[ip_version].update(
+                    external_port_scopemark[ip_version])
+
+        with self.snat_iptables_manager.defer_apply():
+            self._add_address_scope_mark(
+                self.snat_iptables_manager, ports_scopemark)

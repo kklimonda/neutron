@@ -69,7 +69,6 @@ class TestMetadataDriverProcess(base.BaseTestCase):
         agent_config.register_interface_driver_opts_helper(cfg.CONF)
         cfg.CONF.set_override('interface_driver',
                               'neutron.agent.linux.interface.NullDriver')
-        agent_config.register_use_namespaces_opts_helper(cfg.CONF)
 
         mock.patch('neutron.agent.l3.agent.L3PluginApi').start()
         mock.patch('neutron.agent.l3.ha.AgentMixin'
@@ -116,7 +115,6 @@ class TestMetadataDriverProcess(base.BaseTestCase):
                 '--metadata_proxy_user=%s' % expected_user,
                 '--metadata_proxy_group=%s' % expected_group,
                 '--debug',
-                '--verbose',
                 '--log-file=neutron-ns-metadata-proxy-%s.log' %
                 router_id]
             if not watch_log:

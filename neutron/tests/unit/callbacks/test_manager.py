@@ -78,6 +78,13 @@ class CallBacksManagerTestCase(base.BaseTestCase):
             2,
             len(self.manager._callbacks[resources.PORT][events.BEFORE_CREATE]))
 
+    def test_unsubscribe_during_iteration(self):
+        unsub = lambda r, e, *a, **k: self.manager.unsubscribe(unsub, r, e)
+        self.manager.subscribe(unsub, resources.PORT,
+                               events.BEFORE_CREATE)
+        self.manager.notify(resources.PORT, events.BEFORE_CREATE, mock.ANY)
+        self.assertNotIn(unsub, self.manager._index)
+
     def test_unsubscribe(self):
         self.manager.subscribe(
             callback_1, resources.PORT, events.BEFORE_CREATE)
@@ -149,10 +156,13 @@ class CallBacksManagerTestCase(base.BaseTestCase):
             n.return_value = ['error']
             self.assertRaises(exceptions.CallbackFailure,
                               self.manager.notify,
-                              mock.ANY, events.BEFORE_CREATE, mock.ANY)
+                              mock.ANY, events.BEFORE_CREATE,
+                              'trigger', params={'a': 1})
             expected_calls = [
-                mock.call(mock.ANY, 'before_create', mock.ANY),
-                mock.call(mock.ANY, 'abort_create', mock.ANY)
+                mock.call(mock.ANY, 'before_create',
+                          'trigger', params={'a': 1}),
+                mock.call(mock.ANY, 'abort_create',
+                          'trigger', params={'a': 1})
             ]
             n.assert_has_calls(expected_calls)
 

@@ -13,23 +13,31 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import contextlib
 import weakref
 
+from neutron_lib.db import utils as db_utils
+from oslo_db.sqlalchemy import utils as sa_utils
 from oslo_log import log as logging
 from oslo_utils import excutils
 import six
 from sqlalchemy import and_
+from sqlalchemy.ext import associationproxy
 from sqlalchemy import or_
 from sqlalchemy import sql
 
-from neutron.i18n import _, _LE
-from neutron.common import exceptions as n_exc
-from neutron.db import sqlalchemyutils
+from neutron._i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
 
-def safe_creation(context, create_fn, delete_fn, create_bindings):
+@contextlib.contextmanager
+def _noop_context_manager():
+    yield
+
+
+def safe_creation(context, create_fn, delete_fn, create_bindings,
+                  transaction=True):
     '''This function wraps logic of object creation in safe atomic way.
 
     In case of exception, object is deleted.
@@ -48,9 +56,13 @@ def safe_creation(context, create_fn, delete_fn, create_bindings):
 
     :param create_bindings: function that is called to create bindings for
         an object. It is called with object's id field as an argument.
-    '''
 
-    with context.session.begin(subtransactions=True):
+    :param transaction: if true the whole operation will be wrapped in a
+        transaction. if false, no transaction will be used.
+    '''
+    cm = (context.session.begin(subtransactions=True)
+          if transaction else _noop_context_manager())
+    with cm:
         obj = create_fn()
         try:
             value = create_bindings(obj['id'])
@@ -137,42 +149,13 @@ class CommonDbMixin(object):
         return model_query_scope(context, model)
 
     def _model_query(self, context, model):
-        if isinstance(model, UnionModel):
-            return self._union_model_query(context, model)
-        else:
-            return self._single_model_query(context, model)
-
-    def _union_model_query(self, context, model):
-        # A union query is a query that combines multiple sets of data
-        # together and represents them as one. So if a UnionModel was
-        # passed in, we generate the query for each model with the
-        # appropriate filters and then combine them together with the
-        # .union operator. This allows any subsequent users of the query
-        # to handle it like a normal query (e.g. add pagination/sorting/etc)
-        first_query = None
-        remaining_queries = []
-        for name, component_model in model.model_map.items():
-            query = self._single_model_query(context, component_model)
-            if model.column_type_name:
-                query.add_columns(
-                    sql.expression.column('"%s"' % name, is_literal=True).
-                    label(model.column_type_name)
-                )
-            if first_query is None:
-                first_query = query
-            else:
-                remaining_queries.append(query)
-        return first_query.union(*remaining_queries)
-
-    def _single_model_query(self, context, model):
         query = context.session.query(model)
         # define basic filter condition for model query
         query_filter = None
         if self.model_query_scope(context, model):
             if hasattr(model, 'rbac_entries'):
-                rbac_model, join_params = self._get_rbac_query_params(
-                    model)[:2]
-                query = query.outerjoin(*join_params)
+                query = query.outerjoin(model.rbac_entries)
+                rbac_model = model.rbac_entries.property.mapper.class_
                 query_filter = (
                     (model.tenant_id == context.tenant_id) |
                     ((rbac_model.action == 'access_as_shared') &
@@ -210,50 +193,11 @@ class CommonDbMixin(object):
                          if key in fields))
         return resource
 
-    def _get_tenant_id_for_create(self, context, resource):
-        if context.is_admin and 'tenant_id' in resource:
-            tenant_id = resource['tenant_id']
-        elif ('tenant_id' in resource and
-              resource['tenant_id'] != context.tenant_id):
-            reason = _('Cannot create resource for another tenant')
-            raise n_exc.AdminRequired(reason=reason)
-        else:
-            tenant_id = context.tenant_id
-        return tenant_id
-
     def _get_by_id(self, context, model, id):
         query = self._model_query(context, model)
         return query.filter(model.id == id).one()
 
-    @staticmethod
-    def _get_rbac_query_params(model):
-        """Return the parameters required to query an model's RBAC entries.
-
-        Returns a tuple of 3 containing:
-        1. the relevant RBAC model for a given model
-        2. the join parameters required to query the RBAC entries for the model
-        3. the ID column of the passed in model that matches the object_id
-           in the rbac entries.
-        """
-        try:
-            cls = model.rbac_entries.property.mapper.class_
-            return (cls, (cls, ), model.id)
-        except AttributeError:
-            # an association proxy is being used (e.g. subnets
-            # depends on network's rbac entries)
-            rbac_model = (model.rbac_entries.target_class.
-                          rbac_entries.property.mapper.class_)
-            return (rbac_model, model.rbac_entries.attr,
-                    model.rbac_entries.remote_attr.class_.id)
-
     def _apply_filters_to_query(self, query, model, filters, context=None):
-        if isinstance(model, UnionModel):
-            # NOTE(kevinbenton): a unionmodel is made up of multiple tables so
-            # we apply the filter to each table
-            for component_model in model.model_map.values():
-                query = self._apply_filters_to_query(query, component_model,
-                                                     filters, context)
-            return query
         if filters:
             for key, value in six.iteritems(filters):
                 column = getattr(model, key, None)
@@ -266,13 +210,18 @@ class CommonDbMixin(object):
                     if not value:
                         query = query.filter(sql.false())
                         return query
-                    query = query.filter(column.in_(value))
+                    if isinstance(column, associationproxy.AssociationProxy):
+                        # association proxies don't support in_ so we have to
+                        # do multiple equals matches
+                        query = query.filter(
+                            or_(*[column == v for v in value]))
+                    else:
+                        query = query.filter(column.in_(value))
                 elif key == 'shared' and hasattr(model, 'rbac_entries'):
                     # translate a filter on shared into a query against the
                     # object's rbac entries
-                    rbac, join_params, oid_col = self._get_rbac_query_params(
-                        model)
-                    query = query.outerjoin(*join_params, aliased=True)
+                    query = query.outerjoin(model.rbac_entries)
+                    rbac = model.rbac_entries.property.mapper.class_
                     matches = [rbac.target_tenant == '*']
                     if context:
                         matches.append(rbac.target_tenant == context.tenant_id)
@@ -288,6 +237,12 @@ class CommonDbMixin(object):
                         # because that will still give us a network shared to
                         # our tenant (or wildcard) if it's shared to another
                         # tenant.
+                        # This is the column joining the table to rbac via
+                        # the object_id. We can't just use model.id because
+                        # subnets join on network.id so we have to inspect the
+                        # relationship.
+                        join_cols = model.rbac_entries.property.local_columns
+                        oid_col = list(join_cols)[0]
                         is_shared = ~oid_col.in_(
                             query.session.query(rbac.object_id).
                             filter(is_shared)
@@ -322,11 +277,13 @@ class CommonDbMixin(object):
         collection = self._model_query(context, model)
         collection = self._apply_filters_to_query(collection, model, filters,
                                                   context)
-        if limit and page_reverse and sorts:
-            sorts = [(s[0], not s[1]) for s in sorts]
-        collection = sqlalchemyutils.paginate_query(collection, model, limit,
-                                                    sorts,
-                                                    marker_obj=marker_obj)
+        if sorts:
+            sort_keys = db_utils.get_and_validate_sort_keys(sorts, model)
+            sort_dirs = db_utils.get_sort_dirs(sorts, page_reverse)
+            collection = sa_utils.paginate_query(collection, model, limit,
+                                                 marker=marker_obj,
+                                                 sort_keys=sort_keys,
+                                                 sort_dirs=sort_dirs)
         return collection
 
     def _get_collection(self, context, model, dict_func, filters=None,
@@ -351,20 +308,11 @@ class CommonDbMixin(object):
         return None
 
     def _filter_non_model_columns(self, data, model):
-        """Remove all the attributes from data which are not columns of
-        the model passed as second parameter.
+        """Remove all the attributes from data which are not columns or
+        association proxies of the model passed as second parameter
         """
         columns = [c.name for c in model.__table__.columns]
         return dict((k, v) for (k, v) in
-                    six.iteritems(data) if k in columns)
-
-
-class UnionModel(object):
-    """Collection of models that _model_query can query as a single table."""
-
-    def __init__(self, model_map, column_type_name=None):
-        # model_map is a dictionary of models keyed by an arbitrary name.
-        # If column_type_name is specified, the resulting records will have a
-        # column with that name which identifies the source of each record
-        self.model_map = model_map
-        self.column_type_name = column_type_name
+                    six.iteritems(data) if k in columns or
+                    isinstance(getattr(model, k, None),
+                               associationproxy.AssociationProxy))

@@ -13,14 +13,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log
 import sqlalchemy as sa
 from sqlalchemy import sql
 
-from neutron.common import exceptions as n_exc
+from neutron._i18n import _, _LE
 from neutron.db import model_base
-from neutron.i18n import _LE
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers import type_tunnel
 
@@ -33,8 +33,10 @@ vxlan_opts = [
                        "enumerating ranges of VXLAN VNI IDs that are "
                        "available for tenant network allocation")),
     cfg.StrOpt('vxlan_group',
-               help=_("Multicast group for VXLAN. If unset, disables VXLAN "
-                      "multicast mode.")),
+               help=_("Multicast group for VXLAN. When configured, will "
+                      "enable sending all broadcast traffic to this multicast "
+                      "group. When left unconfigured, will disable multicast "
+                      "VXLAN mode.")),
 ]
 
 cfg.CONF.register_opts(vxlan_opts, "ml2_type_vxlan")

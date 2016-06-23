@@ -14,17 +14,20 @@
 #    under the License.
 
 import abc
-import netaddr
 
-from oslo_config import cfg
+import netaddr
+from neutron_lib.api import validators
+from neutron_lib import constants as const
+from neutron_lib import exceptions as nexception
 from oslo_utils import uuidutils
 import six
 
+from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
-from neutron.common import constants as const
-from neutron.common import exceptions as nexception
+from neutron.common import exceptions
+from neutron.conf import quota
 from neutron import manager
 from neutron.quota import resource_registry
 
@@ -92,7 +95,7 @@ class SecurityGroupRemoteGroupAndRemoteIpPrefix(nexception.InvalidInput):
 
 
 class SecurityGroupProtocolRequiredWithPorts(nexception.InvalidInput):
-    message = _("Must also specifiy protocol if port range is given.")
+    message = _("Must also specify protocol if port range is given.")
 
 
 class SecurityGroupNotSingleGroupRules(nexception.InvalidInput):
@@ -113,7 +116,7 @@ class DuplicateSecurityGroupRuleInPost(nexception.InUse):
 
 
 class SecurityGroupRuleExists(nexception.InUse):
-    message = _("Security group rule already exists. Rule id is %(id)s.")
+    message = _("Security group rule already exists. Rule id is %(rule_id)s.")
 
 
 class SecurityGroupRuleInUse(nexception.InUse):
@@ -200,7 +203,7 @@ def convert_ip_prefix_to_cidr(ip_prefix):
         cidr = netaddr.IPNetwork(ip_prefix)
         return str(cidr)
     except (ValueError, TypeError, netaddr.AddrFormatError):
-        raise nexception.InvalidCIDR(input=ip_prefix)
+        raise exceptions.InvalidCIDR(input=ip_prefix)
 
 
 def _validate_name_not_default(data, valid_values=None):
@@ -208,15 +211,16 @@ def _validate_name_not_default(data, valid_values=None):
         raise SecurityGroupDefaultAlreadyExists()
 
 
-attr.validators['type:name_not_default'] = _validate_name_not_default
+validators.validators['type:name_not_default'] = _validate_name_not_default
 
-sg_supported_protocols = [None, const.PROTO_NAME_TCP, const.PROTO_NAME_UDP,
-                          const.PROTO_NAME_ICMP, const.PROTO_NAME_ICMP_V6]
+sg_supported_protocols = ([None] + list(const.IP_PROTOCOL_MAP.keys()))
 sg_supported_ethertypes = ['IPv4', 'IPv6']
+SECURITYGROUPS = 'security_groups'
+SECURITYGROUPRULES = 'security_group_rules'
 
 # Attribute Map
 RESOURCE_ATTRIBUTE_MAP = {
-    'security_groups': {
+    SECURITYGROUPS: {
         'id': {'allow_post': False, 'allow_put': False,
                'validate': {'type:uuid': None},
                'is_visible': True,
@@ -231,10 +235,10 @@ RESOURCE_ATTRIBUTE_MAP = {
                       'required_by_policy': True,
                       'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
-        'security_group_rules': {'allow_post': False, 'allow_put': False,
-                                 'is_visible': True},
+        SECURITYGROUPRULES: {'allow_post': False, 'allow_put': False,
+                             'is_visible': True},
     },
-    'security_group_rules': {
+    SECURITYGROUPRULES: {
         'id': {'allow_post': False, 'allow_put': False,
                'validate': {'type:uuid': None},
                'is_visible': True,
@@ -270,24 +274,15 @@ RESOURCE_ATTRIBUTE_MAP = {
 }
 
 
-SECURITYGROUPS = 'security_groups'
 EXTENDED_ATTRIBUTES_2_0 = {
     'ports': {SECURITYGROUPS: {'allow_post': True,
                                'allow_put': True,
                                'is_visible': True,
                                'convert_to': convert_to_uuid_list_or_none,
-                               'default': attr.ATTR_NOT_SPECIFIED}}}
-security_group_quota_opts = [
-    cfg.IntOpt('quota_security_group',
-               default=10,
-               help=_('Number of security groups allowed per tenant. '
-                      'A negative value means unlimited.')),
-    cfg.IntOpt('quota_security_group_rule',
-               default=100,
-               help=_('Number of security rules allowed per tenant. '
-                      'A negative value means unlimited.')),
-]
-cfg.CONF.register_opts(security_group_quota_opts, 'QUOTAS')
+                               'default': const.ATTR_NOT_SPECIFIED}}}
+
+# Register the configuration options
+quota.register_quota_opts(quota.security_group_quota_opts)
 
 
 class Securitygroup(extensions.ExtensionDescriptor):
@@ -332,6 +327,10 @@ class Securitygroup(extensions.ExtensionDescriptor):
             exts.append(ex)
 
         return exts
+
+    def update_attributes_map(self, attributes):
+        super(Securitygroup, self).update_attributes_map(
+            attributes, extension_attrs_map=RESOURCE_ATTRIBUTE_MAP)
 
     def get_extended_resources(self, version):
         if version == "2.0":

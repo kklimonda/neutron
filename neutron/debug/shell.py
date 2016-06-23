@@ -18,7 +18,10 @@ import sys
 from oslo_config import cfg
 from oslo_utils import importutils
 
+from neutron._i18n import _
+from neutron._i18n import _LW
 from neutron.agent.common import config
+from neutron.agent.common import utils
 from neutron.agent.linux import interface
 from neutron.debug import debug_agent
 from neutronclient.common import exceptions as exc
@@ -70,15 +73,17 @@ class NeutronDebugShell(shell.NeutronShell):
                   " either --config-file or env[NEUTRON_TEST_CONFIG_FILE]"))
         client = self.client_manager.neutron
         cfg.CONF.register_opts(interface.OPTS)
-        cfg.CONF.register_opts(debug_agent.NeutronDebugAgent.OPTS)
+        cfg.CONF.register_opts(config.EXT_NET_BRIDGE_OPTS)
         config.register_interface_driver_opts_helper(cfg.CONF)
-        config.register_use_namespaces_opts_helper(cfg.CONF)
         cfg.CONF(['--config-file', self.options.config_file])
         config.setup_logging()
-        driver = importutils.import_object(cfg.CONF.interface_driver, cfg.CONF)
+        driver = utils.load_interface_driver(cfg.CONF)
         self.debug_agent = debug_agent.NeutronDebugAgent(cfg.CONF,
                                                          client,
                                                          driver)
+        self.log.warning(_LW('This tool is deprecated and will be removed '
+                             'in the future to be replaced with a more '
+                             'powerful troubleshooting toolkit.'))
 
 
 def main(argv=None):

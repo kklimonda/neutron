@@ -12,6 +12,8 @@
 
 # String literals representing core resources.
 AGENT = 'agent'
+EXTERNAL_NETWORK = 'external_network'
+FLOATING_IP = 'floating_ip'
 PORT = 'port'
 PROCESS = 'process'
 ROUTER = 'router'
@@ -21,3 +23,4 @@ SECURITY_GROUP = 'security_group'
 SECURITY_GROUP_RULE = 'security_group_rule'
 SUBNET = 'subnet'
 SUBNET_GATEWAY = 'subnet_gateway'
+SUBNETPOOL_ADDRESS_SCOPE = 'subnetpool_address_scope'

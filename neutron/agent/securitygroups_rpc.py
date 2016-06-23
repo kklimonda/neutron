@@ -19,11 +19,10 @@ import functools
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
-from oslo_utils import importutils
 
+from neutron._i18n import _, _LI, _LW
 from neutron.agent import firewall
 from neutron.api.rpc.handlers import securitygroups_rpc
-from neutron.i18n import _LI, _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -42,7 +41,9 @@ security_group_opts = [
     cfg.BoolOpt(
         'enable_ipset',
         default=True,
-        help=_('Use ipset to speed-up the iptables based security groups.'))
+        help=_('Use ipset to speed-up the iptables based security groups. '
+               'Enabling ipset support requires that ipset is installed on L2 '
+               'agent node.'))
 ]
 cfg.CONF.register_opts(security_group_opts, 'SECURITYGROUP')
 
@@ -62,8 +63,8 @@ def _is_valid_driver_combination():
 
 def is_firewall_enabled():
     if not _is_valid_driver_combination():
-        LOG.warn(_LW("Driver configuration doesn't match with "
-                     "enable_security_group"))
+        LOG.warning(_LW("Driver configuration doesn't match with "
+                        "enable_security_group"))
 
     return cfg.CONF.SECURITYGROUP.enable_security_group
 
@@ -85,21 +86,25 @@ class SecurityGroupAgentRpc(object):
     """Enables SecurityGroup agent support in agent implementations."""
 
     def __init__(self, context, plugin_rpc, local_vlan_map=None,
-                 defer_refresh_firewall=False,):
+                 defer_refresh_firewall=False, integration_bridge=None):
         self.context = context
         self.plugin_rpc = plugin_rpc
-        self.init_firewall(defer_refresh_firewall)
+        self.init_firewall(defer_refresh_firewall, integration_bridge)
         self.local_vlan_map = local_vlan_map
 
-    def init_firewall(self, defer_refresh_firewall=False):
-        firewall_driver = cfg.CONF.SECURITYGROUP.firewall_driver
+    def init_firewall(self, defer_refresh_firewall=False,
+                      integration_bridge=None):
+        firewall_driver = cfg.CONF.SECURITYGROUP.firewall_driver or 'noop'
         LOG.debug("Init firewall settings (driver=%s)", firewall_driver)
         if not _is_valid_driver_combination():
-            LOG.warn(_LW("Driver configuration doesn't match "
-                         "with enable_security_group"))
-        if not firewall_driver:
-            firewall_driver = 'neutron.agent.firewall.NoopFirewallDriver'
-        self.firewall = importutils.import_object(firewall_driver)
+            LOG.warning(_LW("Driver configuration doesn't match "
+                            "with enable_security_group"))
+        firewall_class = firewall.load_firewall_driver_class(firewall_driver)
+        try:
+            self.firewall = firewall_class(
+                integration_bridge=integration_bridge)
+        except TypeError:
+            self.firewall = firewall_class()
         # The following flag will be set to true if port filter must not be
         # applied as soon as a rule or membership notification is received
         self.defer_refresh_firewall = defer_refresh_firewall
@@ -198,7 +203,8 @@ class SecurityGroupAgentRpc(object):
             if sec_grp_set & set(device.get(attribute, [])):
                 devices.append(device['device'])
         if devices:
-            self.firewall.security_group_updated(action_type, sec_grp_set)
+            if self.use_enhanced_rpc:
+                self.firewall.security_group_updated(action_type, sec_grp_set)
             if self.defer_refresh_firewall:
                 LOG.debug("Adding %s devices to the list of devices "
                           "for which firewall needs to be refreshed",
@@ -291,8 +297,9 @@ class SecurityGroupAgentRpc(object):
             LOG.debug("Refreshing firewall for all filtered devices")
             self.refresh_firewall()
         else:
-            self.firewall.security_group_updated('sg_member', [],
-                                                 updated_devices)
+            if self.use_enhanced_rpc:
+                self.firewall.security_group_updated('sg_member', [],
+                                                     updated_devices)
             # If a device is both in new and updated devices
             # avoid reprocessing it
             updated_devices = ((updated_devices | devices_to_refilter) -
@@ -303,7 +310,7 @@ class SecurityGroupAgentRpc(object):
                 self.refresh_firewall(updated_devices)
 
 
-# TODO(armax): for bw compat with external dependencies; to be dropped in M.
+# TODO(armax): For bw compat with external dependencies; to be dropped in M.
 SG_RPC_VERSION = (
     securitygroups_rpc.SecurityGroupAgentRpcApiMixin.SG_RPC_VERSION
 )

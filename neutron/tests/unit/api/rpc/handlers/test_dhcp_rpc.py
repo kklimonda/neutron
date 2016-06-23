@@ -14,12 +14,17 @@
 # limitations under the License.
 
 import mock
+from neutron_lib import constants
+from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
 
 from neutron.api.rpc.handlers import dhcp_rpc
-from neutron.common import constants
-from neutron.common import exceptions as n_exc
+from neutron.callbacks import resources
+from neutron.common import constants as n_const
+from neutron.common import exceptions
 from neutron.common import utils
+from neutron.db import provisioning_blocks
+from neutron.extensions import portbindings
 from neutron.tests import base
 
 
@@ -39,19 +44,6 @@ class TestDhcpRpcCallback(base.BaseTestCase):
         self.mock_set_dirty = set_dirty_p.start()
         self.utils_p = mock.patch('neutron.plugins.common.utils.create_port')
         self.utils = self.utils_p.start()
-
-    def test_get_active_networks(self):
-        plugin_retval = [dict(id='a'), dict(id='b')]
-        self.plugin.get_networks.return_value = plugin_retval
-
-        networks = self.callbacks.get_active_networks(mock.Mock(), host='host')
-
-        self.assertEqual(networks, ['a', 'b'])
-        self.plugin.assert_has_calls(
-            [mock.call.get_networks(mock.ANY,
-                                    filters=dict(admin_state_up=[True]))])
-
-        self.assertEqual(len(self.log.mock_calls), 1)
 
     def test_group_by_network_id(self):
         port1 = {'network_id': 'a'}
@@ -170,7 +162,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
                 }
         expected_port = {'port': {'network_id': 'foo_network_id',
                                   'device_owner': constants.DEVICE_OWNER_DHCP,
-                                  'binding:host_id': 'foo_host',
+                                  portbindings.HOST_ID: 'foo_host',
                                   'fixed_ips': [{'subnet_id': 'foo_subnet_id'}]
                                   },
                          'id': 'foo_port_id'
@@ -180,7 +172,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
             self.assertEqual(expected_port, port)
 
         self.plugin.get_port.return_value = {
-            'device_id': constants.DEVICE_ID_RESERVED_DHCP_PORT}
+            'device_id': n_const.DEVICE_ID_RESERVED_DHCP_PORT}
         self.callbacks._port_action = _fake_port_action
         self.callbacks.update_dhcp_port(mock.Mock(),
                                         host='foo_host',
@@ -194,7 +186,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
                 }
         expected_port = {'port': {'network_id': 'foo_network_id',
                                   'device_owner': constants.DEVICE_OWNER_DHCP,
-                                  'binding:host_id': 'foo_host',
+                                  portbindings.HOST_ID: 'foo_host',
                                   'fixed_ips': [{'subnet_id': 'foo_subnet_id'}]
                                   },
                          'id': 'foo_port_id'
@@ -212,7 +204,7 @@ class TestDhcpRpcCallback(base.BaseTestCase):
 
         self.plugin.get_port.return_value = {
             'device_id': 'other_id'}
-        self.assertRaises(n_exc.DhcpPortInUse,
+        self.assertRaises(exceptions.DhcpPortInUse,
                           self.callbacks.update_dhcp_port,
                           mock.Mock(),
                           host='foo_host',
@@ -226,13 +218,13 @@ class TestDhcpRpcCallback(base.BaseTestCase):
                 }
         expected_port = {'port': {'network_id': 'foo_network_id',
                                   'device_owner': constants.DEVICE_OWNER_DHCP,
-                                  'binding:host_id': 'foo_host',
+                                  portbindings.HOST_ID: 'foo_host',
                                   'fixed_ips': [{'subnet_id': 'foo_subnet_id'}]
                                   },
                          'id': 'foo_port_id'
                          }
         self.plugin.get_port.return_value = {
-            'device_id': constants.DEVICE_ID_RESERVED_DHCP_PORT}
+            'device_id': n_const.DEVICE_ID_RESERVED_DHCP_PORT}
         self.callbacks.update_dhcp_port(mock.Mock(),
                                         host='foo_host',
                                         port_id='foo_port_id',
@@ -250,16 +242,13 @@ class TestDhcpRpcCallback(base.BaseTestCase):
         self.plugin.assert_has_calls([
             mock.call.delete_ports_by_device_id(mock.ANY, 'devid', 'netid')])
 
-    def test_release_port_fixed_ip(self):
-        port_retval = dict(id='port_id', fixed_ips=[dict(subnet_id='a')])
-        port_update = dict(id='port_id', fixed_ips=[])
-        self.plugin.get_ports.return_value = [port_retval]
-
-        self.callbacks.release_port_fixed_ip(mock.ANY, network_id='netid',
-                                             device_id='devid', subnet_id='a')
-
-        self.plugin.assert_has_calls([
-            mock.call.get_ports(mock.ANY, filters=dict(network_id=['netid'],
-                                                       device_id=['devid'])),
-            mock.call.update_port(mock.ANY, 'port_id',
-                                  dict(port=port_update))])
+    def test_dhcp_ready_on_ports(self):
+        context = mock.Mock()
+        port_ids = range(10)
+        with mock.patch.object(provisioning_blocks,
+                               'provisioning_complete') as pc:
+            self.callbacks.dhcp_ready_on_ports(context, port_ids)
+        calls = [mock.call(context, port_id, resources.PORT,
+                           provisioning_blocks.DHCP_ENTITY)
+                 for port_id in port_ids]
+        pc.assert_has_calls(calls)
