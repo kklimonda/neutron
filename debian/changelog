@@ -1,4 +1,4 @@
-neutron (2:9.0.0.0b2~dev254-1) UNRELEASED; urgency=medium
+neutron (2:9.0.0.0b2~dev254-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * New upstream version.
