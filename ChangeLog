@@ -1,7 +1,11 @@
 CHANGES
 =======
 
+* Remove the deprecated config 'router_id'
+* Separate exception class for retriables in callbacks
+* Revert "OVS: don't throw KeyError when duplicate VLAN tags exist"
 * Updated from global requirements
+* Check for RetryRequest in MultipleException types
 * Remove IP availability range recalculation logic
 * Rename ml2_dvr_port_bindings to make it generic
 * Override 'create' for Trunk and SubPort
@@ -10,12 +14,14 @@ CHANGES
 * Revert "move import to top and rename to make more readable"
 * Make pep8 job great again
 * Disable warnerrors=True in setup.cfg
+* Move state reporting initialization to after worker forking
 * Do not rewrite original exception for IPAM part 2
 * Change addCleanup create_tenant to delete_tenant, fix gate
 * Obsolete mac_generation_retries and deprecate the option
 * Fix minor spelling error in debug log
 * tests: clean up designate client session mock on test exit
 * Remove unnecessary import from segment plugin
+* OVS: UnboundLocalError on switch timeout fixed
 * ovsfw: Fix variable names in UT
 * ovs: set device MTU after it's moved into a namespace
 * Syntax fix
