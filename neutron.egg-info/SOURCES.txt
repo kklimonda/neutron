@@ -580,6 +580,7 @@ neutron/pecan_wsgi/hooks/context.py
 neutron/pecan_wsgi/hooks/notifier.py
 neutron/pecan_wsgi/hooks/ownership_validation.py
 neutron/pecan_wsgi/hooks/policy_enforcement.py
+neutron/pecan_wsgi/hooks/query_parameters.py
 neutron/pecan_wsgi/hooks/quota_enforcement.py
 neutron/pecan_wsgi/hooks/translation.py
 neutron/plugins/__init__.py

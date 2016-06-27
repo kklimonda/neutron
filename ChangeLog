@@ -1,6 +1,9 @@
 CHANGES
 =======
 
+* Create auto allocated networks in disabled state
+* Move DHCP notification logic out of API controller
+* Pecan: move fields and filters logic to hooks
 * Remove the deprecated config 'router_id'
 * Separate exception class for retriables in callbacks
 * Revert "OVS: don't throw KeyError when duplicate VLAN tags exist"
@@ -27,6 +30,7 @@ CHANGES
 * Syntax fix
 * Remove deprecated TODO notes in L2 agent extension manager
 * Fix pep8 violations in fullstack qos test
+* Don't return marker item when paginating backwards
 * Fix release name in deprecating message for agent status checks
 * Typo fix
 * Fix bug with mac generation
@@ -37,8 +41,11 @@ CHANGES
 * Provide DB isolation for WalkMigrations tests
 * Refactor NetworkDhcpAgentBinding
 * Tempest: fix a typo
+* qos: support native sorting/pagination for policies and rules
+* qos: added api sorting/pagination tests for policies
 * Check for alembic Add/DropColumn exceptions in migrations
 * objects: switch base plugin class to using subnetpool object
+* Added sorting/pagination tests for routers
 * Added sorting/pagination tests for subnets
 * DHCP: delete config option dnsmasq_dns_server
 * Refactor update_segment_host_mapping_for_agent for agentless topology
