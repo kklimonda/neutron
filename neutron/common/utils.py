@@ -33,6 +33,7 @@ import tempfile
 import time
 import uuid
 
+import eventlet
 from eventlet.green import subprocess
 import netaddr
 from neutron_lib import constants as n_const
@@ -527,11 +528,11 @@ def create_object_with_dependency(creator, dep_getter, dep_creator,
     dep_id_attr be used to determine if the dependency changed during object
     creation.
 
-    dep_getter should return None if the dependency does not exist
+    dep_getter should return None if the dependency does not exist.
 
     dep_creator can raise a DBDuplicateEntry to indicate that a concurrent
-    create of the dependency occured and the process will restart to get the
-    concurrently created one
+    create of the dependency occurred and the process will restart to get the
+    concurrently created one.
 
     This function will return both the created object and the dependency it
     used/created.
@@ -599,6 +600,22 @@ def transaction_guard(f):
                                  "transaction."))
         return f(self, context, *args, **kwargs)
     return inner
+
+
+def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
+    """
+    Wait until callable predicate is evaluated as True
+
+    :param predicate: Callable deciding whether waiting should continue.
+    Best practice is to instantiate predicate with functools.partial()
+    :param timeout: Timeout in seconds how long should function wait.
+    :param sleep: Polling interval for results in seconds.
+    :param exception: Exception class for eventlet.Timeout.
+    (see doc for eventlet.Timeout for more information)
+    """
+    with eventlet.timeout.Timeout(timeout, exception):
+        while not predicate():
+            eventlet.sleep(sleep)
 
 
 class _AuthenticBase(object):

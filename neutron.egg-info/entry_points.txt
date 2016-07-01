@@ -30,6 +30,7 @@ noop = neutron.agent.firewall:NoopFirewallDriver
 openvswitch = neutron.agent.linux.openvswitch_firewall:OVSFirewallDriver
 
 [neutron.agent.l2.extensions]
+fdb = neutron.agent.l2.extensions.fdb_population:FdbPopulationAgentExtension
 qos = neutron.agent.l2.extensions.qos:QosAgentExtension
 
 [neutron.agent.linux.pd_drivers]
