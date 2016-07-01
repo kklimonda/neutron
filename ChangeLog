@@ -1,13 +1,39 @@
 CHANGES
 =======
 
+* Fix spelling mistakes in the docs
+* Restore MySQL and Postgresql functional testing
+* functional: Use assertItemsEqual for db_find outputs
+* Adding FDB population agent extension
+* pep8: Register checks with their code
+* sriov: Fix macvtap vf interface regex pattern
+* Mock threading.Thread to prevent daemon creation by unit tests
+* Fix some typos
+* Register the dict extend function when service plugin starts
+* Add two more callbacks registry events
+* Fix code that's trying to read from a stale DB object
+* Remove 'origin/' in OVS_BRANCH
+* Only update SegmentHostMapping for the given host
+* Move Nova notification logic out of API controller
+* Create segment_host mapping after new segment
+* objects: Introduce the DNSNameServer OVO in the code
+* Implementation details to support trunk ports
+* Move wait_until_true to neutron.common.utils
+* Imported Translations from Zanata
+* Agent extension: fix comment
+* enable OVSDB native interface by default
+* Not auto schedule router when sync routers from agent
+* Updated from global requirements
+* Fix simple typos
 * Create auto allocated networks in disabled state
 * Move DHCP notification logic out of API controller
 * Pecan: move fields and filters logic to hooks
+* DHCP Agent scheduling with segments
 * Remove the deprecated config 'router_id'
 * Separate exception class for retriables in callbacks
 * Revert "OVS: don't throw KeyError when duplicate VLAN tags exist"
 * Updated from global requirements
+* Add revision_number to standard attr for OVO
 * Check for RetryRequest in MultipleException types
 * Remove IP availability range recalculation logic
 * Rename ml2_dvr_port_bindings to make it generic
@@ -45,6 +71,7 @@ CHANGES
 * qos: added api sorting/pagination tests for policies
 * Check for alembic Add/DropColumn exceptions in migrations
 * objects: switch base plugin class to using subnetpool object
+* l3: support native sorting/pagination for routers
 * Added sorting/pagination tests for routers
 * Added sorting/pagination tests for subnets
 * DHCP: delete config option dnsmasq_dns_server
@@ -69,6 +96,7 @@ CHANGES
 * Revert "Add index on trunk_id in the subports model"
 * Update Neutron server to use only keystoneauth
 * Make segment aware IPAM compatible with ML2
+* Fix of ping usage in net_helpers.async_ping()
 * Remove MAC duplicate detection for generated macs
 * Pecan: handle single fields query parameter
 * Compute IPAvailabilityRanges in memory during IP allocation
@@ -362,6 +390,7 @@ CHANGES
 * Avoid referencing code from master branch
 * Support interface drivers that don't support mtu parameter for plug_new
 * Use tempest plugin interface
+* Add 169.254.169.254 when enable force_metadata
 * Fix deprecation warning for external_network_bridge
 * Add ALLOCATING state to routers
 * Change wrong word "propogated" to "propagated"
