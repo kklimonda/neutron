@@ -28,6 +28,7 @@ devstack/lib/macvtap_agent
 devstack/lib/ml2
 devstack/lib/ovs
 devstack/lib/qos
+devstack/lib/trunk
 devstack/lib/ml2_drivers/sriovnicswitch
 doc/Makefile
 doc/pom.xml
@@ -509,6 +510,8 @@ neutron/extensions/standardattrdescription.py
 neutron/extensions/subnetallocation.py
 neutron/extensions/tag.py
 neutron/extensions/timestamp_core.py
+neutron/extensions/trunk.py
+neutron/extensions/trunk_details.py
 neutron/extensions/vlantransparent.py
 neutron/hacking/__init__.py
 neutron/hacking/checks.py
@@ -756,9 +759,13 @@ neutron/services/timestamp/__init__.py
 neutron/services/timestamp/timestamp_db.py
 neutron/services/timestamp/timestamp_plugin.py
 neutron/services/trunk/__init__.py
-neutron/services/trunk/db.py
+neutron/services/trunk/constants.py
 neutron/services/trunk/exceptions.py
 neutron/services/trunk/models.py
+neutron/services/trunk/plugin.py
+neutron/services/trunk/rules.py
+neutron/services/trunk/validators/__init__.py
+neutron/services/trunk/validators/vlan.py
 neutron/tests/__init__.py
 neutron/tests/base.py
 neutron/tests/fake_notifier.py
@@ -792,6 +799,7 @@ neutron/tests/contrib/hooks/pecan
 neutron/tests/contrib/hooks/qos
 neutron/tests/contrib/hooks/quotas
 neutron/tests/contrib/hooks/sorting
+neutron/tests/contrib/hooks/trunk
 neutron/tests/etc/api-paste.ini.test
 neutron/tests/etc/neutron.conf
 neutron/tests/etc/neutron_test.conf
@@ -935,6 +943,8 @@ neutron/tests/tempest/api/test_subnetpools.py
 neutron/tests/tempest/api/test_subnetpools_negative.py
 neutron/tests/tempest/api/test_subnets.py
 neutron/tests/tempest/api/test_timestamp.py
+neutron/tests/tempest/api/test_trunk.py
+neutron/tests/tempest/api/test_trunk_negative.py
 neutron/tests/tempest/api/admin/__init__.py
 neutron/tests/tempest/api/admin/test_agent_management.py
 neutron/tests/tempest/api/admin/test_dhcp_agent_scheduler.py
@@ -1278,7 +1288,8 @@ neutron/tests/unit/services/qos/notification_drivers/dummy.py
 neutron/tests/unit/services/qos/notification_drivers/test_manager.py
 neutron/tests/unit/services/qos/notification_drivers/test_message_queue.py
 neutron/tests/unit/services/trunk/__init__.py
-neutron/tests/unit/services/trunk/test_db.py
+neutron/tests/unit/services/trunk/test_plugin.py
+neutron/tests/unit/services/trunk/test_rules.py
 neutron/tests/unit/tests/__init__.py
 neutron/tests/unit/tests/test_base.py
 neutron/tests/unit/tests/test_post_mortem_debug.py

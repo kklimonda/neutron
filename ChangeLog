@@ -1,7 +1,25 @@
 CHANGES
 =======
 
+* Fix broken link
+* Updated from global requirements
+* Fixed typos
+* next() is incompatible in test_network_ip_availability.py
+* Fix order of arguments in assertEqual
+* Reuse common code in securitygroups_rpc module
+* Imported Translations from Zanata
+* Update the template for model sync test docs
+* Add sorting and pagination tests for trunk resources
+* Enable CRUD for trunk ports
+* Use tempest.lib tenants_client
+* Support unique labels for alembic branches
+* create_router: Report the original exception
+* ml2: postpone exception logs to when retry mechanism fails to recover
+* Fix OVSBridge.set_protocols arg
 * Fix spelling mistakes in the docs
+* Adding the appropriate log hints where needed
+* Lower ML2 message severity
+* spelling error: modify assocations -> associations in files as follows: neutron/agent/l3/link_local_allocator.py:38
 * Restore MySQL and Postgresql functional testing
 * functional: Use assertItemsEqual for db_find outputs
 * Adding FDB population agent extension
@@ -10,12 +28,15 @@ CHANGES
 * Mock threading.Thread to prevent daemon creation by unit tests
 * Fix some typos
 * Register the dict extend function when service plugin starts
+* Remove notification for process event
 * Add two more callbacks registry events
+* Do not depend on Python error strings in parse_network_vlan_range()
 * Fix code that's trying to read from a stale DB object
 * Remove 'origin/' in OVS_BRANCH
 * Only update SegmentHostMapping for the given host
 * Move Nova notification logic out of API controller
 * Create segment_host mapping after new segment
+* Skip INVALID and UNASSIGNED ofport in vlan restore
 * objects: Introduce the DNSNameServer OVO in the code
 * Implementation details to support trunk ports
 * Move wait_until_true to neutron.common.utils
@@ -47,6 +68,7 @@ CHANGES
 * Do not rewrite original exception for IPAM part 2
 * Change addCleanup create_tenant to delete_tenant, fix gate
 * Obsolete mac_generation_retries and deprecate the option
+* Remove unnecessary flush for duplicate address detection
 * Fix minor spelling error in debug log
 * tests: clean up designate client session mock on test exit
 * Remove unnecessary import from segment plugin
@@ -130,6 +152,7 @@ CHANGES
 * Revert "DVR: Clear SNAT namespace when agent restarts after router move"
 * objects: Use common plugin _model_query in get_object
 * Tox: Remove neutron/openstack/common from excludes list
+* Fix missing availability_zone in dhcp and l3 conf
 * qos: Add API test for shared policy
 * Imported Translations from Zanata
 * Fix server_default comparison for BigInteger
@@ -197,6 +220,7 @@ CHANGES
 * Avoid shadowing the method's port argument
 * OVO for VLAN aware VMs
 * tests: cover port with existing sorting/pagination api tests
+* Allow min_l3_agents_per_router to equal one
 * How to support trunk ports with Open vSwitch Agent
 * Introduce official lib tag for neutron-lib issues
 * Pecan: tell the plugin about field selection
@@ -261,6 +285,7 @@ CHANGES
 * Add method to get service provider names by resources
 * Enable flavor plugin as a default service plugin
 * Add setting default max_burst value if not given by user
+* Remove the file i18n.py and other related cleanups
 * Fix for 'ofport' query retries during neutron agent start
 * Segment extension: remove deprecated warnings
 * Add provisioning blocks to status ACTIVE transition
