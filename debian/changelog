@@ -7,6 +7,7 @@ neutron (2:8.1.3~dev44-0ubuntu1) UNRELEASED; urgency=medium
 
   [ James Page ]
   * New upstream version.
+  * d/p/skip-ryu-tests.patch: Rebased.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Mon, 11 Jul 2016 15:32:41 -0400
 
