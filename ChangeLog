@@ -1,9 +1,23 @@
 CHANGES
 =======
 
+* Revert "Fix _get_id_for"
+* When deleting floating IP catch PortNotFound
+* Fix unicode bug for password-authenticated BGP peer
+* DVR: Ensure that only one fg device can exist at a time in fip ns
+* Skip INVALID and UNASSIGNED ofport in vlan restore
+* sriov: Fix macvtap vf interface regex pattern
+* Fix _get_id_for
+* Cap tempest to < 12.1.0
+* Imported Translations from Zanata
+* Imported Translations from Zanata
 * tests: clean up designate client session mock on test exit
 * ovs: set device MTU after it's moved into a namespace
 * Fix designate dns driver for SSL based endpoints
+* add PROTO_NUM_IPV6_ICMP for _validate_port_range
+* Update ml2 delete_subnet to deallocate via ipam
+* Fixed help messages for path_mtu and global_physnet_mtus options
+* DVR: Fix allowed_address_pair port binding with delayed fip
 * After a migration clean up the floating ip on the source host
 * Updated from global requirements
 
@@ -11,20 +25,31 @@ CHANGES
 -----
 
 * Revert "DVR: Clear SNAT namespace when agent restarts after router move"
+* qos: Add API test for shared policy
 * Fix get_free_namespace_port to actually avoid used ports
 * Force "out-of-band" controller connection mode
+* Fix validation of floating-ip association
 * DVR: Fix check multiprefix when delete ipv4 router interface
 * Pass ha_router_port flag for _snat_router_interfaces ports
 * Fixed help messages for path_mtu and global_physnet_mtus options
 * Fix bgp-speaker-network-remove error
 * Make deepcopy of update body in API layer
 * OVS: compare names when checking devices both added and deleted
+* Adopt to config_dir option being a list and not a string
+* [qos] section is missing from neutron.conf
 * fix wrong default value of qos.notification_drivers
 * Fix invalid mock name in test_ovs_neutron_agent
+* Avoid testing oslo.service library internals
+* Only load timestamp service plugin in timestamp tests
 * Correct the interval between two reports
+* Make auto allocate plugin safe for unit/func tests
 * Check for existence of snat port before deleting it
+* De-dup user-defined SG rules before iptables call
+* Add a missing address-scope extension check
+* Skip firewall blink test for ovs-fw
 * Fix regexp for ss output
 * fullstack: Use noop firewall
+* Always call ipam driver on subnet update
 * DVR: Ensure fpr and rfp devices are configured correctly
 * DVR: Use existing IPDevice to add address on FIP VETH
 * Migration for qospolicyrbacs has hardcoded InnoDB

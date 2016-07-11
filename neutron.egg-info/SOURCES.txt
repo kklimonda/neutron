@@ -816,6 +816,7 @@ neutron/tests/contrib/post_test_hook.sh
 neutron/tests/etc/api-paste.ini.test
 neutron/tests/etc/neutron.conf
 neutron/tests/etc/neutron_test.conf
+neutron/tests/etc/neutron_test2.conf.example
 neutron/tests/etc/policy.json
 neutron/tests/fullstack/README
 neutron/tests/fullstack/__init__.py
