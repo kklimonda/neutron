@@ -14,8 +14,7 @@
 
 import mock
 
-from neutron_lib import constants as n_const
-
+from neutron.common import constants as n_const
 from neutron.tests import base
 from neutron.tests.common import net_helpers
 

@@ -164,11 +164,10 @@ here to provide references and note the functionality they provide.
 Functionality legend
 ~~~~~~~~~~~~~~~~~~~~
 
-- base: the base Neutron platform;
-- bgp: BGP dynamic routing service plugin;
-- client: API client implementation;
+- base: the base Neutron platform
+- client: API client implementation
 - core: a monolithic plugin that can implement API at multiple layers L3-L7;
-- dashboard: Horizon dashboard integration;
+- dashboard: Horizon dashboard integration
 - docker: a Docker network plugin that uses Neutron to provide networking services to Docker containers;
 - fw: a Firewall service plugin;
 - intent: a service plugin that provides a declarative API to realize networking;
@@ -177,8 +176,8 @@ Functionality legend
 - l3: a Layer 3 service plugin;
 - lb: a Load Balancer service plugin;
 - ml2: an ML2 mechanism driver;
-- pd: prefix delegation;
-- sfc: traffic steering based on traffic classification;
+- pd: prefix delegation
+- sfc; traffic steering based on traffic classification
 - vpn: a VPN service plugin;
 
 Neutron projects
@@ -190,6 +189,8 @@ functionality.
 +-------------------------------+-----------------------+
 | Name                          |    Functionality      |
 +===============================+=======================+
+| dragonflow_                   | core                  |
++-------------------------------+-----------------------+
 | networking-bagpipe_           | ml2                   |
 +-------------------------------+-----------------------+
 | networking-bgpvpn_            | vpn                   |
@@ -206,19 +207,17 @@ functionality.
 +-------------------------------+-----------------------+
 | networking-onos_              | ml2,l3                |
 +-------------------------------+-----------------------+
-| networking-ovn_               | ml2,l3                |
+| networking-ovn_               | core                  |
 +-------------------------------+-----------------------+
 | networking-sfc_               | sfc                   |
 +-------------------------------+-----------------------+
 | neutron_                      | base,l2,ml2,core,l3   |
 +-------------------------------+-----------------------+
-| neutron-dynamic-routing_      | bgp                   |
-+-------------------------------+-----------------------+
-| neutron-fwaas_                | fw                    |
-+-------------------------------+-----------------------+
 | neutron-lbaas_                | lb,dashboard          |
 | neutron-lbaas-dashboard_      |                       |
 | octavia_                      |                       |
++-------------------------------+-----------------------+
+| neutron-fwaas_                | fw                    |
 +-------------------------------+-----------------------+
 | neutron-lib_                  | base                  |
 +-------------------------------+-----------------------+
@@ -240,8 +239,6 @@ capabilities of Neutron, the Neutron API, or a combination of both.
 +-------------------------------+-----------------------+
 | Name                          |    Functionality      |
 +===============================+=======================+
-| dragonflow_                   | core                  |
-+-------------------------------+-----------------------+
 | kuryr_                        | docker                |
 +-------------------------------+-----------------------+
 | networking-ale-omniswitch_    | ml2                   |
@@ -256,8 +253,6 @@ capabilities of Neutron, the Neutron API, or a combination of both.
 +-------------------------------+-----------------------+
 | networking-edge-vpn_          | vpn                   |
 +-------------------------------+-----------------------+
-| networking-fortinet_          | ml2,l3,fw             |
-+-------------------------------+-----------------------+
 | networking-fujitsu_           | ml2                   |
 +-------------------------------+-----------------------+
 | networking-hyperv_            | ml2                   |
@@ -268,15 +263,15 @@ capabilities of Neutron, the Neutron API, or a combination of both.
 +-------------------------------+-----------------------+
 | networking-nec_               | core                  |
 +-------------------------------+-----------------------+
-| networking-ovs-dpdk_          | ml2                   |
-+-------------------------------+-----------------------+
 | networking-plumgrid_          | core                  |
 +-------------------------------+-----------------------+
 | networking-powervm_           | ml2                   |
 +-------------------------------+-----------------------+
-| networking-vsphere_           | ml2                   |
-+-------------------------------+-----------------------+
 | nuage-openstack-neutron_      | core                  |
++-------------------------------+-----------------------+
+| networking-ovs-dpdk_          | ml2                   |
++-------------------------------+-----------------------+
+| networking-vsphere_           | ml2                   |
 +-------------------------------+-----------------------+
 | vmware-nsx_                   | core                  |
 +-------------------------------+-----------------------+
@@ -337,7 +332,7 @@ ALE Omniswitch
 
 * Git: https://git.openstack.org/cgit/openstack/networking-ale-omniswitch
 * Launchpad: https://launchpad.net/networking-ale-omniswitch
-* PyPI: https://pypi.python.org/pypi/networking-ale-omniswitch
+* Pypi: https://pypi.python.org/pypi/networking-ale-omniswitch
 
 .. _networking-arista:
 
@@ -346,7 +341,7 @@ Arista
 
 * Git: https://git.openstack.org/cgit/openstack/networking-arista
 * Launchpad: https://launchpad.net/networking-arista
-* PyPI: https://pypi.python.org/pypi/networking-arista
+* Pypi: https://pypi.python.org/pypi/networking-arista
 
 .. _networking-bagpipe:
 
@@ -354,8 +349,6 @@ BaGPipe
 +++++++
 
 * Git: https://git.openstack.org/cgit/openstack/networking-bagpipe
-* Launchpad: https://launchpad.net/networking-bagpipe
-* PyPI: https://pypi.python.org/pypi/networking-bagpipe
 
 .. _networking-bgpvpn:
 
@@ -363,8 +356,6 @@ BGPVPN
 ++++++
 
 * Git: https://git.openstack.org/cgit/openstack/networking-bgpvpn
-* Launchpad: https://launchpad.net/bgpvpn
-* PyPI: https://pypi.python.org/pypi/networking-bgpvpn
 
 .. _networking-bigswitch:
 
@@ -372,8 +363,7 @@ Big Switch Networks
 +++++++++++++++++++
 
 * Git: https://git.openstack.org/cgit/openstack/networking-bigswitch
-* Launchpad: https://launchpad.net/networking-bigswitch
-* PyPI: https://pypi.python.org/pypi/bsnstacklib
+* Pypi: https://pypi.python.org/pypi/bsnstacklib
 
 .. _networking-brocade:
 
@@ -419,15 +409,6 @@ Edge VPN
 * Git: https://git.openstack.org/cgit/openstack/networking-edge-vpn
 * Launchpad: https://launchpad.net/edge-vpn
 
-.. _networking-fortinet:
-
-Fortinet
-++++++++
-
-* Git: https://git.openstack.org/cgit/openstack/networking-fortinet
-* Launchpad: https://launchpad.net/networking-fortinet
-* PyPI: https://pypi.python.org/pypi/networking-fortinet
-
 .. _networking-fujitsu:
 
 FUJITSU
@@ -471,7 +452,6 @@ L2 Gateway
 
 * Git: https://git.openstack.org/cgit/openstack/networking-l2gw
 * Launchpad: https://launchpad.net/networking-l2gw
-* PyPI: https://pypi.python.org/pypi/networking-l2gw
 
 .. _networking-midonet:
 
@@ -514,15 +494,13 @@ Neutron Client
 
 * Git: https://git.openstack.org/cgit/openstack/python-neutronclient
 * Launchpad: https://launchpad.net/python-neutronclient
-* PyPI: https://pypi.python.org/pypi/python-neutronclient
 
-.. _neutron-dynamic-routing:
+.. _python-neutron-pd-driver:
 
-Neutron Dynamic Routing
-+++++++++++++++++++++++
+Neutron Prefix Delegation
++++++++++++++++++++++++++
 
-* Git: https://git.openstack.org/cgit/openstack/neutron-dynamic-routing
-* Launchpad: https://launchpad.net/neutron
+* Git: https://git.openstack.org/cgit/openstack/python-neutron-pd-driver
 
 .. _neutron-fwaas:
 
@@ -556,15 +534,6 @@ Neutron Library
 * Git: https://git.openstack.org/cgit/openstack/neutron-lib
 * Launchpad: https://launchpad.net/neutron
 
-.. _python-neutron-pd-driver:
-
-Neutron Prefix Delegation
-+++++++++++++++++++++++++
-
-* Git: https://git.openstack.org/cgit/openstack/python-neutron-pd-driver
-* Launchpad: https://launchpad.net/python-neutron-pd-driver
-* PyPI: https://pypi.python.org/pypi/python-neutron-pd-driver
-
 .. _neutron-vpnaas:
 
 Neutron VPNaaS
@@ -580,15 +549,6 @@ Nuage
 
 * Git: https://github.com/nuagenetworks/nuage-openstack-neutron
 
-.. _octavia:
-
-Octavia
-+++++++
-
-* Git: https://git.openstack.org/cgit/openstack/octavia
-* Launchpad: https://launchpad.net/octavia
-* PyPI: https://pypi.python.org/pypi/octavia
-
 .. _networking-odl:
 
 OpenDayLight
@@ -596,7 +556,6 @@ OpenDayLight
 
 * Git: https://git.openstack.org/cgit/openstack/networking-odl
 * Launchpad: https://launchpad.net/networking-odl
-* PyPI: https://pypi.python.org/pypi/networking-odl
 
 .. _networking-ofagent:
 
@@ -606,9 +565,6 @@ OpenFlow Agent (ofagent)
 * Git: https://git.openstack.org/cgit/openstack/networking-ofagent
 * Launchpad: https://launchpad.net/networking-ofagent
 * PyPI: https://pypi.python.org/pypi/networking-ofagent
-
-Note: The networking-ofagent project has been removed in the Newton cycle
-      and the only stable branch is maintained until its EOL.
 
 .. _networking-onos:
 
@@ -635,7 +591,6 @@ Open DPDK
 
 * Git: https://git.openstack.org/cgit/openstack/networking-ovs-dpdk
 * Launchpad: https://launchpad.net/networking-ovs-dpdk
-* PyPI: https://pypi.python.org/pypi/networking-ovs-dpdk
 
 .. _networking-plumgrid:
 
@@ -661,8 +616,6 @@ SFC
 +++
 
 * Git: https://git.openstack.org/cgit/openstack/networking-sfc
-* Launchpad: https://launchpad.net/networking-sfc
-* PyPI: https://pypi.python.org/pypi/networking-sfc
 
 .. _networking-vsphere:
 
@@ -671,7 +624,6 @@ vSphere
 
 * Git: https://git.openstack.org/cgit/openstack/networking-vsphere
 * Launchpad: https://launchpad.net/networking-vsphere
-* PyPI: https://pypi.python.org/pypi/networking-vsphere
 
 .. _vmware-nsx:
 
@@ -681,3 +633,11 @@ VMware NSX
 * Git: https://git.openstack.org/cgit/openstack/vmware-nsx
 * Launchpad: https://launchpad.net/vmware-nsx
 * PyPI: https://pypi.python.org/pypi/vmware-nsx
+
+.. _octavia:
+
+Octavia
++++++++
+
+* Git: https://git.openstack.org/cgit/openstack/octavia
+* Launchpad: https://launchpad.net/octavia

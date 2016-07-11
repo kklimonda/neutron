@@ -12,8 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-
+from neutron.common import constants
 from neutron import context
 from neutron.db import models_v2
 from neutron.extensions import portbindings
@@ -57,7 +56,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
                 status=constants.PORT_STATUS_ACTIVE,
                 device_id='',
                 device_owner=device_owner))
-            port_binding_cls = (models.DistributedPortBinding if dvr
+            port_binding_cls = (models.DVRPortBinding if dvr
                                 else models.PortBinding)
             binding_kwarg = {
                 'port_id': 'port_id',

@@ -147,29 +147,19 @@ class OVSBridgeTestCase(OVSBridgeTestBase):
                                  self.br.br_name, 'datapath_id', dpid)
         self.assertIn(dpid, self.br.get_datapath_id())
 
-    def _test_add_tunnel_port(self, attrs):
-        port_name = tests_base.get_rand_device_name(net_helpers.PORT_PREFIX)
-        self.br.add_tunnel_port(port_name, attrs['remote_ip'],
-                                attrs['local_ip'])
-        self.assertEqual('gre',
-                         self.ovs.db_get_val('Interface', port_name, 'type'))
-        options = self.ovs.db_get_val('Interface', port_name, 'options')
-        for attr, val in attrs.items():
-            self.assertEqual(val, options[attr])
-
-    def test_add_tunnel_port_ipv4(self):
+    def test_add_tunnel_port(self):
         attrs = {
             'remote_ip': '192.0.2.1',  # RFC 5737 TEST-NET-1
             'local_ip': '198.51.100.1',  # RFC 5737 TEST-NET-2
         }
-        self._test_add_tunnel_port(attrs)
-
-    def test_add_tunnel_port_ipv6(self):
-        attrs = {
-            'remote_ip': '2001:db8:200::1',
-            'local_ip': '2001:db8:100::1',
-        }
-        self._test_add_tunnel_port(attrs)
+        port_name = tests_base.get_rand_device_name(net_helpers.PORT_PREFIX)
+        self.br.add_tunnel_port(port_name, attrs['remote_ip'],
+                                attrs['local_ip'])
+        self.assertEqual(self.ovs.db_get_val('Interface', port_name, 'type'),
+                         'gre')
+        options = self.ovs.db_get_val('Interface', port_name, 'options')
+        for attr, val in attrs.items():
+            self.assertEqual(val, options[attr])
 
     def test_add_patch_port(self):
         local = tests_base.get_rand_device_name(net_helpers.PORT_PREFIX)
@@ -367,29 +357,3 @@ class OVSLibTestCase(base.BaseOVSLinuxTestCase):
         self.assertTrue(self.ovs.bridge_exists(name))
         br.destroy()
         self.assertFalse(self.ovs.bridge_exists(name))
-
-    def test_db_find_column_type_list(self):
-        """Fixate output for vsctl/native ovsdb_interface.
-
-        Makes sure that db_find search queries give the same result for both
-        implementations.
-        """
-        bridge_name = base.get_rand_name(prefix=net_helpers.BR_PREFIX)
-        self.addCleanup(self.ovs.delete_bridge, bridge_name)
-        br = self.ovs.add_bridge(bridge_name)
-        port_name = base.get_rand_name(prefix=net_helpers.PORT_PREFIX)
-        br.add_port(port_name)
-        self.ovs.set_db_attribute('Port', port_name, 'tag', 42)
-        tags = self.ovs.ovsdb.db_list('Port', columns=['tag']).execute()
-        # Make sure that there is data to query.
-        # It should be, but let's be a little paranoid here as otherwise
-        # the test has no sense
-        tags_present = [t for t in tags if t['tag'] != []]
-        self.assertTrue(tags_present)
-        tags_42 = [t for t in tags_present if t['tag'] == 42]
-        single_value = self.ovs.ovsdb.db_find(
-            'Port', ('tag', '=', 42), columns=['tag']).execute()
-        self.assertEqual(tags_42, single_value)
-        len_0_list = self.ovs.ovsdb.db_find(
-            'Port', ('tag', '!=', []), columns=['tag']).execute()
-        self.assertItemsEqual(tags_present, len_0_list)

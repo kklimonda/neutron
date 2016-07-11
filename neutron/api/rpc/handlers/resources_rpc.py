@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import exceptions
 from oslo_log import helpers as log_helpers
 from oslo_log import log as logging
 import oslo_messaging
@@ -24,6 +23,7 @@ from neutron.api.rpc.callbacks.producer import registry as prod_registry
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.callbacks import version_manager
 from neutron.common import constants
+from neutron.common import exceptions
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.objects import base as obj_base

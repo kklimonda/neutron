@@ -17,7 +17,6 @@ import collections
 import contextlib
 
 import mock
-from neutron_lib import constants as const
 from oslo_config import cfg
 import oslo_messaging
 from testtools import matchers
@@ -27,7 +26,7 @@ from neutron.agent import firewall as firewall_base
 from neutron.agent.linux import iptables_manager
 from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.api.rpc.handlers import securitygroups_rpc
-from neutron.common import constants as n_const
+from neutron.common import constants as const
 from neutron.common import ipv6_utils as ipv6
 from neutron.common import rpc as n_rpc
 from neutron import context
@@ -463,7 +462,6 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
                 security_groups=[sg2_id])
             ports_rest2 = self.deserialize(self.fmt, res2)
             port_id2 = ports_rest2['port']['id']
-            port_fixed_ip2 = ports_rest2['port']['fixed_ips'][0]['ip_address']
             ctx = context.get_admin_context()
             ports_rpc = self.rpc.security_group_rules_for_devices(
                 ctx, devices=devices)
@@ -477,7 +475,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
                         {'direction': 'egress', 'ethertype': const.IPv6,
                          'security_group_id': sg2_id},
                         {'direction': u'ingress',
-                         'source_ip_prefix': port_fixed_ip2 + '/32',
+                         'source_ip_prefix': u'10.0.0.3/32',
                          'protocol': const.PROTO_NAME_TCP,
                          'ethertype': const.IPv4,
                          'port_range_max': 25, 'port_range_min': 24,
@@ -520,7 +518,6 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
                 security_groups=[sg2_id])
             ports_rest2 = self.deserialize(self.fmt, res2)
             port_id2 = ports_rest2['port']['id']
-            port_ip2 = ports_rest2['port']['fixed_ips'][0]['ip_address']
             ctx = context.get_admin_context()
             ports_rpc = self.rpc.security_group_info_for_devices(
                 ctx, devices=devices)
@@ -535,7 +532,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
                      'remote_group_id': sg2_id}
                 ]},
                 'sg_member_ips': {sg2_id: {
-                    'IPv4': set([port_ip2]),
+                    'IPv4': set([u'10.0.0.3']),
                     'IPv6': set(),
                 }}
             }
@@ -581,7 +578,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
             dhcp_rest = self.deserialize(self.fmt, dhcp_port)
             dhcp_mac = dhcp_rest['port']['mac_address']
             dhcp_lla_ip = str(ipv6.get_ipv6_addr_by_EUI64(
-                const.IPv6_LLA_PREFIX,
+                const.IPV6_LLA_PREFIX,
                 dhcp_mac))
 
             res1 = self._create_port(
@@ -683,7 +680,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
         with self.network() as n,\
                 self.subnet(n, gateway_ip=fake_gateway,
                             cidr=fake_prefix, ip_version=6,
-                            ipv6_ra_mode=n_const.IPV6_SLAAC
+                            ipv6_ra_mode=const.IPV6_SLAAC
                             ) as subnet_v6,\
                 self.security_group() as sg1:
             sg1_id = sg1['security_group']['id']
@@ -705,7 +702,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
             gateway_mac = gateway_res['port']['mac_address']
             gateway_port_id = gateway_res['port']['id']
             gateway_lla_ip = str(ipv6.get_ipv6_addr_by_EUI64(
-                const.IPv6_LLA_PREFIX,
+                const.IPV6_LLA_PREFIX,
                 gateway_mac))
 
             ports_rest1 = self._make_port(
@@ -751,7 +748,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
         with self.network() as n,\
                 self.subnet(n, gateway_ip=fake_gateway,
                             cidr=fake_prefix, ip_version=6,
-                            ipv6_ra_mode=n_const.IPV6_SLAAC
+                            ipv6_ra_mode=const.IPV6_SLAAC
                             ) as subnet_v6,\
                 self.security_group() as sg1:
             sg1_id = sg1['security_group']['id']
@@ -773,7 +770,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
             gateway_mac = gateway_res['port']['mac_address']
             gateway_port_id = gateway_res['port']['id']
             gateway_lla_ip = str(ipv6.get_ipv6_addr_by_EUI64(
-                const.IPv6_LLA_PREFIX,
+                const.IPV6_LLA_PREFIX,
                 gateway_mac))
             # Create another router interface port
             interface_res = self._make_port(
@@ -826,7 +823,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
         with self.network() as n,\
                 self.subnet(n, gateway_ip=fake_gateway,
                             cidr=fake_prefix, ip_version=6,
-                            ipv6_ra_mode=n_const.IPV6_SLAAC
+                            ipv6_ra_mode=const.IPV6_SLAAC
                             ) as subnet_v6,\
                 self.security_group() as sg1:
             sg1_id = sg1['security_group']['id']
@@ -848,7 +845,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
             gateway_mac = gateway_res['port']['mac_address']
             gateway_port_id = gateway_res['port']['id']
             gateway_lla_ip = str(ipv6.get_ipv6_addr_by_EUI64(
-                const.IPv6_LLA_PREFIX,
+                const.IPV6_LLA_PREFIX,
                 gateway_mac))
 
             ports_rest1 = self._make_port(
@@ -894,7 +891,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
         with self.network() as n,\
                 self.subnet(n, gateway_ip=fake_gateway,
                             cidr=fake_prefix, ip_version=6,
-                            ipv6_ra_mode=n_const.IPV6_SLAAC
+                            ipv6_ra_mode=const.IPV6_SLAAC
                             ) as subnet_v6,\
                 self.security_group() as sg1:
             sg1_id = sg1['security_group']['id']
@@ -942,7 +939,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
         fake_prefix = FAKE_PREFIX[const.IPv6]
         with self.network() as n,\
                 self.subnet(n, gateway_ip=None, cidr=fake_prefix,
-                            ip_version=6, ipv6_ra_mode=n_const.IPV6_SLAAC
+                            ip_version=6, ipv6_ra_mode=const.IPV6_SLAAC
                             ) as subnet_v6,\
                 self.security_group() as sg1:
             sg1_id = sg1['security_group']['id']
@@ -1079,7 +1076,6 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
                 fixed_ips=[{'subnet_id': subnet_v6['subnet']['id']}],
                 security_groups=[sg2_id])
             port_id2 = ports_rest2['port']['id']
-            port_ip2 = ports_rest2['port']['fixed_ips'][0]['ip_address']
 
             ctx = context.get_admin_context()
             ports_rpc = self.rpc.security_group_rules_for_devices(
@@ -1094,7 +1090,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
                         {'direction': 'egress', 'ethertype': const.IPv6,
                          'security_group_id': sg2_id},
                         {'direction': 'ingress',
-                         'source_ip_prefix': port_ip2 + '/128',
+                         'source_ip_prefix': '2001:db8::2/128',
                          'protocol': const.PROTO_NAME_TCP,
                          'ethertype': const.IPv6,
                          'port_range_max': 25, 'port_range_min': 24,
@@ -1696,7 +1692,8 @@ IPTABLES_ARG = {'bn': iptables_manager.binary_name,
                 'physdev_mod': PHYSDEV_MOD,
                 'physdev_is_bridged': PHYSDEV_IS_BRIDGED}
 
-CHAINS_MANGLE = 'FORWARD|INPUT|OUTPUT|POSTROUTING|PREROUTING|mark'
+CHAINS_MANGLE = ('FORWARD|INPUT|OUTPUT|POSTROUTING|PREROUTING|mark|scope'
+                 '|float-snat|floatingip')
 IPTABLES_ARG['chains'] = CHAINS_MANGLE
 
 IPTABLES_MANGLE = """# Generated by iptables_manager
@@ -1712,17 +1709,26 @@ IPTABLES_MANGLE = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j %(bn)s-OUTPUT
 -I POSTROUTING 1 -j %(bn)s-POSTROUTING
 -I PREROUTING 1 -j %(bn)s-PREROUTING
 -I %(bn)s-PREROUTING 1 -j %(bn)s-mark
+-I %(bn)s-PREROUTING 2 -j %(bn)s-scope
+-I %(bn)s-PREROUTING 3 -m connmark ! --mark 0x0/0xffff0000 -j CONNMARK \
+--restore-mark --nfmask 0xffff0000 --ctmask 0xffff0000
+-I %(bn)s-PREROUTING 4 -j %(bn)s-floatingip
+-I %(bn)s-float-snat 1 -m connmark --mark 0x0/0xffff0000 \
+-j CONNMARK --save-mark --nfmask 0xffff0000 --ctmask 0xffff0000
 COMMIT
 # Completed by iptables_manager
 """ % IPTABLES_ARG
 
-CHAINS_MANGLE_V6 = 'FORWARD|INPUT|OUTPUT|POSTROUTING|PREROUTING'
+CHAINS_MANGLE_V6 = 'FORWARD|INPUT|OUTPUT|POSTROUTING|PREROUTING|scope'
 IPTABLES_ARG['chains'] = CHAINS_MANGLE_V6
 IPTABLES_MANGLE_V6 = """# Generated by iptables_manager
 *mangle
@@ -1736,11 +1742,15 @@ IPTABLES_MANGLE_V6 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j %(bn)s-OUTPUT
 -I POSTROUTING 1 -j %(bn)s-POSTROUTING
 -I PREROUTING 1 -j %(bn)s-PREROUTING
+-I %(bn)s-PREROUTING 1 -j %(bn)s-scope
+-I %(bn)s-PREROUTING 2 -m connmark ! --mark 0x0/0xffff0000 -j CONNMARK \
+--restore-mark --nfmask 0xffff0000 --ctmask 0xffff0000
 COMMIT
 # Completed by iptables_manager
 """ % IPTABLES_ARG
@@ -1835,7 +1845,7 @@ COMMIT
 # Completed by iptables_manager
 """ % IPTABLES_ARG
 
-CHAINS_EMPTY = 'FORWARD|INPUT|OUTPUT|local|sg-chain|sg-fallback'
+CHAINS_EMPTY = ('FORWARD|INPUT|OUTPUT|local|scope|sg-chain|sg-fallback')
 CHAINS_1 = CHAINS_EMPTY + '|i_port1|o_port1|s_port1'
 CHAINS_2 = CHAINS_1 + '|i_port2|o_port2|s_port2'
 
@@ -1856,15 +1866,17 @@ IPSET_FILTER_1 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_port1 \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_port1 \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-o_port1
@@ -1913,15 +1925,17 @@ IPTABLES_FILTER_1 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_port1 \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_port1 \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-o_port1
@@ -1969,15 +1983,17 @@ IPTABLES_FILTER_1_2 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_port1 \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_port1 \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-o_port1
@@ -2030,19 +2046,21 @@ IPSET_FILTER_2 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 5 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-o_%(port1)s
@@ -2116,19 +2134,21 @@ IPSET_FILTER_2_3 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 5 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-o_%(port1)s
@@ -2204,19 +2224,21 @@ IPTABLES_FILTER_2 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 5 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-o_%(port1)s
@@ -2290,19 +2312,21 @@ IPTABLES_FILTER_2_2 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 5 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-o_%(port1)s
@@ -2375,19 +2399,21 @@ IPTABLES_FILTER_2_3 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 5 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-o_%(port1)s
@@ -2459,12 +2485,14 @@ IPTABLES_FILTER_EMPTY = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
 -I %(bn)s-sg-chain 1 -j ACCEPT
 -I %(bn)s-sg-fallback 1 -j DROP
 COMMIT
@@ -2486,25 +2514,28 @@ IPTABLES_FILTER_V6_1 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_port1 \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_port1 \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_port1 \
 %(physdev_is_bridged)s -j %(bn)s-o_port1
 -I %(bn)s-i_port1 1 -p ipv6-icmp -m icmp6 --icmpv6-type 130 -j RETURN
--I %(bn)s-i_port1 2 -p ipv6-icmp -m icmp6 --icmpv6-type 134 -j RETURN
--I %(bn)s-i_port1 3 -p ipv6-icmp -m icmp6 --icmpv6-type 135 -j RETURN
--I %(bn)s-i_port1 4 -p ipv6-icmp -m icmp6 --icmpv6-type 136 -j RETURN
--I %(bn)s-i_port1 5 -m state --state RELATED,ESTABLISHED -j RETURN
--I %(bn)s-i_port1 6 -m state --state INVALID -j DROP
--I %(bn)s-i_port1 7 -j %(bn)s-sg-fallback
+-I %(bn)s-i_port1 2 -p ipv6-icmp -m icmp6 --icmpv6-type 131 -j RETURN
+-I %(bn)s-i_port1 3 -p ipv6-icmp -m icmp6 --icmpv6-type 132 -j RETURN
+-I %(bn)s-i_port1 4 -p ipv6-icmp -m icmp6 --icmpv6-type 135 -j RETURN
+-I %(bn)s-i_port1 5 -p ipv6-icmp -m icmp6 --icmpv6-type 136 -j RETURN
+-I %(bn)s-i_port1 6 -m state --state RELATED,ESTABLISHED -j RETURN
+-I %(bn)s-i_port1 7 -m state --state INVALID -j DROP
+-I %(bn)s-i_port1 8 -j %(bn)s-sg-fallback
 -I %(bn)s-o_port1 1 -s ::/128 -d ff02::/16 -p ipv6-icmp -m icmp6 \
 --icmpv6-type 131 -j RETURN
 -I %(bn)s-o_port1 2 -s ::/128 -d ff02::/16 -p ipv6-icmp -m icmp6 \
@@ -2547,38 +2578,42 @@ IPTABLES_FILTER_V6_2 = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
--I %(bn)s-FORWARD 1 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
+-I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-INGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 2 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
+-I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 3 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-INGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
--I %(bn)s-FORWARD 4 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
+-I %(bn)s-FORWARD 5 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-sg-chain
 -I %(bn)s-INPUT 1 %(physdev_mod)s --physdev-EGRESS tap_%(port1)s \
 %(physdev_is_bridged)s -j %(bn)s-o_%(port1)s
 -I %(bn)s-INPUT 2 %(physdev_mod)s --physdev-EGRESS tap_%(port2)s \
 %(physdev_is_bridged)s -j %(bn)s-o_%(port2)s
 -I %(bn)s-i_%(port1)s 1 -p ipv6-icmp -m icmp6 --icmpv6-type 130 -j RETURN
--I %(bn)s-i_%(port1)s 2 -p ipv6-icmp -m icmp6 --icmpv6-type 134 -j RETURN
--I %(bn)s-i_%(port1)s 3 -p ipv6-icmp -m icmp6 --icmpv6-type 135 -j RETURN
--I %(bn)s-i_%(port1)s 4 -p ipv6-icmp -m icmp6 --icmpv6-type 136 -j RETURN
--I %(bn)s-i_%(port1)s 5 -m state --state RELATED,ESTABLISHED -j RETURN
--I %(bn)s-i_%(port1)s 6 -m state --state INVALID -j DROP
--I %(bn)s-i_%(port1)s 7 -j %(bn)s-sg-fallback
+-I %(bn)s-i_%(port1)s 2 -p ipv6-icmp -m icmp6 --icmpv6-type 131 -j RETURN
+-I %(bn)s-i_%(port1)s 3 -p ipv6-icmp -m icmp6 --icmpv6-type 132 -j RETURN
+-I %(bn)s-i_%(port1)s 4 -p ipv6-icmp -m icmp6 --icmpv6-type 135 -j RETURN
+-I %(bn)s-i_%(port1)s 5 -p ipv6-icmp -m icmp6 --icmpv6-type 136 -j RETURN
+-I %(bn)s-i_%(port1)s 6 -m state --state RELATED,ESTABLISHED -j RETURN
+-I %(bn)s-i_%(port1)s 7 -m state --state INVALID -j DROP
+-I %(bn)s-i_%(port1)s 8 -j %(bn)s-sg-fallback
 -I %(bn)s-i_%(port2)s 1 -p ipv6-icmp -m icmp6 --icmpv6-type 130 -j RETURN
--I %(bn)s-i_%(port2)s 2 -p ipv6-icmp -m icmp6 --icmpv6-type 134 -j RETURN
--I %(bn)s-i_%(port2)s 3 -p ipv6-icmp -m icmp6 --icmpv6-type 135 -j RETURN
--I %(bn)s-i_%(port2)s 4 -p ipv6-icmp -m icmp6 --icmpv6-type 136 -j RETURN
--I %(bn)s-i_%(port2)s 5 -m state --state RELATED,ESTABLISHED -j RETURN
--I %(bn)s-i_%(port2)s 6 -m state --state INVALID -j DROP
--I %(bn)s-i_%(port2)s 7 -j %(bn)s-sg-fallback
+-I %(bn)s-i_%(port2)s 2 -p ipv6-icmp -m icmp6 --icmpv6-type 131 -j RETURN
+-I %(bn)s-i_%(port2)s 3 -p ipv6-icmp -m icmp6 --icmpv6-type 132 -j RETURN
+-I %(bn)s-i_%(port2)s 4 -p ipv6-icmp -m icmp6 --icmpv6-type 135 -j RETURN
+-I %(bn)s-i_%(port2)s 5 -p ipv6-icmp -m icmp6 --icmpv6-type 136 -j RETURN
+-I %(bn)s-i_%(port2)s 6 -m state --state RELATED,ESTABLISHED -j RETURN
+-I %(bn)s-i_%(port2)s 7 -m state --state INVALID -j DROP
+-I %(bn)s-i_%(port2)s 8 -j %(bn)s-sg-fallback
 -I %(bn)s-o_%(port1)s 1 -s ::/128 -d ff02::/16 -p ipv6-icmp -m icmp6 \
 --icmpv6-type 131 -j RETURN
 -I %(bn)s-o_%(port1)s 2 -s ::/128 -d ff02::/16 -p ipv6-icmp -m icmp6 \
@@ -2632,12 +2667,14 @@ IPTABLES_FILTER_V6_EMPTY = """# Generated by iptables_manager
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
 :%(bn)s-(%(chains)s) - [0:0]
+:%(bn)s-(%(chains)s) - [0:0]
 -I FORWARD 1 -j neutron-filter-top
 -I FORWARD 2 -j %(bn)s-FORWARD
 -I INPUT 1 -j %(bn)s-INPUT
 -I OUTPUT 1 -j neutron-filter-top
 -I OUTPUT 2 -j %(bn)s-OUTPUT
 -I neutron-filter-top 1 -j %(bn)s-local
+-I %(bn)s-FORWARD 1 -j %(bn)s-scope
 -I %(bn)s-sg-chain 1 -j ACCEPT
 -I %(bn)s-sg-fallback 1 -j DROP
 COMMIT

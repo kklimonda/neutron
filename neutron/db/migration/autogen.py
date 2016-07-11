@@ -22,9 +22,10 @@ _ec_dispatcher = Dispatcher()
 
 
 def process_revision_directives(context, revision, directives):
-    directives[:] = [
-        directive for directive in _assign_directives(context, directives)
-    ]
+    if cli._use_separate_migration_branches(context.config):
+        directives[:] = [
+            directive for directive in _assign_directives(context, directives)
+        ]
 
 
 def _assign_directives(context, directives, phase=None):
@@ -54,8 +55,7 @@ def _migration_script_ops(context, directive, phase):
     version_path = cli._get_version_branch_path(
         context.config, release=cli.CURRENT_RELEASE, branch=phase)
     autogen_kwargs = {}
-    cli._check_bootstrap_new_branch(context.config, phase, version_path,
-                                    autogen_kwargs)
+    cli._check_bootstrap_new_branch(phase, version_path, autogen_kwargs)
 
     op = ops.MigrationScript(
         new_rev_id(),

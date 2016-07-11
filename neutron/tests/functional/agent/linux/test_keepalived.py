@@ -19,13 +19,12 @@ from neutron._i18n import _
 from neutron.agent.linux import external_process
 from neutron.agent.linux import keepalived
 from neutron.agent.linux import utils
-from neutron.common import utils as common_utils
+from neutron.tests import base
 from neutron.tests.functional.agent.linux import helpers
-from neutron.tests.functional import base
 from neutron.tests.unit.agent.linux import test_keepalived
 
 
-class KeepalivedManagerTestCase(base.BaseLoggingTestCase,
+class KeepalivedManagerTestCase(base.BaseTestCase,
                                 test_keepalived.KeepalivedConfBaseMixin):
 
     def setUp(self):
@@ -40,31 +39,34 @@ class KeepalivedManagerTestCase(base.BaseLoggingTestCase,
             conf_path=cfg.CONF.state_path)
         self.addCleanup(self.manager.disable)
 
-    def _spawn_keepalived(self, keepalived_manager):
-        keepalived_manager.spawn()
-        process = keepalived_manager.get_process()
-        common_utils.wait_until_true(
-            lambda: process.active,
-            timeout=5,
-            sleep=0.01,
-            exception=RuntimeError(_("Keepalived didn't spawn")))
-        return process
-
     def test_keepalived_spawn(self):
-        self._spawn_keepalived(self.manager)
+        self.manager.spawn()
+        process = external_process.ProcessManager(
+            cfg.CONF,
+            'router1',
+            namespace=None,
+            pids_path=cfg.CONF.state_path)
+        self.assertTrue(process.active)
 
         self.assertEqual(self.expected_config.get_config_str(),
                          self.manager.get_conf_on_disk())
 
     def _test_keepalived_respawns(self, normal_exit=True):
-        process = self._spawn_keepalived(self.manager)
+        self.manager.spawn()
+        process = self.manager.get_process()
         pid = process.pid
+        utils.wait_until_true(
+            lambda: process.active,
+            timeout=5,
+            sleep=0.01,
+            exception=RuntimeError(_("Keepalived didn't spawn")))
+
         exit_code = '-15' if normal_exit else '-9'
 
         # Exit the process, and see that when it comes back
         # It's indeed a different process
         utils.execute(['kill', exit_code, pid], run_as_root=True)
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: process.active and pid != process.pid,
             timeout=5,
             sleep=0.01,
@@ -87,7 +89,12 @@ class KeepalivedManagerTestCase(base.BaseLoggingTestCase,
         with open(pid_file, "w") as f_pid_file:
             f_pid_file.write("%s" % spawn_process.pid)
 
-        self._spawn_keepalived(self.manager)
+        self.manager.spawn()
+        utils.wait_until_true(
+            lambda: process.active,
+            timeout=5,
+            sleep=0.1,
+            exception=RuntimeError(_("Keepalived didn't spawn")))
 
     def test_keepalived_spawns_conflicting_pid_base_process(self):
         process = self.manager.get_process()

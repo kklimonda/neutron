@@ -98,8 +98,8 @@ with the following content: ::
 
  from neutron.db.migration.alembic_migrations import external
  from neutron.db.migration import cli as migration
+ from neutron.tests.common import base
  from neutron.tests.functional.db import test_migrations
- from neutron.tests.unit import testlib_api
 
  from networking_foo.db.migration import alembic_migrations
  from networking_foo.db.models import head
@@ -130,15 +130,13 @@ with the following content: ::
            return True
 
 
- class TestModelsMigrationsMysql(testlib_api.MySQLTestCaseMixin,
-                                 _TestModelsMigrationsFoo,
-                                 testlib_api.SqlTestCaseLight):
+ class TestModelsMigrationsMysql(_TestModelsMigrationsFoo,
+                                 base.MySQLTestCase):
     pass
 
 
- class TestModelsMigrationsPsql(testlib_api.PostgreSQLTestCaseMixin,
-                                _TestModelsMigrationsFoo,
-                                testlib_api.SqlTestCaseLight):
+ class TestModelsMigrationsPsql(_TestModelsMigrationsFoo,
+                                base.PostgreSQLTestCase):
     pass
 
 

@@ -19,7 +19,6 @@ import eventlet
 import fixtures
 import mock
 import netaddr
-from neutron_lib import constants as lib_const
 from oslo_config import fixture as fixture_config
 from oslo_utils import uuidutils
 
@@ -201,7 +200,7 @@ class DHCPAgentOVSTestFramework(base.BaseSudoTestCase):
 
         predicate = lambda: len(
             self._ip_list_for_vif(vif_name, network.namespace))
-        common_utils.wait_until_true(predicate, 10)
+        utils.wait_until_true(predicate, 10)
 
         ip_list = self._ip_list_for_vif(vif_name, network.namespace)
         cidr = ip_list[0].get('cidr')
@@ -286,7 +285,7 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
         self.addCleanup(self.agent.disable_isolated_metadata_proxy, network)
         self.configure_dhcp_for_network(network=network)
         pm = self._get_metadata_proxy_process(network)
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: pm.active,
             timeout=5,
             sleep=0.01,
@@ -298,7 +297,7 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
         old_pid = pm.pid
 
         utils.execute(['kill', '-9', old_pid], run_as_root=True)
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: pm.active and pm.pid != old_pid,
             timeout=5,
             sleep=0.1,
@@ -309,26 +308,8 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
 
         self.conf.set_override('enable_isolated_metadata', False)
         self.configure_dhcp_for_network(network=network)
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: not pm.active,
             timeout=5,
             sleep=0.1,
             exception=RuntimeError("Stale metadata proxy didn't get killed"))
-
-    def test_notify_port_ready_after_enable_dhcp(self):
-        network = self.network_dict_for_dhcp()
-        dhcp_port = self.create_port_dict(
-            network.id, network.subnets[0].id,
-            '24:77:03:7d:00:4d', ip_address='192.168.10.11')
-        dhcp_port.device_owner = lib_const.DEVICE_OWNER_DHCP
-        network.ports.append(dhcp_port)
-        self.agent.start_ready_ports_loop()
-        self.configure_dhcp_for_network(network)
-        ports_to_send = {p.id for p in network.ports}
-        common_utils.wait_until_true(
-            lambda: self.mock_plugin_api.dhcp_ready_on_ports.called,
-            timeout=1,
-            sleep=0.1,
-            exception=RuntimeError("'dhcp_ready_on_ports' not be called"))
-        self.mock_plugin_api.dhcp_ready_on_ports.assert_called_with(
-            ports_to_send)

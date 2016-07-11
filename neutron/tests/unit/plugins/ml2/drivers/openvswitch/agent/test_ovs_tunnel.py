@@ -17,13 +17,13 @@
 import time
 
 import mock
-from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_log import log
 import six
 
 from neutron.agent.common import ip_lib
 from neutron.agent.common import ovs_lib
+from neutron.common import constants as n_const
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
 from neutron.tests.unit.plugins.ml2.drivers.openvswitch.agent \
@@ -74,10 +74,6 @@ class TunnelTest(object):
 
     def setUp(self):
         super(TunnelTest, self).setUp()
-        conn_patcher = mock.patch(
-            'neutron.agent.ovsdb.native.connection.Connection.start')
-        conn_patcher.start()
-        self.addCleanup(conn_patcher.stop)
         cfg.CONF.set_default('firewall_driver',
                              'neutron.agent.firewall.NoopFirewallDriver',
                              group='SECURITYGROUP')
@@ -214,7 +210,7 @@ class TunnelTest(object):
         ]
         self.mock_int_bridge_expected += [
             mock.call.db_get_val('Interface', 'int-%s' % self.MAP_TUN_BRIDGE,
-                                 'type', log_errors=False),
+                                 'type'),
             mock.call.port_exists('int-%s' % self.MAP_TUN_BRIDGE),
             mock.call.add_patch_port('int-%s' % self.MAP_TUN_BRIDGE,
                                      constants.NONEXISTENT_PEER),
@@ -670,7 +666,7 @@ class TunnelTestUseVethInterco(TunnelTest):
         ]
         self.mock_int_bridge_expected += [
             mock.call.db_get_val('Interface', 'int-%s' % self.MAP_TUN_BRIDGE,
-                                 'type', log_errors=False),
+                                 'type'),
             mock.call.add_port(self.inta)
         ]
 

@@ -110,16 +110,6 @@ class StandardAttribute(BASEV2, models.TimestampMixin):
     resource_type = sa.Column(sa.String(255), nullable=False)
     description = sa.Column(sa.String(attr.DESCRIPTION_MAX_LEN))
 
-    revision_number = sa.Column(
-        sa.BigInteger().with_variant(sa.Integer(), 'sqlite'),
-        server_default='0', nullable=False)
-
-    __mapper_args__ = {
-        # see http://docs.sqlalchemy.org/en/latest/orm/versioning.html for
-        # details about how this works
-        "version_id_col": revision_number
-    }
-
 
 class HasStandardAttributes(object):
     @declarative.declared_attr
@@ -151,29 +141,3 @@ class HasStandardAttributes(object):
     @declarative.declared_attr
     def description(cls):
         return association_proxy('standard_attr', 'description')
-
-    @declarative.declared_attr
-    def created_at(cls):
-        return association_proxy('standard_attr', 'created_at')
-
-    @declarative.declared_attr
-    def updated_at(cls):
-        return association_proxy('standard_attr', 'updated_at')
-
-    def update(self, new_dict):
-        # ignore the timestamps if they were passed in. For example, this
-        # happens if code calls update_port with modified results of get_port
-        new_dict.pop('created_at', None)
-        new_dict.pop('updated_at', None)
-        super(HasStandardAttributes, self).update(new_dict)
-
-    @declarative.declared_attr
-    def revision_number(cls):
-        return association_proxy('standard_attr', 'revision_number')
-
-    def bump_revision(self):
-        # SQLAlchemy will bump the version for us automatically if the
-        # standard attr record is being modified, but we must call this
-        # for all other modifications or when relevant children are being
-        # modified (e.g. fixed_ips change should bump port revision)
-        self.standard_attr.revision_number += 1

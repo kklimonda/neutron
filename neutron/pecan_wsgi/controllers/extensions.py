@@ -14,7 +14,6 @@
 
 import pecan
 
-from neutron._i18n import _
 from neutron.api import extensions
 from neutron.pecan_wsgi.controllers import utils
 

@@ -20,18 +20,16 @@ from oslo_utils import excutils
 from oslo_utils import importutils
 import six
 
-from neutron._i18n import _LE, _LI
+from neutron._i18n import _, _LE, _LI
 from neutron.api import extensions
 from neutron.db import servicetype_db as sdb
 from neutron.services import provider_configuration as pconf
-from neutron import worker as neutron_worker
 
 LOG = logging.getLogger(__name__)
 
 
 @six.add_metaclass(abc.ABCMeta)
-class ServicePluginBase(extensions.PluginInterface,
-                        neutron_worker.WorkerSupportServiceMixin):
+class ServicePluginBase(extensions.PluginInterface):
     """Define base interface for any Advanced Service plugin."""
     supported_extension_aliases = []
 
@@ -48,6 +46,10 @@ class ServicePluginBase(extensions.PluginInterface,
         """Return string description of the plugin."""
         pass
 
+    def get_workers(self):
+        """Returns a collection of NeutronWorkers"""
+        return ()
+
 
 def load_drivers(service_type, plugin):
     """Loads drivers for specific service.
@@ -61,7 +63,7 @@ def load_drivers(service_type, plugin):
                      filters={'service_type': [service_type]})
                  )
     if not providers:
-        msg = (_LE("No providers specified for '%s' service, exiting") %
+        msg = (_("No providers specified for '%s' service, exiting") %
                service_type)
         LOG.error(msg)
         raise SystemExit(1)

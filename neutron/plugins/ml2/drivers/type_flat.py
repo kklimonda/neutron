@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import exceptions as exc
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log
@@ -21,7 +20,7 @@ import six
 import sqlalchemy as sa
 
 from neutron._i18n import _, _LI, _LW
-from neutron.common import exceptions as n_exc
+from neutron.common import exceptions as exc
 from neutron.db import model_base
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import driver_api as api
@@ -117,7 +116,7 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
                 alloc = FlatAllocation(physical_network=physical_network)
                 alloc.save(session)
             except db_exc.DBDuplicateEntry:
-                raise n_exc.FlatNetworkInUse(
+                raise exc.FlatNetworkInUse(
                     physical_network=physical_network)
             segment[api.MTU] = self.get_mtu(alloc.physical_network)
         return segment

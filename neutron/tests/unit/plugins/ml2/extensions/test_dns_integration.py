@@ -17,14 +17,12 @@ import uuid
 
 import mock
 import netaddr
-from neutron_lib import constants
 import testtools
 
 from neutron import context
 from neutron.db import dns_db
 from neutron.extensions import dns
 from neutron.extensions import providernet as pnet
-from neutron import manager
 from neutron.plugins.ml2 import config
 from neutron.plugins.ml2.extensions import dns_integration
 from neutron.services.externaldns.drivers.designate import driver
@@ -57,7 +55,6 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         super(DNSIntegrationTestCase, self).setUp()
         dns_integration.DNS_DRIVER = None
         dns_integration.subscribe()
-        self.plugin = manager.NeutronManager.get_plugin()
 
     def _create_port_for_test(self, provider_net=True, dns_domain=True,
                               dns_name=True, ipv4=True, ipv6=True):
@@ -76,13 +73,11 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
                                    **net_kwargs)
         network = self.deserialize(self.fmt, res)
         if ipv4:
-            cidr = '10.0.0.0/24'
-            self._create_subnet_for_test(network['network']['id'], cidr)
-
+            self._create_subnet(self.fmt, network['network']['id'],
+                                '10.0.0.0/24', ip_version=4)
         if ipv6:
-            cidr = 'fd3d:bdd4:da60::/64'
-            self._create_subnet_for_test(network['network']['id'], cidr)
-
+            self._create_subnet(self.fmt, network['network']['id'],
+                                'fd3d:bdd4:da60::/64', ip_version=6)
         port_kwargs = {}
         if dns_name:
             port_kwargs = {
@@ -99,19 +94,6 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
             port_id=port['id']).one_or_none()
         return network['network'], port, dns_data_db
 
-    def _create_subnet_for_test(self, network_id, cidr):
-        ip_net = netaddr.IPNetwork(cidr)
-        # initialize the allocation_pool to the lower half of the subnet
-        subnet_size = ip_net.last - ip_net.first
-        subnet_mid_point = int(ip_net.first + subnet_size / 2)
-        start, end = (netaddr.IPAddress(ip_net.first + 2),
-                      netaddr.IPAddress(subnet_mid_point))
-        allocation_pools = [{'start': str(start),
-                             'end': str(end)}]
-        return self._create_subnet(self.fmt, network_id,
-                                   str(ip_net), ip_version=ip_net.ip.version,
-                                   allocation_pools=allocation_pools)
-
     def _update_port_for_test(self, port, new_dns_name=NEWDNSNAME,
                               **kwargs):
         mock_client.reset_mock()
@@ -122,7 +104,7 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         recordsets = []
         if records_v4:
             recordsets.append({'id': V4UUID, 'records': records_v4})
-        if records_v6:
+        if records_v4:
             recordsets.append({'id': V6UUID, 'records': records_v6})
         mock_client.recordsets.list.return_value = recordsets
         mock_admin_client.reset_mock()
@@ -240,10 +222,8 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
     def _get_bytes_or_nybles_to_skip(self, in_addr_name):
         if 'in-addr.arpa' in in_addr_name:
             return ((
-                constants.IPv4_BITS -
-                config.cfg.CONF.designate.ipv4_ptr_zone_prefix_size) / 8)
-        return (constants.IPv6_BITS -
-                config.cfg.CONF.designate.ipv6_ptr_zone_prefix_size) / 4
+                32 - config.cfg.CONF.designate.ipv4_ptr_zone_prefix_size) / 8)
+        return (128 - config.cfg.CONF.designate.ipv6_ptr_zone_prefix_size) / 4
 
     def test_create_port(self, *mocks):
         config.cfg.CONF.set_override('dns_domain', DNSDOMAIN)
@@ -386,26 +366,10 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         config.cfg.CONF.set_override('dns_domain', DNSDOMAIN)
         net, port, dns_data_db = self._create_port_for_test()
         original_ips = [ip['ip_address'] for ip in port['fixed_ips']]
-        ctx = context.get_admin_context()
         kwargs = {'fixed_ips': []}
         for ip in port['fixed_ips']:
-            # Since this tests using an "any" IP allocation to update the port
-            # IP address, change the allocation pools so that IPAM won't ever
-            # give us back the IP address we originally had.
-            subnet = self.plugin.get_subnet(ctx, ip['subnet_id'])
-            ip_net = netaddr.IPNetwork(subnet['cidr'])
-            subnet_size = ip_net.last - ip_net.first
-            subnet_mid_point = int(ip_net.first + subnet_size / 2)
-            start, end = (netaddr.IPAddress(subnet_mid_point + 1),
-                          netaddr.IPAddress(ip_net.last - 1))
-            allocation_pools = [{'start': str(start), 'end': str(end)}]
-            body = {'allocation_pools': allocation_pools}
-            req = self.new_update_request('subnets', {'subnet': body},
-                                          ip['subnet_id'])
-            req.get_response(self.api)
             kwargs['fixed_ips'].append(
                 {'subnet_id': ip['subnet_id']})
-
         port, dns_data_db = self._update_port_for_test(port,
                                                        new_dns_name=None,
                                                        **kwargs)

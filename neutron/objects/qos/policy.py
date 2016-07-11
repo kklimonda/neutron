@@ -15,7 +15,6 @@
 
 import itertools
 
-from oslo_utils import versionutils
 from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import fields as obj_fields
 from six import add_metaclass
@@ -37,8 +36,7 @@ from neutron.objects import rbac_db
 @add_metaclass(rbac_db.RbacNeutronMetaclass)
 class QosPolicy(base.NeutronDbObject):
     # Version 1.0: Initial version
-    # Version 1.1: QosDscpMarkingRule introduced
-    VERSION = '1.1'
+    VERSION = '1.0'
 
     # required by RbacNeutronMetaclass
     rbac_db_model = QosPolicyRBAC
@@ -49,7 +47,7 @@ class QosPolicy(base.NeutronDbObject):
 
     fields = {
         'id': obj_fields.UUIDField(),
-        'tenant_id': obj_fields.StringField(),
+        'tenant_id': obj_fields.UUIDField(),
         'name': obj_fields.StringField(),
         'description': obj_fields.StringField(),
         'shared': obj_fields.BooleanField(default=False),
@@ -63,6 +61,12 @@ class QosPolicy(base.NeutronDbObject):
     binding_models = {'network': network_binding_model,
                       'port': port_binding_model}
 
+    def to_dict(self):
+        dict_ = super(QosPolicy, self).to_dict()
+        if 'rules' in dict_:
+            dict_['rules'] = [rule.to_dict() for rule in dict_['rules']]
+        return dict_
+
     def obj_load_attr(self, attrname):
         if attrname != 'rules':
             raise exceptions.ObjectActionError(
@@ -73,7 +77,7 @@ class QosPolicy(base.NeutronDbObject):
             self.reload_rules()
 
     def reload_rules(self):
-        rules = rule_obj_impl.get_rules(self.obj_context, self.id)
+        rules = rule_obj_impl.get_rules(self._context, self.id)
         setattr(self, 'rules', rules)
         self.obj_reset_changes(['rules'])
 
@@ -139,14 +143,14 @@ class QosPolicy(base.NeutronDbObject):
 
     # TODO(QoS): Consider extending base to trigger registered methods for us
     def create(self):
-        with db_api.autonested_transaction(self.obj_context.session):
+        with db_api.autonested_transaction(self._context.session):
             super(QosPolicy, self).create()
             self.reload_rules()
 
     def delete(self):
-        with db_api.autonested_transaction(self.obj_context.session):
+        with db_api.autonested_transaction(self._context.session):
             for object_type, model in self.binding_models.items():
-                binding_db_obj = obj_db_api.get_object(self.obj_context, model,
+                binding_db_obj = obj_db_api.get_object(self._context, model,
                                                        policy_id=self.id)
                 if binding_db_obj:
                     raise exceptions.QosPolicyInUse(
@@ -157,32 +161,24 @@ class QosPolicy(base.NeutronDbObject):
             super(QosPolicy, self).delete()
 
     def attach_network(self, network_id):
-        qos_db_api.create_policy_network_binding(self.obj_context,
+        qos_db_api.create_policy_network_binding(self._context,
                                                  policy_id=self.id,
                                                  network_id=network_id)
 
     def attach_port(self, port_id):
-        qos_db_api.create_policy_port_binding(self.obj_context,
+        qos_db_api.create_policy_port_binding(self._context,
                                               policy_id=self.id,
                                               port_id=port_id)
 
     def detach_network(self, network_id):
-        qos_db_api.delete_policy_network_binding(self.obj_context,
+        qos_db_api.delete_policy_network_binding(self._context,
                                                  policy_id=self.id,
                                                  network_id=network_id)
 
     def detach_port(self, port_id):
-        qos_db_api.delete_policy_port_binding(self.obj_context,
+        qos_db_api.delete_policy_port_binding(self._context,
                                               policy_id=self.id,
                                               port_id=port_id)
-
-    def get_bound_networks(self):
-        return qos_db_api.get_network_ids_by_network_policy_binding(
-            self.obj_context, self.id)
-
-    def get_bound_ports(self):
-        return qos_db_api.get_port_ids_by_port_policy_binding(
-            self.obj_context, self.id)
 
     @classmethod
     def _get_bound_tenant_ids(cls, session, binding_db, bound_db,
@@ -210,13 +206,3 @@ class QosPolicy(base.NeutronDbObject):
                 cls._get_bound_tenant_ids(context.session, qosport, port,
                                           qosport.port_id, policy_id))
         return set(bound_tenants)
-
-    def obj_make_compatible(self, primitive, target_version):
-        _target_version = versionutils.convert_version_to_tuple(target_version)
-        if _target_version < (1, 1):
-            if 'rules' in primitive:
-                bw_obj_name = rule_obj_impl.QosBandwidthLimitRule.obj_name()
-                primitive['rules'] = filter(
-                    lambda rule: (rule['versioned_object.name'] ==
-                                  bw_obj_name),
-                    primitive['rules'])

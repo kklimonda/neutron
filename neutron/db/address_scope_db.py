@@ -12,17 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
 from oslo_utils import uuidutils
 import sqlalchemy as sa
 from sqlalchemy.orm import exc
 
 from neutron._i18n import _
 from neutron.api.v2 import attributes as attr
+from neutron.common import constants
 from neutron.db import db_base_plugin_v2
 from neutron.db import model_base
 from neutron.extensions import address_scope as ext_address_scope
-from neutron.objects import subnetpool as subnetpool_obj
 
 
 class AddressScope(model_base.BASEV2, model_base.HasId, model_base.HasTenant):
@@ -123,8 +122,7 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
 
     def delete_address_scope(self, context, id):
         with context.session.begin(subtransactions=True):
-            if subnetpool_obj.SubnetPool.get_objects(context,
-                                                     address_scope_id=id):
+            if self._get_subnetpools_by_address_scope_id(context, id):
                 raise ext_address_scope.AddressScopeInUse(address_scope_id=id)
             address_scope = self._get_address_scope(context, id)
             context.session.delete(address_scope)

@@ -15,7 +15,6 @@
 
 import eventlet
 import netaddr
-from neutron_lib import constants as lib_const
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -51,6 +50,13 @@ from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron import context as n_context
 from neutron import manager
+
+try:
+    from neutron_fwaas.services.firewall.agents.l3reference \
+        import firewall_l3_agent
+except Exception:
+    # TODO(dougw) - REMOVE THIS FROM NEUTRON; during l3_agent refactor only
+    from neutron.services.firewall.agents.l3reference import firewall_l3_agent
 
 LOG = logging.getLogger(__name__)
 # TODO(Carl) Following constants retained to increase SNR during refactoring
@@ -153,7 +159,8 @@ class L3PluginApi(object):
                           host=self.host, network_id=fip_net)
 
 
-class L3NATAgent(ha.AgentMixin,
+class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
+                 ha.AgentMixin,
                  dvr.AgentMixin,
                  manager.Manager):
     """Manager for L3NatAgent
@@ -233,7 +240,7 @@ class L3NATAgent(ha.AgentMixin,
             self.metadata_driver)
 
         self._queue = queue.RouterProcessingQueue()
-        super(L3NATAgent, self).__init__(host=self.conf.host)
+        super(L3NATAgent, self).__init__(conf=self.conf)
 
         self.target_ex_net_id = None
         self.use_ipv6 = ipv6_utils.is_enabled()
@@ -254,6 +261,12 @@ class L3NATAgent(ha.AgentMixin,
             msg = _LE('An interface driver must be specified')
             LOG.error(msg)
             raise SystemExit(1)
+        if self.conf.external_network_bridge:
+            LOG.warning(_LW("Using an 'external_network_bridge' value other "
+                            "than '' is deprecated. Any other values may "
+                            "not be supported in the future. Note that the "
+                            "default value is 'br-ex' so it must be "
+                            "explicitly set to a blank value."))
 
         if self.conf.ipv6_gateway:
             # ipv6_gateway configured. Check for valid v6 link-local address.
@@ -336,6 +349,9 @@ class L3NATAgent(ha.AgentMixin,
 
         ri.initialize(self.process_monitor)
 
+        # TODO(Carl) This is a hook in to fwaas.  It should be cleaned up.
+        self.process_router_add(ri)
+
     def _safe_router_removed(self, router_id):
         """Try to delete a router and return True if successful."""
 
@@ -400,6 +416,9 @@ class L3NATAgent(ha.AgentMixin,
             LOG.error(_LE("The external network bridge '%s' does not exist"),
                       self.conf.external_network_bridge)
             return
+
+        if self.conf.router_id and router['id'] != self.conf.router_id:
+            raise n_exc.RouterNotCompatibleWithAgent(router_id=router['id'])
 
         # Either ex_net_id or handle_internal_only_routers must be set
         ex_net_id = (router['external_gateway_info'] or {}).get('network_id')
@@ -507,6 +526,7 @@ class L3NATAgent(ha.AgentMixin,
     # is responsible for task execution.
     @periodic_task.periodic_task(spacing=1, run_immediately=True)
     def periodic_sync_routers_task(self, context):
+        self.process_services_sync(context)
         if not self.fullsync:
             return
         LOG.debug("Starting fullsync periodic_sync_routers_task")
@@ -532,7 +552,8 @@ class L3NATAgent(ha.AgentMixin,
         timestamp = timeutils.utcnow()
 
         try:
-            router_ids = self.plugin_rpc.get_router_ids(context)
+            router_ids = ([self.conf.router_id] if self.conf.router_id else
+                          self.plugin_rpc.get_router_ids(context))
             # fetch routers by chunks to reduce the load on server and to
             # start router processing earlier
             for i in range(0, len(router_ids), self.sync_routers_chunk_size):
@@ -620,6 +641,7 @@ class L3NATAgentWithStateReport(L3NATAgent):
             'topic': topics.L3_AGENT,
             'configurations': {
                 'agent_mode': self.conf.agent_mode,
+                'router_id': self.conf.router_id,
                 'handle_internal_only_routers':
                 self.conf.handle_internal_only_routers,
                 'external_network_bridge': self.conf.external_network_bridge,
@@ -628,7 +650,7 @@ class L3NATAgentWithStateReport(L3NATAgent):
                 'interface_driver': self.conf.interface_driver,
                 'log_agent_heartbeats': self.conf.AGENT.log_agent_heartbeats},
             'start_flag': True,
-            'agent_type': lib_const.AGENT_TYPE_L3}
+            'agent_type': l3_constants.AGENT_TYPE_L3}
         report_interval = self.conf.AGENT.report_interval
         if report_interval:
             self.heartbeat = loopingcall.FixedIntervalLoopingCall(
@@ -645,9 +667,9 @@ class L3NATAgentWithStateReport(L3NATAgent):
             ex_gw_port = ri.get_ex_gw_port()
             if ex_gw_port:
                 num_ex_gw_ports += 1
-            num_interfaces += len(ri.router.get(lib_const.INTERFACE_KEY,
+            num_interfaces += len(ri.router.get(l3_constants.INTERFACE_KEY,
                                                 []))
-            num_floating_ips += len(ri.router.get(lib_const.FLOATINGIP_KEY,
+            num_floating_ips += len(ri.router.get(l3_constants.FLOATINGIP_KEY,
                                                   []))
         configurations = self.agent_state['configurations']
         configurations['routers'] = num_routers

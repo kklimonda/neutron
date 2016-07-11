@@ -24,11 +24,9 @@ import select
 import shlex
 import signal
 import subprocess
-import time
 
 import fixtures
 import netaddr
-from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
@@ -39,7 +37,7 @@ from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.common import utils as common_utils
+from neutron.common import constants as n_const
 from neutron.db import db_base_plugin_common
 from neutron.plugins.ml2.drivers.linuxbridge.agent import \
     linuxbridge_neutron_agent as linuxbridge_agent
@@ -97,22 +95,12 @@ def set_namespace_gateway(port_dev, gateway_ip):
     port_dev.route.add_gateway(gateway_ip)
 
 
-def assert_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
+def assert_ping(src_namespace, dst_ip, timeout=1, count=1):
     ipversion = netaddr.IPAddress(dst_ip).version
     ping_command = 'ping' if ipversion == 4 else 'ping6'
     ns_ip_wrapper = ip_lib.IPWrapper(src_namespace)
-
-    # See bug 1588731 for explanation why using -c count ping option
-    # cannot be used and it needs to be done using the following workaround.
-    for _index in range(count):
-        start_time = time.time()
-        ns_ip_wrapper.netns.execute([ping_command, '-c', '1', '-W', timeout,
-                                     dst_ip])
-        end_time = time.time()
-        diff = end_time - start_time
-        if 0 < diff < interval:
-            # wait at most "interval" seconds between individual pings
-            time.sleep(interval - diff)
+    ns_ip_wrapper.netns.execute([ping_command, '-c', count, '-W', timeout,
+                                 dst_ip])
 
 
 @contextlib.contextmanager
@@ -249,7 +237,7 @@ class RootHelperProcess(subprocess.Popen):
             poller = select.poll()
             poller.register(stream.fileno())
             poll_predicate = functools.partial(poller.poll, 1)
-            common_utils.wait_until_true(poll_predicate, timeout, 0.1,
+            utils.wait_until_true(poll_predicate, timeout, 0.1,
                                   RuntimeError(
                                       'No output in %.2f seconds' % timeout))
         return stream.readline()
@@ -262,17 +250,17 @@ class RootHelperProcess(subprocess.Popen):
                                 sleep=CHILD_PROCESS_SLEEP):
         def child_is_running():
             child_pid = utils.get_root_helper_child_pid(
-                self.pid, self.cmd, run_as_root=True)
+                self.pid, run_as_root=True)
             if utils.pid_invoked_with_cmdline(child_pid, self.cmd):
                 return True
 
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             child_is_running,
             timeout,
             exception=RuntimeError("Process %s hasn't been spawned "
                                    "in %d seconds" % (self.cmd, timeout)))
         self.child_pid = utils.get_root_helper_child_pid(
-            self.pid, self.cmd, run_as_root=True)
+            self.pid, run_as_root=True)
 
     @property
     def is_running(self):
@@ -316,7 +304,7 @@ class Pinger(object):
 
     def _wait_for_death(self):
         is_dead = lambda: self.proc.poll() is not None
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             is_dead, timeout=self.TIMEOUT, exception=RuntimeError(
                 "Ping command hasn't ended after %d seconds." % self.TIMEOUT))
 

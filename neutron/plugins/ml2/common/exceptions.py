@@ -15,9 +15,8 @@
 
 """Exceptions used by ML2."""
 
-from neutron_lib import exceptions
-
 from neutron._i18n import _
+from neutron.common import exceptions
 
 
 class MechanismDriverError(exceptions.NeutronException):

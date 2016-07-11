@@ -167,8 +167,7 @@ class ResourceExtensionTest(base.BaseTestCase):
             return {'collection': 'value'}
 
     class DummySvcPlugin(wsgi.Controller):
-            @classmethod
-            def get_plugin_type(cls):
+            def get_plugin_type(self):
                 return constants.DUMMY
 
             def index(self, request, **kwargs):
@@ -216,8 +215,7 @@ class ResourceExtensionTest(base.BaseTestCase):
             def index(self, request):
                 return ""
 
-            @classmethod
-            def get_plugin_type(cls):
+            def get_plugin_type(self):
                 return constants.DUMMY
 
         res_ext = extensions.ResourceExtension(
@@ -531,7 +529,7 @@ class RequestExtensionTest(base.BaseTestCase):
         def extend_response_data(req, res):
             data = jsonutils.loads(res.body)
             data['FOXNSOX:extended_key'] = req.GET.get('extended_key')
-            res.body = jsonutils.dump_as_bytes(data)
+            res.body = jsonutils.dumps(data).encode('utf-8')
             return res
 
         app = self._setup_app_with_request_handler(extend_response_data, 'GET')
@@ -557,7 +555,7 @@ class RequestExtensionTest(base.BaseTestCase):
         def _update_handler(req, res):
             data = jsonutils.loads(res.body)
             data['uneditable'] = req.params['uneditable']
-            res.body = jsonutils.dump_as_bytes(data)
+            res.body = jsonutils.dumps(data).encode('utf-8')
             return res
 
         base_app = webtest.TestApp(setup_base_app(self))

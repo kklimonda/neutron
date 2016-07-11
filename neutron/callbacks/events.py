@@ -10,7 +10,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-# String literals representing events associated to data store operations
+# String literals representing core events.
 BEFORE_CREATE = 'before_create'
 BEFORE_READ = 'before_read'
 BEFORE_UPDATE = 'before_update'
@@ -25,15 +25,6 @@ AFTER_READ = 'after_read'
 AFTER_UPDATE = 'after_update'
 AFTER_DELETE = 'after_delete'
 
-# String literals representing events associated to API operations
-BEFORE_RESPONSE = 'before_response'
-AFTER_REQUEST = 'after_request'
-
-# String literals representing events associated to process operations
-BEFORE_INIT = 'before_init'
-AFTER_INIT = 'after_init'
-
-# String literals representing events associated to error conditions
 ABORT_CREATE = 'abort_create'
 ABORT_READ = 'abort_read'
 ABORT_UPDATE = 'abort_update'

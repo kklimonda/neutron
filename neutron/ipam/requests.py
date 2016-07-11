@@ -13,12 +13,13 @@
 import abc
 
 import netaddr
-from neutron_lib.api import validators
-from neutron_lib import constants
+from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
 
 from neutron._i18n import _
+from neutron.api.v2 import attributes
+from neutron.common import constants
 from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
 from neutron.ipam import exceptions as ipam_exc
@@ -104,6 +105,15 @@ class SubnetRequest(object):
         return self._allocation_pools
 
     def _validate_with_subnet(self, subnet_cidr):
+        if self.gateway_ip and cfg.CONF.force_gateway_on_subnet:
+            gw_ip = netaddr.IPAddress(self.gateway_ip)
+            if (gw_ip.version == 4 or (gw_ip.version == 6
+                                       and not gw_ip.is_link_local())):
+                if self.gateway_ip not in subnet_cidr:
+                    raise ipam_exc.IpamValueInvalid(_(
+                                        "gateway_ip %s is not in the subnet") %
+                                        self.gateway_ip)
+
         if self.allocation_pools:
             if subnet_cidr.version != self.allocation_pools[0].version:
                 raise ipam_exc.IpamValueInvalid(_(
@@ -206,10 +216,6 @@ class AnyAddressRequest(AddressRequest):
     """Used to request any available address from the pool."""
 
 
-class PreferNextAddressRequest(AnyAddressRequest):
-    """Used to request next available IP address from the pool."""
-
-
 class AutomaticAddressRequest(SpecificAddressRequest):
     """Used to create auto generated addresses, such as EUI64"""
     EUI64 = 'eui64'
@@ -269,9 +275,6 @@ class AddressRequestFactory(object):
         elif ip_dict.get('eui64_address'):
             return AutomaticAddressRequest(prefix=ip_dict['subnet_cidr'],
                                            mac=ip_dict['mac'])
-        elif port['device_owner'] == constants.DEVICE_OWNER_DHCP:
-            # preserve previous behavior of DHCP ports choosing start of pool
-            return PreferNextAddressRequest()
         else:
             return AnyAddressRequest()
 
@@ -283,11 +286,11 @@ class SubnetRequestFactory(object):
     def get_request(cls, context, subnet, subnetpool):
         cidr = subnet.get('cidr')
         subnet_id = subnet.get('id', uuidutils.generate_uuid())
-        is_any_subnetpool_request = not validators.is_attr_set(cidr)
+        is_any_subnetpool_request = not attributes.is_attr_set(cidr)
 
         if is_any_subnetpool_request:
             prefixlen = subnet['prefixlen']
-            if not validators.is_attr_set(prefixlen):
+            if not attributes.is_attr_set(prefixlen):
                 prefixlen = int(subnetpool['default_prefixlen'])
 
             return AnySubnetRequest(
