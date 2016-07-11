@@ -1,4 +1,4 @@
-neutron (2:9.0.0~b2~dev383-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.0.0~b2~dev423-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * New upstream version.
@@ -10,7 +10,7 @@ neutron (2:9.0.0~b2~dev383-0ubuntu1) UNRELEASED; urgency=medium
   * d/p/drop-ryu-dep.patch: Rebased.
   * d/control: Align (build-)depends with upstream.
 
- -- David Della Vecchia <ddv@canonical.com>  Wed, 06 Jul 2016 07:29:50 -0400
+ -- Corey Bryant <corey.bryant@canonical.com>  Mon, 11 Jul 2016 15:52:11 -0400
 
 neutron (2:9.0.0~b1-0ubuntu1) yakkety; urgency=medium
 
