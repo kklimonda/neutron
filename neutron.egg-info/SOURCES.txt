@@ -1338,6 +1338,7 @@ releasenotes/notes/default-local-dns-a1c3fa1451f228fa.yaml
 releasenotes/notes/default-subnetpool-semantics-1cdc5cdde2be88c2.yaml
 releasenotes/notes/deprecate-advertise-mtu-51e3f78475a14efc.yaml
 releasenotes/notes/deprecate-force_gateway_on_subnet-376855c4e66f4e11.yaml
+releasenotes/notes/deprecate-min-l3-agents-per-router-15ddaa4c178b23df.yaml
 releasenotes/notes/deprecate-network-device-mtu-59b78264c9974808.yaml
 releasenotes/notes/deprecate-router_id-34aca9ea5ee9e789.yaml
 releasenotes/notes/deprecate_max_fixed_ips_per_port-5e80518cbf25cfd6.yaml
@@ -1362,9 +1363,11 @@ releasenotes/notes/macvtap_assigned_vf_check-f4d07660ffd82a24.yaml
 releasenotes/notes/mtu-selection-and-advertisement-ab29f9ec43140224.yaml
 releasenotes/notes/network_ip_availability-d64bd7032b3c15ee.yaml
 releasenotes/notes/new-vif-type-for-pf-passthrough-33ec560b9b5d246f.yaml
+releasenotes/notes/of_interface-native-by-default-0c07bdbd7365230a.yaml
 releasenotes/notes/oslo-cache-cache-url-deprecated-16cd3d335c5962eb.yaml
 releasenotes/notes/oslo-messaging-notifier-queue-d94677076a1db261.yaml
 releasenotes/notes/oslo-reports-166a169037bf64f2.yaml
+releasenotes/notes/overlay_ip_version-ml2-e6438b570844ef5c.yaml
 releasenotes/notes/ovs-ct-firewall-driver-52a70a6a16d06f59.yaml
 releasenotes/notes/ovs-ipv6-tunnel-endpoints-f41b4954a04c43f6.yaml
 releasenotes/notes/ovsdb-native-by-default-38835d6963592396.yaml
@@ -1372,6 +1375,7 @@ releasenotes/notes/path-mtu-back-to-zero-e4f9e8bdd8317ad4.yaml
 releasenotes/notes/physical_network-aware-dhcp-scheduling-94e9fadc7c7c5fec.yaml
 releasenotes/notes/remove-driver-60eb7e26d95f7322.yaml
 releasenotes/notes/remove-force_gateway_on_subnet-77cb79f0b35d0c6d.yaml
+releasenotes/notes/remove-quota_items-d50b4672dd31ea3e.yaml
 releasenotes/notes/remove-router_id-b3732089f8f1faa1.yaml
 releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml
 releasenotes/notes/segment_mtu_to_global_physnet_mtu-9cee5ff09557edeb.yaml

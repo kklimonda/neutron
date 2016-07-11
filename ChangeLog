@@ -1,16 +1,35 @@
 CHANGES
 =======
 
+* Rename dvr portbinding functions
+* Fix typo in message string causing server exception
+* Deprecate option min_l3_agents_per_router
+* Address outstanding TODO for callback event
+* Allow tox to be run with python 3
+* Grammar error fixed
+* Fixed Typo in contribute.rst
+* Revert "Support unique labels for alembic branches"
+* DVR: Ensure that only one fg device can exist at a time in fip ns
+* New engine facade from oslo_db: Step 2
+* When deleting floating IP catch PortNotFound
+* Skip TrunksSearchCriteriaTest if the extension is not available
+* Don't catch DBDuplicate in default SG creation
+* Catch missing binding record in provision handler
+* Pull stadium projects from governance.o.o in utility script
+* List only admin_state_up auto-allocated resources
+* Change tunnel MTU calculation to support IPv6
 * Fix broken link
 * Updated from global requirements
 * Fixed typos
 * next() is incompatible in test_network_ip_availability.py
+* Remove unused LOG
 * Fix order of arguments in assertEqual
 * Reuse common code in securitygroups_rpc module
 * Imported Translations from Zanata
 * Update the template for model sync test docs
 * Add sorting and pagination tests for trunk resources
 * Enable CRUD for trunk ports
+* OVS-agent: Switch the default to "native" of_interface
 * Use tempest.lib tenants_client
 * Support unique labels for alembic branches
 * create_router: Report the original exception
@@ -45,6 +64,7 @@ CHANGES
 * enable OVSDB native interface by default
 * Not auto schedule router when sync routers from agent
 * Updated from global requirements
+* Remove the deprecated config "quota_items"
 * Fix simple typos
 * Create auto allocated networks in disabled state
 * Move DHCP notification logic out of API controller
