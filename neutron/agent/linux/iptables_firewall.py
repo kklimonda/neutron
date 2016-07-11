@@ -17,6 +17,7 @@ import collections
 import re
 
 import netaddr
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import six
@@ -28,7 +29,6 @@ from neutron.agent.linux import ipset_manager
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_manager
 from neutron.agent.linux import utils
-from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as c_utils
@@ -40,7 +40,6 @@ SPOOF_FILTER = 'spoof-filter'
 CHAIN_NAME_PREFIX = {firewall.INGRESS_DIRECTION: 'i',
                      firewall.EGRESS_DIRECTION: 'o',
                      SPOOF_FILTER: 's'}
-ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES = [131, 135, 143]
 IPSET_DIRECTION = {firewall.INGRESS_DIRECTION: 'src',
                    firewall.EGRESS_DIRECTION: 'dst'}
 # length of all device prefixes (e.g. qvo, tap, qvb)
@@ -381,7 +380,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         else:
             mac_ipv6_pairs.append((mac, ip_address))
             lla = str(ipv6_utils.get_ipv6_addr_by_EUI64(
-                    constants.IPV6_LLA_PREFIX, mac))
+                    constants.IPv6_LLA_PREFIX, mac))
             mac_ipv6_pairs.append((mac, lla))
 
     def _spoofing_rule(self, port, ipv4_rules, ipv6_rules):
@@ -393,7 +392,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                                     '-j RETURN', comment=ic.DHCP_CLIENT)]
         # Allow neighbor solicitation and multicast listener discovery
         # from the unspecified address for duplicate address detection
-        for icmp6_type in ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES:
+        for icmp6_type in constants.ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES:
             ipv6_rules += [comment_rule('-s ::/128 -d ff02::/16 '
                                         '-p ipv6-icmp -m icmp6 '
                                         '--icmpv6-type %s -j RETURN' %
@@ -447,7 +446,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         # Allow multicast listener, neighbor solicitation and
         # neighbor advertisement into the instance
         icmpv6_rules = []
-        for icmp6_type in constants.ICMPV6_ALLOWED_TYPES:
+        for icmp6_type in firewall.ICMPV6_ALLOWED_TYPES:
             icmpv6_rules += ['-p ipv6-icmp -m icmp6 --icmpv6-type %s '
                              '-j RETURN' % icmp6_type]
         return icmpv6_rules
@@ -911,6 +910,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
 
 class OVSHybridIptablesFirewallDriver(IptablesFirewallDriver):
     OVS_HYBRID_TAP_PREFIX = constants.TAP_DEVICE_PREFIX
+    OVS_HYBRID_PLUG_REQUIRED = True
 
     def _port_chain_name(self, port, direction):
         return iptables_manager.get_chain_name(

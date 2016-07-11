@@ -13,18 +13,22 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import base64
 import collections
 import functools
+import hashlib
 import signal
 import sys
 import time
 
 import netaddr
+from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import loopingcall
 from oslo_service import systemd
+from osprofiler import profiler
 import six
 from six import moves
 
@@ -39,11 +43,12 @@ from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import dvr_rpc
 from neutron.common import config
-from neutron.common import constants as n_const
+from neutron.common import constants as c_const
 from neutron.common import ipv6_utils as ipv6
 from neutron.common import topics
 from neutron.common import utils as n_utils
 from neutron import context
+from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as p_utils
 from neutron.plugins.ml2.drivers.l2pop.rpc_manager import l2population_rpc
@@ -94,6 +99,7 @@ def has_zero_prefixlen_address(ip_addresses):
     return any(netaddr.IPNetwork(ip).prefixlen == 0 for ip in ip_addresses)
 
 
+@profiler.trace_cls("rpc")
 class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                       l2population_rpc.L2populationRpcCallBackTunnelMixin,
                       dvr_rpc.DVRAgentRpcCallbackMixin):
@@ -164,10 +170,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         host = self.conf.host
         self.agent_id = 'ovs-agent-%s' % host
 
-        if self.tunnel_types:
-            self.enable_tunneling = True
-        else:
-            self.enable_tunneling = False
+        self.enable_tunneling = bool(self.tunnel_types)
 
         # Validate agent configurations
         self._check_agent_configurations()
@@ -228,6 +231,34 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             self.enable_tunneling,
             self.enable_distributed_routing)
 
+        if self.enable_tunneling:
+            self.setup_tunnel_br_flows()
+
+        self.dvr_agent.setup_dvr_flows()
+
+        # Collect additional bridges to monitor
+        self.ancillary_brs = self.setup_ancillary_bridges(
+            ovs_conf.integration_bridge, ovs_conf.tunnel_bridge)
+
+        # In order to keep existed device's local vlan unchanged,
+        # restore local vlan mapping at start
+        self._restore_local_vlan_map()
+
+        # Security group agent support
+        self.sg_agent = sg_rpc.SecurityGroupAgentRpc(self.context,
+                self.sg_plugin_rpc, self.local_vlan_map,
+                defer_refresh_firewall=True, integration_bridge=self.int_br)
+
+        # we default to False to provide backward compat with out of tree
+        # firewall drivers that expect the logic that existed on the Neutron
+        # server which only enabled hybrid plugging based on the use of the
+        # hybrid driver.
+        hybrid_plug = getattr(self.sg_agent.firewall,
+                              'OVS_HYBRID_PLUG_REQUIRED', False)
+        self.prevent_arp_spoofing = (
+            agent_conf.prevent_arp_spoofing and
+            not self.sg_agent.firewall.provides_arp_spoofing_protection)
+
         #TODO(mangelajo): optimize resource_versions to only report
         #                 versions about resources which are common,
         #                 or which are used by specific extensions.
@@ -249,7 +280,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                'datapath_type': ovs_conf.datapath_type,
                                'ovs_capabilities': self.ovs.capabilities,
                                'vhostuser_socket_dir':
-                               ovs_conf.vhostuser_socket_dir},
+                               ovs_conf.vhostuser_socket_dir,
+                               portbindings.OVS_HYBRID_PLUG: hybrid_plug},
             'resource_versions': resources.LOCAL_RESOURCE_VERSIONS,
             'agent_type': agent_conf.agent_type,
             'start_flag': True}
@@ -259,29 +291,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             heartbeat = loopingcall.FixedIntervalLoopingCall(
                 self._report_state)
             heartbeat.start(interval=report_interval)
-
-        if self.enable_tunneling:
-            self.setup_tunnel_br_flows()
-
-        self.dvr_agent.setup_dvr_flows()
-
-        # Collect additional bridges to monitor
-        self.ancillary_brs = self.setup_ancillary_bridges(
-            ovs_conf.integration_bridge, ovs_conf.tunnel_bridge)
-
-        # In order to keep existed device's local vlan unchanged,
-        # restore local vlan mapping at start
-        self._restore_local_vlan_map()
-
-        # Security group agent support
-        self.sg_agent = sg_rpc.SecurityGroupAgentRpc(self.context,
-                self.sg_plugin_rpc, self.local_vlan_map,
-                defer_refresh_firewall=True, integration_bridge=self.int_br)
-
-        self.prevent_arp_spoofing = (
-            agent_conf.prevent_arp_spoofing and
-            not self.sg_agent.firewall.provides_arp_spoofing_protection)
-
         # Initialize iteration counter
         self.iter_num = 0
         self.run_daemon_loop = True
@@ -311,7 +320,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             agent_status = self.state_rpc.report_state(self.context,
                                                        self.agent_state,
                                                        True)
-            if agent_status == n_const.AGENT_REVIVED:
+            if agent_status == c_const.AGENT_REVIVED:
                 LOG.info(_LI('Agent has just been revived. '
                              'Doing a full sync.'))
                 self.fullsync = True
@@ -915,7 +924,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                           if netaddr.IPNetwork(ip).version == 6}
         # Allow neighbor advertisements for LLA address.
         ipv6_addresses |= {str(ipv6.get_ipv6_addr_by_EUI64(
-                               n_const.IPV6_LLA_PREFIX, mac))
+                               n_const.IPv6_LLA_PREFIX, mac))
                            for mac in mac_addresses}
         if not has_zero_prefixlen_address(ipv6_addresses):
             # Install protection only when prefix is not zero because a /0
@@ -1109,7 +1118,10 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 bridge, prefix=constants.PEER_PHYSICAL_PREFIX)
             # Interface type of port for physical and integration bridges must
             # be same, so check only one of them.
-            int_type = self.int_br.db_get_val("Interface", int_if_name, "type")
+            # Not logging error here, as the interface may not exist yet.
+            # Type check is done to cleanup wrong interface if any.
+            int_type = self.int_br.db_get_val("Interface",
+                int_if_name, "type", log_errors=False)
             if self.use_veth_interconnection:
                 # Drop ports if the interface types doesn't match the
                 # configuration value.
@@ -1171,11 +1183,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                     'options', {'peer': int_if_name})
 
     def update_stale_ofport_rules(self):
-        # right now the ARP spoofing rules are the only thing that utilizes
-        # ofport-based rules, so make arp_spoofing protection a conditional
-        # until something else uses ofport
-        if not self.prevent_arp_spoofing:
-            return []
+        # ARP spoofing rules and drop-flow upon port-delete
+        # use ofport-based rules
         previous = self.vifname_to_ofport_map
         current = self.int_br.get_vif_port_to_ofport_map()
 
@@ -1186,9 +1195,9 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         # delete any stale rules based on removed ofports
         ofports_deleted = set(previous.values()) - set(current.values())
         for ofport in ofports_deleted:
-            self.int_br.delete_arp_spoofing_protection(port=ofport)
-            self.int_br.set_allowed_macs_for_port(port=ofport, allow_all=True)
-
+            if self.prevent_arp_spoofing:
+                self.int_br.delete_arp_spoofing_protection(port=ofport)
+            self.int_br.delete_flows(in_port=ofport)
         # store map for next iteration
         self.vifname_to_ofport_map = current
         return moved_ports
@@ -1409,6 +1418,18 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         return port_needs_binding
 
     def _setup_tunnel_port(self, br, port_name, remote_ip, tunnel_type):
+        try:
+            if (netaddr.IPAddress(self.local_ip).version !=
+                netaddr.IPAddress(remote_ip).version):
+                LOG.error(_LE("IP version mismatch, cannot create tunnel: "
+                              "local_ip=%(lip)s remote_ip=%(rip)s"),
+                          {'lip': self.local_ip, 'rip': remote_ip})
+                return 0
+        except Exception:
+            LOG.error(_LE("Invalid local or remote IP, cannot create tunnel: "
+                          "local_ip=%(lip)s remote_ip=%(rip)s"),
+                      {'lip': self.local_ip, 'rip': remote_ip})
+            return 0
         ofport = br.add_tunnel_port(port_name,
                                     remote_ip,
                                     self.local_ip,
@@ -1667,15 +1688,24 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         return failed_devices
 
     @classmethod
-    def get_ip_in_hex(cls, ip_address):
+    def get_tunnel_hash(cls, ip_address, hashlen):
         try:
-            return '%08x' % netaddr.IPAddress(ip_address, version=4)
+            addr = netaddr.IPAddress(ip_address)
+            if addr.version == n_const.IP_VERSION_4:
+                # We cannot change this from 8, since it could break
+                # backwards-compatibility
+                return '%08x' % addr
+            else:
+                # Create 32-bit Base32 encoded hash
+                sha1 = hashlib.sha1(ip_address.encode())
+                iphash = base64.b32encode(sha1.digest())
+                return iphash[:hashlen].decode().lower()
         except Exception:
             LOG.warning(_LW("Invalid remote IP: %s"), ip_address)
             return
 
     def tunnel_sync(self):
-        LOG.info(_LI("Configuring tunnel endpoints to other OVS agents"))
+        LOG.debug("Configuring tunnel endpoints to other OVS agents")
 
         try:
             for tunnel_type in self.tunnel_types:
@@ -1704,10 +1734,18 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
 
     @classmethod
     def get_tunnel_name(cls, network_type, local_ip, remote_ip):
-        remote_ip_hex = cls.get_ip_in_hex(remote_ip)
-        if not remote_ip_hex:
+        # This string is used to build port and interface names in OVS.
+        # Port and interface names can be max 16 characters long,
+        # including NULL, and must be unique per table per host.
+        # We make the name as long as possible given the network_type,
+        # for example, 'vxlan-012345678' or 'geneve-01234567'.
+
+        # Remove length of network type and dash
+        hashlen = n_const.DEVICE_NAME_MAX_LEN - len(network_type) - 1
+        remote_tunnel_hash = cls.get_tunnel_hash(remote_ip, hashlen)
+        if not remote_tunnel_hash:
             return None
-        return '%s-%s' % (network_type, remote_ip_hex)
+        return '%s-%s' % (network_type, remote_tunnel_hash)
 
     def _agent_has_updates(self, polling_manager):
         return (polling_manager.is_polling_required or

@@ -13,7 +13,8 @@
 #    under the License.
 
 import netaddr
-from oslo_db import exception as db_exc
+from neutron_lib.api import validators
+from neutron_lib import constants
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 import sqlalchemy as sa
@@ -27,7 +28,7 @@ from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants
+from neutron.common import constants as n_const
 from neutron.common import utils
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2
@@ -420,8 +421,8 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         # problems with comparing int and string in PostgreSQL. Here this
         # string is converted to int to give an opportunity to use it as
         # before.
-        if protocol in constants.IP_PROTOCOL_NAME_ALIASES:
-            protocol = constants.IP_PROTOCOL_NAME_ALIASES[protocol]
+        if protocol in n_const.IP_PROTOCOL_NAME_ALIASES:
+            protocol = n_const.IP_PROTOCOL_NAME_ALIASES[protocol]
         return int(constants.IP_PROTOCOL_MAP.get(protocol, protocol))
 
     def _get_ip_proto_name_and_num(self, protocol):
@@ -430,8 +431,8 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         protocol = str(protocol)
         if protocol in constants.IP_PROTOCOL_MAP:
             return [protocol, str(constants.IP_PROTOCOL_MAP.get(protocol))]
-        elif protocol in constants.IP_PROTOCOL_NUM_TO_NAME_MAP:
-            return [constants.IP_PROTOCOL_NUM_TO_NAME_MAP.get(protocol),
+        elif protocol in n_const.IP_PROTOCOL_NUM_TO_NAME_MAP:
+            return [n_const.IP_PROTOCOL_NUM_TO_NAME_MAP.get(protocol),
                     protocol]
         return [protocol, protocol]
 
@@ -546,7 +547,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
 
         include_if_present = ['protocol', 'port_range_max', 'port_range_min',
                               'ethertype', 'remote_ip_prefix',
-                              'remote_group_id', 'description']
+                              'remote_group_id']
         for key in include_if_present:
             value = sgr.get(key)
             if value:
@@ -557,11 +558,20 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
             res['protocol'] = self._get_ip_proto_name_and_num(value)
         return res
 
+    def _rules_equal(self, rule1, rule2):
+        """Determines if two rules are equal ignoring id field."""
+        rule1_copy = rule1.copy()
+        rule2_copy = rule2.copy()
+        rule1_copy.pop('id', None)
+        rule2_copy.pop('id', None)
+        return rule1_copy == rule2_copy
+
     def _check_for_duplicate_rules(self, context, security_group_rules):
         for i in security_group_rules:
             found_self = False
             for j in security_group_rules:
-                if i['security_group_rule'] == j['security_group_rule']:
+                if self._rules_equal(i['security_group_rule'],
+                                     j['security_group_rule']):
                     if found_self:
                         raise ext_sg.DuplicateSecurityGroupRuleInPost(rule=i)
                     found_self = True
@@ -572,7 +582,9 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         # Check in database if rule exists
         filters = self._make_security_group_rule_filter_dict(
             security_group_rule)
-        keys = security_group_rule['security_group_rule'].keys()
+        rule_dict = security_group_rule['security_group_rule'].copy()
+        rule_dict.pop('description', None)
+        keys = rule_dict.keys()
         fields = list(keys) + ['id']
         db_rules = self.get_security_group_rules(context, filters,
                                                  fields=fields)
@@ -585,7 +597,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         # is changed which cannot be because other methods are already
         # relying on this behavior. Therefore, we do the filtering
         # below to check for these corner cases.
-        rule_dict = security_group_rule['security_group_rule'].copy()
+        rule_dict.pop('id', None)
         sg_protocol = rule_dict.pop('protocol', None)
         for db_rule in db_rules:
             rule_id = db_rule.pop('id', None)
@@ -688,7 +700,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
 
     def _process_port_create_security_group(self, context, port,
                                             security_group_ids):
-        if attributes.is_attr_set(security_group_ids):
+        if validators.is_attr_set(security_group_ids):
             for security_group_id in security_group_ids:
                 self._create_port_security_group_binding(context, port['id'],
                                                          security_group_id)
@@ -707,27 +719,14 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
             default_group = query.filter_by(tenant_id=tenant_id).one()
             return default_group['security_group_id']
         except exc.NoResultFound:
-            return self._create_default_security_group(context, tenant_id)
-
-    def _create_default_security_group(self, context, tenant_id):
-        security_group = {
-            'security_group':
-                {'name': 'default',
-                 'tenant_id': tenant_id,
-                 'description': _('Default security group')}
-        }
-        try:
-            security_group = self.create_security_group(
-                context, security_group, default_sg=True)
-            return security_group['id']
-        except db_exc.DBDuplicateEntry as ex:
-            # default security group was created concurrently
-            LOG.debug("Duplicate default security group %s was "
-                      "not created", ex.value)
-            # raise a retry request to restart the whole process since
-            # we could be in a REPEATABLE READ isolation level and won't
-            # be able to see the SG group in this transaction.
-            raise db_exc.RetryRequest(ex)
+            security_group = {
+                'security_group':
+                    {'name': 'default',
+                     'tenant_id': tenant_id,
+                     'description': _('Default security group')}
+            }
+            return self.create_security_group(
+                context, security_group, default_sg=True)['id']
 
     def _get_security_groups_on_port(self, context, port):
         """Check that all security groups on port belong to tenant.
@@ -735,7 +734,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         :returns: all security groups IDs on port belonging to tenant.
         """
         port = port['port']
-        if not attributes.is_attr_set(port.get(ext_sg.SECURITYGROUPS)):
+        if not validators.is_attr_set(port.get(ext_sg.SECURITYGROUPS)):
             return
         if port.get('device_owner') and utils.is_port_trusted(port):
             return
@@ -763,7 +762,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
             return
         default_sg = self._ensure_default_security_group(context,
                                                          port['tenant_id'])
-        if not attributes.is_attr_set(port.get(ext_sg.SECURITYGROUPS)):
+        if not validators.is_attr_set(port.get(ext_sg.SECURITYGROUPS)):
             port[ext_sg.SECURITYGROUPS] = [default_sg]
 
     def _check_update_deletes_security_groups(self, port):
@@ -771,7 +770,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         is either [] or not is_attr_set, otherwise return False
         """
         if (ext_sg.SECURITYGROUPS in port['port'] and
-            not (attributes.is_attr_set(port['port'][ext_sg.SECURITYGROUPS])
+            not (validators.is_attr_set(port['port'][ext_sg.SECURITYGROUPS])
                  and port['port'][ext_sg.SECURITYGROUPS] != [])):
             return True
         return False
@@ -782,7 +781,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         This method is called both for port create and port update.
         """
         if (ext_sg.SECURITYGROUPS in port['port'] and
-            (attributes.is_attr_set(port['port'][ext_sg.SECURITYGROUPS]) and
+            (validators.is_attr_set(port['port'][ext_sg.SECURITYGROUPS]) and
              port['port'][ext_sg.SECURITYGROUPS] != [])):
             return True
         return False

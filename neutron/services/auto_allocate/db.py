@@ -14,17 +14,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from sqlalchemy import sql
-
+from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
+from sqlalchemy import sql
 
 from neutron._i18n import _, _LE
 from neutron.api.v2 import attributes
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import exceptions as n_exc
 from neutron.db import common_db_mixin
 from neutron.db import db_base_plugin_v2
 from neutron.db import external_net_db
@@ -42,7 +41,7 @@ IS_DEFAULT = 'is_default'
 CHECK_REQUIREMENTS = 'dry-run'
 
 
-def _extend_external_network_default(self, net_res, net_db):
+def _extend_external_network_default(core_plugin, net_res, net_db):
     """Add is_default field to 'show' response."""
     if net_db.external is not None:
         net_res[IS_DEFAULT] = net_db.external.is_default
@@ -103,7 +102,7 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
         tenant_id = self._validate(context, tenant_id)
         if CHECK_REQUIREMENTS in fields:
             # for dry-run requests, simply validates that subsequent
-            # requests can be fullfilled based on a set of requirements
+            # requests can be fulfilled based on a set of requirements
             # such as existence of default networks, pools, etc.
             return self._check_requirements(context, tenant_id)
         elif fields:
@@ -224,7 +223,7 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
         try:
             network_args = {
                 'name': 'auto_allocated_network',
-                'admin_state_up': True,
+                'admin_state_up': False,
                 'tenant_id': tenant_id,
                 'shared': False
             }
@@ -286,13 +285,17 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
             # NOTE(armax): saving the auto allocated topology in a
             # separate transaction will keep the Neutron DB and the
             # Neutron plugin backend in sync, thus allowing for a
-            # more bullet proof cleanup.
+            # more bullet proof cleanup. Any other error will have
+            # to bubble up.
             with context.session.begin(subtransactions=True):
                 context.session.add(
                     models.AutoAllocatedTopology(
                         tenant_id=tenant_id,
                         network_id=network_id,
                         router_id=router_id))
+            p_utils.update_network(
+                self.core_plugin, context,
+                network_id, {'admin_state_up': True})
         except db_exc.DBDuplicateEntry:
             LOG.error(_LE("Multiple auto-allocated networks detected for "
                           "tenant %(tenant)s. Attempting clean up for "
@@ -303,8 +306,7 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
             self._cleanup(
                 context, network_id=network_id,
                 router_id=router_id, subnets=subnets)
-            network_id = self._get_auto_allocated_network(
-                context, tenant_id)
+            network_id = self._get_auto_allocated_network(context, tenant_id)
         return network_id
 
     def _cleanup(self, context, network_id=None, router_id=None, subnets=None):

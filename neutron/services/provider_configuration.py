@@ -17,13 +17,13 @@ import importlib
 import itertools
 import os
 
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 import stevedore
 
 from neutron._i18n import _, _LW
 from neutron.api.v2 import attributes as attr
-from neutron.common import exceptions as n_exc
 
 LOG = logging.getLogger(__name__)
 
@@ -72,17 +72,11 @@ class NeutronModule(object):
                 neutron_dirs = [neutron_dir]
             else:
                 try:
-                    neutron_dirs = cfg.CONF.config_dirs or ['/etc/neutron']
+                    neutron_dirs = cfg.CONF.config_dirs
                 except cfg.NoSuchOptError:
-                    # handle older oslo.config versions (<= 3.8.0) that do not
-                    # support config_dirs property
+                    neutron_dirs = None
+                if not neutron_dirs:
                     neutron_dirs = ['/etc/neutron']
-                    try:
-                        config_dir = cfg.CONF.config_dir
-                        if config_dir:
-                            neutron_dirs = [config_dir]
-                    except cfg.NoSuchOptError:
-                        pass
 
             # load configuration from all matching files to reflect oslo.config
             # behaviour

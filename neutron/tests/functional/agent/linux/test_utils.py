@@ -12,12 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import eventlet
-import testtools
+import functools
 
 from neutron.agent.linux import async_process
 from neutron.agent.linux import utils
+from neutron.common import utils as common_utils
 from neutron.tests.functional.agent.linux import test_async_process
+from neutron.tests.functional import base as functional_base
 
 
 class TestPIDHelpers(test_async_process.AsyncProcessTestFramework):
@@ -32,9 +33,60 @@ class TestPIDHelpers(test_async_process.AsyncProcessTestFramework):
         self.assertTrue(utils.pid_invoked_with_cmdline(pid, cmd))
         self.assertEqual([], utils.get_cmdline_from_pid(-1))
 
-    def test_wait_until_true_predicate_succeeds(self):
-        utils.wait_until_true(lambda: True)
 
-    def test_wait_until_true_predicate_fails(self):
-        with testtools.ExpectedException(eventlet.timeout.Timeout):
-            utils.wait_until_true(lambda: False, 2)
+class TestGetRootHelperChildPid(functional_base.BaseSudoTestCase):
+    def _addcleanup_sleep_process(self, parent_pid):
+        sleep_pid = utils.execute(
+            ['ps', '--ppid', parent_pid, '-o', 'pid=']).strip()
+        self.addCleanup(
+            utils.execute,
+            ['kill', '-9', sleep_pid],
+            check_exit_code=False,
+            run_as_root=True)
+
+    def test_get_root_helper_child_pid_returns_first_child(self):
+        """Test that the first child, not lowest child pid is returned.
+
+        Test creates following process tree:
+          sudo +
+               |
+               +--rootwrap +
+                           |
+                           +--bash+
+                                  |
+                                  +--sleep 100
+
+        and tests that pid of `bash' command is returned.
+        """
+
+        def wait_for_sleep_is_spawned(parent_pid):
+            proc_tree = utils.execute(
+                ['pstree', parent_pid], check_exit_code=False)
+            processes = [command.strip() for command in proc_tree.split('---')
+                         if command]
+            return 'sleep' == processes[-1]
+
+        cmd = ['bash', '-c', '(sleep 100)']
+        proc = async_process.AsyncProcess(cmd, run_as_root=True)
+        proc.start()
+
+        # root helpers spawn their child processes asynchronously, and we
+        # don't want to use proc.start(block=True) as that uses
+        # get_root_helper_child_pid (The method under test) internally.
+        sudo_pid = proc._process.pid
+        common_utils.wait_until_true(
+            functools.partial(
+                wait_for_sleep_is_spawned,
+                sudo_pid),
+            sleep=0.1)
+
+        child_pid = utils.get_root_helper_child_pid(
+            sudo_pid, cmd, run_as_root=True)
+        self.assertIsNotNone(
+            child_pid,
+            "get_root_helper_child_pid is expected to return the pid of the "
+            "bash process")
+        self._addcleanup_sleep_process(child_pid)
+        with open('/proc/%s/cmdline' % child_pid, 'r') as f_proc_cmdline:
+            cmdline = f_proc_cmdline.readline().split('\0')[0]
+        self.assertIn('bash', cmdline)

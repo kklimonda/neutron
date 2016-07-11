@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants as l3_constants
 from oslo_log import log as logging
 
 from neutron._i18n import _LE
@@ -20,7 +21,6 @@ from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
-from neutron.common import constants as l3_constants
 
 LOG = logging.getLogger(__name__)
 
@@ -148,8 +148,8 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         self.snat_iptables_manager = iptables_manager.IptablesManager(
             namespace=snat_ns.name,
             use_ipv6=self.use_ipv6)
-        # kicks the FW Agent to add rules for the snat namespace
-        self.agent.process_router_add(self)
+
+        self._initialize_address_scope_iptables(self.snat_iptables_manager)
 
     def _create_snat_namespace(self):
         # TODO(mlavalle): in the near future, this method should contain the
@@ -174,6 +174,9 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         return host == self.host
 
     def _handle_router_snat_rules(self, ex_gw_port, interface_name):
+        super(DvrEdgeRouter, self)._handle_router_snat_rules(
+            ex_gw_port, interface_name)
+
         if not self._is_this_snat_host():
             return
         if not self.get_ex_gw_port():
@@ -186,7 +189,8 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         with self.snat_iptables_manager.defer_apply():
             self._empty_snat_chains(self.snat_iptables_manager)
 
-            # NOTE DVR doesn't add the jump to float snat like the super class.
+            # NOTE: DVR adds the jump to float snat via super class,
+            # but that is in the router namespace and not snat.
 
             self._add_snat_rules(ex_gw_port, self.snat_iptables_manager,
                                  interface_name)

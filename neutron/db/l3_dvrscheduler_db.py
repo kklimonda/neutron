@@ -13,13 +13,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants as n_const
 from oslo_log import log as logging
 from sqlalchemy import or_
 
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants as n_const
+from neutron.common import constants as const
 from neutron.common import utils as n_utils
 
 from neutron.db import agentschedulers_db
@@ -183,9 +184,8 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
                 admin_context, filters=filter_rtr)
             for port in int_ports:
                 dvr_binding = (ml2_db.
-                               get_dvr_port_binding_by_host(context.session,
-                                                            port['id'],
-                                                            port_host))
+                               get_distributed_port_binding_by_host(
+                                   context.session, port['id'], port_host))
                 if dvr_binding:
                     # unbind this port from router
                     dvr_binding['router_id'] = None
@@ -286,8 +286,8 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
 
         # dvr routers are not explicitly scheduled to agents on hosts with
         # dvr serviceable ports, so need special handling
-        if self._get_agent_mode(agent_db) in [n_const.L3_AGENT_MODE_DVR,
-                                              n_const.L3_AGENT_MODE_DVR_SNAT]:
+        if self._get_agent_mode(agent_db) in [const.L3_AGENT_MODE_DVR,
+                                              const.L3_AGENT_MODE_DVR_SNAT]:
             if not router_ids:
                 result_set |= set(self._get_dvr_router_ids_for_host(
                     context, agent_db['host']))

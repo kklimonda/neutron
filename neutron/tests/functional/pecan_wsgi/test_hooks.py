@@ -17,6 +17,7 @@ import mock
 from oslo_config import cfg
 from oslo_policy import policy as oslo_policy
 from oslo_serialization import jsonutils
+from oslo_utils import uuidutils
 
 from neutron.api.v2 import attributes
 from neutron import context
@@ -301,6 +302,16 @@ class TestNovaNotifierHook(test_functional.PecanFunctionalTest):
         self.mock_notifier = patcher.start()
         super(TestNovaNotifierHook, self).setUp()
 
+    def test_nova_notification_skips_on_failure(self):
+        req_headers = {'X-Project-Id': 'tenid', 'X-Roles': 'admin'}
+        response = self.app.put_json(
+            '/v2.0/networks/%s.json' % uuidutils.generate_uuid(),
+            params={'network': {'name': 'meh-2'}},
+            headers=req_headers,
+            expect_errors=True)
+        self.assertEqual(404, response.status_int)
+        self.assertFalse(self.mock_notifier.called)
+
     def test_nova_notifications_disabled(self):
         cfg.CONF.set_override('notify_nova_on_port_data_changes', False)
         self.app.post_json(
@@ -324,7 +335,7 @@ class TestNovaNotifierHook(test_functional.PecanFunctionalTest):
         # NOTE(kevinbenton): the original passed into the notifier does
         # not contain all of the fields of the object. Only those required
         # by the policy engine are included.
-        orig = pe.fetch_resource(context.get_admin_context(),
+        orig = pe.fetch_resource(context.get_admin_context(), 'networks',
                                  'network', network_id)
         response = self.app.put_json(
             '/v2.0/networks/%s.json' % network_id,
@@ -336,7 +347,7 @@ class TestNovaNotifierHook(test_functional.PecanFunctionalTest):
                                                    orig, json_body)
         self.mock_notifier.reset_mock()
 
-        orig = pe.fetch_resource(context.get_admin_context(),
+        orig = pe.fetch_resource(context.get_admin_context(), 'networks',
                                  'network', network_id)
         response = self.app.delete(
             '/v2.0/networks/%s.json' % network_id, headers=req_headers)

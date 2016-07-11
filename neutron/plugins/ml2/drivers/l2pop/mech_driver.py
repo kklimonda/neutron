@@ -13,11 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants as const
 from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron._i18n import _LW
-from neutron.common import constants as const
 from neutron import context as n_context
 from neutron.db import api as db_api
 from neutron.plugins.ml2.common import exceptions as ml2_exc
@@ -51,6 +51,12 @@ class L2populationMechanismDriver(api.MechanismDriver):
                                           port, agent_host)
         self.L2populationAgentNotify.remove_fdb_entries(self.rpc_ctx,
             fdb_entries)
+
+    def filter_hosts_with_segment_access(
+            self, context, segments, candidate_hosts, agent_getter):
+        # NOTE(cbrandily): let other mechanisms (openvswitch, linuxbridge, ...)
+        # perform the filtering
+        return set()
 
     def _get_diff_ips(self, orig, port):
         orig_ips = set([ip['ip_address'] for ip in orig['fixed_ips']])
@@ -163,9 +169,10 @@ class L2populationMechanismDriver(api.MechanismDriver):
                               'network_type': segment['network_type'],
                               'ports': {}}}
         tunnel_network_ports = (
-            l2pop_db.get_dvr_active_network_ports(session, network_id))
+            l2pop_db.get_distributed_active_network_ports(session, network_id))
         fdb_network_ports = (
-            l2pop_db.get_nondvr_active_network_ports(session, network_id))
+            l2pop_db.get_nondistributed_active_network_ports(session,
+                                                             network_id))
         ports = agent_fdb_entries[network_id]['ports']
         ports.update(self._get_tunnels(
             fdb_network_ports + tunnel_network_ports,
@@ -179,7 +186,7 @@ class L2populationMechanismDriver(api.MechanismDriver):
 
     def _get_tunnels(self, tunnel_network_ports, exclude_host):
         agents = {}
-        for _, agent in tunnel_network_ports:
+        for __, agent in tunnel_network_ports:
             if agent.host == exclude_host:
                 continue
 

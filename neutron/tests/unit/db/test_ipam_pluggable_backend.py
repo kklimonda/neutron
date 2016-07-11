@@ -15,15 +15,18 @@
 
 import mock
 import netaddr
+from neutron_lib import constants
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
+from oslo_db import exception as db_exc
 from oslo_utils import uuidutils
 import webob.exc
 
-from neutron.common import constants
-from neutron.common import exceptions as n_exc
+from neutron.common import constants as n_const
 from neutron.common import ipv6_utils
 from neutron.db import ipam_backend_mixin
 from neutron.db import ipam_pluggable_backend
+from neutron.db import models_v2
 from neutron.ipam import requests as ipam_req
 from neutron.tests.unit.db import test_db_base_plugin_v2 as test_db_base
 
@@ -71,6 +74,8 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         mocks = {
             'driver': mock.Mock(),
             'subnet': mock.Mock(),
+            'subnets': mock.Mock(),
+            'port': {'device_owner': 'compute:None'},
             'subnet_request': ipam_req.SpecificSubnetRequest(
                 self.tenant_id,
                 self.subnet_id,
@@ -80,6 +85,9 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         }
         mocks['driver'].get_subnet.return_value = mocks['subnet']
         mocks['driver'].allocate_subnet.return_value = mocks['subnet']
+        mocks['driver'].get_allocator.return_value = mocks['subnets']
+        mocks['subnets'].allocate.return_value = (
+            mock.sentinel.address, mock.sentinel.subnet_id)
         mocks['driver'].get_subnet_request_factory.return_value = (
             subnet_factory)
         mocks['driver'].get_address_request_factory.return_value = (
@@ -99,24 +107,37 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         pool_mock.get_instance.return_value = mocks['driver']
         return mocks
 
-    def _get_allocate_mock(self, auto_ip='10.0.0.2',
+    def _get_allocate_mock(self, subnet_id, auto_ip='10.0.0.2',
                            fail_ip='127.0.0.1',
-                           error_message='SomeError'):
+                           exception=None):
+        if exception is None:
+            exception = n_exc.InvalidInput(error_message='SomeError')
+
         def allocate_mock(request):
             if type(request) == ipam_req.SpecificAddressRequest:
                 if request.address == netaddr.IPAddress(fail_ip):
-                    raise n_exc.InvalidInput(error_message=error_message)
+                    raise exception
                 else:
-                    return str(request.address)
+                    return str(request.address), subnet_id
             else:
-                return auto_ip
+                return auto_ip, subnet_id
 
         return allocate_mock
 
-    def _validate_allocate_calls(self, expected_calls, mocks):
-        self.assertTrue(mocks['subnet'].allocate.called)
+    def _get_deallocate_mock(self, fail_ip='127.0.0.1', exception=None):
+            if exception is None:
+                exception = n_exc.InvalidInput(error_message='SomeError')
 
-        actual_calls = mocks['subnet'].allocate.call_args_list
+            def deallocate_mock(ip):
+                if str(ip) == fail_ip:
+                    raise exception
+
+            return deallocate_mock
+
+    def _validate_allocate_calls(self, expected_calls, mocks):
+        self.assertTrue(mocks['subnets'].allocate.called)
+
+        actual_calls = mocks['subnets'].allocate.call_args_list
         self.assertEqual(len(expected_calls), len(actual_calls))
 
         i = 0
@@ -175,12 +196,12 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
             ips[0]['ip_address'] = ip
 
         allocated_ips = mocks['ipam']._ipam_allocate_ips(
-            mock.ANY, mocks['driver'], mock.ANY, ips)
+            mock.ANY, mocks['driver'], mocks['port'], ips)
 
-        mocks['driver'].get_subnet.assert_called_once_with(subnet)
+        mocks['driver'].get_allocator.assert_called_once_with([subnet])
 
-        self.assertTrue(mocks['subnet'].allocate.called)
-        request = mocks['subnet'].allocate.call_args[0][0]
+        self.assertTrue(mocks['subnets'].allocate.called)
+        request = mocks['subnets'].allocate.call_args[0][0]
 
         return {'ips': allocated_ips,
                 'request': request}
@@ -188,12 +209,13 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
     def test_allocate_single_fixed_ip(self):
         mocks = self._prepare_ipam()
         ip = '192.168.15.123'
-        mocks['subnet'].allocate.return_value = ip
+        subnet_id = self._gen_subnet_id()
+        mocks['subnets'].allocate.return_value = ip, subnet_id
 
         results = self._single_ip_allocate_helper(mocks,
                                                   ip,
                                                   '192.168.15.0/24',
-                                                  self._gen_subnet_id())
+                                                  subnet_id)
 
         self.assertIsInstance(results['request'],
                               ipam_req.SpecificAddressRequest)
@@ -206,10 +228,11 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         mocks = self._prepare_ipam()
         network = '192.168.15.0/24'
         ip = '192.168.15.83'
-        mocks['subnet'].allocate.return_value = ip
+        subnet_id = self._gen_subnet_id()
+        mocks['subnets'].allocate.return_value = ip, subnet_id
 
         results = self._single_ip_allocate_helper(mocks, '', network,
-                                                  self._gen_subnet_id())
+                                                  subnet_id)
 
         self.assertIsInstance(results['request'], ipam_req.AnyAddressRequest)
         self.assertEqual(ip, results['ips'][0]['ip_address'])
@@ -225,57 +248,92 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         mocks['ipam']._ipam_allocate_ips(mock.ANY, mocks['driver'],
                                          mock.ANY, [ip])
 
-        request = mocks['subnet'].allocate.call_args[0][0]
+        request = mocks['subnets'].allocate.call_args[0][0]
         self.assertIsInstance(request, ipam_req.AutomaticAddressRequest)
         self.assertEqual(eui64_ip, request.address)
 
     def test_allocate_multiple_ips(self):
         mocks = self._prepare_ipam()
-        data = {'': ['172.23.128.0/17', self._gen_subnet_id()],
+        subnet_id = self._gen_subnet_id()
+        data = {'': ['172.23.128.0/17', subnet_id],
                 '192.168.43.15': ['192.168.43.0/24', self._gen_subnet_id()],
                 '8.8.8.8': ['8.0.0.0/8', self._gen_subnet_id()]}
         ips = self._convert_to_ips(data)
-        mocks['subnet'].allocate.side_effect = self._get_allocate_mock(
-            auto_ip='172.23.128.94')
+        mocks['subnets'].allocate.side_effect = self._get_allocate_mock(
+            subnet_id, auto_ip='172.23.128.94')
 
         mocks['ipam']._ipam_allocate_ips(
-            mock.ANY, mocks['driver'], mock.ANY, ips)
-        get_calls = [mock.call(data[ip][1]) for ip in data]
-        mocks['driver'].get_subnet.assert_has_calls(get_calls, any_order=True)
+            mock.ANY, mocks['driver'], mocks['port'], ips)
+        get_calls = [mock.call([data[ip][1]]) for ip in data]
+        mocks['driver'].get_allocator.assert_has_calls(
+            get_calls, any_order=True)
 
         self._validate_allocate_calls(ips, mocks)
 
-    def test_allocate_multiple_ips_with_exception(self):
+    def _test_allocate_multiple_ips_with_exception(self,
+                                                   exc_on_deallocate=False):
         mocks = self._prepare_ipam()
-
-        auto_ip = '172.23.128.94'
         fail_ip = '192.168.43.15'
-        data = {'': ['172.23.128.0/17', self._gen_subnet_id()],
+        auto_ip = '172.23.128.94'
+        subnet_id = self._gen_subnet_id()
+        data = {'': ['172.23.128.0/17', subnet_id],
                 fail_ip: ['192.168.43.0/24', self._gen_subnet_id()],
                 '8.8.8.8': ['8.0.0.0/8', self._gen_subnet_id()]}
         ips = self._convert_to_ips(data)
-        mocks['subnet'].allocate.side_effect = self._get_allocate_mock(
-            auto_ip=auto_ip, fail_ip=fail_ip)
+
+        mocks['subnets'].allocate.side_effect = self._get_allocate_mock(
+            subnet_id, auto_ip=auto_ip, fail_ip=fail_ip,
+            exception=db_exc.DBDeadlock())
 
         # Exception should be raised on attempt to allocate second ip.
         # Revert action should be performed for the already allocated ips,
         # In this test case only one ip should be deallocated
         # and original error should be reraised
-        self.assertRaises(n_exc.InvalidInput,
+        self.assertRaises(db_exc.DBDeadlock,
                           mocks['ipam']._ipam_allocate_ips,
                           mock.ANY,
                           mocks['driver'],
-                          mock.ANY,
+                          mocks['port'],
                           ips)
 
         # get_subnet should be called only for the first two networks
-        get_calls = [mock.call(data[ip][1]) for ip in ['', fail_ip]]
-        mocks['driver'].get_subnet.assert_has_calls(get_calls, any_order=True)
+        get_calls = [mock.call([data[ip][1]]) for ip in ['', fail_ip]]
+        mocks['driver'].get_allocator.assert_has_calls(
+            get_calls, any_order=True)
 
         # Allocate should be called for the first two ips only
         self._validate_allocate_calls(ips[:-1], mocks)
         # Deallocate should be called for the first ip only
         mocks['subnet'].deallocate.assert_called_once_with(auto_ip)
+
+    def test_allocate_multiple_ips_with_exception(self):
+        self._test_allocate_multiple_ips_with_exception()
+
+    def test_allocate_multiple_ips_with_exception_on_rollback(self):
+        # Validate that original exception is not replaced with one raised on
+        # rollback (during deallocate)
+        self._test_allocate_multiple_ips_with_exception(exc_on_deallocate=True)
+
+    def test_deallocate_multiple_ips_with_exception(self):
+        mocks = self._prepare_ipam()
+        fail_ip = '192.168.43.15'
+        data = {fail_ip: ['192.168.43.0/24', self._gen_subnet_id()],
+                '0.10.8.8': ['0.10.0.0/8', self._gen_subnet_id()]}
+        ips = self._convert_to_ips(data)
+
+        mocks['subnet'].deallocate.side_effect = self._get_deallocate_mock(
+            fail_ip=fail_ip, exception=db_exc.DBDeadlock())
+        mocks['subnet'].allocate.side_effect = ValueError('Some-error')
+        # Validate that exception from deallocate (DBDeadlock) is not replaced
+        # by exception from allocate (ValueError) in rollback block,
+        # so original exception is not changed
+        self.assertRaises(db_exc.DBDeadlock,
+                          mocks['ipam']._ipam_deallocate_ips,
+                          mock.ANY,
+                          mocks['driver'],
+                          mock.ANY,
+                          ips)
+        mocks['subnets'].allocate.assert_called_once_with(mock.ANY)
 
     @mock.patch('neutron.ipam.driver.Pool')
     def test_create_subnet_over_ipam(self, pool_mock):
@@ -294,12 +352,12 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
     def test_create_ipv6_pd_subnet_over_ipam(self, pool_mock):
         mocks = self._prepare_mocks_with_pool_mock(pool_mock)
         cfg.CONF.set_override('ipv6_pd_enabled', True)
-        cidr = constants.PROVISIONAL_IPV6_PD_PREFIX
+        cidr = n_const.PROVISIONAL_IPV6_PD_PREFIX
         allocation_pools = [netaddr.IPRange('::2', '::ffff:ffff:ffff:ffff')]
         with self.subnet(cidr=None, ip_version=6,
                          subnetpool_id=constants.IPV6_PD_POOL_ID,
-                         ipv6_ra_mode=constants.IPV6_SLAAC,
-                         ipv6_address_mode=constants.IPV6_SLAAC):
+                         ipv6_ra_mode=n_const.IPV6_SLAAC,
+                         ipv6_address_mode=n_const.IPV6_SLAAC):
             pool_mock.get_instance.assert_called_once_with(None, mock.ANY)
             self.assertTrue(mocks['driver'].allocate_subnet.called)
             request = mocks['driver'].allocate_subnet.call_args[0][0]
@@ -327,9 +385,7 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
             net = self.deserialize(self.fmt, res)
             self.assertEqual(0, len(net['network']['subnets']))
 
-    @mock.patch('neutron.ipam.driver.Pool')
-    def test_ipam_subnet_deallocated_if_create_fails(self, pool_mock):
-        mocks = self._prepare_mocks_with_pool_mock(pool_mock)
+    def _test_rollback_on_subnet_creation(self, pool_mock, driver_mocks):
         cidr = '10.0.2.0/24'
         with mock.patch.object(
                 ipam_backend_mixin.IpamBackendMixin, '_save_subnet',
@@ -338,13 +394,28 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
                                 cidr, expected_res_status=500)
             pool_mock.get_instance.assert_any_call(None, mock.ANY)
             self.assertEqual(2, pool_mock.get_instance.call_count)
-            self.assertTrue(mocks['driver'].allocate_subnet.called)
-            request = mocks['driver'].allocate_subnet.call_args[0][0]
+            self.assertTrue(driver_mocks['driver'].allocate_subnet.called)
+            request = driver_mocks['driver'].allocate_subnet.call_args[0][0]
             self.assertIsInstance(request, ipam_req.SpecificSubnetRequest)
             self.assertEqual(netaddr.IPNetwork(cidr), request.subnet_cidr)
             # Verify remove ipam subnet was called
-            mocks['driver'].remove_subnet.assert_called_once_with(
+            driver_mocks['driver'].remove_subnet.assert_called_once_with(
                 self.subnet_id)
+
+    @mock.patch('neutron.ipam.driver.Pool')
+    def test_ipam_subnet_deallocated_if_create_fails(self, pool_mock):
+        driver_mocks = self._prepare_mocks_with_pool_mock(pool_mock)
+        self._test_rollback_on_subnet_creation(pool_mock, driver_mocks)
+
+    @mock.patch('neutron.ipam.driver.Pool')
+    def test_ipam_subnet_create_and_rollback_fails(self, pool_mock):
+        driver_mocks = self._prepare_mocks_with_pool_mock(pool_mock)
+        # remove_subnet is called on rollback stage and n_exc.NotFound
+        # typically produces 404 error. Validate that exception from
+        # rollback stage is silenced and main exception (ValueError in this
+        # case) is reraised. So resulting http status should be 500.
+        driver_mocks['driver'].remove_subnet.side_effect = n_exc.NotFound
+        self._test_rollback_on_subnet_creation(pool_mock, driver_mocks)
 
     @mock.patch('neutron.ipam.driver.Pool')
     def test_update_subnet_over_ipam(self, pool_mock):
@@ -424,9 +495,9 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         mocks = self._prepare_mocks_with_pool_mock(pool_mock)
         auto_ip = '10.0.0.2'
         expected_calls = [{'ip_address': ''}]
-        mocks['subnet'].allocate.side_effect = self._get_allocate_mock(
-            auto_ip=auto_ip)
         with self.subnet() as subnet:
+            mocks['subnets'].allocate.side_effect = self._get_allocate_mock(
+                subnet['subnet']['id'], auto_ip=auto_ip)
             with self.port(subnet=subnet) as port:
                 ips = port['port']['fixed_ips']
                 self.assertEqual(1, len(ips))
@@ -461,9 +532,9 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         auto_ip = '10.0.0.2'
         new_ip = '10.0.0.15'
         expected_calls = [{'ip_address': ip} for ip in ['', new_ip]]
-        mocks['subnet'].allocate.side_effect = self._get_allocate_mock(
-            auto_ip=auto_ip)
         with self.subnet() as subnet:
+            mocks['subnets'].allocate.side_effect = self._get_allocate_mock(
+                subnet['subnet']['id'], auto_ip=auto_ip)
             with self.port(subnet=subnet) as port:
                 ips = port['port']['fixed_ips']
                 self.assertEqual(1, len(ips))
@@ -488,9 +559,9 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
     def test_delete_port_ipam(self, pool_mock):
         mocks = self._prepare_mocks_with_pool_mock(pool_mock)
         auto_ip = '10.0.0.2'
-        mocks['subnet'].allocate.side_effect = self._get_allocate_mock(
-            auto_ip=auto_ip)
         with self.subnet() as subnet:
+            mocks['subnets'].allocate.side_effect = self._get_allocate_mock(
+                subnet['subnet']['id'], auto_ip=auto_ip)
             with self.port(subnet=subnet) as port:
                 ips = port['port']['fixed_ips']
                 self.assertEqual(1, len(ips))
@@ -502,9 +573,28 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
                 mocks['subnet'].deallocate.assert_called_once_with(auto_ip)
 
     def test_recreate_port_ipam(self):
-        ip = '10.0.0.2'
         with self.subnet() as subnet:
+            subnet_cidr = subnet['subnet']['cidr']
             with self.port(subnet=subnet) as port:
+                ips = port['port']['fixed_ips']
+                self.assertEqual(1, len(ips))
+                orig_ip = ips[0]['ip_address']
+                self.assertIn(netaddr.IPAddress(ips[0]['ip_address']),
+                              netaddr.IPSet(netaddr.IPNetwork(subnet_cidr)))
+                req = self.new_delete_request('ports', port['port']['id'])
+                res = req.get_response(self.api)
+                self.assertEqual(webob.exc.HTTPNoContent.code, res.status_int)
+                with self.port(subnet=subnet, fixed_ips=ips) as port:
+                    ips = port['port']['fixed_ips']
+                    self.assertEqual(1, len(ips))
+                    self.assertEqual(orig_ip, ips[0]['ip_address'])
+
+    def test_recreate_port_ipam_specific_ip(self):
+        with self.subnet() as subnet:
+            ip = '10.0.0.2'
+            fixed_ip_data = [{'subnet_id': subnet['subnet']['id'],
+                              'ip_address': ip}]
+            with self.port(subnet=subnet, fixed_ips=fixed_ip_data) as port:
                 ips = port['port']['fixed_ips']
                 self.assertEqual(1, len(ips))
                 self.assertEqual(ip, ips[0]['ip_address'])
@@ -534,14 +624,18 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         fixed_ips_mock = mock.Mock(return_value=changes.add)
         mocks['ipam'] = ipam_pluggable_backend.IpamPluggableBackend()
         mocks['ipam']._get_changed_ips_for_port = changes_mock
+        mocks['ipam']._ipam_get_subnets = mock.Mock()
         mocks['ipam']._test_fixed_ips_for_port = fixed_ips_mock
+        mocks['ipam']._update_ips_for_pd_subnet = mock.Mock(return_value=[])
 
         port_dict = {'device_owner': uuidutils.generate_uuid(),
                      'network_id': uuidutils.generate_uuid()}
 
-        mocks['ipam']._update_ips_for_port(context, port_dict,
+        mocks['ipam']._update_ips_for_port(context, port_dict, None,
                                            original_ips, new_ips, mac)
         mocks['driver'].get_address_request_factory.assert_called_once_with()
+        mocks['ipam']._ipam_get_subnets.assert_called_once_with(
+            context, network_id=port_dict['network_id'], host=None)
         # Validate port_dict is passed into address_factory
         address_factory.get_request.assert_called_once_with(context,
                                                             port_dict,
@@ -564,12 +658,13 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         subnets = [{'id': ip_dict['subnet_id'],
                     'network_id': network_id,
                     'cidr': '192.1.1.0/24',
+                    'ip_version': 4,
                     'ipv6_address_mode': None,
                     'ipv6_ra_mode': None}]
         get_subnets_mock = mock.Mock(return_value=subnets)
         get_subnet_mock = mock.Mock(return_value=subnets[0])
         mocks['ipam'] = ipam_pluggable_backend.IpamPluggableBackend()
-        mocks['ipam']._get_subnets = get_subnets_mock
+        mocks['ipam']._ipam_get_subnets = get_subnets_mock
         mocks['ipam']._get_subnet = get_subnet_mock
 
         mocks['ipam'].allocate_ips_for_port_and_store(context,
@@ -635,3 +730,50 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         # incoming one, i.e. new pools in it are not overwritten by old pools
         self._test_update_db_subnet(pool_mock, subnet, expected_subnet,
                                     old_pools)
+
+    @mock.patch('neutron.ipam.driver.Pool')
+    def test_update_db_subnet_new_pools_exception(self, pool_mock):
+        context = mock.Mock()
+        mocks = self._prepare_mocks_with_pool_mock(pool_mock)
+        mocks['ipam'] = ipam_pluggable_backend.IpamPluggableBackend()
+
+        new_port = {'fixed_ips': [{'ip_address': '192.168.1.20',
+                                   'subnet_id': 'some-id'},
+                                  {'ip_address': '192.168.1.50',
+                                   'subnet_id': 'some-id'}]}
+        db_port = models_v2.Port(id='id', network_id='some-net-id')
+        old_port = {'fixed_ips': [{'ip_address': '192.168.1.10',
+                                   'subnet_id': 'some-id'},
+                                  {'ip_address': '192.168.1.50',
+                                   'subnet_id': 'some-id'}]}
+        changes = mocks['ipam'].Changes(
+            add=[{'ip_address': '192.168.1.20',
+                  'subnet_id': 'some-id'}],
+            original=[{'ip_address': '192.168.1.50',
+                       'subnet_id': 'some-id'}],
+            remove=[{'ip_address': '192.168.1.10',
+                     'subnet_id': 'some-id'}])
+        mocks['ipam']._delete_ip_allocation = mock.Mock()
+        mocks['ipam']._make_port_dict = mock.Mock(return_value=old_port)
+        mocks['ipam']._update_ips_for_port = mock.Mock(return_value=changes)
+        mocks['ipam']._update_db_port = mock.Mock(
+            side_effect=db_exc.DBDeadlock)
+        # emulate raising exception on rollback actions
+        mocks['ipam']._ipam_deallocate_ips = mock.Mock(side_effect=ValueError)
+        mocks['ipam']._ipam_allocate_ips = mock.Mock(side_effect=ValueError)
+
+        # Validate original exception (DBDeadlock) is not overriden by
+        # exception raised on rollback (ValueError)
+        self.assertRaises(db_exc.DBDeadlock,
+                          mocks['ipam'].update_port_with_ips,
+                          context,
+                          None,
+                          db_port,
+                          new_port,
+                          mock.Mock())
+        mocks['ipam']._ipam_deallocate_ips.assert_called_once_with(
+            context, mocks['driver'], db_port,
+            changes.add, revert_on_fail=False)
+        mocks['ipam']._ipam_allocate_ips.assert_called_once_with(
+            context, mocks['driver'], db_port,
+            changes.remove, revert_on_fail=False)

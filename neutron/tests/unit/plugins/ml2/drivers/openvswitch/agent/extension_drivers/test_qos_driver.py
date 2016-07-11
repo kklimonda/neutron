@@ -18,8 +18,12 @@ from oslo_utils import uuidutils
 from neutron import context
 from neutron.objects.qos import policy
 from neutron.objects.qos import rule
+from neutron.plugins.ml2.drivers.openvswitch.agent import (
+        ovs_agent_extension_api as ovs_ext_api)
 from neutron.plugins.ml2.drivers.openvswitch.agent.extension_drivers import (
     qos_driver)
+from neutron.plugins.ml2.drivers.openvswitch.agent.openflow.ovs_ofctl import (
+    ovs_bridge)
 from neutron.tests.unit.plugins.ml2.drivers.openvswitch.agent import (
     ovs_test_base)
 
@@ -28,8 +32,16 @@ class QosOVSAgentDriverTestCase(ovs_test_base.OVSAgentConfigTestBase):
 
     def setUp(self):
         super(QosOVSAgentDriverTestCase, self).setUp()
+        conn_patcher = mock.patch(
+            'neutron.agent.ovsdb.native.connection.Connection.start')
+        conn_patcher.start()
+        self.addCleanup(conn_patcher.stop)
         self.context = context.get_admin_context()
         self.qos_driver = qos_driver.QosOVSAgentDriver()
+        self.agent_api = ovs_ext_api.OVSAgentExtensionAPI(
+                         ovs_bridge.OVSAgentBridge('br-int'),
+                         ovs_bridge.OVSAgentBridge('br-tun'))
+        self.qos_driver.consume_api(self.agent_api)
         self.qos_driver.initialize()
         self.qos_driver.br_int = mock.Mock()
         self.qos_driver.br_int.get_egress_bw_limit_for_port = mock.Mock(

@@ -13,14 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from neutron_lib import constants
+from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_serialization import jsonutils
 import six
 
-from neutron.common import constants
-from neutron.common import exceptions
+from neutron.common import constants as n_const
 from neutron.common import utils
 from neutron import context as neutron_context
 from neutron.db import api as db_api
@@ -89,11 +90,6 @@ class L3RpcCallback(object):
         context = neutron_context.get_admin_context()
         if utils.is_extension_supported(
             self.l3plugin, constants.L3_AGENT_SCHEDULER_EXT_ALIAS):
-            # only auto schedule routers that were specifically requested;
-            # on agent full sync routers will be auto scheduled in
-            # get_router_ids()
-            if cfg.CONF.router_auto_schedule and router_ids:
-                self.l3plugin.auto_schedule_routers(context, host, router_ids)
             routers = (
                 self.l3plugin.list_active_sync_routers_on_active_l3_agent(
                     context, host, router_ids))
@@ -119,10 +115,11 @@ class L3RpcCallback(object):
                                               gw_port_host,
                                               router.get('gw_port'),
                                               router['id'])
-                for p in router.get(constants.SNAT_ROUTER_INTF_KEY, []):
+                for p in router.get(n_const.SNAT_ROUTER_INTF_KEY, []):
                     self._ensure_host_set_on_port(
                         context, gw_port_host, p, router['id'],
                         ha_router_port=router.get('ha'))
+
             else:
                 self._ensure_host_set_on_port(
                     context, host,
@@ -196,8 +193,8 @@ class L3RpcCallback(object):
             # Ports that are DVR interfaces have multiple bindings (based on
             # of hosts on which DVR router interfaces are spawned). Such
             # bindings are created/updated here by invoking
-            # update_dvr_port_binding
-            self.plugin.update_dvr_port_binding(context, port['id'],
+            # update_distributed_port_binding
+            self.plugin.update_distributed_port_binding(context, port['id'],
                                                 {'port':
                                                  {portbindings.HOST_ID: host,
                                                   'device_id': router_id}

@@ -18,13 +18,13 @@ import copy
 import datetime
 import mock
 
+from neutron_lib import constants
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_db import exception as exc
 from oslo_utils import timeutils
 import testscenarios
 
-from neutron.common import constants
-from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import db_base_plugin_v2 as base_plugin
@@ -228,14 +228,14 @@ class TestAgentsDbMixin(TestAgentsDbBase):
         cfg = self.plugin.get_configuration_dict(db_obj)
         self.assertIn('cfg', cfg)
 
-    def test__get_agents_resource_versions(self):
+    def test_get_agents_resource_versions(self):
         tracker = mock.Mock()
         self._create_and_save_agents(
             ['host-%d' % i for i in range(5)],
             constants.AGENT_TYPE_L3,
             down_agents_count=3,
             down_but_version_considered=2)
-        self.plugin._get_agents_resource_versions(tracker)
+        self.plugin.get_agents_resource_versions(tracker)
         self.assertEqual(tracker.set_versions.call_count, 2)
 
 

@@ -16,8 +16,7 @@ from oslo_log import log as logging
 import pecan
 from pecan import request
 
-from neutron.api import api_common
-from neutron.i18n import _LW
+from neutron._i18n import _LW
 from neutron import manager
 from neutron.pecan_wsgi.controllers import utils
 
@@ -27,18 +26,21 @@ LOG = logging.getLogger(__name__)
 
 class ItemController(utils.NeutronPecanController):
 
-    def __init__(self, resource, item):
-        super(ItemController, self).__init__(None, resource)
+    def __init__(self, resource, item, plugin=None, resource_info=None):
+        super(ItemController, self).__init__(None, resource, plugin=plugin,
+                                             resource_info=resource_info)
         self.item = item
 
     @utils.expose(generic=True)
     def index(self, *args, **kwargs):
-        return self.get()
+        return self.get(*args, **kwargs)
 
     def get(self, *args, **kwargs):
         getter = getattr(self.plugin, 'get_%s' % self.resource)
         neutron_context = request.context['neutron_context']
-        return {self.resource: getter(neutron_context, self.item)}
+        fields = request.context['query_params'].get('fields')
+        return {self.resource: getter(neutron_context, self.item,
+                                      fields=fields)}
 
     @utils.when(index, method='HEAD')
     @utils.when(index, method='POST')
@@ -87,26 +89,22 @@ class CollectionsController(utils.NeutronPecanController):
         request.context['resource_id'] = item
         uri_identifier = '%s_id' % self.resource
         request.context['uri_identifiers'][uri_identifier] = item
-        return self.item_controller_class(self.resource, item), remainder
+        return (self.item_controller_class(
+            self.resource, item, resource_info=self.resource_info),
+                remainder)
 
     @utils.expose(generic=True)
     def index(self, *args, **kwargs):
         return self.get(*args, **kwargs)
 
     def get(self, *args, **kwargs):
-        # list request
-        # TODO(kevinbenton): use user-provided fields in call to plugin
-        # after making sure policy enforced fields remain
-        kwargs.pop('fields', None)
-        _listify = lambda x: x if isinstance(x, list) else [x]
-        filters = api_common.get_filters_from_dict(
-            {k: _listify(v) for k, v in kwargs.items()},
-            self._resource_info,
-            skips=['fields', 'sort_key', 'sort_dir',
-                   'limit', 'marker', 'page_reverse'])
+        # NOTE(blogan): these are set in the FieldsAndFiltersHoook
+        fields = request.context['query_params'].get('fields')
+        filters = request.context['query_params'].get('filters')
         lister = getattr(self.plugin, 'get_%s' % self.collection)
         neutron_context = request.context['neutron_context']
-        return {self.collection: lister(neutron_context, filters=filters)}
+        return {self.collection: lister(neutron_context,
+                fields=fields, filters=filters)}
 
     @utils.when(index, method='HEAD')
     @utils.when(index, method='PATCH')

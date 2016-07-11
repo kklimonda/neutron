@@ -15,6 +15,7 @@
 import datetime
 import time
 
+from neutron_lib import exceptions as n_exc
 from oslo_log import log
 from oslo_utils import timeutils
 from sqlalchemy import event
@@ -22,10 +23,11 @@ from sqlalchemy import exc as sql_exc
 from sqlalchemy.orm import session as se
 
 from neutron._i18n import _LW
-from neutron.common import exceptions as n_exc
 from neutron.db import model_base
 
 LOG = log.getLogger(__name__)
+
+CHANGED_SINCE = 'changed_since'
 
 
 class TimeStamp_db_mixin(object):
@@ -39,18 +41,18 @@ class TimeStamp_db_mixin(object):
         # And translate it from string to datetime type.
         # Then compare with the timestamp in db which has
         # datetime type.
-        values = filters and filters.get('changed_since', [])
+        values = filters and filters.get(CHANGED_SINCE, [])
         if not values:
             return query
-        data = filters['changed_since'][0]
+        data = filters[CHANGED_SINCE][0]
         try:
             # this block checks queried timestamp format.
             datetime.datetime.fromtimestamp(time.mktime(
                 time.strptime(data,
                               self.ISO8601_TIME_FORMAT)))
         except Exception:
-            msg = _LW("The input changed_since must be in the "
-                      "following format: YYYY-MM-DDTHH:MM:SS")
+            msg = _LW("The input %s must be in the "
+                      "following format: YYYY-MM-DDTHH:MM:SS") % CHANGED_SINCE
             raise n_exc.InvalidInput(error_message=msg)
         changed_since_string = timeutils.parse_isotime(data)
         changed_since = (timeutils.
@@ -70,7 +72,7 @@ class TimeStamp_db_mixin(object):
             obj = objs_list.pop()
             if (isinstance(obj, model_base.HasStandardAttributes)
                 and obj.standard_attr_id):
-                obj.standard_attr.updated_at = timeutils.utcnow()
+                obj.updated_at = timeutils.utcnow()
 
     def register_db_events(self):
         event.listen(model_base.StandardAttribute, 'before_insert',
@@ -91,15 +93,15 @@ class TimeStamp_db_mixin(object):
                         listen_obj)
 
     def _format_timestamp(self, resource_db, result):
-        result['created_at'] = (resource_db.standard_attr.created_at.
+        result['created_at'] = (resource_db.created_at.
                                 strftime(self.ISO8601_TIME_FORMAT))
-        result['updated_at'] = (resource_db.standard_attr.updated_at.
+        result['updated_at'] = (resource_db.updated_at.
                                 strftime(self.ISO8601_TIME_FORMAT))
 
     def extend_resource_dict_timestamp(self, plugin_obj,
                                        resource_res, resource_db):
-        if (resource_db and resource_db.standard_attr.created_at and
-                resource_db.standard_attr.updated_at):
+        if (resource_db and resource_db.created_at and
+                resource_db.updated_at):
             self._format_timestamp(resource_db, resource_res)
 
     def _add_timestamp(self, mapper, _conn, target):

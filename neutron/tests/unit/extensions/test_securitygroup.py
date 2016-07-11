@@ -16,18 +16,21 @@
 import contextlib
 
 import mock
+from neutron_lib.api import validators
+from neutron_lib import constants as const
+from oslo_config import cfg
 import oslo_db.exception as exc
 import six
 import testtools
 import webob.exc
 
 from neutron.api.v2 import attributes as attr
-from neutron.common import constants as const
 from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import db_base_plugin_v2
 from neutron.db import securitygroups_db
 from neutron.extensions import securitygroup as ext_sg
+from neutron.extensions import standardattrdescription
 from neutron import manager
 from neutron.tests import base
 from neutron.tests.unit.db import test_db_base_plugin_v2
@@ -39,6 +42,17 @@ DB_PLUGIN_KLASS = ('neutron.tests.unit.extensions.test_securitygroup.'
 class SecurityGroupTestExtensionManager(object):
 
     def get_resources(self):
+        # The description of security_group_rules will be added by extending
+        # standardattrdescription. But as API router will not be initialized
+        # in test code, manually add it.
+        if (ext_sg.SECURITYGROUPRULES in
+                standardattrdescription.EXTENDED_ATTRIBUTES_2_0):
+            existing_sg_rule_attr_map = (
+                ext_sg.RESOURCE_ATTRIBUTE_MAP[ext_sg.SECURITYGROUPRULES])
+            sg_rule_attr_desc = (
+                standardattrdescription.
+                EXTENDED_ATTRIBUTES_2_0[ext_sg.SECURITYGROUPRULES])
+            existing_sg_rule_attr_map.update(sg_rule_attr_desc)
         # Add the resources to the global attribute map
         # This is done here as the setup process won't
         # initialize the main API router which extends
@@ -58,10 +72,12 @@ class SecurityGroupsTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
     def _create_security_group(self, fmt, name, description, **kwargs):
 
-        data = {'security_group': {'name': name,
-                                   'tenant_id': kwargs.get('tenant_id',
-                                                           'test-tenant'),
-                                   'description': description}}
+        data = {
+            'security_group': {
+                'name': name,
+                'tenant_id': kwargs.get('tenant_id',
+                                        test_db_base_plugin_v2.TEST_TENANT_ID),
+                'description': description}}
         security_group_req = self.new_create_request('security-groups', data,
                                                      fmt)
         if (kwargs.get('set_context') and 'tenant_id' in kwargs):
@@ -70,11 +86,12 @@ class SecurityGroupsTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                 context.Context('', kwargs['tenant_id']))
         return security_group_req.get_response(self.ext_api)
 
-    def _build_security_group_rule(self, security_group_id, direction, proto,
-                                   port_range_min=None, port_range_max=None,
-                                   remote_ip_prefix=None, remote_group_id=None,
-                                   tenant_id='test-tenant',
-                                   ethertype=const.IPv4):
+    def _build_security_group_rule(
+            self, security_group_id, direction, proto,
+            port_range_min=None, port_range_max=None,
+            remote_ip_prefix=None, remote_group_id=None,
+            tenant_id=test_db_base_plugin_v2.TEST_TENANT_ID,
+            ethertype=const.IPv4):
 
         data = {'security_group_rule': {'security_group_id': security_group_id,
                                         'direction': direction,
@@ -179,7 +196,7 @@ class SecurityGroupTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
     def create_port(self, context, port):
         tenant_id = port['port']['tenant_id']
         default_sg = self._ensure_default_security_group(context, tenant_id)
-        if not attr.is_attr_set(port['port'].get(ext_sg.SECURITYGROUPS)):
+        if not validators.is_attr_set(port['port'].get(ext_sg.SECURITYGROUPS)):
             port['port'][ext_sg.SECURITYGROUPS] = [default_sg]
         session = context.session
         with session.begin(subtransactions=True):
@@ -606,13 +623,15 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
         with self.network():
             res = self.new_list_request('security-groups')
             sg = self.deserialize(self.fmt, res.get_response(self.ext_api))
-            neutron_context = context.Context('', 'test-tenant')
+            neutron_context = context.Context(
+                '', test_db_base_plugin_v2.TEST_TENANT_ID)
             self._delete('security-groups', sg['security_groups'][0]['id'],
                          webob.exc.HTTPConflict.code,
                          neutron_context=neutron_context)
 
     def test_security_group_list_creates_default_security_group(self):
-        neutron_context = context.Context('', 'test-tenant')
+        neutron_context = context.Context(
+            '', test_db_base_plugin_v2.TEST_TENANT_ID)
         sg = self._list('security-groups',
                         neutron_context=neutron_context).get('security_groups')
         self.assertEqual(1, len(sg))
@@ -972,6 +991,22 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                 rule = self._build_security_group_rule(
                     sg['security_group']['id'], 'ingress',
                     const.PROTO_NAME_TCP, '22', '22')
+                res = self._create_security_group_rule(self.fmt, rule)
+                self.deserialize(self.fmt, res)
+                self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
+                self.assertIn(sgr['security_group_rule']['id'],
+                              res.json['NeutronError']['message'])
+
+    def test_create_security_group_rule_duplicate_rules_diff_desc(self):
+        name = 'webservers'
+        description = 'my webservers'
+        with self.security_group(name, description) as sg:
+            security_group_id = sg['security_group']['id']
+            with self.security_group_rule(security_group_id) as sgr:
+                rule = self._build_security_group_rule(
+                    sg['security_group']['id'], 'ingress',
+                    const.PROTO_NAME_TCP, '22', '22')
+                rule['security_group_rule']['description'] = "description"
                 res = self._create_security_group_rule(self.fmt, rule)
                 self.deserialize(self.fmt, res)
                 self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
@@ -1406,7 +1441,7 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
             rule = {'security_group_id': sg['security_group']['id'],
                     'direction': 'ingress',
                     'ethertype': const.IPv4,
-                    'tenant_id': 'test-tenant'}
+                    'tenant_id': test_db_base_plugin_v2.TEST_TENANT_ID}
 
             res = self._create_security_group_rule(
                 self.fmt, {'security_group_rule': rule})
@@ -1421,11 +1456,11 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
             rule_v4 = {'security_group_id': sg['security_group']['id'],
                        'direction': 'ingress',
                        'ethertype': const.IPv4,
-                       'tenant_id': 'test-tenant'}
+                       'tenant_id': test_db_base_plugin_v2.TEST_TENANT_ID}
             rule_v6 = {'security_group_id': sg['security_group']['id'],
                        'direction': 'ingress',
                        'ethertype': const.IPv6,
-                       'tenant_id': 'test-tenant'}
+                       'tenant_id': test_db_base_plugin_v2.TEST_TENANT_ID}
 
             rules = {'security_group_rules': [rule_v4, rule_v6]}
             res = self._create_security_group_rule(self.fmt, rules)
@@ -1504,6 +1539,39 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                 res = self._create_security_group_rule(self.fmt, rule)
                 self.deserialize(self.fmt, res)
                 self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
+
+    def test_create_security_groups_native_quotas(self):
+        quota = 1
+        cfg.CONF.set_override('quota_security_group', quota, group='QUOTAS')
+        name = 'quota_test'
+        description = 'quota_test'
+        res = self._create_security_group(self.fmt, name, description)
+        self.assertEqual(webob.exc.HTTPCreated.code, res.status_int)
+        res = self._create_security_group(self.fmt, name, description)
+        self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
+
+    def test_create_security_group_rules_native_quotas(self):
+        name = 'quota_test'
+        description = 'quota_test'
+        with self.security_group(name, description) as sg:
+            # avoid the number of default security group rules
+            sgr = self._list('security-group-rules').get(
+                'security_group_rules')
+            quota = len(sgr) + 1
+            cfg.CONF.set_override(
+                'quota_security_group_rule', quota, group='QUOTAS')
+
+            security_group_id = sg['security_group']['id']
+            rule = self._build_security_group_rule(
+                security_group_id, 'ingress',
+                const.PROTO_NAME_TCP, '22', '22')
+            res = self._create_security_group_rule(self.fmt, rule)
+            self.assertEqual(webob.exc.HTTPCreated.code, res.status_int)
+            rule = self._build_security_group_rule(
+                security_group_id, 'egress',
+                const.PROTO_NAME_TCP, '22', '22')
+            res = self._create_security_group_rule(self.fmt, rule)
+            self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
 
     def test_create_security_group_rule_different_security_group_ids(self):
         if self._skip_native_bulk:
@@ -1587,7 +1655,8 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                 self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
 
     def test_create_security_group_rule_with_specific_id(self):
-        neutron_context = context.Context('', 'test-tenant')
+        neutron_context = context.Context(
+            '', test_db_base_plugin_v2.TEST_TENANT_ID)
         specified_id = "4cd70774-cc67-4a87-9b39-7d1db38eb087"
         with self.security_group() as sg:
             rule = self._build_security_group_rule(
