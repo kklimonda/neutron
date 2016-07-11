@@ -1,4 +1,4 @@
-neutron (2:8.1.3~dev9-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:8.1.3~dev44-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * New upstream version.
@@ -8,7 +8,7 @@ neutron (2:8.1.3~dev9-0ubuntu1) UNRELEASED; urgency=medium
   [ James Page ]
   * New upstream version.
 
- -- James Page <james.page@ubuntu.com>  Tue, 21 Jun 2016 09:39:52 +0100
+ -- Corey Bryant <corey.bryant@canonical.com>  Mon, 11 Jul 2016 15:32:41 -0400
 
 neutron (2:8.1.2-0ubuntu1) xenial; urgency=medium
 
