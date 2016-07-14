@@ -152,7 +152,6 @@ neutron/agent/common/polling.py
 neutron/agent/common/utils.py
 neutron/agent/dhcp/__init__.py
 neutron/agent/dhcp/agent.py
-neutron/agent/dhcp/config.py
 neutron/agent/l2/__init__.py
 neutron/agent/l2/agent_extension.py
 neutron/agent/l2/extensions/__init__.py
@@ -308,6 +307,8 @@ neutron/common/utils.py
 neutron/conf/__init__.py
 neutron/conf/quota.py
 neutron/conf/service.py
+neutron/conf/agent/__init__.py
+neutron/conf/agent/dhcp.py
 neutron/core_extensions/__init__.py
 neutron/core_extensions/base.py
 neutron/core_extensions/qos.py
@@ -486,6 +487,7 @@ neutron/extensions/external_net.py
 neutron/extensions/extra_dhcp_opt.py
 neutron/extensions/extraroute.py
 neutron/extensions/flavors.py
+neutron/extensions/ip_allocation.py
 neutron/extensions/l3.py
 neutron/extensions/l3_ext_gw_mode.py
 neutron/extensions/l3_ext_ha_mode.py
@@ -1095,6 +1097,7 @@ neutron/tests/unit/db/test_l3_db.py
 neutron/tests/unit/db/test_l3_dvr_db.py
 neutron/tests/unit/db/test_l3_hamode_db.py
 neutron/tests/unit/db/test_migration.py
+neutron/tests/unit/db/test_model_base.py
 neutron/tests/unit/db/test_portsecurity_db.py
 neutron/tests/unit/db/test_portsecurity_db_common.py
 neutron/tests/unit/db/test_provisioning_blocks.py
