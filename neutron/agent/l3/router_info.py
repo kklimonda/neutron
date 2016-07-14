@@ -50,6 +50,7 @@ class RouterInfo(object):
         self.router_id = router_id
         self.ex_gw_port = None
         self._snat_enabled = None
+        self.fip_map = {}
         self.internal_ports = []
         self.floating_ips = set()
         # Invoke the setter for establishing initial SNAT action
@@ -277,6 +278,9 @@ class RouterInfo(object):
     def remove_floating_ip(self, device, ip_cidr):
         device.delete_addr_and_conntrack_state(ip_cidr)
 
+    def move_floating_ip(self, fip):
+        return l3_constants.FLOATINGIP_STATUS_ACTIVE
+
     def remove_external_gateway_ip(self, device, ip_cidr):
         device.delete_addr_and_conntrack_state(ip_cidr)
 
@@ -313,6 +317,13 @@ class RouterInfo(object):
                 LOG.debug('Floating ip %(id)s added, status %(status)s',
                           {'id': fip['id'],
                            'status': fip_statuses.get(fip['id'])})
+            elif (fip_ip in self.fip_map and
+                  self.fip_map[fip_ip] != fip['fixed_ip_address']):
+                LOG.debug("Floating IP was moved from fixed IP "
+                          "%(old)s to %(new)s",
+                          {'old': self.fip_map[fip_ip],
+                           'new': fip['fixed_ip_address']})
+                fip_statuses[fip['id']] = self.move_floating_ip(fip)
             elif fip_statuses[fip['id']] == fip['status']:
                 # mark the status as not changed. we can't remove it because
                 # that's how the caller determines that it was removed
@@ -615,7 +626,15 @@ class RouterInfo(object):
             clean_connections=True)
 
         device = ip_lib.IPDevice(interface_name, namespace=ns_name)
-        for ip in gateway_ips or []:
+        current_gateways = set()
+        for ip_version in (l3_constants.IP_VERSION_4,
+                           l3_constants.IP_VERSION_6):
+            gateway = device.route.get_gateway(ip_version=ip_version)
+            if gateway and gateway.get('gateway'):
+                current_gateways.add(gateway.get('gateway'))
+        for ip in current_gateways - set(gateway_ips):
+            device.route.delete_gateway(ip)
+        for ip in gateway_ips:
             device.route.add_gateway(ip)
 
         if enable_ra_on_gw:
@@ -1021,5 +1040,8 @@ class RouterInfo(object):
 
         # Update ex_gw_port and enable_snat on the router info cache
         self.ex_gw_port = self.get_ex_gw_port()
+        self.fip_map = dict([(fip['floating_ip_address'],
+                              fip['fixed_ip_address'])
+                             for fip in self.get_floating_ips()])
         # TODO(Carl) FWaaS uses this.  Why is it set after processing is done?
         self.enable_snat = self.router.get('enable_snat')
