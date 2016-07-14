@@ -15,6 +15,7 @@
 import mock
 import netaddr
 from neutron_lib import constants
+from neutron_lib import exceptions as n_exc
 from oslo_utils import uuidutils
 import webob.exc
 
@@ -320,6 +321,11 @@ class HostSegmentMappingTestCase(SegmentTestCase):
 
 class TestMl2HostSegmentMappingNoAgent(HostSegmentMappingTestCase):
 
+    def setUp(self, plugin=None):
+        if not plugin:
+            plugin = TEST_PLUGIN_KLASS
+        super(TestMl2HostSegmentMappingNoAgent, self).setUp(plugin=plugin)
+
     def test_update_segment_host_mapping(self):
         ctx = context.get_admin_context()
         host = 'host1'
@@ -340,6 +346,18 @@ class TestMl2HostSegmentMappingNoAgent(HostSegmentMappingTestCase):
         self.assertEqual(segment['id'],
                          segments_host_db[segment['id']]['segment_id'])
         self.assertEqual(host, segments_host_db[segment['id']]['host'])
+
+    def test_map_segment_to_hosts(self):
+        ctx = context.get_admin_context()
+        hosts = {'host1', 'host2', 'host3'}
+        with self.network() as network:
+            network = network['network']
+        segment = self._test_create_segment(
+            network_id=network['id'], physical_network='phys_net1',
+            segmentation_id=200, network_type=p_constants.TYPE_VLAN)['segment']
+        db.map_segment_to_hosts(ctx, segment['id'], hosts)
+        updated_segment = self.plugin.get_segment(ctx, segment['id'])
+        self.assertEqual(hosts, set(updated_segment['hosts']))
 
 
 class TestMl2HostSegmentMappingOVS(HostSegmentMappingTestCase):
@@ -969,6 +987,35 @@ class TestSegmentAwareIpam(SegmentTestCase):
         # Since port is bound and there is a mapping to segment, it succeeds.
         self.assertEqual(webob.exc.HTTPOk.code, response.status_int)
         self._assert_one_ip_in_subnet(response, subnet['subnet']['cidr'])
+
+    def test_port_update_deferred_allocation_no_ips(self):
+        """Binding information is provided on update, subnets on segments"""
+        network, segments, subnets = self._create_test_segments_with_subnets(2)
+
+        self._setup_host_mappings([(segments[0]['segment']['id'], 'fakehost2'),
+                                   (segments[1]['segment']['id'], 'fakehost')])
+
+        port = self._create_deferred_ip_port(network)
+
+        # Update the subnet on the second segment to be out of IPs
+        subnet_data = {'subnet': {'allocation_pools': []}}
+        subnet_req = self.new_update_request('subnets',
+                                             subnet_data,
+                                             subnets[1]['subnet']['id'])
+        subnet_response = subnet_req.get_response(self.api)
+        res = self.deserialize(self.fmt, subnet_response)
+
+        # Try requesting an IP (but the subnet ran out of ips)
+        data = {'port': {portbindings.HOST_ID: 'fakehost'}}
+        port_id = port['port']['id']
+        port_req = self.new_update_request('ports', data, port_id)
+        response = port_req.get_response(self.api)
+        res = self.deserialize(self.fmt, response)
+
+        # Since port is bound and there is a mapping to segment, it succeeds.
+        self.assertEqual(webob.exc.HTTPConflict.code, response.status_int)
+        self.assertEqual(n_exc.IpAddressGenerationFailure.__name__,
+                         res['NeutronError']['type'])
 
 
 class TestSegmentAwareIpamML2(TestSegmentAwareIpam):
