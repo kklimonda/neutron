@@ -10,6 +10,7 @@ neutron (2:9.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
 
   [ James Page ]
   * New upstream version.
+  * d/control: Align (Build-)Depends with upstream.
 
  -- James Page <james.page@ubuntu.com>  Thu, 14 Jul 2016 11:06:54 +0100
 
