@@ -1,3 +1,10 @@
+neutron (2:9.0.0~b3~dev10-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream version.
+  * d/p/drop-ryu-dep.patch: Rebased.
+
+ -- James Page <james.page@ubuntu.com>  Thu, 14 Jul 2016 11:52:39 +0100
+
 neutron (2:9.0.0~b2-0ubuntu3) yakkety; urgency=medium
 
   * d/neutron-linuxbridge-agent.neutron-linuxbridge-cleanup.init.in:
