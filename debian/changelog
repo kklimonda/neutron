@@ -1,16 +1,17 @@
-neutron (2:9.0.0~b2~dev423-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
-  * New upstream version.
   * d/p/drop-ryu-dep.patch: Rebased.
   * d/control: Bump min python-fixtures to 3.0.0.
 
   [ David Della Vecchia ]
-  * New upstream version.
   * d/p/drop-ryu-dep.patch: Rebased.
   * d/control: Align (build-)depends with upstream.
 
- -- Corey Bryant <corey.bryant@canonical.com>  Mon, 11 Jul 2016 15:52:11 -0400
+  [ James Page ]
+  * New upstream version.
+
+ -- James Page <james.page@ubuntu.com>  Thu, 14 Jul 2016 11:06:54 +0100
 
 neutron (2:9.0.0~b1-0ubuntu1) yakkety; urgency=medium
 
