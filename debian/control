@@ -232,7 +232,6 @@ Depends: alembic (>= 0.8.4),
          python-webob (>= 1.2.3),
          ${misc:Depends},
          ${python:Depends},
-Suggests: python-ryu (>= 3.30),
 Provides: ${python:Provides},
 XB-Python-Version: ${python:Versions}
 Description: Neutron is a virtual network service for Openstack - Python library
