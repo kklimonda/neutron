@@ -57,7 +57,6 @@ from neutron.db import dvr_mac_db
 from neutron.db import external_net_db
 from neutron.db import extradhcpopt_db
 from neutron.db import models_v2
-from neutron.db import netmtu_db
 from neutron.db import provisioning_blocks
 from neutron.db.quota import driver  # noqa
 from neutron.db import securitygroups_db
@@ -67,6 +66,7 @@ from neutron.db import vlantransparent_db
 from neutron.extensions import allowedaddresspairs as addr_pair
 from neutron.extensions import availability_zone as az_ext
 from neutron.extensions import extra_dhcp_opt as edo_ext
+from neutron.extensions import multiprovidernet as mpnet
 from neutron.extensions import portbindings
 from neutron.extensions import portsecurity as psec
 from neutron.extensions import providernet as provider
@@ -103,7 +103,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 addr_pair_db.AllowedAddressPairsMixin,
                 vlantransparent_db.Vlantransparent_db_mixin,
                 extradhcpopt_db.ExtraDhcpOptMixin,
-                netmtu_db.Netmtu_db_mixin,
                 address_scope_db.AddressScopeDbMixin):
 
     """Implement the Neutron L2 abstractions using modules.
@@ -685,6 +684,41 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                'resource_ids': ', '.join(resource_ids)})
                 self._delete_objects(context, resource, objects)
 
+    def _get_network_mtu(self, network):
+        mtus = []
+        try:
+            segments = network[mpnet.SEGMENTS]
+        except KeyError:
+            segments = [network]
+        for s in segments:
+            segment_type = s[provider.NETWORK_TYPE]
+            try:
+                type_driver = self.type_manager.drivers[segment_type].obj
+            except KeyError:
+                # NOTE(ihrachys) This can happen when type driver is not loaded
+                # for an existing segment. While it's probably an indication of
+                # a bad setup, it's better to be safe than sorry here. Also,
+                # several unit tests use non-existent driver types that may
+                # trigger the exception here.
+                LOG.warning(
+                    _LW("Failed to determine MTU for segment "
+                        "%(segment_type)s:%(segment_id)s; network "
+                        "%(network_id)s MTU calculation may be not accurate"),
+                    {
+                        'segment_type': segment_type,
+                        'segment_id': s[provider.SEGMENTATION_ID],
+                        'network_id': network['id'],
+                    }
+                )
+            else:
+                mtu = type_driver.get_mtu(provider.PHYSICAL_NETWORK)
+                # Some drivers, like 'local', may return None; the assumption
+                # then is that for the segment type, MTU has no meaning or
+                # unlimited, and so we should then ignore those values.
+                if mtu:
+                    mtus.append(mtu)
+        return min(mtus) if mtus else 0
+
     def _create_network_db(self, context, network):
         net_data = network[attributes.NETWORK]
         tenant_id = net_data['tenant_id']
@@ -701,13 +735,16 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             self.type_manager.create_network_segments(context, net_data,
                                                       tenant_id)
             self.type_manager.extend_network_dict_provider(context, result)
+            # Update the transparent vlan if configured
+            if utils.is_extension_supported(self, 'vlan-transparent'):
+                vlt = vlantransparent.get_vlan_transparent(net_data)
+                net_db['vlan_transparent'] = vlt
+                result['vlan_transparent'] = vlt
             mech_context = driver_context.NetworkContext(self, context,
                                                          result)
             self.mechanism_manager.create_network_precommit(mech_context)
 
-            if net_data.get(api.MTU, 0) > 0:
-                net_db[api.MTU] = net_data[api.MTU]
-                result[api.MTU] = net_data[api.MTU]
+            result[api.MTU] = self._get_network_mtu(result)
 
             if az_ext.AZ_HINTS in net_data:
                 self.validate_availability_zones(context, 'network',
@@ -717,17 +754,13 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 net_db[az_ext.AZ_HINTS] = az_hints
                 result[az_ext.AZ_HINTS] = az_hints
 
-            # Update the transparent vlan if configured
-            if utils.is_extension_supported(self, 'vlan-transparent'):
-                vlt = vlantransparent.get_vlan_transparent(net_data)
-                net_db['vlan_transparent'] = vlt
-                result['vlan_transparent'] = vlt
-
         self._apply_dict_extend_functions('networks', result, net_db)
         return result, mech_context
 
     def create_network(self, context, network):
         result, mech_context = self._create_network_db(context, network)
+        kwargs = {'context': context, 'network': result}
+        registry.notify(resources.NETWORK, events.AFTER_CREATE, self, **kwargs)
         try:
             self.mechanism_manager.create_network_postcommit(mech_context)
         except ml2_exc.MechanismDriverError:
@@ -758,6 +791,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             self.type_manager.extend_network_dict_provider(context,
                                                            updated_network)
 
+            updated_network[api.MTU] = self._get_network_mtu(updated_network)
+
             # TODO(QoS): Move out to the extension framework somehow.
             need_network_update_notify = (
                 qos_consts.QOS_POLICY_ID in net_data and
@@ -773,6 +808,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         # by re-calling update_network with the previous attributes. For
         # now the error is propagated to the caller, which is expected to
         # either undo/retry the operation or delete the resource.
+        kwargs = {'context': context, 'network': updated_network,
+                  'original_network': original_network}
+        registry.notify(resources.NETWORK, events.AFTER_UPDATE, self, **kwargs)
         self.mechanism_manager.update_network_postcommit(mech_context)
         if need_network_update_notify:
             self.notifier.network_update(context, updated_network)
@@ -783,6 +821,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         with session.begin(subtransactions=True):
             result = super(Ml2Plugin, self).get_network(context, id, None)
             self.type_manager.extend_network_dict_provider(context, result)
+            result[api.MTU] = self._get_network_mtu(result)
 
         return self._fields(result, fields)
 
@@ -796,6 +835,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             self.type_manager.extend_networks_dict_provider(context, nets)
 
             nets = self._filter_nets_provider(context, nets, filters)
+
+            for net in nets:
+                net[api.MTU] = self._get_network_mtu(net)
 
         return [self._fields(net, fields) for net in nets]
 
@@ -899,6 +941,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             self._delete_ports(context, port_ids)
             self._delete_subnets(context, subnet_ids)
 
+        kwargs = {'context': context, 'network': network}
+        registry.notify(resources.NETWORK, events.AFTER_DELETE, self, **kwargs)
         try:
             self.mechanism_manager.delete_network_postcommit(mech_context)
         except ml2_exc.MechanismDriverError:
@@ -924,6 +968,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
     def create_subnet(self, context, subnet):
         result, mech_context = self._create_subnet_db(context, subnet)
+        kwargs = {'context': context, 'subnet': result}
+        registry.notify(resources.SUBNET, events.AFTER_CREATE, self, **kwargs)
         try:
             self.mechanism_manager.create_subnet_postcommit(mech_context)
         except ml2_exc.MechanismDriverError:
@@ -955,6 +1001,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         # by re-calling update_subnet with the previous attributes. For
         # now the error is propagated to the caller, which is expected to
         # either undo/retry the operation or delete the resource.
+        kwargs = {'context': context, 'subnet': updated_subnet,
+                  'original_subnet': original_subnet}
+        registry.notify(resources.SUBNET, events.AFTER_UPDATE, self, **kwargs)
         self.mechanism_manager.update_subnet_postcommit(mech_context)
         return updated_subnet
 
@@ -1056,11 +1105,17 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 if a.port:
                     # calling update_port() for each allocation to remove the
                     # IP from the port and call the MechanismDrivers
-                    data = {attributes.PORT:
-                            {'fixed_ips': [{'subnet_id': ip.subnet_id,
-                                            'ip_address': ip.ip_address}
-                                           for ip in a.port.fixed_ips
-                                           if ip.subnet_id != id]}}
+                    fixed_ips = [{'subnet_id': ip.subnet_id,
+                                  'ip_address': ip.ip_address}
+                                 for ip in a.port.fixed_ips
+                                 if ip.subnet_id != id]
+                    # By default auto-addressed ips are not removed from port
+                    # on port update, so mark subnet with 'delete_subnet' flag
+                    # to force ip deallocation on port update.
+                    if is_auto_addr_subnet:
+                        fixed_ips.append({'subnet_id': id,
+                                          'delete_subnet': True})
+                    data = {attributes.PORT: {'fixed_ips': fixed_ips}}
                     try:
                         # NOTE Don't inline port_id; needed for PortNotFound.
                         port_id = a.port_id
@@ -1074,6 +1129,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                 e, _LE("Exception deleting fixed_ip from "
                                        "port %s"), port_id)
 
+        kwargs = {'context': context, 'subnet': subnet}
+        registry.notify(resources.SUBNET, events.AFTER_DELETE, self, **kwargs)
         try:
             self.mechanism_manager.delete_subnet_postcommit(mech_context)
         except ml2_exc.MechanismDriverError:
@@ -1103,6 +1160,11 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             raise psec.PortSecurityAndIPRequiredForSecurityGroups()
 
     def _setup_dhcp_agent_provisioning_component(self, context, port):
+        # NOTE(kevinbenton): skipping network ports is a workaround for
+        # the fact that we don't issue dhcp notifications from internal
+        # port creation like router ports and dhcp ports via RPC
+        if utils.is_port_trusted(port):
+            return
         subnet_ids = [f['subnet_id'] for f in port['fixed_ips']]
         if (db.is_dhcp_active_on_any_subnet(context, subnet_ids) and
             any(self.get_configuration_dict(a).get('notifies_port_ready')

@@ -12,32 +12,61 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from tempest.lib.common.utils import test_utils
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 
 from neutron.tests.tempest.api import base
 
 
+def trunks_cleanup(client, trunks):
+    for trunk in trunks:
+        # NOTE(armax): deleting a trunk with subports is permitted, however
+        # for testing purposes it is safer to be explicit and clean all the
+        # resources associated with the trunk beforehand.
+        subports = test_utils.call_and_ignore_notfound_exc(
+            client.get_subports, trunk['id'])
+        if subports:
+            client.remove_subports(
+                trunk['id'], subports['sub_ports'])
+        test_utils.call_and_ignore_notfound_exc(
+            client.delete_trunk, trunk['id'])
+
+
 class TrunkTestJSONBase(base.BaseAdminNetworkTest):
 
-    def _create_trunk_with_network_and_parent(self, subports):
+    extension = 'trunk'
+
+    def setUp(self):
+        self.addCleanup(self.resource_cleanup)
+        super(TrunkTestJSONBase, self).setUp()
+
+    @classmethod
+    def skip_checks(cls):
+        super(TrunkTestJSONBase, cls).skip_checks()
+        if not test.is_extension_enabled(cls.extension, 'network'):
+            msg = "%s extension not enabled." % cls.extension
+            raise cls.skipException(msg)
+
+    @classmethod
+    def resource_setup(cls):
+        super(TrunkTestJSONBase, cls).resource_setup()
+        cls.trunks = []
+
+    @classmethod
+    def resource_cleanup(cls):
+        trunks_cleanup(cls.client, cls.trunks)
+        super(TrunkTestJSONBase, cls).resource_cleanup()
+
+    def _create_trunk_with_network_and_parent(self, subports, **kwargs):
         network = self.create_network()
         parent_port = self.create_port(network)
-        return self.client.create_trunk(parent_port['id'], subports)
+        trunk = self.client.create_trunk(parent_port['id'], subports, **kwargs)
+        self.trunks.append(trunk['trunk'])
+        return trunk
 
 
 class TrunkTestJSON(TrunkTestJSONBase):
-
-    @classmethod
-    @test.requires_ext(extension="trunk", service="network")
-    def resource_setup(cls):
-        super(TrunkTestJSON, cls).resource_setup()
-
-    def tearDown(self):
-        # NOTE(tidwellr) These tests create networks and ports, clean them up
-        # after each test to avoid hitting quota limits
-        self.resource_cleanup()
-        super(TrunkTestJSON, self).tearDown()
 
     @test.idempotent_id('e1a6355c-4768-41f3-9bf8-0f1d192bd501')
     def test_create_trunk_empty_subports_list(self):
@@ -61,6 +90,20 @@ class TrunkTestJSON(TrunkTestJSONBase):
         self.assertEqual(parent_port_id, res['trunk']['port_id'])
         self.client.delete_trunk(trunk_id)
         self.assertRaises(lib_exc.NotFound, self.client.show_trunk, trunk_id)
+
+    @test.idempotent_id('4ce46c22-a2b6-4659-bc5a-0ef2463cab32')
+    def test_create_update_trunk(self):
+        trunk = self._create_trunk_with_network_and_parent(None)
+        trunk_id = trunk['trunk']['id']
+        res = self.client.show_trunk(trunk_id)
+        self.assertTrue(res['trunk']['admin_state_up'])
+        self.assertEqual("", res['trunk']['name'])
+        res = self.client.update_trunk(
+            trunk_id, name='foo', admin_state_up=False)
+        self.assertFalse(res['trunk']['admin_state_up'])
+        self.assertEqual("foo", res['trunk']['name'])
+        # enable the trunk so that it can be managed
+        self.client.update_trunk(trunk_id, admin_state_up=True)
 
     @test.idempotent_id('73365f73-bed6-42cd-960b-ec04e0c99d85')
     def test_list_trunks(self):
@@ -88,6 +131,16 @@ class TrunkTestJSON(TrunkTestJSONBase):
         self.assertEqual(1, len(observed_subports))
         created_subport = observed_subports[0]
         self.assertEqual(subports[0], created_subport)
+
+    @test.idempotent_id('ee5fcead-1abf-483a-bce6-43d1e06d6aa0')
+    def test_delete_trunk_with_subport_is_allowed(self):
+        network = self.create_network()
+        port = self.create_port(network)
+        subports = [{'port_id': port['id'],
+                     'segmentation_type': 'vlan',
+                     'segmentation_id': 2}]
+        trunk = self._create_trunk_with_network_and_parent(subports)
+        self.client.delete_trunk(trunk['trunk']['id'])
 
     @test.idempotent_id('96eea398-a03c-4c3e-a99e-864392c2ca53')
     def test_remove_subport(self):
@@ -136,16 +189,28 @@ class TrunkTestJSON(TrunkTestJSONBase):
 class TrunksSearchCriteriaTest(base.BaseSearchCriteriaTest):
 
     resource = 'trunk'
-    field = 'id'
 
     @classmethod
-    @test.requires_ext(extension="trunk", service="network")
+    def skip_checks(cls):
+        super(TrunksSearchCriteriaTest, cls).skip_checks()
+        if not test.is_extension_enabled('trunk', 'network'):
+            msg = "trunk extension not enabled."
+            raise cls.skipException(msg)
+
+    @classmethod
     def resource_setup(cls):
         super(TrunksSearchCriteriaTest, cls).resource_setup()
+        cls.trunks = []
         net = cls.create_network(network_name='trunk-search-test-net')
         for name in cls.resource_names:
             parent_port = cls.create_port(net)
-            cls.client.create_trunk(parent_port['id'], [])
+            trunk = cls.client.create_trunk(parent_port['id'], [], name=name)
+            cls.trunks.append(trunk['trunk'])
+
+    @classmethod
+    def resource_cleanup(cls):
+        trunks_cleanup(cls.client, cls.trunks)
+        super(TrunksSearchCriteriaTest, cls).resource_cleanup()
 
     @test.idempotent_id('fab73df4-960a-4ae3-87d3-60992b8d3e2d')
     def test_list_sorts_asc(self):

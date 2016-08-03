@@ -17,9 +17,8 @@ import operator
 from keystoneauth1 import loading as ks_loading
 from oslo_config import cfg
 
+import neutron.agent.agent_extensions_manager
 import neutron.agent.common.config
-import neutron.agent.common.ovs_lib
-import neutron.agent.l2.extensions.manager
 import neutron.agent.l3.config
 import neutron.agent.l3.ha
 import neutron.agent.linux.interface
@@ -30,6 +29,9 @@ import neutron.agent.ovsdb.api
 import neutron.agent.securitygroups_rpc
 import neutron.common.cache_utils
 import neutron.conf.agent.dhcp
+import neutron.conf.agent.l3.config
+import neutron.conf.agent.ovs_conf
+import neutron.conf.common
 import neutron.conf.quota
 import neutron.conf.service
 import neutron.db.agents_db
@@ -129,14 +131,14 @@ def list_opts():
     return [
         ('DEFAULT',
          itertools.chain(
-             neutron.common.config.core_cli_opts,
-             neutron.common.config.core_opts,
+             neutron.conf.common.core_cli_opts,
+             neutron.conf.common.core_opts,
              neutron.wsgi.socket_opts,
              neutron.conf.service.service_opts)
          ),
-        (neutron.common.config.NOVA_CONF_SECTION,
+        (neutron.conf.common.NOVA_CONF_SECTION,
          itertools.chain(
-              neutron.common.config.nova_opts)
+              neutron.conf.common.nova_opts)
          ),
         ('quotas', neutron.conf.quota.core_quota_opts)
     ]
@@ -155,7 +157,7 @@ def list_base_agent_opts():
          itertools.chain(
              neutron.agent.linux.interface.OPTS,
              neutron.agent.common.config.INTERFACE_DRIVER_OPTS,
-             neutron.agent.common.ovs_lib.OPTS)
+             neutron.conf.agent.ovs_conf.OPTS)
          ),
         ('AGENT',
          itertools.chain(
@@ -195,7 +197,7 @@ def list_l3_agent_opts():
     return [
         ('DEFAULT',
          itertools.chain(
-             neutron.agent.l3.config.OPTS,
+             neutron.conf.agent.l3.config.OPTS,
              neutron.conf.service.service_opts,
              neutron.agent.l3.ha.OPTS,
              neutron.agent.linux.pd.OPTS,
@@ -288,7 +290,7 @@ def list_sriov_agent_opts():
          neutron.plugins.ml2.drivers.mech_sriov.agent.common.config.
          sriov_nic_opts),
         ('agent',
-         neutron.agent.l2.extensions.manager.L2_AGENT_EXT_MANAGER_OPTS)
+         neutron.agent.agent_extensions_manager.AGENT_EXT_MANAGER_OPTS)
     ]
 
 

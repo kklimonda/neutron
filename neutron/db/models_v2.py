@@ -96,6 +96,7 @@ class IPAllocation(model_base.BASEV2):
     network_id = sa.Column(sa.String(36), sa.ForeignKey("networks.id",
                                                         ondelete="CASCADE"),
                            nullable=False, primary_key=True)
+    revises_on_change = ('port', )
 
 
 class Route(object):
@@ -129,7 +130,6 @@ class Port(model_base.HasStandardAttributes, model_base.BASEV2,
     device_id = sa.Column(sa.String(attr.DEVICE_ID_MAX_LEN), nullable=False)
     device_owner = sa.Column(sa.String(attr.DEVICE_OWNER_MAX_LEN),
                              nullable=False)
-    dns_name = sa.Column(sa.String(255), nullable=True)
     __table_args__ = (
         sa.Index(
             'ix_ports_network_id_mac_address', 'network_id', 'mac_address'),
@@ -144,8 +144,7 @@ class Port(model_base.HasStandardAttributes, model_base.BASEV2,
 
     def __init__(self, id=None, tenant_id=None, name=None, network_id=None,
                  mac_address=None, admin_state_up=None, status=None,
-                 device_id=None, device_owner=None, fixed_ips=None,
-                 dns_name=None, **kwargs):
+                 device_id=None, device_owner=None, fixed_ips=None, **kwargs):
         super(Port, self).__init__(**kwargs)
         self.id = id
         self.tenant_id = tenant_id
@@ -155,7 +154,6 @@ class Port(model_base.HasStandardAttributes, model_base.BASEV2,
         self.admin_state_up = admin_state_up
         self.device_owner = device_owner
         self.device_id = device_id
-        self.dns_name = dns_name
         # Since this is a relationship only set it if one is passed in.
         if fixed_ips:
             self.fixed_ips = fixed_ips
@@ -275,7 +273,6 @@ class Network(model_base.HasStandardAttributes, model_base.BASEV2,
         lazy="joined")
     status = sa.Column(sa.String(16))
     admin_state_up = sa.Column(sa.Boolean)
-    mtu = sa.Column(sa.Integer, nullable=True)
     vlan_transparent = sa.Column(sa.Boolean, nullable=True)
     rbac_entries = orm.relationship(rbac_db_models.NetworkRBAC,
                                     backref='network', lazy='joined',

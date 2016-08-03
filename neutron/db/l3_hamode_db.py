@@ -36,6 +36,7 @@ from neutron.common import utils as n_utils
 from neutron.db import agents_db
 from neutron.db.availability_zone import router as router_az_db
 from neutron.db import common_db_mixin
+from neutron.db import l3_db
 from neutron.db import l3_dvr_db
 from neutron.db.l3_dvr_db import is_distributed_router
 from neutron.db import model_base
@@ -340,6 +341,10 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
     def _create_ha_port_binding(self, context, router_id, port_id):
         try:
             with context.session.begin():
+                routerportbinding = l3_db.RouterPort(
+                    port_id=port_id, router_id=router_id,
+                    port_type=constants.DEVICE_OWNER_ROUTER_HA_INTF)
+                context.session.add(routerportbinding)
                 portbinding = L3HARouterAgentPortBinding(port_id=port_id,
                                                          router_id=router_id)
                 context.session.add(portbinding)
@@ -452,9 +457,10 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                                        context, router_db.tenant_id)
         dep_creator = functools.partial(self._create_ha_network,
                                         context, router_db.tenant_id)
+        dep_deleter = functools.partial(self._delete_ha_network, context)
         dep_id_attr = 'network_id'
         return n_utils.create_object_with_dependency(
-            creator, dep_getter, dep_creator, dep_id_attr)
+            creator, dep_getter, dep_creator, dep_id_attr, dep_deleter)
 
     def create_router(self, context, router):
         is_ha = self._is_ha(router['router'])
@@ -584,6 +590,12 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             if ha_network:
                 self._delete_vr_id_allocation(
                     context, ha_network, router_db.extra_attributes.ha_vr_id)
+                # NOTE(kevinbenton): normally the ha interfaces should have
+                # been automatically removed by the super delete_router call.
+                # However, that only applies to interfaces created after fix
+                # Ifd3e007aaf2a2ed8123275aa3a9f540838e3c003 which added the
+                # RouterPort relationship to ha interfaces. Legacy interfaces
+                # will be cleaned up by this.
                 self._delete_ha_interfaces(context, router_db.id)
 
                 # always attempt to cleanup the network as the router is
@@ -686,7 +698,15 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                                                     routers_dict.keys(),
                                                     host)
         for binding in bindings:
-            port_dict = self._core_plugin._make_port_dict(binding.port)
+            port = binding.port
+            if not port:
+                # Filter the HA router has no ha port here
+                LOG.info(_LI("HA router %s is missing HA router port "
+                             "bindings. Skipping it."),
+                         binding.router_id)
+                routers_dict.pop(binding.router_id)
+                continue
+            port_dict = self._core_plugin._make_port_dict(port)
 
             router = routers_dict.get(binding.router_id)
             router[constants.HA_INTERFACE_KEY] = port_dict
@@ -697,6 +717,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             if interface:
                 self._populate_mtu_and_subnets_for_ports(context, [interface])
 
+        # Could not filter the HA_INTERFACE_KEY here, because a DVR router
+        # with SNAT HA in DVR compute host also does not have that attribute.
         return list(routers_dict.values())
 
     @log_helpers.log_method_call

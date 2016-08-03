@@ -22,6 +22,7 @@ import mock
 import netaddr
 from neutron_lib import constants as l3_constants
 from neutron_lib import exceptions as exc
+from oslo_config import cfg
 from oslo_log import log
 import oslo_messaging
 from oslo_utils import timeutils
@@ -31,7 +32,6 @@ from testtools import matchers
 
 from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import agent as l3_agent
-from neutron.agent.l3 import config as l3_config
 from neutron.agent.l3 import dvr_edge_router as dvr_router
 from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import ha
@@ -48,9 +48,10 @@ from neutron.agent.linux import pd
 from neutron.agent.linux import ra
 from neutron.agent.metadata import driver as metadata_driver
 from neutron.agent import rpc as agent_rpc
-from neutron.common import config as base_config
 from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
+from neutron.conf.agent.l3 import config as l3_config
+from neutron.conf import common as base_config
 from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_const
 from neutron.tests import base
@@ -71,7 +72,7 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
         self.conf.register_opts(base_config.core_opts)
         log.register_options(self.conf)
         self.conf.register_opts(agent_config.AGENT_STATE_OPTS, 'AGENT')
-        self.conf.register_opts(l3_config.OPTS)
+        l3_config.register_l3_agent_config_opts(l3_config.OPTS, self.conf)
         self.conf.register_opts(ha.OPTS)
         agent_config.register_interface_driver_opts_helper(self.conf)
         agent_config.register_process_monitor_opts(self.conf)
@@ -83,8 +84,7 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
         self.conf.set_override('interface_driver',
                                'neutron.agent.linux.interface.NullDriver')
         self.conf.set_override('send_arp_for_ha', 1)
-        self.conf.set_override('state_path', '/tmp')
-        self.conf.set_override('ra_confs', '/tmp')
+        self.conf.set_override('state_path', cfg.CONF.state_path)
         self.conf.set_override('pd_dhcp_driver', '')
 
         self.device_exists_p = mock.patch(
@@ -878,11 +878,10 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         self.assertEqual(distributed, ri.process_floating_ip_addresses.called)
         self.assertEqual(distributed, ri.process_floating_ip_nat_rules.called)
 
-    @mock.patch('neutron.agent.linux.ip_lib.IPDevice')
-    def _test_process_floating_ip_addresses_add(self, ri, agent, IPDevice):
+    def _test_process_floating_ip_addresses_add(self, ri, agent):
         floating_ips = ri.get_floating_ips()
         fip_id = floating_ips[0]['id']
-        IPDevice.return_value = device = mock.Mock()
+        device = self.mock_ip_dev
         device.addr.list.return_value = []
         ri.iptables_manager.ipv4['nat'] = mock.MagicMock()
         ex_gw_port = {'id': _uuid(), 'network_id': mock.sentinel.ext_net_id}
@@ -2233,8 +2232,6 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         self.assertEqual(tuple(), agent.neutron_service_plugins)
 
     def test_external_gateway_removed_ext_gw_port_no_fip_ns(self):
-        self.conf.set_override('state_path', '/tmp')
-
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         agent.conf.agent_mode = 'dvr_snat'
         router = l3_test_common.prepare_router_data(num_internal_ports=2)
