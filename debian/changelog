@@ -1,11 +1,14 @@
-neutron (2:9.0.0~b3~dev10-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.0.0~b3~dev207-0ubuntu1) UNRELEASED; urgency=medium
 
+  [ James Page ]
   * New upstream version.
-  * d/control: Add runtime dependency on python-ryu, now used as the default
-    openflow manager for the ML2/Open vSwitch agent.
-  * d/p/drop-ryu-dep.patch: Dropped, as we need ryu now for normal operation.
 
- -- James Page <james.page@ubuntu.com>  Thu, 14 Jul 2016 11:52:39 +0100
+  [ Corey Bryant ]
+  * New upstream version.
+  * d/neutron-linuxbridge-agent.neutron-linuxbridge-cleanup.service.in:
+    Fix Type=oneshot typo (LP: #1606652).
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Fri, 05 Aug 2016 14:02:07 -0400
 
 neutron (2:9.0.0~b2-0ubuntu3) yakkety; urgency=medium
 
