@@ -15,12 +15,12 @@
 import mock
 import netaddr
 from neutron_lib import constants as l3_constants
+from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import uuidutils
 
 from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import agent as l3_agent
-from neutron.agent.l3 import config as l3_config
 from neutron.agent.l3 import dvr_local_router as dvr_router
 from neutron.agent.l3 import ha
 from neutron.agent.l3 import link_local_allocator as lla
@@ -28,9 +28,10 @@ from neutron.agent.l3 import router_info
 from neutron.agent.linux import external_process
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
-from neutron.common import config as base_config
 from neutron.common import constants as n_const
 from neutron.common import utils as common_utils
+from neutron.conf.agent.l3 import config as l3_config
+from neutron.conf import common as base_config
 from neutron.extensions import portbindings
 from neutron.tests import base
 from neutron.tests.common import l3_test_common
@@ -49,7 +50,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.conf.register_opts(base_config.core_opts)
         log.register_options(self.conf)
         self.conf.register_opts(agent_config.AGENT_STATE_OPTS, 'AGENT')
-        self.conf.register_opts(l3_config.OPTS)
+        l3_config.register_l3_agent_config_opts(l3_config.OPTS, self.conf)
         self.conf.register_opts(ha.OPTS)
         agent_config.register_interface_driver_opts_helper(self.conf)
         agent_config.register_process_monitor_opts(self.conf)
@@ -58,7 +59,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.conf.set_override('interface_driver',
                                'neutron.agent.linux.interface.NullDriver')
         self.conf.set_override('send_arp_for_ha', 1)
-        self.conf.set_override('state_path', '')
+        self.conf.set_override('state_path', cfg.CONF.state_path)
 
         self.device_exists_p = mock.patch(
             'neutron.agent.linux.ip_lib.device_exists')
@@ -600,8 +601,6 @@ class TestDvrRouterOperations(base.BaseTestCase):
                                                  'dvr', 0)
 
     def test_external_gateway_removed_ext_gw_port_and_fip(self):
-        self.conf.set_override('state_path', '/tmp')
-
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         agent.conf.agent_mode = 'dvr'
         router = l3_test_common.prepare_router_data(num_internal_ports=2)

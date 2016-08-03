@@ -101,7 +101,7 @@ class Controller(object):
                 LOG.info(_LI("Allow sorting is enabled because native "
                              "pagination requires native sorting"))
                 self._allow_sorting = True
-
+        self.parent = parent
         if parent:
             self._parent_id_name = '%s_id' % parent['member_name']
             parent_part = '_%s' % parent['member_name']
@@ -128,14 +128,10 @@ class Controller(object):
         return getattr(self._plugin, native_bulk_attr_name, False)
 
     def _is_native_pagination_supported(self):
-        native_pagination_attr_name = ("_%s__native_pagination_support"
-                                       % self._plugin.__class__.__name__)
-        return getattr(self._plugin, native_pagination_attr_name, False)
+        return api_common.is_native_pagination_supported(self._plugin)
 
     def _is_native_sorting_supported(self):
-        native_sorting_attr_name = ("_%s__native_sorting_support"
-                                    % self._plugin.__class__.__name__)
-        return getattr(self._plugin, native_sorting_attr_name, False)
+        return api_common.is_native_sorting_supported(self._plugin)
 
     def _exclude_attributes_by_policy(self, context, data):
         """Identifies attributes to exclude according to authZ policies.
@@ -550,10 +546,12 @@ class Controller(object):
         # usage trackers as dirty
         resource_registry.set_resources_dirty(request.context)
         notifier_method = self._resource + '.delete.end'
+        result = {self._resource: self._view(request.context, obj)}
+        notifier_payload = {self._resource + '_id': id}
+        notifier_payload.update(result)
         self._notifier.info(request.context,
                             notifier_method,
-                            {self._resource + '_id': id})
-        result = {self._resource: self._view(request.context, obj)}
+                            notifier_payload)
         registry.notify(self._resource, events.BEFORE_RESPONSE, self,
                         context=request.context, data=result,
                         method_name=notifier_method, action=action,

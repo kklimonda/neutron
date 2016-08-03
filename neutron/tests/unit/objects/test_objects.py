@@ -30,18 +30,19 @@ object_data = {
     'DNSNameServer': '1.0-bf87a85327e2d812d1666ede99d9918b',
     'ExtraDhcpOpt': '1.0-632f689cbeb36328995a7aed1d0a78d3',
     'IPAllocationPool': '1.0-371016a6480ed0b4299319cb46d9215d',
-    'PortSecurity': '1.0-cf5b382a0112080ec4e0f23f697c7ab2',
+    'NetworkPortSecurity': '1.0-b30802391a87945ee9c07582b4ff95e3',
+    'PortSecurity': '1.0-b30802391a87945ee9c07582b4ff95e3',
     'AllowedAddressPair': '1.0-9f9186b6f952fbf31d257b0458b852c0',
     'QosBandwidthLimitRule': '1.1-4e44a8f5c2895ab1278399f87b40a13d',
     'QosDscpMarkingRule': '1.1-0313c6554b34fd10c753cb63d638256c',
     'QosRuleType': '1.1-8a53fef4c6a43839d477a85b787d22ce',
     'QosPolicy': '1.1-7c5659e1c1f64395223592d3d3293e22',
     'Route': '1.0-a9883a63b416126f9e345523ec09483b',
-    'Subnet': '1.0-3737cdae6fe084d0ea5e191ec64e806a',
+    'Subnet': '1.0-b71e720f45fff2a39759940e010be7d1',
     'SubnetPool': '1.0-e8300bfbc4762cc88a7f6205b52da2f8',
     'SubnetPoolPrefix': '1.0-13c15144135eb869faa4a76dc3ee3b6c',
     'SubPort': '1.0-72c8471068db1f0491b5480fe49b52bb',
-    'Trunk': '1.0-ee3f16ebc40c16bda7be6dcd963895cc',
+    'Trunk': '1.0-80ebebb57f2b0dbb510f84d91421ed10',
 }
 
 
@@ -59,8 +60,8 @@ class TestObjectVersions(test_base.BaseTestCase):
         fingerprints = checker.get_hashes()
 
         if os.getenv('GENERATE_HASHES'):
-            file('object_hashes.txt', 'w').write(
-                pprint.pformat(fingerprints))
+            with open('object_hashes.txt', 'w') as hashes_file:
+                hashes_file.write(pprint.pformat(fingerprints))
 
         expected, actual = checker.test_hashes(object_data)
         self.assertEqual(expected, actual,

@@ -97,6 +97,7 @@ neutron.services.firewall.fwaas_plugin.FirewallPlugin = neutron_fwaas.services.f
 neutron.services.loadbalancer.plugin.LoadBalancerPlugin = neutron_lbaas.services.loadbalancer.plugin:LoadBalancerPlugin
 neutron.services.vpn.plugin.VPNDriverPlugin = neutron_vpnaas.services.vpn.plugin:VPNDriverPlugin
 qos = neutron.services.qos.qos_plugin:QoSPlugin
+revisions = neutron.services.revisions.revision_plugin:RevisionPlugin
 router = neutron.services.l3_router.l3_router_plugin:L3RouterPlugin
 segments = neutron.services.segments.plugin:Plugin
 tag = neutron.services.tag.tag_plugin:TagPlugin

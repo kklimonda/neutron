@@ -398,21 +398,28 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
     def _get_changed_ips_for_port(self, context, original_ips,
                                   new_ips, device_owner):
         """Calculate changes in IPs for the port."""
+        # Collect auto addressed subnet ids that has to be removed on update
+        delete_subnet_ids = set(ip['subnet_id'] for ip in new_ips
+                                if ip.get('delete_subnet'))
+        ips = [ip for ip in new_ips
+               if ip.get('subnet_id') not in delete_subnet_ids]
         # the new_ips contain all of the fixed_ips that are to be updated
-        self._validate_max_ips_per_port(new_ips, device_owner)
+        self._validate_max_ips_per_port(ips, device_owner)
 
         add_ips = []
         remove_ips = []
+
         ips_map = {ip['ip_address']: ip
                    for ip in itertools.chain(new_ips, original_ips)
                    if 'ip_address' in ip}
 
         new = set()
         for ip in new_ips:
-            if 'ip_address' in ip:
-                new.add(ip['ip_address'])
-            else:
-                add_ips.append(ip)
+            if ip.get('subnet_id') not in delete_subnet_ids:
+                if 'ip_address' in ip:
+                    new.add(ip['ip_address'])
+                else:
+                    add_ips.append(ip)
 
         # Convert original ip addresses to sets
         orig = set(ip['ip_address'] for ip in original_ips)
@@ -427,11 +434,13 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
 
         # Mark ip for removing if it is not found in new_ips
         # and subnet requires ip to be set manually.
-        # For auto addresses leave ip unchanged
+        # For auto addressed subnet leave ip unchanged
+        # unless it is explicitly marked for delete.
         for ip in remove:
             subnet_id = ips_map[ip]['subnet_id']
-            if self._is_ip_required_by_subnet(context, subnet_id,
-                                              device_owner):
+            ip_required = self._is_ip_required_by_subnet(context, subnet_id,
+                                                         device_owner)
+            if ip_required or subnet_id in delete_subnet_ids:
                 remove_ips.append(ips_map[ip])
             else:
                 prev_ips.append(ips_map[ip])
@@ -615,10 +624,21 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                                             new_port.get('mac_address'))
 
         fixed_ips_requested = validators.is_attr_set(new_port.get('fixed_ips'))
+        old_ips = old_port.get('fixed_ips')
         deferred_ip_allocation = (host and not old_host
-                                  and not old_port.get('fixed_ips')
+                                  and not old_ips
                                   and not fixed_ips_requested)
         if not deferred_ip_allocation:
+            # Check that any existing IPs are valid on the new segment
+            new_host_requested = host and host != old_host
+            if old_ips and new_host_requested and not fixed_ips_requested:
+                valid_subnets = self._ipam_get_subnets(
+                    context, old_port['network_id'], host)
+                valid_subnet_ids = {s['id'] for s in valid_subnets}
+                for fixed_ip in old_ips:
+                    if fixed_ip['subnet_id'] not in valid_subnet_ids:
+                        raise segment_exc.HostNotCompatibleWithFixedIps(
+                            host=host, port_id=old_port['id'])
             return changes
 
         # Allocate as if this were the port create.

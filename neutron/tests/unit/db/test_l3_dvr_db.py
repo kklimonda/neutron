@@ -42,8 +42,7 @@ class FakeL3Plugin(common_db_mixin.CommonDbMixin,
 class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
     def setUp(self):
-        core_plugin = 'neutron.plugins.ml2.plugin.Ml2Plugin'
-        super(L3DvrTestCase, self).setUp(plugin=core_plugin)
+        super(L3DvrTestCase, self).setUp(plugin='ml2')
         self.core_plugin = manager.NeutronManager.get_plugin()
         self.ctx = context.get_admin_context()
         self.mixin = FakeL3Plugin()
@@ -625,7 +624,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             elif action == 'del':
                 self.mixin.delete_arp_entry_for_dvr_service_port(
                     self.ctx, port)
-                self.assertTrue(3, l3_notify.del_arp_entry.call_count)
+                self.assertEqual(3, l3_notify.del_arp_entry.call_count)
 
     def test_update_arp_entry_for_dvr_service_port_added(self):
         action = 'add'
