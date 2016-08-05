@@ -2,7 +2,7 @@
 Description=OpenStack Neutron Linux bridge cleanup
 
 [Service]
-type=oneshot
+Type=oneshot
 User=neutron
 Group=neutron
 WorkingDirectory=/var/lib/neutron
