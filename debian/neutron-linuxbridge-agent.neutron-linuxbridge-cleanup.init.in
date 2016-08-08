@@ -16,3 +16,7 @@
 DESC="OpenStack Neutron Linux bridge cleanup"
 PROJECT_NAME=neutron
 NAME=${PROJECT_NAME}-linuxbridge-cleanup
+DAEMON=/usr/bin/neutron-linuxbridge-cleanup
+# --config-file=/etc/neutron/neutron.conf will be appended
+# to DAEMON_ARGS later by openstack-pkg-tools
+DAEMON_ARGS="--config-file=/etc/neutron/plugins/ml2/linuxbridge_agent.ini"
