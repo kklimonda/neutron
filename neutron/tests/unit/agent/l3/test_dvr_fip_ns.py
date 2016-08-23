@@ -165,10 +165,10 @@ class TestDvrFipNs(base.BaseTestCase):
     @mock.patch.object(ip_lib.IpNetnsCommand, 'exists')
     def _test_create(self, old_kernel, exists, execute, IPTables):
         exists.return_value = True
-        # There are up to four sysctl calls - two for ip_nonlocal_bind,
-        # and two to enable forwarding
-        execute.side_effect = [RuntimeError if old_kernel else None,
-                               None, None, None]
+        # There are up to four sysctl calls - two to enable forwarding,
+        # and two for ip_nonlocal_bind
+        execute.side_effect = [None, None,
+                               RuntimeError if old_kernel else None, None]
 
         self.fip_ns._iptables_manager = IPTables()
         self.fip_ns.create()
@@ -205,9 +205,12 @@ class TestDvrFipNs(base.BaseTestCase):
         ip_wrapper.get_devices.return_value = [dev1, dev2]
 
         with mock.patch.object(self.fip_ns.ip_wrapper_root.netns,
-                               'delete') as delete:
+                               'delete') as delete,\
+                mock.patch.object(self.fip_ns.ip_wrapper_root.netns,
+                                  'exists', return_value=True) as exists:
             self.fip_ns.delete()
-            delete.assert_called_once_with(mock.ANY)
+            exists.assert_called_once_with(self.fip_ns.name)
+            delete.assert_called_once_with(self.fip_ns.name)
 
         ext_net_bridge = self.conf.external_network_bridge
         ns_name = self.fip_ns.get_name()
@@ -216,6 +219,15 @@ class TestDvrFipNs(base.BaseTestCase):
                                                    prefix='fg-',
                                                    namespace=ns_name)
         ip_wrapper.del_veth.assert_called_once_with('fpr-aaaa')
+
+    def test_destroy_no_namespace(self):
+        with mock.patch.object(self.fip_ns.ip_wrapper_root.netns,
+                               'delete') as delete,\
+                mock.patch.object(self.fip_ns.ip_wrapper_root.netns,
+                                  'exists', return_value=False) as exists:
+            self.fip_ns.delete()
+            exists.assert_called_once_with(self.fip_ns.name)
+            self.assertFalse(delete.called)
 
     @mock.patch.object(ip_lib, 'IPWrapper')
     @mock.patch.object(ip_lib, 'IPDevice')

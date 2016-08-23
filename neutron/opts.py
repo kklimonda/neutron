@@ -32,8 +32,14 @@ import neutron.conf.agent.dhcp
 import neutron.conf.agent.l3.config
 import neutron.conf.agent.ovs_conf
 import neutron.conf.common
+import neutron.conf.extensions.allowedaddresspairs
+import neutron.conf.plugins.ml2.drivers.agent
+import neutron.conf.plugins.ml2.drivers.linuxbridge
 import neutron.conf.quota
 import neutron.conf.service
+import neutron.conf.services.metering_agent
+import neutron.conf.services.qos_driver_manager
+import neutron.conf.wsgi
 import neutron.db.agents_db
 import neutron.db.agentschedulers_db
 import neutron.db.dvr_mac_db
@@ -43,12 +49,9 @@ import neutron.db.l3_dvr_db
 import neutron.db.l3_gwmode_db
 import neutron.db.l3_hamode_db
 import neutron.db.migration.cli
-import neutron.extensions.allowedaddresspairs
 import neutron.extensions.l3
 import neutron.extensions.securitygroup
 import neutron.plugins.ml2.config
-import neutron.plugins.ml2.drivers.agent.config
-import neutron.plugins.ml2.drivers.linuxbridge.agent.common.config
 import neutron.plugins.ml2.drivers.macvtap.agent.config
 import neutron.plugins.ml2.drivers.mech_sriov.agent.common.config
 import neutron.plugins.ml2.drivers.mech_sriov.mech_driver.mech_driver
@@ -58,8 +61,6 @@ import neutron.plugins.ml2.drivers.type_geneve
 import neutron.plugins.ml2.drivers.type_gre
 import neutron.plugins.ml2.drivers.type_vlan
 import neutron.plugins.ml2.drivers.type_vxlan
-import neutron.services.metering.agents.metering_agent
-import neutron.services.qos.notification_drivers.manager
 import neutron.wsgi
 
 
@@ -100,7 +101,8 @@ def list_agent_opts():
 def list_extension_opts():
     return [
         ('DEFAULT',
-         neutron.extensions.allowedaddresspairs.allowed_address_pair_opts),
+         neutron.conf.extensions.allowedaddresspairs
+         .allowed_address_pair_opts),
         ('quotas',
          itertools.chain(
              neutron.conf.quota.l3_quota_opts,
@@ -133,7 +135,7 @@ def list_opts():
          itertools.chain(
              neutron.conf.common.core_cli_opts,
              neutron.conf.common.core_opts,
-             neutron.wsgi.socket_opts,
+             neutron.conf.wsgi.socket_opts,
              neutron.conf.service.service_opts)
          ),
         (neutron.conf.common.NOVA_CONF_SECTION,
@@ -147,7 +149,7 @@ def list_opts():
 def list_qos_opts():
     return [
         ('qos',
-         neutron.services.qos.notification_drivers.manager.QOS_PLUGIN_OPTS)
+         neutron.conf.services.qos_driver_manager.QOS_PLUGIN_OPTS)
     ]
 
 
@@ -181,15 +183,13 @@ def list_dhcp_agent_opts():
 def list_linux_bridge_opts():
     return [
         ('linux_bridge',
-         neutron.plugins.ml2.drivers.linuxbridge.agent.common.config.
-         bridge_opts),
+         neutron.conf.plugins.ml2.drivers.linuxbridge.bridge_opts),
         ('vxlan',
-         neutron.plugins.ml2.drivers.linuxbridge.agent.common.config.
-         vxlan_opts),
+         neutron.conf.plugins.ml2.drivers.linuxbridge.vxlan_opts),
         ('agent',
-         neutron.plugins.ml2.drivers.agent.config.agent_opts),
+         neutron.conf.plugins.ml2.drivers.agent.agent_opts),
         ('securitygroup',
-         neutron.agent.securitygroups_rpc.security_group_opts)
+         neutron.conf.agent.securitygroups_rpc.security_group_opts)
     ]
 
 
@@ -211,9 +211,9 @@ def list_macvtap_opts():
         ('macvtap',
          neutron.plugins.ml2.drivers.macvtap.agent.config.macvtap_opts),
         ('agent',
-         neutron.plugins.ml2.drivers.agent.config.agent_opts),
+         neutron.conf.plugins.ml2.drivers.agent.agent_opts),
         ('securitygroup',
-         neutron.agent.securitygroups_rpc.security_group_opts)
+         neutron.conf.agent.securitygroups_rpc.security_group_opts)
     ]
 
 
@@ -234,8 +234,7 @@ def list_metering_agent_opts():
     return [
         ('DEFAULT',
          itertools.chain(
-             neutron.services.metering.agents.metering_agent.MeteringAgent.
-             Opts,
+             neutron.conf.services.metering_agent.metering_agent_opts,
              neutron.agent.common.config.INTERFACE_DRIVER_OPTS)
          )
     ]
@@ -256,7 +255,7 @@ def list_ml2_conf_opts():
         ('ml2_type_geneve',
          neutron.plugins.ml2.drivers.type_geneve.geneve_opts),
         ('securitygroup',
-         neutron.agent.securitygroups_rpc.security_group_opts)
+         neutron.conf.agent.securitygroups_rpc.security_group_opts)
     ]
 
 
@@ -280,7 +279,7 @@ def list_ovs_opts():
          neutron.plugins.ml2.drivers.openvswitch.agent.common.config.
          agent_opts),
         ('securitygroup',
-         neutron.agent.securitygroups_rpc.security_group_opts)
+         neutron.conf.agent.securitygroups_rpc.security_group_opts)
     ]
 
 

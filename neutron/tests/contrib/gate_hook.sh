@@ -54,6 +54,7 @@ case $VENV in
         start_new_ovs
     fi
 
+    load_conf_hook iptables_verify
     # Make the workspace owned by the stack user
     sudo chown -R $STACK_USER:$STACK_USER $BASE
     ;;
@@ -63,11 +64,12 @@ case $VENV in
     # NOTE(ihrachys): note the order of hook post-* sections is significant: [quotas] hook should
     # go before other hooks modifying [DEFAULT]. See LP#1583214 for details.
     load_conf_hook quotas
-    load_conf_hook sorting
-    load_conf_hook pagination
     load_rc_hook qos
     load_rc_hook trunk
     load_conf_hook osprofiler
+    if [[ "$VENV" =~ "dsvm-scenario" ]]; then
+        load_conf_hook iptables_verify
+    fi
     if [[ "$VENV" =~ "pecan" ]]; then
         load_conf_hook pecan
     fi

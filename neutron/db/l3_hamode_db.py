@@ -124,7 +124,7 @@ class L3HARouterAgentPortBinding(model_base.BASEV2):
                       server_default=n_const.HA_ROUTER_STATE_STANDBY)
 
 
-class L3HARouterNetwork(model_base.BASEV2):
+class L3HARouterNetwork(model_base.BASEV2, model_base.HasProjectPrimaryKey):
     """Host HA network for a tenant.
 
     One HA Network is used per tenant, all HA router ports are created
@@ -133,8 +133,6 @@ class L3HARouterNetwork(model_base.BASEV2):
 
     __tablename__ = 'ha_router_networks'
 
-    tenant_id = sa.Column(sa.String(attributes.TENANT_ID_MAX_LEN),
-                          primary_key=True, nullable=False)
     network_id = sa.Column(sa.String(36),
                            sa.ForeignKey('networks.id', ondelete="CASCADE"),
                            nullable=False, primary_key=True)
@@ -321,8 +319,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
 
         min_agents = cfg.CONF.min_l3_agents_per_router
         num_agents = len(self.get_l3_agents(context, active=True,
-            filters={'agent_modes': [n_const.L3_AGENT_MODE_LEGACY,
-                                     n_const.L3_AGENT_MODE_DVR_SNAT]}))
+            filters={'agent_modes': [constants.L3_AGENT_MODE_LEGACY,
+                                     constants.L3_AGENT_MODE_DVR_SNAT]}))
         max_agents = cfg.CONF.max_l3_agents_per_router
         if max_agents:
             if max_agents > num_agents:
@@ -567,6 +565,10 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             self._set_vr_id(context, router_db, ha_network)
         else:
             self._delete_ha_interfaces(context, router_db.id)
+            # always attempt to cleanup the network as the router is
+            # deleted. the core plugin will stop us if its in use
+            self.safe_delete_ha_network(context, ha_network,
+                                        router_db.tenant_id)
 
         self.schedule_router(context, router_id)
         router_db = super(L3_HA_NAT_db_mixin, self)._update_router_db(
@@ -580,6 +582,26 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
         admin_ctx = context.elevated()
         self._core_plugin.delete_network(admin_ctx, net.network_id)
 
+    def safe_delete_ha_network(self, context, ha_network, tenant_id):
+        try:
+            self._delete_ha_network(context, ha_network)
+        except (n_exc.NetworkNotFound,
+                orm.exc.ObjectDeletedError):
+            LOG.debug(
+                "HA network for tenant %s was already deleted.", tenant_id)
+        except sa.exc.InvalidRequestError:
+            LOG.info(_LI("HA network %s can not be deleted."),
+                     ha_network.network_id)
+        except n_exc.NetworkInUse:
+            # network is still in use, this is normal so we don't
+            # log anything
+            pass
+        else:
+            LOG.info(_LI("HA network %(network)s was deleted as "
+                         "no HA routers are present in tenant "
+                         "%(tenant)s."),
+                     {'network': ha_network.network_id, 'tenant': tenant_id})
+
     def delete_router(self, context, id):
         router_db = self._get_router(context, id)
         super(L3_HA_NAT_db_mixin, self).delete_router(context, id)
@@ -590,36 +612,11 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             if ha_network:
                 self._delete_vr_id_allocation(
                     context, ha_network, router_db.extra_attributes.ha_vr_id)
-                # NOTE(kevinbenton): normally the ha interfaces should have
-                # been automatically removed by the super delete_router call.
-                # However, that only applies to interfaces created after fix
-                # Ifd3e007aaf2a2ed8123275aa3a9f540838e3c003 which added the
-                # RouterPort relationship to ha interfaces. Legacy interfaces
-                # will be cleaned up by this.
-                self._delete_ha_interfaces(context, router_db.id)
 
                 # always attempt to cleanup the network as the router is
                 # deleted. the core plugin will stop us if its in use
-                try:
-                    self._delete_ha_network(context, ha_network)
-                except (n_exc.NetworkNotFound,
-                        orm.exc.ObjectDeletedError):
-                    LOG.debug(
-                        "HA network for tenant %s was already deleted.",
-                        router_db.tenant_id)
-                except sa.exc.InvalidRequestError:
-                    LOG.info(_LI("HA network %s can not be deleted."),
-                             ha_network.network_id)
-                except n_exc.NetworkInUse:
-                    # network is still in use, this is normal so we don't
-                    # log anything
-                    pass
-                else:
-                    LOG.info(_LI("HA network %(network)s was deleted as "
-                                 "no HA routers are present in tenant "
-                                 "%(tenant)s."),
-                             {'network': ha_network.network_id,
-                              'tenant': router_db.tenant_id})
+                self.safe_delete_ha_network(context, ha_network,
+                                            router_db.tenant_id)
 
     def _unbind_ha_router(self, context, router_id):
         for agent in self.get_l3_agents_hosting_routers(context, [router_id]):
@@ -725,8 +722,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
     def get_ha_sync_data_for_host(self, context, host, agent,
                                   router_ids=None, active=None):
         agent_mode = self._get_agent_mode(agent)
-        dvr_agent_mode = (agent_mode in [n_const.L3_AGENT_MODE_DVR_SNAT,
-                                         n_const.L3_AGENT_MODE_DVR])
+        dvr_agent_mode = (agent_mode in [constants.L3_AGENT_MODE_DVR_SNAT,
+                                         constants.L3_AGENT_MODE_DVR])
         if (dvr_agent_mode and n_utils.is_extension_supported(
                 self, constants.L3_DISTRIBUTED_EXT_ALIAS)):
             # DVR has to be handled differently

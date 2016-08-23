@@ -26,9 +26,9 @@ from neutron.agent import firewall
 from neutron.agent.linux import ipset_manager
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_firewall
-from neutron.agent import securitygroups_rpc as sg_cfg
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
+from neutron.conf.agent import securitygroups_rpc as security_config
 from neutron.tests import base
 from neutron.tests.unit.api.v2 import test_base
 
@@ -71,7 +71,7 @@ class BaseIptablesFirewallTestCase(base.BaseTestCase):
     def setUp(self):
         super(BaseIptablesFirewallTestCase, self).setUp()
         cfg.CONF.register_opts(a_cfg.ROOT_HELPER_OPTS, 'AGENT')
-        cfg.CONF.register_opts(sg_cfg.security_group_opts, 'SECURITYGROUP')
+        security_config.register_securitygroups_opts()
         cfg.CONF.set_override('comment_iptables_rules', False, 'AGENT')
         self.utils_exec_p = mock.patch(
             'neutron.agent.linux.utils.execute')
@@ -1156,6 +1156,56 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                        '-w', 10],
                       run_as_root=True, check_exit_code=True,
                       extra_ok_codes=[1])]
+        self.utils_exec.assert_has_calls(calls)
+
+    def test_remove_conntrack_entries_for_sg_member_changed_ipv4(self):
+        for direction in ['ingress', 'egress']:
+            for protocol in [None, 'tcp', 'icmp', 'udp']:
+                self._test_remove_conntrack_entries_sg_member_changed(
+                    'IPv4', protocol, direction)
+
+    def test_remove_conntrack_entries_for_sg_member_changed_ipv6(self):
+        for direction in ['ingress', 'egress']:
+            for protocol in [None, 'tcp', 'icmp', 'udp']:
+                self._test_remove_conntrack_entries_sg_member_changed(
+                    'IPv6', protocol, direction)
+
+    def _test_remove_conntrack_entries_sg_member_changed(self, ethertype,
+                                                         protocol, direction):
+        port = self._fake_port()
+        port['security_groups'] = ['fake_sg_id']
+        self.firewall.sg_rules.setdefault('fake_sg_id', [])
+        self.firewall.sg_rules['fake_sg_id'].append(
+            {'direction': direction, 'remote_group_id': 'fake_sg_id2',
+             'ethertype': ethertype})
+
+        self.firewall.filter_defer_apply_on()
+        self.firewall.devices_with_updated_sg_members['fake_sg_id2'] = [port]
+        if ethertype == "IPv4":
+            self.firewall.pre_sg_members = {'fake_sg_id2': {
+                                            'IPv4': ['10.0.0.2', '10.0.0.3']}}
+            self.firewall.sg_members = {'fake_sg_id2': {
+                                            'IPv4': ['10.0.0.3']}}
+            ethertype = "ipv4"
+        else:
+            self.firewall.pre_sg_members = {'fake_sg_id2': {
+                                            'IPv6': ['fe80::2', 'fe80::3']}}
+            self.firewall.sg_members = {'fake_sg_id2': {
+                                            'IPv6': ['fe80::3']}}
+            ethertype = "ipv6"
+        self.firewall.filter_defer_apply_off()
+        direction = '-d' if direction == 'ingress' else '-s'
+        remote_ip_direction = '-s' if direction == '-d' else '-d'
+        ips = {"ipv4": ['10.0.0.1', '10.0.0.2'],
+               "ipv6": ['fe80::1', 'fe80::2']}
+        calls = [
+                     # initial data has 1, 2, and 9 in use, CT zone will start
+                     # at 10.
+                     mock.call(['conntrack', '-D', '-f', ethertype, direction,
+                                ips[ethertype][0], '-w', 10,
+                                remote_ip_direction, ips[ethertype][1]],
+                               run_as_root=True, check_exit_code=True,
+                               extra_ok_codes=[1])]
         self.utils_exec.assert_has_calls(calls)
 
     def test_user_sg_rules_deduped_before_call_to_iptables_manager(self):

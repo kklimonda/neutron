@@ -43,9 +43,11 @@ Andrew Boik <dboik@cisco.com>
 Andrew Boik <drew.boik@gmail.com>
 Andrey Epifanov <aepifanov@mirantis.com>
 Andrey Kurilin <akurilin@mirantis.com>
+Andrey Shestakov <ashestakov@mirantis.com>
 Andy Hill <hillad@gmail.com>
 Angela Smith <aallen@brocade.com>
 Angus Lees <gus@inodes.org>
+Anh Tran <anhtt@vn.fujitsu.com>
 Anindita Das <anindita.das@intel.com>
 Ankur Gupta <ankur.gupta@intel.com>
 Ann Kamyshnikova <akamyshnikova@mirantis.com>
@@ -86,6 +88,7 @@ Bo Chi <shcbo@cn.ibm.com>
 Bo Wang <bo.wang@easystack.cn>
 Bob Kukura <rkukura@redhat.com>
 Bob Melander <bob.melander@gmail.com>
+Boden R <bodenvmw@gmail.com>
 Bogdan Tabor <bogdan.tabor@ericpol.com>
 Boris Pavlovic <boris@pavlovic.me>
 Brad Hall <bhall@nicira.com>
@@ -135,6 +138,7 @@ Dariusz Smigiel (dasm) <smigiel.dariusz@gmail.com>
 Dariusz Smigiel <smigiel.dariusz@gmail.com>
 Darragh O'Reilly <dara2002-openstack@yahoo.com>
 Darragh O'Reilly <darragh.oreilly@hp.com>
+Darragh O'Reilly <darragh.oreilly@hpe.com>
 Darren Birkett <darren.birkett@gmail.com>
 Davanum Srinivas <davanum@gmail.com>
 Davanum Srinivas <dims@linux.vnet.ibm.com>
@@ -181,6 +185,7 @@ Eric Brown <browne@vmware.com>
 Eric Windisch <eric@cloudscaling.com>
 Erik Colnick <erik.colnick@hp.com>
 Erik Colnick <erik.colnick@hpe.com>
+Ester Niclos Ferreras <esterniclos@gmail.com>
 Eugene Nikanorov <enikanorov@mirantis.com>
 Evgeny Fedoruk <evgenyf@radware.com>
 Eyal <eyal.bar-ilan@nokia.com>
@@ -282,6 +287,7 @@ Jiajun Liu <jiajun@unitedstack.com>
 Jian Wen <jian.wen@canonical.com>
 Jian Wen <wenjian@letv.com>
 Jianing Yang <jianingy@unitedstack.com>
+JieLee <JieLi2087@126.com>
 Joe Gordon <joe.gordon0@gmail.com>
 Joe Harrison <joehazzers@gmail.com>
 Joe Heck <heckj@mac.com>
@@ -338,6 +344,7 @@ Kumar Acharya <ma501v@intl.att.com>
 Kun Huang <gareth@unitedstack.com>
 Kyle Mestery <kmestery@cisco.com>
 Kyle Mestery <mestery@mestery.com>
+LIU Yulong <liuyulong@le.com>
 LIU Yulong <liuyulong@letv.com>
 Lajos Katona <lajos.katona@ericsson.com>
 Lars Kellogg-Stedman <lars@redhat.com>
@@ -359,6 +366,7 @@ Lucas Alvares Gomes <lucasagomes@gmail.com>
 Lucian Petrut <lpetrut@cloudbasesolutions.com>
 Luis A. Garcia <luis@linux.vnet.ibm.com>
 Luiz H Ozaki <luiz.ozaki@gmail.com>
+Lujin Luo <luo.lujin@jp.fujitsu.com>
 Luke Gorrie <luke@snabb.co>
 Ly Loi <lyloi@cisco.com>
 Madhav Puri <madhav.puri@gmail.com>
@@ -416,6 +424,7 @@ Ming Shuang Xian <xianms@cn.ibm.com>
 Mithil Arun <arun.mithil@gmail.com>
 Mitsuhiro SHIGEMATSU <shigematsu.mitsuhiro@lab.ntt.co.jp>
 Mohammad Banikazemi <mb@us.ibm.com>
+Mohit Malik <mohit.malik@intel.com>
 Monty Taylor <mordred@inaugust.com>
 Morgan Fainberg <morgan.fainberg@gmail.com>
 Moshe Levi <moshele@mellanox.com>
@@ -600,6 +609,7 @@ Stephen Finucane <stephen.finucane@intel.com>
 Stephen Gordon <sgordon@redhat.com>
 Stephen Gran <stephen.gran@guardian.co.uk>
 Stephen Ma <stephen.ma@hp.com>
+Steve Kipp <sk167v@att.com>
 Steven Gonzales <stevendgonzales@gmail.com>
 Steven Hillman <sthillma@cisco.com>
 Steven Ren <sren@vmware.com>
@@ -753,6 +763,7 @@ gongysh <gongysh@linux.vnet.ibm.com>
 gordon chung <gord@live.ca>
 guiyanxing <guiyanxing@cmss.chinamobile.com>
 hgangwx <hgangwx@cn.ibm.com>
+hobo.kengo <hobo.kengo@jp.fujitsu.com>
 houming-wang <houming.wang@easystack.cn>
 huangpengtao <huangpengtao@huawei.com>
 hyunsun <hyunsun.moon@gmail.com>
@@ -761,6 +772,7 @@ ivan-zhu <bozhu@linux.vnet.ibm.com>
 jasonrad <jason.walker@radware.com>
 jingliuqing <lawrancejing@gmail.com>
 joe@midokura.com <ih@ih.defaultdomain>
+john_a_joyce <joycej@cisco.com>
 johndavidge <jodavidg@cisco.com>
 jun xie <easonxie160@163.com>
 jun xie <junxiebj@cn.ibm.com>
@@ -771,6 +783,7 @@ lawrancejing <lawrancejing@gmail.com>
 leejian0612 <ljianbj@cn.ibm.com>
 lei zhang <shleiz@cn.ibm.com>
 lijianlj <lijianlj@cn.ibm.com>
+lilintan <lintan.li@easystack.cn>
 linb <linb@vmware.com>
 liu-sheng <liusheng@huawei.com>
 liudong <liudong78@huawei.com>
@@ -814,6 +827,7 @@ sayalilunkad <sayali.lunkad@suse.com>
 shihanzhang <shihanzhang@huawei.com>
 shmcfarl <shmcfarl@gmail.com>
 shu,xinxin <xinxin.shu@intel.com>
+sindhu devale <sindhu.devale@intel.com>
 singhannie <aniruddha.gautam@hp.com>
 siyingchun <siyingchun@sina.com>
 snaiksat <sumitnaiksatam@gmail.com>
@@ -848,6 +862,7 @@ yaowei <yaowei@unitedstack.com>
 yujie <yujie@cmss.chinamobile.com>
 yuyangbj <yangyu@vmware.com>
 zengfagao <zengfa.gao@hp.com>
+zhangyanxian <zhang.yanxian@zte.com.cn>
 zhhuabj <zhhuabj@cn.ibm.com>
 zhiyuan_cai <luckyvega.g@gmail.com>
 zhufl <zhu.fanglei@zte.com.cn>

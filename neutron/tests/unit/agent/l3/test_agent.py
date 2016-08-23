@@ -611,6 +611,68 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
     def test_external_gateway_updated_dual_stack(self):
         self._test_external_gateway_updated(dual_stack=True)
 
+    def test_dvr_edge_router_init_for_snat_namespace_object(self):
+        router = {'id': _uuid()}
+        ri = dvr_router.DvrEdgeRouter(mock.Mock(),
+                                      HOSTNAME,
+                                      router['id'],
+                                      router,
+                                      **self.ri_kwargs)
+        # Make sure that ri.snat_namespace object is created when the
+        # router is initialized
+        self.assertIsNotNone(ri.snat_namespace)
+
+    def test_ext_gw_updated_calling_snat_ns_delete_if_gw_port_host_none(
+        self):
+        """Test to check the impact of snat_namespace object.
+
+        This function specifically checks the impact of the snat
+        namespace object value on external_gateway_removed for deleting
+        snat_namespace when the gw_port_host mismatches or none.
+        """
+        router = l3_test_common.prepare_router_data(num_internal_ports=2)
+        ri = dvr_router.DvrEdgeRouter(mock.Mock(),
+                                      HOSTNAME,
+                                      router['id'],
+                                      router,
+                                      **self.ri_kwargs)
+        with mock.patch.object(dvr_snat_ns.SnatNamespace,
+                               'delete') as snat_ns_delete:
+            interface_name, ex_gw_port = l3_test_common.prepare_ext_gw_test(
+                self, ri)
+            router['gw_port_host'] = ''
+            ri.external_gateway_updated(ex_gw_port, interface_name)
+            if router['gw_port_host'] != ri.host:
+                self.assertEqual(1, snat_ns_delete.call_count)
+
+    @mock.patch.object(namespaces.Namespace, 'delete')
+    def test_snat_ns_delete_not_called_when_snat_namespace_does_not_exist(
+        self, mock_ns_del):
+        """Test to check the impact of snat_namespace object.
+
+        This function specifically checks the impact of the snat
+        namespace object initialization without the actual creation
+        of snat_namespace. When deletes are issued to the snat
+        namespace based on the snat namespace object existence, it
+        should be checking for the valid namespace existence before
+        it tries to delete.
+        """
+        router = l3_test_common.prepare_router_data(num_internal_ports=2)
+        ri = dvr_router.DvrEdgeRouter(mock.Mock(),
+                                      HOSTNAME,
+                                      router['id'],
+                                      router,
+                                      **self.ri_kwargs)
+        # Make sure we set a return value to emulate the non existence
+        # of the namespace.
+        self.mock_ip.netns.exists.return_value = False
+        self.assertIsNotNone(ri.snat_namespace)
+        interface_name, ex_gw_port = l3_test_common.prepare_ext_gw_test(self,
+                                                                        ri)
+        ri._external_gateway_removed = mock.Mock()
+        ri.external_gateway_removed(ex_gw_port, interface_name)
+        self.assertFalse(mock_ns_del.called)
+
     def _test_ext_gw_updated_dvr_edge_router(self, host_match,
                                              snat_hosted_before=True):
         """
@@ -629,8 +691,6 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         if snat_hosted_before:
             ri._create_snat_namespace()
             snat_ns_name = ri.snat_namespace.name
-        else:
-            self.assertIsNone(ri.snat_namespace)
 
         interface_name, ex_gw_port = l3_test_common.prepare_ext_gw_test(self,
                                                                         ri)
@@ -650,7 +710,6 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
                     bridge=self.conf.external_network_bridge,
                     namespace=snat_ns_name,
                     prefix=l3_agent.EXTERNAL_DEV_PREFIX)
-                self.assertIsNone(ri.snat_namespace)
         else:
             if not snat_hosted_before:
                 self.assertIsNotNone(ri.snat_namespace)
@@ -1813,7 +1872,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
 
         self.mock_driver.unplug.assert_called_with(
             stale_devnames[0],
-            bridge="br-ex",
+            bridge="",
             namespace=ri.ns_name,
             prefix=l3_agent.EXTERNAL_DEV_PREFIX)
 
@@ -1994,6 +2053,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         self._test_process_routers_update_router_deleted(True)
 
     def test_process_router_if_compatible_with_no_ext_net_in_conf(self):
+        self.conf.set_override('external_network_bridge', 'br-ex')
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         self.plugin_api.get_external_network_id.return_value = 'aaa'
 
@@ -2022,6 +2082,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         self.assertFalse(self.plugin_api.get_external_network_id.called)
 
     def test_process_router_if_compatible_with_stale_cached_ext_net(self):
+        self.conf.set_override('external_network_bridge', 'br-ex')
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         self.plugin_api.get_external_network_id.return_value = 'aaa'
         agent.target_ex_net_id = 'bbb'
@@ -2037,6 +2098,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             agent.context)
 
     def test_process_router_if_compatible_w_no_ext_net_and_2_net_plugin(self):
+        self.conf.set_override('external_network_bridge', 'br-ex')
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
 
         router = {'id': _uuid(),
@@ -2078,7 +2140,6 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
                   'external_gateway_info': {'network_id': 'aaa'}}
 
         agent.router_info = {}
-        self.conf.set_override('external_network_bridge', '')
         agent._process_router_if_compatible(router)
         self.assertIn(router['id'], agent.router_info)
 

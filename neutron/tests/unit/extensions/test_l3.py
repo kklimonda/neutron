@@ -1229,7 +1229,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
             expected_port_update = {
                 'device_owner': l3_constants.DEVICE_OWNER_ROUTER_INTF,
                 'device_id': r['router']['id']}
-            update_port.assert_called_with(
+            update_port.assert_any_call(
                 mock.ANY, p['port']['id'], {'port': expected_port_update})
             # fetch port and confirm device_id
             body = self._show('ports', p['port']['id'])
@@ -1240,6 +1240,53 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                                           r['router']['id'],
                                           None,
                                           p['port']['id'])
+
+    def test_router_add_interface_delete_port_after_failure(self):
+        with self.router() as r, self.subnet(enable_dhcp=False) as s:
+            plugin = manager.NeutronManager.get_plugin()
+            # inject a failure in the update port that happens at the end
+            # to ensure the port gets deleted
+            with mock.patch.object(
+                    plugin, 'update_port',
+                    side_effect=n_exc.InvalidInput(error_message='x')):
+                self._router_interface_action('add',
+                                              r['router']['id'],
+                                              s['subnet']['id'],
+                                              None,
+                                              exc.HTTPBadRequest.code)
+                self.assertFalse(plugin.get_ports(context.get_admin_context()))
+
+    def test_router_add_interface_dup_port(self):
+        '''This tests that if multiple routers add one port as their
+        interfaces. Only the first router's interface would be added
+        to this port. All the later requests would return exceptions.
+        '''
+        with self.router() as r1, self.router() as r2, self.network() as n:
+            with self.subnet(network=n) as s:
+                with self.port(subnet=s) as p:
+                    self._router_interface_action('add',
+                                                  r1['router']['id'],
+                                                  None,
+                                                  p['port']['id'])
+                    # mock out the sequential check
+                    plugin = 'neutron.db.l3_db.L3_NAT_dbonly_mixin'
+                    check_p = mock.patch(plugin + '._check_router_port',
+                                         port_id=p['port']['id'],
+                                         device_id=r2['router']['id'],
+                                         return_value=p['port'])
+                    checkport = check_p.start()
+                    # do regular checkport after first skip
+                    checkport.side_effect = check_p.stop()
+                    self._router_interface_action('add',
+                                                  r2['router']['id'],
+                                                  None,
+                                                  p['port']['id'],
+                                                  exc.HTTPConflict.code)
+                    # clean-up
+                    self._router_interface_action('remove',
+                                                  r1['router']['id'],
+                                                  None,
+                                                  p['port']['id'])
 
     def _assert_body_port_id_and_update_port(self, body, mock_update_port,
                                              port_id, device_id):
@@ -1982,7 +2029,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
 
     def test_floatingip_with_assoc_fails(self):
         self._test_floatingip_with_assoc_fails(
-            'neutron.db.l3_db.L3_NAT_db_mixin._check_and_get_fip_assoc')
+            'neutron.db.l3_db.L3_NAT_dbonly_mixin._check_and_get_fip_assoc')
 
     def test_create_floatingip_with_assoc(
         self, expected_status=l3_constants.FLOATINGIP_STATUS_ACTIVE):
@@ -2142,6 +2189,34 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                         {'floatingip': {'port_id': p['port']['id'],
                                         'fixed_ip_address': '2001:db8::a'}},
                         expected_code=exc.HTTPBadRequest.code)
+
+    def test_floatingip_update_to_same_port_id_twice(
+        self, expected_status=l3_constants.FLOATINGIP_STATUS_ACTIVE):
+        with self.port() as p:
+            private_sub = {'subnet': {'id':
+                                      p['port']['fixed_ips'][0]['subnet_id']}}
+            with self.floatingip_no_assoc(private_sub) as fip:
+                body = self._show('floatingips', fip['floatingip']['id'])
+                self.assertIsNone(body['floatingip']['port_id'])
+                self.assertIsNone(body['floatingip']['fixed_ip_address'])
+                self.assertEqual(expected_status, body['floatingip']['status'])
+
+                port_id = p['port']['id']
+                ip_address = p['port']['fixed_ips'][0]['ip_address']
+                # 1. Update floating IP with port_id (associate)
+                body = self._update('floatingips', fip['floatingip']['id'],
+                                    {'floatingip': {'port_id': port_id}})
+                self.assertEqual(port_id, body['floatingip']['port_id'])
+                self.assertEqual(ip_address,
+                                 body['floatingip']['fixed_ip_address'])
+
+                # 2. Update floating IP with same port again
+                body = self._update('floatingips', fip['floatingip']['id'],
+                                    {'floatingip': {'port_id': port_id}})
+                # No errors, and nothing changed
+                self.assertEqual(port_id, body['floatingip']['port_id'])
+                self.assertEqual(ip_address,
+                                 body['floatingip']['fixed_ip_address'])
 
     def test_first_floatingip_associate_notification(self):
         with self.port() as p:
@@ -2917,6 +2992,58 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                           create_router_with_transaction, ctx, data)
         routers = plugin.get_routers(ctx)
         self.assertEqual(0, len(routers))
+
+    def test_router_add_interface_by_port_fails_nested(self):
+        # Force _validate_router_port_info failure
+        plugin = manager.NeutronManager.get_service_plugins()[
+            service_constants.L3_ROUTER_NAT]
+        if not isinstance(plugin, l3_db.L3_NAT_dbonly_mixin):
+            self.skipTest("Plugin is not L3_NAT_dbonly_mixin")
+        orig_update_port = self.plugin.update_port
+
+        def mock_fail__validate_router_port_info(ctx, router, port_id):
+            # Fail with raising BadRequest exception
+            msg = "Failure mocking..."
+            raise n_exc.BadRequest(resource='router', msg=msg)
+
+        def mock_update_port_with_transaction(ctx, id, port):
+            # Update port within a sub-transaction
+            with ctx.session.begin(subtransactions=True):
+                orig_update_port(ctx, id, port)
+
+        def add_router_interface_with_transaction(ctx, router_id,
+                                                  interface_info):
+            # Call add_router_interface() within a sub-transaction
+            with ctx.session.begin():
+                plugin.add_router_interface(ctx, router_id, interface_info)
+
+        tenant_id = _uuid()
+        ctx = context.Context('', tenant_id)
+        with self.network(tenant_id=tenant_id) as network, (
+             self.router(name='router1', admin_state_up=True,
+                         tenant_id=tenant_id)) as router:
+            with self.subnet(network=network, cidr='10.0.0.0/24',
+                             tenant_id=tenant_id) as subnet:
+                fixed_ips = [{'subnet_id': subnet['subnet']['id']}]
+                with self.port(subnet=subnet, fixed_ips=fixed_ips,
+                               tenant_id=tenant_id) as port:
+                    mock.patch.object(
+                        self.plugin, 'update_port',
+                        side_effect=(
+                            mock_update_port_with_transaction)).start()
+                    mock.patch.object(
+                        plugin, '_validate_router_port_info',
+                        side_effect=(
+                            mock_fail__validate_router_port_info)).start()
+                    self.assertRaises(n_exc.BadRequest,
+                        add_router_interface_with_transaction,
+                        ctx, router['router']['id'],
+                        {'port_id': port['port']['id']})
+
+                    # fetch port and confirm device_id and device_owner
+                    body = self._show('ports', port['port']['id'])
+                    self.assertEqual('', body['port']['device_owner'])
+                    self.assertEqual('', body['port']['device_id'])
 
     def test_update_subnet_gateway_for_external_net(self):
         """Test to make sure notification to routers occurs when the gateway

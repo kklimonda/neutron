@@ -57,3 +57,18 @@ class TrunkInUse(n_exc.InUse):
 
 class TrunkDisabled(n_exc.Conflict):
     message = _("Trunk %(trunk_id)s is currently disabled.")
+
+
+class TrunkInErrorState(n_exc.Conflict):
+    message = _("Trunk %(trunk_id)s is in error state. Attempt "
+                "to resolve the error condition before proceeding.")
+
+
+class IncompatibleTrunkPluginConfiguration(n_exc.NeutronException):
+    message = _("Cannot load trunk plugin: no compatible core plugin "
+                "configuration is found.")
+
+
+class TrunkPluginDriverConflict(n_exc.Conflict):
+    message = _("A misconfiguration in the environment prevents the "
+                "operation from completing, please, contact the admin.")
