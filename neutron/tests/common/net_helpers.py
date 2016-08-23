@@ -98,7 +98,15 @@ def set_namespace_gateway(port_dev, gateway_ip):
     port_dev.route.add_gateway(gateway_ip)
 
 
-def assert_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
+def assert_ping(src_namespace, dst_ip, timeout=1, count=1):
+    ipversion = netaddr.IPAddress(dst_ip).version
+    ping_command = 'ping' if ipversion == 4 else 'ping6'
+    ns_ip_wrapper = ip_lib.IPWrapper(src_namespace)
+    ns_ip_wrapper.netns.execute([ping_command, '-c', count, '-W', timeout,
+                                 dst_ip])
+
+
+def assert_async_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
     ipversion = netaddr.IPAddress(dst_ip).version
     ping_command = 'ping' if ipversion == 4 else 'ping6'
     ns_ip_wrapper = ip_lib.IPWrapper(src_namespace)
@@ -119,7 +127,7 @@ def assert_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
 @contextlib.contextmanager
 def async_ping(namespace, ips):
     with futures.ThreadPoolExecutor(max_workers=len(ips)) as executor:
-        fs = [executor.submit(assert_ping, namespace, ip, count=10)
+        fs = [executor.submit(assert_async_ping, namespace, ip, count=10)
               for ip in ips]
         yield lambda: all(f.done() for f in fs)
         futures.wait(fs)
@@ -172,7 +180,12 @@ def _get_source_ports_from_ss_output(output):
     return ports
 
 
-def get_unused_port(used, start=1024, end=65535):
+def get_unused_port(used, start=1024, end=None):
+    if end is None:
+        port_range = utils.execute(
+            ['sysctl', '-n', 'net.ipv4.ip_local_port_range'])
+        end = int(port_range.split()[0]) - 1
+
     candidates = set(range(start, end + 1))
     return random.choice(list(candidates - used))
 
@@ -193,7 +206,7 @@ def get_free_namespace_port(protocol, namespace=None):
     elif protocol == n_const.PROTO_NAME_UDP:
         param = '-una'
     else:
-        raise ValueError("Unsupported procotol %s" % protocol)
+        raise ValueError("Unsupported protocol %s" % protocol)
 
     ip_wrapper = ip_lib.IPWrapper(namespace=namespace)
     output = ip_wrapper.netns.execute(['ss', param])
@@ -356,7 +369,7 @@ class Pinger(object):
             self._wait_for_death()
             self._parse_stats()
         else:
-            raise RuntimeError("Pinger is running infinitelly, use stop() "
+            raise RuntimeError("Pinger is running infinitely, use stop() "
                                "first")
 
 

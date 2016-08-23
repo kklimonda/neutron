@@ -18,7 +18,6 @@ from oslo_config import cfg
 from oslo_service import wsgi
 
 from neutron._i18n import _
-from neutron import api
 from neutron.common import constants
 from neutron.common import utils
 
@@ -54,9 +53,9 @@ core_opts = [
                       "removed in the Ocata release.")),
     cfg.BoolOpt('allow_bulk', default=True,
                 help=_("Allow the usage of the bulk API")),
-    cfg.BoolOpt('allow_pagination', default=api.DEFAULT_ALLOW_PAGINATION,
+    cfg.BoolOpt('allow_pagination', default=True,
                 help=_("Allow the usage of the pagination")),
-    cfg.BoolOpt('allow_sorting', default=api.DEFAULT_ALLOW_SORTING,
+    cfg.BoolOpt('allow_sorting', default=True,
                 help=_("Allow the usage of the sorting")),
     cfg.StrOpt('pagination_max_limit', default="-1",
                help=_("The maximum number of items returned in a single "
@@ -147,7 +146,7 @@ core_opts = [
                 help=_('If True, advertise network MTU values if core plugin '
                        'calculates them. MTU is advertised to running '
                        'instances via DHCP and RA MTU options.')),
-    cfg.StrOpt('ipam_driver',
+    cfg.StrOpt('ipam_driver', default='internal',
                help=_("Neutron IPAM (IP address management) driver to use. "
                       "If ipam_driver is not set (default behavior), no IPAM "
                       "driver is used. In order to use the reference "

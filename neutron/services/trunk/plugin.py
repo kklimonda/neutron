@@ -30,6 +30,7 @@ from neutron.objects import trunk as trunk_objects
 from neutron.services import service_base
 from neutron.services.trunk import callbacks
 from neutron.services.trunk import constants
+from neutron.services.trunk import drivers
 from neutron.services.trunk import exceptions as trunk_exc
 from neutron.services.trunk import rules
 
@@ -61,11 +62,51 @@ class TrunkPlugin(service_base.ServicePluginBase,
     def __init__(self):
         db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
             attributes.PORTS, [_extend_port_trunk_details])
+        self._rpc_backend = None
+        self._drivers = []
         self._segmentation_types = {}
+        self._interfaces = set()
+        self._agent_types = set()
+        drivers.register()
         registry.subscribe(rules.enforce_port_deletion_rules,
                            resources.PORT, events.BEFORE_DELETE)
         registry.notify(constants.TRUNK_PLUGIN, events.AFTER_INIT, self)
-        LOG.debug('Trunk plugin loaded')
+        for driver in self._drivers:
+            LOG.debug('Trunk plugin loaded with driver %s', driver.name)
+        self.check_compatibility()
+
+    def check_compatibility(self):
+        """Fail to load if no compatible driver is found."""
+        if not any([driver.is_loaded for driver in self._drivers]):
+            raise trunk_exc.IncompatibleTrunkPluginConfiguration()
+
+    def set_rpc_backend(self, backend):
+        self._rpc_backend = backend
+
+    def is_rpc_enabled(self):
+        return self._rpc_backend is not None
+
+    def register_driver(self, driver):
+        """Register driver with trunk plugin."""
+        if driver.agent_type:
+            self._agent_types.add(driver.agent_type)
+        self._interfaces = self._interfaces | set(driver.interfaces)
+        self._drivers.append(driver)
+
+    @property
+    def registered_drivers(self):
+        """The registered drivers."""
+        return self._drivers
+
+    @property
+    def supported_interfaces(self):
+        """A set of supported interfaces."""
+        return self._interfaces
+
+    @property
+    def supported_agent_types(self):
+        """A set of supported agent types."""
+        return self._agent_types
 
     def add_segmentation_type(self, segmentation_type, id_validator):
         self._segmentation_types[segmentation_type] = id_validator
@@ -118,12 +159,19 @@ class TrunkPlugin(service_base.ServicePluginBase,
                          segmentation_type=p['segmentation_type'])
                      for p in trunk['sub_ports']]
         admin_state_up = trunk.get('admin_state_up', True)
+        # NOTE(status_police): a trunk is created in PENDING status. Depending
+        # on the nature of the create request, a driver may set the status
+        # immediately to ACTIVE if no physical provisioning is required.
+        # Otherwise a transition to BUILD (or ERROR) should be expected
+        # depending on how the driver reacts. PRECOMMIT failures prevent the
+        # trunk from being created altogether.
         trunk_obj = trunk_objects.Trunk(context=context,
                                         admin_state_up=admin_state_up,
                                         id=uuidutils.generate_uuid(),
                                         name=trunk.get('name', ""),
                                         tenant_id=trunk['tenant_id'],
                                         port_id=trunk['port_id'],
+                                        status=constants.PENDING_STATUS,
                                         sub_ports=sub_ports)
         with db_api.autonested_transaction(context.session):
             trunk_obj.create()
@@ -143,6 +191,10 @@ class TrunkPlugin(service_base.ServicePluginBase,
         with db_api.autonested_transaction(context.session):
             trunk_obj = self._get_trunk(context, trunk_id)
             original_trunk = copy.deepcopy(trunk_obj)
+            # NOTE(status_police): a trunk status should not change during an
+            # update_trunk(), even in face of PRECOMMIT failures. This is
+            # because only name and admin_state_up are being affected, and
+            # these are DB properties only.
             trunk_obj.update_fields(trunk_data, reset_changes=True)
             trunk_obj.update()
             payload = callbacks.TrunkPayload(context, trunk_id,
@@ -161,6 +213,10 @@ class TrunkPlugin(service_base.ServicePluginBase,
             rules.trunk_can_be_managed(context, trunk)
             trunk_port_validator = rules.TrunkPortValidator(trunk.port_id)
             if not trunk_port_validator.is_bound(context):
+                # NOTE(status_police): when a trunk is deleted, the logical
+                # object disappears from the datastore, therefore there is no
+                # status transition involved. If PRECOMMIT failures occur,
+                # the trunk remains in the status where it was.
                 trunk.delete()
                 payload = callbacks.TrunkPayload(context, trunk_id,
                                                  original_trunk=trunk)
@@ -184,8 +240,24 @@ class TrunkPlugin(service_base.ServicePluginBase,
 
         with db_api.autonested_transaction(context.session):
             trunk = self._get_trunk(context, trunk_id)
-            original_trunk = copy.deepcopy(trunk)
             rules.trunk_can_be_managed(context, trunk)
+            original_trunk = copy.deepcopy(trunk)
+            # NOTE(status_police): the trunk status should transition to
+            # PENDING (and consequently to BUILD and finally in ACTIVE
+            # or ERROR), only if it is not in ERROR status already. A user
+            # should attempt to resolve the ERROR condition before adding
+            # more subports to the trunk. Should a trunk be in PENDING or
+            # BUILD state (e.g. when dealing with multiple concurrent
+            # requests), the status is still forced to PENDING and thus
+            # can potentially overwrite an interleaving state change to
+            # ACTIVE. Eventually the driver should bring the status back
+            # to ACTIVE or ERROR.
+            if trunk.status == constants.ERROR_STATUS:
+                raise trunk_exc.TrunkInErrorState(trunk_id=trunk_id)
+            else:
+                trunk.status = constants.PENDING_STATUS
+                trunk.update()
+
             for subport in subports:
                 obj = trunk_objects.SubPort(
                                context=context,
@@ -240,6 +312,15 @@ class TrunkPlugin(service_base.ServicePluginBase,
 
             del trunk.sub_ports[:]
             trunk.sub_ports.extend(current_subports.values())
+            # NOTE(status_police): the trunk status should transition to
+            # PENDING irrespective of the status in which it is in to allow
+            # the user to resolve potential conflicts due to prior add_subports
+            # operations.
+            # Should a trunk be in PENDING or BUILD state (e.g. when dealing
+            # with multiple concurrent requests), the status is still forced
+            # to PENDING. See add_subports() for more details.
+            trunk.status = constants.PENDING_STATUS
+            trunk.update()
             payload = callbacks.TrunkPayload(context, trunk_id,
                                              current_trunk=trunk,
                                              original_trunk=original_trunk,

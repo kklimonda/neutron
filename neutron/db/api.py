@@ -16,25 +16,36 @@
 import contextlib
 
 from debtcollector import moves
+from debtcollector import removals
 from oslo_config import cfg
 from oslo_db import api as oslo_db_api
 from oslo_db import exception as db_exc
 from oslo_db.sqlalchemy import enginefacade
+from oslo_log import log as logging
 from oslo_utils import excutils
 import osprofiler.sqlalchemy
 import six
 import sqlalchemy
 from sqlalchemy.orm import exc
+import traceback
 
 from neutron.common import exceptions
 from neutron.common import profiler  # noqa
 
-context_manager = enginefacade.transaction_context()
-context_manager.configure(sqlite_fk=True)
 
-_PROFILER_INITIALIZED = False
+def set_hook(engine):
+    if cfg.CONF.profiler.enabled and cfg.CONF.profiler.trace_sqlalchemy:
+        osprofiler.sqlalchemy.add_tracing(sqlalchemy, engine, 'neutron.db')
+
+
+context_manager = enginefacade.transaction_context()
+
+context_manager.configure(sqlite_fk=True)
+context_manager.append_on_engine_create(set_hook)
+
 
 MAX_RETRIES = 10
+LOG = logging.getLogger(__name__)
 
 
 def is_retriable(e):
@@ -48,12 +59,28 @@ def is_retriable(e):
 is_deadlock = moves.moved_function(is_retriable, 'is_deadlock', __name__,
                                    message='use "is_retriable" instead',
                                    version='newton', removal_version='ocata')
-retry_db_errors = oslo_db_api.wrap_db_retry(
+_retry_db_errors = oslo_db_api.wrap_db_retry(
     max_retries=MAX_RETRIES,
     retry_interval=0.1,
     inc_retry_interval=True,
     exception_checker=is_retriable
 )
+
+
+def retry_db_errors(f):
+    """Log retriable exceptions before retry to help debugging."""
+
+    @_retry_db_errors
+    @six.wraps(f)
+    def wrapped(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception as e:
+            with excutils.save_and_reraise_exception():
+                if is_retriable(e):
+                    LOG.debug("Retry wrapper got retriable exception: %s",
+                              traceback.format_exc())
+    return wrapped
 
 
 def reraise_as_retryrequest(f):
@@ -78,16 +105,6 @@ def _is_nested_instance(e, etypes):
             any(_is_nested_instance(i, etypes) for i in e.inner_exceptions))
 
 
-# TODO(akamyshnikova) this code should be in oslo.db
-def _set_profiler():
-    global _PROFILER_INITIALIZED
-    if (not _PROFILER_INITIALIZED and cfg.CONF.profiler.enabled and
-            cfg.CONF.profiler.trace_sqlalchemy):
-        _PROFILER_INITIALIZED = True
-        osprofiler.sqlalchemy.add_tracing(
-            sqlalchemy, context_manager.get_legacy_facade().get_engine(), "db")
-
-
 @contextlib.contextmanager
 def exc_to_retry(exceptions):
     try:
@@ -99,11 +116,9 @@ def exc_to_retry(exceptions):
                 raise db_exc.RetryRequest(e)
 
 
-#TODO(akamyshnikova): when all places in the code, which use sessions/
-# connections will be updated, this won't be needed
+@removals.remove(version='Newton', removal_version='Ocata')
 def get_engine():
     """Helper method to grab engine."""
-    _set_profiler()
     return context_manager.get_legacy_facade().get_engine()
 
 
@@ -118,7 +133,6 @@ def dispose():
 # connections will be updated, this won't be needed
 def get_session(autocommit=True, expire_on_commit=False, use_slave=False):
     """Helper method to grab session."""
-    _set_profiler()
     return context_manager.get_legacy_facade().get_session(
         autocommit=autocommit, expire_on_commit=expire_on_commit,
         use_slave=use_slave)

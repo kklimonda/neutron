@@ -202,6 +202,11 @@ class NeutronObject(obj_base.VersionedObject,
     def delete(self):
         raise NotImplementedError()
 
+    @classmethod
+    def count(cls, context, **kwargs):
+        '''Count the number of objects matching filtering criteria.'''
+        return len(cls.get_objects(context, **kwargs))
+
 
 class DeclarativeObject(abc.ABCMeta):
 
@@ -243,7 +248,7 @@ class DeclarativeObject(abc.ABCMeta):
                 cls.has_standard_attributes()):
             standardattributes.add_standard_attributes(cls)
         # Instantiate extra filters per class
-        cls.extra_filter_names = set()
+        cls.extra_filter_names = set(cls.extra_filter_names)
 
 
 @six.add_metaclass(DeclarativeObject)
@@ -537,3 +542,17 @@ class NeutronDbObject(NeutronObject):
         obj_db_api.delete_object(self.obj_context, self.db_model,
                                  **self.modify_fields_to_db(
                                      self._get_composite_keys()))
+
+    @classmethod
+    def count(cls, context, **kwargs):
+        """
+        Count the number of objects matching filtering criteria.
+
+        :param context:
+        :param kwargs: multiple keys defined by key=value pairs
+        :return: number of matching objects
+        """
+        cls.validate_filters(**kwargs)
+        return obj_db_api.count(
+            context, cls.db_model, **cls.modify_fields_to_db(kwargs)
+        )

@@ -1,8 +1,8 @@
 Metadata-Version: 1.1
 Name: neutron
-Version: 9.0.0.0b3.dev207
+Version: 9.0.0.0b3.dev444
 Summary: OpenStack Networking
-Home-page: http://www.openstack.org/
+Home-page: http://docs.openstack.org/developer/neutron/
 Author: OpenStack
 Author-email: openstack-dev@lists.openstack.org
 License: UNKNOWN
@@ -55,3 +55,4 @@ Classifier: Programming Language :: Python :: 2
 Classifier: Programming Language :: Python :: 2.7
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5

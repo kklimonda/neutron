@@ -50,8 +50,8 @@ from neutron.db import api as db_api
 from neutron.db import db_base_plugin_common
 from neutron.db import ipam_backend_mixin
 from neutron.db import l3_db
+from neutron.db.models import securitygroup as sg_models
 from neutron.db import models_v2
-from neutron.db import securitygroups_db as sgdb
 from neutron import manager
 from neutron.tests import base
 from neutron.tests import tools
@@ -332,7 +332,8 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
         for arg in ('ip_version', 'tenant_id', 'subnetpool_id', 'prefixlen',
                     'enable_dhcp', 'allocation_pools', 'segment_id',
                     'dns_nameservers', 'host_routes',
-                    'shared', 'ipv6_ra_mode', 'ipv6_address_mode'):
+                    'shared', 'ipv6_ra_mode', 'ipv6_address_mode',
+                    'service_types'):
             # Arg must be present and not null (but can be false)
             if kwargs.get(arg) is not None:
                 data['subnet'][arg] = kwargs[arg]
@@ -625,6 +626,7 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
                ipv6_ra_mode=None,
                ipv6_address_mode=None,
                tenant_id=None,
+               service_types=None,
                set_context=False):
         with optional_ctx(network, self.network,
                           set_context=set_context,
@@ -6007,7 +6009,7 @@ class TestSubnetPoolsV2(NeutronDbPluginV2TestCase):
             self.assertEqual(400, res.status_int)
 
 
-class DbModelTestCase(testlib_api.SqlTestCase):
+class DbModelMixin(object):
     """DB model tests."""
     def test_repr(self):
         """testing the string representation of 'model' classes."""
@@ -6016,7 +6018,7 @@ class DbModelTestCase(testlib_api.SqlTestCase):
         actual_repr_output = repr(network)
         exp_start_with = "<neutron.db.models_v2.Network"
         exp_middle = "[object at %x]" % id(network)
-        exp_end_with = (" {tenant_id=None, id=None, "
+        exp_end_with = (" {project_id=None, id=None, "
                         "name='net_net', status='OK', "
                         "admin_state_up=True, "
                         "vlan_transparent=None, "
@@ -6025,50 +6027,14 @@ class DbModelTestCase(testlib_api.SqlTestCase):
         final_exp = exp_start_with + exp_middle + exp_end_with
         self.assertEqual(final_exp, actual_repr_output)
 
-    def _make_network(self, ctx):
-        with ctx.session.begin():
-            network = models_v2.Network(name="net_net", status="OK",
-                                        tenant_id='dbcheck',
-                                        admin_state_up=True)
-            ctx.session.add(network)
-        return network
-
-    def _make_subnet(self, ctx, network_id):
-        with ctx.session.begin():
-            subnet = models_v2.Subnet(name="subsub", ip_version=4,
-                                      tenant_id='dbcheck',
-                                      cidr='turn_down_for_what',
-                                      network_id=network_id)
-            ctx.session.add(subnet)
-        return subnet
-
-    def _make_port(self, ctx, network_id):
-        with ctx.session.begin():
-            port = models_v2.Port(network_id=network_id, mac_address='1',
-                                  tenant_id='dbcheck',
-                                  admin_state_up=True, status="COOL",
-                                  device_id="devid", device_owner="me")
-            ctx.session.add(port)
-        return port
-
-    def _make_subnetpool(self, ctx):
-        with ctx.session.begin():
-            subnetpool = models_v2.SubnetPool(
-                ip_version=4, default_prefixlen=4, min_prefixlen=4,
-                max_prefixlen=4, shared=False, default_quota=4,
-                address_scope_id='f', tenant_id='dbcheck',
-                is_default=False
-            )
-            ctx.session.add(subnetpool)
-        return subnetpool
-
     def _make_security_group_and_rule(self, ctx):
         with ctx.session.begin():
-            sg = sgdb.SecurityGroup(name='sg', description='sg')
-            rule = sgdb.SecurityGroupRule(security_group=sg, port_range_min=1,
-                                          port_range_max=2, protocol='TCP',
-                                          ethertype='v4', direction='ingress',
-                                          remote_ip_prefix='0.0.0.0/0')
+            sg = sg_models.SecurityGroup(name='sg', description='sg')
+            rule = sg_models.SecurityGroupRule(
+                security_group=sg, port_range_min=1,
+                port_range_max=2, protocol='TCP',
+                ethertype='v4', direction='ingress',
+                remote_ip_prefix='0.0.0.0/0')
             ctx.session.add(sg)
             ctx.session.add(rule)
         return sg, rule
@@ -6147,9 +6113,9 @@ class DbModelTestCase(testlib_api.SqlTestCase):
         ctx = context.get_admin_context()
         sg, rule = self._make_security_group_and_rule(ctx)
         self._test_staledata_error_on_concurrent_object_update(
-            sgdb.SecurityGroup, sg['id'])
+            sg_models.SecurityGroup, sg['id'])
         self._test_staledata_error_on_concurrent_object_update(
-            sgdb.SecurityGroupRule, rule['id'])
+            sg_models.SecurityGroupRule, rule['id'])
 
     def _test_staledata_error_on_concurrent_object_update(self, model, dbid):
         """Test revision compare and swap update breaking on concurrent update.
@@ -6249,6 +6215,84 @@ class DbModelTestCase(testlib_api.SqlTestCase):
                           ('subnets', subnet), ('subnetpools', spool)):
             self.assertEqual(
                 disc, obj.standard_attr.resource_type)
+
+
+class DbModelTenantTestCase(DbModelMixin, testlib_api.SqlTestCase):
+    def _make_network(self, ctx):
+        with ctx.session.begin():
+            network = models_v2.Network(name="net_net", status="OK",
+                                        tenant_id='dbcheck',
+                                        admin_state_up=True)
+            ctx.session.add(network)
+        return network
+
+    def _make_subnet(self, ctx, network_id):
+        with ctx.session.begin():
+            subnet = models_v2.Subnet(name="subsub", ip_version=4,
+                                      tenant_id='dbcheck',
+                                      cidr='turn_down_for_what',
+                                      network_id=network_id)
+            ctx.session.add(subnet)
+        return subnet
+
+    def _make_port(self, ctx, network_id):
+        with ctx.session.begin():
+            port = models_v2.Port(network_id=network_id, mac_address='1',
+                                  tenant_id='dbcheck',
+                                  admin_state_up=True, status="COOL",
+                                  device_id="devid", device_owner="me")
+            ctx.session.add(port)
+        return port
+
+    def _make_subnetpool(self, ctx):
+        with ctx.session.begin():
+            subnetpool = models_v2.SubnetPool(
+                ip_version=4, default_prefixlen=4, min_prefixlen=4,
+                max_prefixlen=4, shared=False, default_quota=4,
+                address_scope_id='f', tenant_id='dbcheck',
+                is_default=False
+            )
+            ctx.session.add(subnetpool)
+        return subnetpool
+
+
+class DbModelProjectTestCase(DbModelMixin, testlib_api.SqlTestCase):
+    def _make_network(self, ctx):
+        with ctx.session.begin():
+            network = models_v2.Network(name="net_net", status="OK",
+                                        project_id='dbcheck',
+                                        admin_state_up=True)
+            ctx.session.add(network)
+        return network
+
+    def _make_subnet(self, ctx, network_id):
+        with ctx.session.begin():
+            subnet = models_v2.Subnet(name="subsub", ip_version=4,
+                                      project_id='dbcheck',
+                                      cidr='turn_down_for_what',
+                                      network_id=network_id)
+            ctx.session.add(subnet)
+        return subnet
+
+    def _make_port(self, ctx, network_id):
+        with ctx.session.begin():
+            port = models_v2.Port(network_id=network_id, mac_address='1',
+                                  project_id='dbcheck',
+                                  admin_state_up=True, status="COOL",
+                                  device_id="devid", device_owner="me")
+            ctx.session.add(port)
+        return port
+
+    def _make_subnetpool(self, ctx):
+        with ctx.session.begin():
+            subnetpool = models_v2.SubnetPool(
+                ip_version=4, default_prefixlen=4, min_prefixlen=4,
+                max_prefixlen=4, shared=False, default_quota=4,
+                address_scope_id='f', project_id='dbcheck',
+                is_default=False
+            )
+            ctx.session.add(subnetpool)
+        return subnetpool
 
 
 class NeutronDbPluginV2AsMixinTestCase(NeutronDbPluginV2TestCase,
@@ -6383,7 +6427,7 @@ class DbOperationBoundMixin(object):
         def _event_incrementer(*args, **kwargs):
             self._db_execute_count += 1
 
-        engine = db_api.get_engine()
+        engine = db_api.context_manager.get_legacy_facade().get_engine()
         event.listen(engine, 'after_execute', _event_incrementer)
         self.addCleanup(event.remove, engine, 'after_execute',
                         _event_incrementer)

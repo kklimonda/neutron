@@ -19,7 +19,6 @@ from neutron_lib import constants as const
 from neutron_lib import exceptions as exc
 from oslo_concurrency import lockutils
 from oslo_config import cfg
-from oslo_db import api as oslo_db_api
 from oslo_db import exception as os_db_exception
 from oslo_log import helpers as log_helpers
 from oslo_log import log
@@ -56,12 +55,13 @@ from neutron.db import db_base_plugin_v2
 from neutron.db import dvr_mac_db
 from neutron.db import external_net_db
 from neutron.db import extradhcpopt_db
+from neutron.db.models import securitygroup as sg_models
 from neutron.db import models_v2
 from neutron.db import provisioning_blocks
 from neutron.db.quota import driver  # noqa
-from neutron.db import securitygroups_db
 from neutron.db import securitygroups_rpc_base as sg_db_rpc
 from neutron.db import segments_db
+from neutron.db import subnet_service_type_db_models as service_type_db
 from neutron.db import vlantransparent_db
 from neutron.extensions import allowedaddresspairs as addr_pair
 from neutron.extensions import availability_zone as az_ext
@@ -103,7 +103,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 addr_pair_db.AllowedAddressPairsMixin,
                 vlantransparent_db.Vlantransparent_db_mixin,
                 extradhcpopt_db.ExtraDhcpOptMixin,
-                address_scope_db.AddressScopeDbMixin):
+                address_scope_db.AddressScopeDbMixin,
+                service_type_db.SubnetServiceTypeMixin):
 
     """Implement the Neutron L2 abstractions using modules.
 
@@ -131,7 +132,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                     "address-scope",
                                     "availability_zone",
                                     "network_availability_zone",
-                                    "default-subnetpools"]
+                                    "default-subnetpools",
+                                    "subnet-service-types"]
 
     @property
     def supported_extension_aliases(self):
@@ -148,8 +150,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         port=models_v2.Port,
         subnet=models_v2.Subnet,
         subnetpool=models_v2.SubnetPool,
-        security_group=securitygroups_db.SecurityGroup,
-        security_group_rule=securitygroups_db.SecurityGroupRule)
+        security_group=sg_models.SecurityGroup,
+        security_group_rule=sg_models.SecurityGroupRule)
     def __init__(self):
         # First load drivers, then initialize DB, then initialize drivers
         self.type_manager = managers.TypeManager()
@@ -757,6 +759,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         self._apply_dict_extend_functions('networks', result, net_db)
         return result, mech_context
 
+    @utils.transaction_guard
     def create_network(self, context, network):
         result, mech_context = self._create_network_db(context, network)
         kwargs = {'context': context, 'network': result}
@@ -771,10 +774,12 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
         return result
 
+    @utils.transaction_guard
     def create_network_bulk(self, context, networks):
         objects = self._create_bulk_ml2(attributes.NETWORK, context, networks)
         return [obj['result'] for obj in objects]
 
+    @utils.transaction_guard
     def update_network(self, context, id, network):
         net_data = network[attributes.NETWORK]
         provider._raise_if_updates_provider_attributes(net_data)
@@ -955,6 +960,11 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
     def _create_subnet_db(self, context, subnet):
         session = context.session
+        # FIXME(kevinbenton): this is a mess because create_subnet ends up
+        # calling _update_router_gw_ports which ends up calling update_port
+        # on a router port inside this transaction. Need to find a way to
+        # separate router updates from the subnet update operation.
+        setattr(context, 'GUARD_TRANSACTION', False)
         with session.begin(subtransactions=True):
             result = super(Ml2Plugin, self).create_subnet(context, subnet)
             self.extension_manager.process_create_subnet(
@@ -966,6 +976,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
         return result, mech_context
 
+    @utils.transaction_guard
     def create_subnet(self, context, subnet):
         result, mech_context = self._create_subnet_db(context, subnet)
         kwargs = {'context': context, 'subnet': result}
@@ -979,10 +990,12 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 self.delete_subnet(context, result['id'])
         return result
 
+    @utils.transaction_guard
     def create_subnet_bulk(self, context, subnets):
         objects = self._create_bulk_ml2(attributes.SUBNET, context, subnets)
         return [obj['result'] for obj in objects]
 
+    @utils.transaction_guard
     def update_subnet(self, context, id, subnet):
         session = context.session
         with session.begin(subtransactions=True):
@@ -1188,8 +1201,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             attrs['status'] = const.PORT_STATUS_DOWN
 
         session = context.session
-        with db_api.exc_to_retry(os_db_exception.DBDuplicateEntry),\
-                session.begin(subtransactions=True):
+        with session.begin(subtransactions=True):
             dhcp_opts = attrs.get(edo_ext.EXTRADHCPOPTS, [])
             port_db = self.create_port_db(context, port)
             result = self._make_port_dict(port_db, process_extensions=False)
@@ -1217,6 +1229,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         self._apply_dict_extend_functions('ports', result, port_db)
         return result, mech_context
 
+    @utils.transaction_guard
     def create_port(self, context, port):
         # TODO(kevinbenton): remove when bug/1543094 is fixed.
         with lockutils.lock(port['port']['network_id'],
@@ -1256,6 +1269,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
         return bound_context.current
 
+    @utils.transaction_guard
     def create_port_bulk(self, context, ports):
         objects = self._create_bulk_ml2(attributes.PORT, context, ports)
 
@@ -1325,14 +1339,14 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             if security_groups:
                 raise psec.PortSecurityPortHasSecurityGroup()
 
+    @utils.transaction_guard
     def update_port(self, context, id, port):
         attrs = port[attributes.PORT]
         need_port_update_notify = False
         session = context.session
         bound_mech_contexts = []
 
-        with db_api.exc_to_retry(os_db_exception.DBDuplicateEntry),\
-                session.begin(subtransactions=True):
+        with session.begin(subtransactions=True):
             port_db, binding = db.get_locked_port_and_binding(session, id)
             if not port_db:
                 raise exc.PortNotFound(port_id=id)
@@ -1462,6 +1476,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         binding.host = attrs and attrs.get(portbindings.HOST_ID)
         binding.router_id = attrs and attrs.get('device_id')
 
+    @utils.transaction_guard
     def update_distributed_port_binding(self, context, id, port):
         attrs = port[attributes.PORT]
 
@@ -1518,6 +1533,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 raise e.errors[0].error
             raise exc.ServicePortInUse(port_id=port_id, reason=e)
 
+    @utils.transaction_guard
     def delete_port(self, context, id, l3_port_check=True):
         self._pre_delete_port(context, id, l3_port_check)
         # TODO(armax): get rid of the l3 dependency in the with block
@@ -1587,6 +1603,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.notifier.port_delete(context, port['id'])
         self.notify_security_groups_member_updated(context, port)
 
+    @utils.transaction_guard
     def get_bound_port_context(self, plugin_context, port_id, host=None,
                                cached_networks=None):
         session = plugin_context.session
@@ -1638,11 +1655,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
         return self._bind_port_if_needed(port_context)
 
-    @oslo_db_api.wrap_db_retry(
-        max_retries=db_api.MAX_RETRIES, retry_on_request=True,
-        exception_checker=lambda e: isinstance(e, (sa_exc.StaleDataError,
-                                                   os_db_exception.DBDeadlock))
-    )
+    @utils.transaction_guard
+    @db_api.retry_db_errors
     def update_port_status(self, context, port_id, status, host=None,
                            network=None):
         """

@@ -144,7 +144,7 @@ class Ml2PluginV2TestCase(test_plugin.NeutronDbPluginV2TestCase):
                                      [self.phys_vrange, self.phys2_vrange],
                                      group='ml2_type_vlan')
         self.setup_parent()
-        self.driver = ml2_plugin.Ml2Plugin()
+        self.driver = manager.NeutronManager.get_plugin()
         self.context = context.get_admin_context()
 
 
@@ -1072,7 +1072,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                     raise db_exc.DBDuplicateEntry()
 
         listener = IPAllocationsGrenade()
-        engine = db_api.get_engine()
+        engine = db_api.context_manager.get_legacy_facade().get_engine()
         event.listen(engine, 'before_cursor_execute', listener.execute)
         event.listen(engine, 'commit', listener.commit)
         self.addCleanup(event.remove, engine, 'before_cursor_execute',
@@ -1570,9 +1570,11 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
                 'id': port['port']['id'],
                 portbindings.HOST_ID: 'foo_host',
             }
-            with mock.patch.object(plugin, 'get_port', new=plugin.delete_port):
+            exc = db_exc.DBReferenceError('', '', '', '')
+            with mock.patch.object(ml2_db, 'ensure_distributed_port_binding',
+                                   side_effect=exc):
                 res = plugin.update_distributed_port_binding(
-                    self.context, 'foo_port_id', {'port': port})
+                    self.context, port['id'], {'port': port})
         self.assertIsNone(res)
 
     def test_update_distributed_port_binding_on_non_existent_port(self):
@@ -2310,6 +2312,7 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
         # neutron.objects.db.api from core plugin instance
         self.setup_coreplugin(PLUGIN_NAME)
         self.context = mock.MagicMock()
+        self.context.session.is_active = False
         self.notify_p = mock.patch('neutron.callbacks.registry.notify')
         self.notify = self.notify_p.start()
 
@@ -2427,14 +2430,14 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
 
 class TestTransactionGuard(Ml2PluginV2TestCase):
     def test_delete_network_guard(self):
-        plugin = ml2_plugin.Ml2Plugin()
+        plugin = manager.NeutronManager.get_plugin()
         ctx = context.get_admin_context()
         with ctx.session.begin(subtransactions=True):
             with testtools.ExpectedException(RuntimeError):
                 plugin.delete_network(ctx, 'id')
 
     def test_delete_subnet_guard(self):
-        plugin = ml2_plugin.Ml2Plugin()
+        plugin = manager.NeutronManager.get_plugin()
         ctx = context.get_admin_context()
         with ctx.session.begin(subtransactions=True):
             with testtools.ExpectedException(RuntimeError):
