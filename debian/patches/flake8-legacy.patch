@@ -1,0 +1,15 @@
+Description: Use legacy API as provided in flake8 >= 3.0.0
+Author: James Page <james.page@ubuntu.com>
+Forwarded: not-needed
+
+--- a/neutron/tests/unit/hacking/test_checks.py
++++ b/neutron/tests/unit/hacking/test_checks.py
+@@ -12,7 +12,7 @@
+ 
+ import re
+ 
+-from flake8 import engine
++from flake8.api import legacy as engine
+ from hacking.tests import test_doctest as hacking_doctest
+ import pep8
+ import testscenarios

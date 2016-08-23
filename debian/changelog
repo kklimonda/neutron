@@ -6,6 +6,8 @@ neutron (2:9.0.0~b3~dev444-0ubuntu1) UNRELEASED; urgency=medium
 
   [ James Page ]
   * New upstream release.
+  * d/p/flake8-legacy.patch: Compat patch for newer flake8 version than
+    upstream OpenStack is currently aligned with.
 
  -- James Page <james.page@ubuntu.com>  Tue, 23 Aug 2016 09:12:20 +0100
 
