@@ -246,7 +246,9 @@ class IPWrapper(SubProcessBase):
 
     @classmethod
     def get_namespaces(cls):
-        output = cls._execute([], 'netns', ('list',))
+        output = cls._execute(
+            [], 'netns', ('list',),
+            run_as_root=cfg.CONF.AGENT.use_helper_for_ns_read)
         return [l.split()[0] for l in output.splitlines()]
 
 
@@ -697,7 +699,7 @@ class IpRouteCommand(IpDeviceCommandBase):
             with excutils.save_and_reraise_exception() as ctx:
                 if "Cannot find device" in str(rte):
                     ctx.reraise = False
-                    raise n_exc.DeviceNotFoundError(device_name=self.name)
+                    raise exceptions.DeviceNotFoundError(device_name=self.name)
 
     def delete_gateway(self, gateway, table=None):
         ip_version = get_ip_version(gateway)

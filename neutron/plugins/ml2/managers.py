@@ -208,6 +208,26 @@ class TypeManager(stevedore.named.NamedExtensionManager):
                 segment = self._allocate_tenant_net_segment(session)
                 self._add_network_segment(context, network_id, segment)
 
+    def reserve_network_segment(self, session, segment_data):
+        """Call type drivers to reserve a network segment."""
+        # Validate the data of segment
+        if not validators.is_attr_set(segment_data[api.NETWORK_TYPE]):
+            msg = _("network_type required")
+            raise exc.InvalidInput(error_message=msg)
+
+        net_type = self._get_attribute(segment_data, api.NETWORK_TYPE)
+        phys_net = self._get_attribute(segment_data, api.PHYSICAL_NETWORK)
+        seg_id = self._get_attribute(segment_data, api.SEGMENTATION_ID)
+        segment = {api.NETWORK_TYPE: net_type,
+                   api.PHYSICAL_NETWORK: phys_net,
+                   api.SEGMENTATION_ID: seg_id}
+
+        self.validate_provider_segment(segment)
+
+        # Reserve segment in type driver
+        with session.begin(subtransactions=True):
+            return self.reserve_provider_segment(session, segment)
+
     def is_partial_segment(self, segment):
         network_type = segment[api.NETWORK_TYPE]
         driver = self.drivers.get(network_type)
@@ -254,13 +274,16 @@ class TypeManager(stevedore.named.NamedExtensionManager):
                                                     filter_dynamic=None)
 
         for segment in segments:
-            network_type = segment.get(api.NETWORK_TYPE)
-            driver = self.drivers.get(network_type)
-            if driver:
-                driver.obj.release_segment(session, segment)
-            else:
-                LOG.error(_LE("Failed to release segment '%s' because "
-                              "network type is not supported."), segment)
+            self.release_network_segment(session, segment)
+
+    def release_network_segment(self, session, segment):
+        network_type = segment.get(api.NETWORK_TYPE)
+        driver = self.drivers.get(network_type)
+        if driver:
+            driver.obj.release_segment(session, segment)
+        else:
+            LOG.error(_LE("Failed to release segment '%s' because "
+                          "network type is not supported."), segment)
 
     def allocate_dynamic_segment(self, context, network_id, segment):
         """Allocate a dynamic segment using a partial or full segment dict."""
@@ -404,7 +427,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         raise_db_retriable=False. See neutron.db.api.is_retriable for
         what db exception is retriable
         """
-        error = False
+        errors = []
         for driver in self.ordered_mech_drivers:
             try:
                 getattr(driver.obj, method_name)(context)
@@ -419,12 +442,13 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                     _LE("Mechanism driver '%(name)s' failed in %(method)s"),
                     {'name': driver.name, 'method': method_name}
                 )
-                error = True
+                errors.append(e)
                 if not continue_on_failure:
                     break
-        if error:
+        if errors:
             raise ml2_exc.MechanismDriverError(
-                method=method_name
+                method=method_name,
+                errors=errors
             )
 
     def create_network_precommit(self, context):

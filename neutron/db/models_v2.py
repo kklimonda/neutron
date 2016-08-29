@@ -22,6 +22,7 @@ from neutron.api.v2 import attributes as attr
 from neutron.db import model_base
 from neutron.db.network_dhcp_agent_binding import models as ndab_model
 from neutron.db import rbac_db_models
+from neutron.db import standard_attr
 
 
 # NOTE(kevinbenton): these are here for external projects that expect them
@@ -114,7 +115,7 @@ class SubnetRoute(model_base.BASEV2, Route):
                           primary_key=True)
 
 
-class Port(model_base.HasStandardAttributes, model_base.BASEV2,
+class Port(standard_attr.HasStandardAttributes, model_base.BASEV2,
            HasId, HasTenant):
     """Represents a port on a Neutron v2 network."""
 
@@ -173,7 +174,7 @@ class DNSNameServer(model_base.BASEV2):
     order = sa.Column(sa.Integer, nullable=False, server_default='0')
 
 
-class Subnet(model_base.HasStandardAttributes, model_base.BASEV2,
+class Subnet(standard_attr.HasStandardAttributes, model_base.BASEV2,
              HasId, HasTenant):
     """Represents a neutron subnet.
 
@@ -213,11 +214,13 @@ class Subnet(model_base.HasStandardAttributes, model_base.BASEV2,
     ipv6_ra_mode = sa.Column(sa.Enum(constants.IPV6_SLAAC,
                                      constants.DHCPV6_STATEFUL,
                                      constants.DHCPV6_STATELESS,
-                                     name='ipv6_ra_modes'), nullable=True)
+                                     name='ipv6_ra_modes'),
+                             nullable=True)
     ipv6_address_mode = sa.Column(sa.Enum(constants.IPV6_SLAAC,
-                                  constants.DHCPV6_STATEFUL,
-                                  constants.DHCPV6_STATELESS,
-                                  name='ipv6_address_modes'), nullable=True)
+                                          constants.DHCPV6_STATEFUL,
+                                          constants.DHCPV6_STATELESS,
+                                          name='ipv6_address_modes'),
+                                  nullable=True)
     # subnets don't have their own rbac_entries, they just inherit from
     # the network rbac entries
     rbac_entries = orm.relationship(
@@ -240,7 +243,7 @@ class SubnetPoolPrefix(model_base.BASEV2):
                               primary_key=True)
 
 
-class SubnetPool(model_base.HasStandardAttributes, model_base.BASEV2,
+class SubnetPool(standard_attr.HasStandardAttributes, model_base.BASEV2,
                  HasId, HasTenant):
     """Represents a neutron subnet pool.
     """
@@ -262,7 +265,7 @@ class SubnetPool(model_base.HasStandardAttributes, model_base.BASEV2,
                                 lazy='joined')
 
 
-class Network(model_base.HasStandardAttributes, model_base.BASEV2,
+class Network(standard_attr.HasStandardAttributes, model_base.BASEV2,
               HasId, HasTenant):
     """Represents a v2 neutron network."""
 

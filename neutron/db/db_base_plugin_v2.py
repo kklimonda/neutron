@@ -558,8 +558,8 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                        "subnets.")
             raise exc.BadRequest(resource='subnets', msg=reason)
 
-        mode_list = [n_const.IPV6_SLAAC,
-                     n_const.DHCPV6_STATELESS]
+        mode_list = [constants.IPV6_SLAAC,
+                     constants.DHCPV6_STATELESS]
 
         ra_mode = subnet.get('ipv6_ra_mode')
         if ra_mode not in mode_list:
@@ -666,14 +666,6 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         subnetpool = self.get_default_subnetpool(context, ip_version)
         if subnetpool:
             return subnetpool['id']
-
-        # Until the default_subnet_pool config options are removed in the N
-        # release, check for them after get_default_subnetpool returns None.
-        # TODO(john-davidge): Remove after Mitaka release.
-        if ip_version == 4 and cfg.CONF.default_ipv4_subnet_pool:
-            return cfg.CONF.default_ipv4_subnet_pool
-        if ip_version == 6 and cfg.CONF.default_ipv6_subnet_pool:
-            return cfg.CONF.default_ipv6_subnet_pool
 
         msg = _('No default subnetpool found for IPv%s') % ip_version
         raise exc.BadRequest(resource='subnets', msg=msg)

@@ -14,7 +14,9 @@
 import mock
 from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
+from oslo_utils import uuidutils
 
+from neutron.common import exceptions as c_exc
 from neutron import context
 from neutron.services.auto_allocate import db
 from neutron.services.auto_allocate import exceptions
@@ -28,6 +30,7 @@ class AutoAllocateTestCase(testlib_api.SqlTestCaseLight):
         self.ctx = context.get_admin_context()
         self.mixin = db.AutoAllocatedTopologyMixin()
         self.mixin._l3_plugin = mock.Mock()
+        self.mixin._core_plugin = mock.Mock()
 
     def test__provision_external_connectivity_expected_cleanup(self):
         """Test that the right resources are cleaned up."""
@@ -58,6 +61,21 @@ class AutoAllocateTestCase(testlib_api.SqlTestCaseLight):
         self.assertRaises(n_exc.BadRequest,
             self.mixin.get_auto_allocated_topology,
             self.ctx, mock.ANY, fields=['foo'])
+
+    def test__provision_tenant_private_network_handles_subnet_errors(self):
+        network_id = uuidutils.generate_uuid()
+        self.mixin._core_plugin.create_network.return_value = (
+            {'id': network_id})
+        self.mixin._core_plugin.create_subnet.side_effect = (
+            c_exc.SubnetAllocationError(reason='disaster'))
+        with mock.patch.object(self.mixin, "_get_supported_subnetpools") as f,\
+                mock.patch.object(self.mixin, "_cleanup") as g:
+            f.return_value = (
+                [{'ip_version': 4, "id": uuidutils.generate_uuid()}])
+            self.assertRaises(exceptions.AutoAllocationFailure,
+                              self.mixin._provision_tenant_private_network,
+                              self.ctx, 'foo_tenant')
+            g.assert_called_once_with(self.ctx, network_id)
 
     def _test__build_topology(self, exception):
         with mock.patch.object(self.mixin,
@@ -96,3 +114,17 @@ class AutoAllocateTestCase(testlib_api.SqlTestCaseLight):
             result = self.mixin._check_requirements(self.ctx, 'foo_tenant')
             expected = {'id': 'dry-run=pass', 'tenant_id': 'foo_tenant'}
             self.assertEqual(expected, result)
+
+    def test__cleanup_handles_failures(self):
+        retry_then_notfound = (
+            [db_exc.RetryRequest(ValueError())] +
+            [n_exc.NotFound()] * 10
+        )
+        self.mixin._l3_plugin.remove_router_interface.side_effect = (
+            retry_then_notfound)
+        self.mixin._l3_plugin.delete_router.side_effect = (
+            retry_then_notfound)
+        self.mixin._core_plugin.delete_network.side_effect = (
+            retry_then_notfound)
+        self.mixin._cleanup(self.ctx, network_id=44, router_id=45,
+                            subnets=[{'id': 46}])

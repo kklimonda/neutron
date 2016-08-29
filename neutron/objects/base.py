@@ -24,6 +24,7 @@ import six
 from neutron._i18n import _
 from neutron.db import api as db_api
 from neutron.db import model_base
+from neutron.db import standard_attr
 from neutron.objects.db import api as obj_db_api
 from neutron.objects.extensions import standardattributes
 
@@ -66,6 +67,10 @@ class NeutronPrimaryKeyMissing(exceptions.BadRequest):
 class NeutronSyntheticFieldMultipleForeignKeys(exceptions.NeutronException):
     message = _("Synthetic field %(field)s shouldn't have more than one "
                 "foreign key")
+
+
+class NeutronSyntheticFieldsForeignKeysNotFound(exceptions.NeutronException):
+    message = _("%(child)s does not define a foreign key for %(parent)s")
 
 
 def get_updatable_fields(cls, fields):
@@ -303,7 +308,8 @@ class NeutronDbObject(NeutronObject):
     @classmethod
     def has_standard_attributes(cls):
         return bool(cls.db_model and
-                    issubclass(cls.db_model, model_base.HasStandardAttributes))
+                    issubclass(cls.db_model,
+                               standard_attr.HasStandardAttributes))
 
     @classmethod
     def modify_fields_to_db(cls, fields):
@@ -445,6 +451,7 @@ class NeutronDbObject(NeutronObject):
         This method doesn't take care of loading synthetic fields that aren't
         stored in the DB, e.g. 'shared' in RBAC policy.
         """
+        clsname = self.__class__.__name__
 
         # TODO(rossella_s) Find a way to handle ObjectFields with
         # subclasses=True
@@ -462,7 +469,11 @@ class NeutronDbObject(NeutronObject):
                 # QosRule
                 continue
             objclass = objclasses[0]
-            if len(objclass.foreign_keys.keys()) > 1:
+            foreign_keys = objclass.foreign_keys.get(clsname)
+            if not foreign_keys:
+                raise NeutronSyntheticFieldsForeignKeysNotFound(
+                    parent=clsname, child=objclass.__name__)
+            if len(foreign_keys.keys()) > 1:
                 raise NeutronSyntheticFieldMultipleForeignKeys(field=field)
 
             synthetic_field_db_name = (
@@ -482,7 +493,7 @@ class NeutronDbObject(NeutronObject):
                 synth_objs = objclass.get_objects(
                     self.obj_context, **{
                         k: getattr(self, v)
-                        for k, v in objclass.foreign_keys.items()})
+                        for k, v in foreign_keys.items()})
             if isinstance(self.fields[field], obj_fields.ObjectField):
                 setattr(self, field, synth_objs[0] if synth_objs else None)
             else:

@@ -13,11 +13,17 @@
 #    under the License.
 
 import mock
+from mock import patch
 from neutron_lib import constants
+from neutron_lib import exceptions as lib_exc
 import testtools
 
 from neutron import context
+from neutron import manager
+from neutron.plugins.common import constants as p_cons
 from neutron.services.l3_router.service_providers import driver_controller
+from neutron.services import provider_configuration
+from neutron.tests import base
 from neutron.tests.unit import testlib_api
 
 
@@ -46,6 +52,20 @@ class TestDriverController(testlib_api.SqlTestCase):
         self.assertEqual(self.dc.drivers['dvrha'],
                          self.dc._get_provider_for_router(self.ctx,
                                                           'router_id'))
+
+    def test__update_router_provider_invalid(self):
+        test_dc = driver_controller.DriverController(self.fake_l3)
+        with mock.patch.object(test_dc, "_get_provider_for_router"):
+            with mock.patch.object(
+                driver_controller,
+                "_ensure_driver_supports_request") as _ensure:
+                _ensure.side_effect = lib_exc.Invalid(message='message')
+                self.assertRaises(
+                    lib_exc.Invalid,
+                    test_dc._update_router_provider,
+                    None, None, None, None,
+                    None, {'name': 'testname'},
+                    {'flavor_id': 'old_fid'}, None)
 
     def test__set_router_provider_attr_lookups(self):
         # ensure correct drivers are looked up based on attrs
@@ -89,3 +109,20 @@ class TestDriverController(testlib_api.SqlTestCase):
             # if association was cleared, get_router will be called
             self.fake_l3.get_router.side_effect = ValueError
             self.dc._get_provider_for_router(self.ctx, body['id'])
+
+    @patch.object(manager.NeutronManager, "get_service_plugins")
+    def test__flavor_plugin(self, get_service_plugins):
+        _fake_flavor_plugin = mock.sentinel.fla_plugin
+        get_service_plugins.return_value = {p_cons.FLAVORS:
+                                            _fake_flavor_plugin}
+        _dc = driver_controller.DriverController(self.fake_l3)
+        self.assertEqual(_fake_flavor_plugin, _dc._flavor_plugin)
+
+
+class Test_LegacyPlusProviderConfiguration(base.BaseTestCase):
+
+    @mock.patch.object(provider_configuration.ProviderConfiguration,
+                       "add_provider")
+    def test__update_router_provider_invalid(self, mock_method):
+            mock_method.side_effect = lib_exc.Invalid(message='message')
+            driver_controller._LegacyPlusProviderConfiguration()
