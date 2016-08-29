@@ -1,26 +1,77 @@
 CHANGES
 =======
 
+* fullstack: Use ovs-2.5 for tests
+* Relocate Flat Allocation DB model
+* Relocate subnet_service_types db models
+* Remove unused config.CONF
+* Remove unused logging import
+* Add test cases for Invalid exception type
+* Enable create and delete segments in ML2
+* Use MultipleExceptions from neutorn-lib
+* Move standard attr out of model_base
+* Wait for ovsdb_monitor to be active before use it
+* Fix deprecation warnings
 * Updated from global requirements
+* Make addbr safe to bridge add races
+* Deprecate allow_sorting and allow_pagination options
+* Fix passing error physical network for get_mtu
+* Fix indent
+* Remove useless line for tenant_id
+* Implement check_vlan_transparency to return True in L2population mech driver
+* Security group call back need cascading delete the related rules
+* Fix internal server error during updating QoS rule
+* Make OVS and LinuxBridge trunk drivers' is_loaded() property more robust
+* IP allocation with Service Subnets
+* Include [agent] extensions option into ovs/linuxbridge agent files
+* Fix the QoSPluginBase methods signature
+* TrivialFix: Remove logging import unused
+* TrunkManager for the OVS agent
+* SR-IOV: remove unused supported_pci_vendor_info variable
+* Catch SubnetAllocationError during auto-allocated-topology provisioning
+* Revisit the Stadium section of the developer guide
+* objects: add support for per parent type foreign keys
+* Fix bug in L3 agent extension manager
+* Added the appropriate links in developer guide
+* L3 DVR: use fanout when sending dvr arp table update
+* Fix the attribute name: _flavor_plugin_ref
+* Implement the DELETE method for get-me-a-network
+* Update README to reflect ML2 Exception in Dir Tree
+* Revert "Fix NoSuchOptError on identity config option lookup"
+* Use row.uuid as getattr works for inserted row
+* Add mechanism driver error details to MechanismDriverError
+* Make auto allocate cleanup retry
+* Updated from global requirements
+* Increase default packet count to 3 in assert_ping
+* L2 Agent Extensions handle unimplemented methods
+* Relocate GRE Db models
+* docs: Small Open vSwitch devref tweaks
+* Filter out external networks in NetworksSearchCriteriaTest
 * Remove useless deprecation warning for tenant_id
 * Fix init method for HasStandardAttributes
 * Imported Translations from Zanata
+* TrunkStub.trunk_deleted is called with NULL trunk object
 * Fix NoSuchOptError on identity config option lookup
 * Fix bridge assertion error when times are equal
+* Avoid KeyError when accessing "dns_name" as it may not exist
 * Add tool to list moved globals
 * Introduce ovo objects for network segments
 * Add agent-side driver scaffolding for trunk functionality
 * Revert "Publish segment id in port responses"
+* Increase rally network/port count and add quotas
 * Extensions: fix file mode permissions
 * Update the homepage with developer documentation page
 * Don't create another plugin instance in ML2 tests
 * Relocate AddressScope DB model
 * Enable ra on gateway when add gateway to HA router
+* Remove override of _compare_server_default in _TestModelsMigrations
 * Make callback manager Object Oriented friendly
 * Switch to pluggable IPAM implementation
 * Update "devref/quality_of_service" with QoS DSCP rule reference
 * Adjust spacing in METADATA_PROXY_HANDLER_OPTS
 * Refactoring config options for plugin agent opts
+* Added tests for checking expand/contract branch upgrade
+* Don't pass argument sqlite_db in method set_defaults
 * SR-IOV: deprecate supported_pci_vendor_devs
 * Add error informations for users when value is invalid in database
 * Implement L3 Agent Extension Manager
@@ -39,6 +90,7 @@ CHANGES
 * Add debug option to verify iptables rules
 * Avoid IPAM driver reusing a session that has been rolled back
 * Fix neutron_lib.constants DeprecationWarning from db.models_v2
+* Use dispose_pool() from oslo.db
 * Get rid of get_engine() in db/api.py
 * models: move AllowedAddressPair model under neutron/db/models
 * Refactor setting OSprofiler for db calls
@@ -76,6 +128,7 @@ CHANGES
 * ml2: allow retry on retriabable db error by precommit
 * Rollback router intf port update if csnat update fails
 * Enable DeprecationWarning in test environments
+* Check target_tenant when create rbac policy
 * Delete HA network if last HA router is migrated
 * Add linux bridge trunk server side driver
 * Enable CRUD for Subnet Service Types
@@ -90,6 +143,7 @@ CHANGES
 * L3 agent: check router namespace existence before delete
 * Consider baremetal device_owner as compute for nova notify
 * Delete conntrack entry with remote_ip on the other direction
+* Do not remove the HA/legacy router gateway secondary IPs
 * DHCP Auto Scheduling for routed provider networks
 * Restore old assert_ping behavior
 * DVR: Clean stale snat-ns by checking its existence when agent restarts
@@ -116,6 +170,7 @@ CHANGES
 * Change external_network_bridge default to ''
 * Fix link reference in OVS agent devref
 * Support callbacks for L3 plugins without an agent
+* Remove deprecated default subnetpools
 * Fixes the midonet test_l3 unit test failures
 * fixed a typo in src code
 * Suppresses a warning when no agents are configured
@@ -231,6 +286,8 @@ Add 'api-ref' for API reference
 * Replace device owners hard coded strings to neutron_lib constants
 * Add function to remove constraints from database
 * Add dhcp to Fdb extension's permitted device owners
+* Use context from_environ to load contexts
+* Use from_dict to load context params
 * Add a hacking rule for string interpolation at logging
 * Add check that factory started in dispose
 * Delete gw port on exceptions
@@ -273,6 +330,7 @@ Add 'api-ref' for API reference
 * Fixed typos
 * Fixes a link error
 * next() is incompatible in test_network_ip_availability.py
+* Run 'ip netns list' according to 'AGENT/use_helper_for_ns_read'
 * Remove unused LOG
 * Fix order of arguments in assertEqual
 * Reuse common code in securitygroups_rpc module
@@ -355,6 +413,7 @@ Add 'api-ref' for API reference
 * ovs: set device MTU after it's moved into a namespace
 * cache_utils: fixed cache misses for the new (oslo.cache) configuration
 * Syntax fix
+* ml2 lb: do not program arp responder when unused
 * Remove deprecated TODO notes in L2 agent extension manager
 * Fix pep8 violations in fullstack qos test
 * Don't return marker item when paginating backwards

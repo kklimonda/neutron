@@ -98,7 +98,7 @@ def set_namespace_gateway(port_dev, gateway_ip):
     port_dev.route.add_gateway(gateway_ip)
 
 
-def assert_ping(src_namespace, dst_ip, timeout=1, count=1):
+def assert_ping(src_namespace, dst_ip, timeout=1, count=3):
     ipversion = netaddr.IPAddress(dst_ip).version
     ping_command = 'ping' if ipversion == 4 else 'ping6'
     ns_ip_wrapper = ip_lib.IPWrapper(src_namespace)
@@ -682,6 +682,14 @@ class OVSBridgeFixture(fixtures.Fixture):
     def _setUp(self):
         ovs = ovs_lib.BaseOVS()
         self.bridge = common_base.create_resource(self.prefix, ovs.add_bridge)
+        self.addCleanup(self.bridge.destroy)
+
+
+class OVSTrunkBridgeFixture(OVSBridgeFixture):
+    """This bridge doesn't generate the name."""
+    def _setUp(self):
+        ovs = ovs_lib.BaseOVS()
+        self.bridge = ovs.add_bridge(self.prefix)
         self.addCleanup(self.bridge.destroy)
 
 

@@ -91,9 +91,9 @@ doc/source/policies/index.rst
 doc/source/policies/neutron-teams.rst
 doc/source/policies/release-checklist.rst
 doc/source/policies/thirdparty-ci.rst
+doc/source/stadium/governance.rst
+doc/source/stadium/guidelines.rst
 doc/source/stadium/index.rst
-doc/source/stadium/sub_project_guidelines.rst
-doc/source/stadium/sub_projects.rst
 etc/README.txt
 etc/api-paste.ini
 etc/policy.json
@@ -385,6 +385,7 @@ neutron/db/segments_db.py
 neutron/db/servicetype_db.py
 neutron/db/sqlalchemytypes.py
 neutron/db/sqlalchemyutils.py
+neutron/db/standard_attr.py
 neutron/db/standardattrdescription_db.py
 neutron/db/subnet_service_type_db_models.py
 neutron/db/tag_db.py
@@ -502,6 +503,11 @@ neutron/db/models/__init__.py
 neutron/db/models/address_scope.py
 neutron/db/models/allowed_address_pair.py
 neutron/db/models/securitygroup.py
+neutron/db/models/subnet_service_type.py
+neutron/db/models/plugins/__init__.py
+neutron/db/models/plugins/ml2/__init__.py
+neutron/db/models/plugins/ml2/flatallocation.py
+neutron/db/models/plugins/ml2/gre_allocation_endpoints.py
 neutron/db/network_dhcp_agent_binding/__init__.py
 neutron/db/network_dhcp_agent_binding/models.py
 neutron/db/port_security/__init__.py
@@ -847,6 +853,8 @@ neutron/services/trunk/drivers/openvswitch/constants.py
 neutron/services/trunk/drivers/openvswitch/driver.py
 neutron/services/trunk/drivers/openvswitch/agent/__init__.py
 neutron/services/trunk/drivers/openvswitch/agent/driver.py
+neutron/services/trunk/drivers/openvswitch/agent/exceptions.py
+neutron/services/trunk/drivers/openvswitch/agent/trunk_manager.py
 neutron/services/trunk/rpc/__init__.py
 neutron/services/trunk/rpc/agent.py
 neutron/services/trunk/rpc/backend.py
@@ -906,6 +914,7 @@ neutron/tests/fullstack/resources/machine.py
 neutron/tests/fullstack/resources/process.py
 neutron/tests/functional/__init__.py
 neutron/tests/functional/base.py
+neutron/tests/functional/constants.py
 neutron/tests/functional/requirements.txt
 neutron/tests/functional/test_server.py
 neutron/tests/functional/test_service.py
@@ -992,6 +1001,10 @@ neutron/tests/functional/services/l3_router/test_l3_dvr_ha_router_plugin.py
 neutron/tests/functional/services/l3_router/test_l3_dvr_router_plugin.py
 neutron/tests/functional/services/trunk/__init__.py
 neutron/tests/functional/services/trunk/test_plugin.py
+neutron/tests/functional/services/trunk/drivers/__init__.py
+neutron/tests/functional/services/trunk/drivers/openvswitch/__init__.py
+neutron/tests/functional/services/trunk/drivers/openvswitch/agent/__init__.py
+neutron/tests/functional/services/trunk/drivers/openvswitch/agent/test_trunk_manager.py
 neutron/tests/functional/tests/__init__.py
 neutron/tests/functional/tests/common/__init__.py
 neutron/tests/functional/tests/common/exclusive_resources/__init__.py
@@ -1149,6 +1162,7 @@ neutron/tests/unit/api/test_extensions.py
 neutron/tests/unit/api/rpc/__init__.py
 neutron/tests/unit/api/rpc/agentnotifiers/__init__.py
 neutron/tests/unit/api/rpc/agentnotifiers/test_dhcp_rpc_agent_api.py
+neutron/tests/unit/api/rpc/agentnotifiers/test_l3_rpc_agent_api.py
 neutron/tests/unit/api/rpc/callbacks/__init__.py
 neutron/tests/unit/api/rpc/callbacks/test_resource_manager.py
 neutron/tests/unit/api/rpc/callbacks/test_resources.py
@@ -1417,6 +1431,7 @@ neutron/tests/unit/services/trunk/drivers/openvswitch/__init__.py
 neutron/tests/unit/services/trunk/drivers/openvswitch/test_driver.py
 neutron/tests/unit/services/trunk/drivers/openvswitch/agent/__init__.py
 neutron/tests/unit/services/trunk/drivers/openvswitch/agent/test_driver.py
+neutron/tests/unit/services/trunk/drivers/openvswitch/agent/test_trunk_manager.py
 neutron/tests/unit/services/trunk/rpc/__init__.py
 neutron/tests/unit/services/trunk/rpc/test_agent.py
 neutron/tests/unit/services/trunk/rpc/test_backend.py
@@ -1454,6 +1469,7 @@ releasenotes/notes/add-osprofiler-support-7fc2de3001187075.yaml
 releasenotes/notes/add-port-rebinding-chance-33178b9abacf5804.yaml
 releasenotes/notes/add-rbac-qos-8b1154ee756c66df.yaml
 releasenotes/notes/add-standard-attr-descriptions-1ba0d7a454c3fd8f.yaml
+releasenotes/notes/add-subnet-service-types-bc81f6df9834f96e.yaml
 releasenotes/notes/add-tags-to-core-resources-b05330a129900609.yaml
 releasenotes/notes/add-timestamp-fields-f9ab949fc88f05f6.yaml
 releasenotes/notes/advertise_mtu_by_default-d8b0b056a74517b8.yaml
@@ -1468,6 +1484,7 @@ releasenotes/notes/correlate-address-scope-with-network-ea16e16b0154ac21.yaml
 releasenotes/notes/default-local-dns-a1c3fa1451f228fa.yaml
 releasenotes/notes/default-subnetpool-semantics-1cdc5cdde2be88c2.yaml
 releasenotes/notes/deprecate-advertise-mtu-51e3f78475a14efc.yaml
+releasenotes/notes/deprecate-allow-sorting-allow-pagination-4549c92a74cfe15d.yaml
 releasenotes/notes/deprecate-force_gateway_on_subnet-376855c4e66f4e11.yaml
 releasenotes/notes/deprecate-implicit-service-providers-loading-703f984b90351bf0.yaml
 releasenotes/notes/deprecate-min-l3-agents-per-router-15ddaa4c178b23df.yaml
@@ -1516,6 +1533,7 @@ releasenotes/notes/remove-force_gateway_on_subnet-77cb79f0b35d0c6d.yaml
 releasenotes/notes/remove-network_device_mtu-option-a1a96e99dc7f0a02.yaml
 releasenotes/notes/remove-quota_items-d50b4672dd31ea3e.yaml
 releasenotes/notes/remove-router_id-b3732089f8f1faa1.yaml
+releasenotes/notes/remove-subnetpool-config-b15dbe59237aee7e.yaml
 releasenotes/notes/rename-tenant-to-project-b19a4068f8625969.yaml
 releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml
 releasenotes/notes/segment_mtu_to_global_physnet_mtu-9cee5ff09557edeb.yaml
