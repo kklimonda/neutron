@@ -1,4 +1,4 @@
-neutron (2:9.0.0~b3~dev444-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.0.0~b3~dev557-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * d/neutron-linuxbridge-agent.neutron-linuxbridge-cleanup.service.in:
@@ -9,7 +9,10 @@ neutron (2:9.0.0~b3~dev444-0ubuntu1) UNRELEASED; urgency=medium
   * d/p/flake8-legacy.patch: Compat patch for newer flake8 version than
     upstream OpenStack is currently aligned with.
 
- -- James Page <james.page@ubuntu.com>  Tue, 23 Aug 2016 09:12:20 +0100
+  [ Corey Bryant ]
+  * New upstream version.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Mon, 29 Aug 2016 16:06:44 -0400
 
 neutron (2:9.0.0~b2-0ubuntu3) yakkety; urgency=medium
 
