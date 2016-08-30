@@ -11,6 +11,7 @@ neutron (2:9.0.0~b3~dev557-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * New upstream version.
+  * d/control: Add python-pep8 to BDs.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Mon, 29 Aug 2016 16:06:44 -0400
 
