@@ -1,4 +1,4 @@
-neutron (2:9.0.0~b3-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.0.0~b3-0ubuntu1) yakkety; urgency=medium
 
   [ Corey Bryant ]
   * d/neutron-linuxbridge-agent.neutron-linuxbridge-cleanup.service.in:
