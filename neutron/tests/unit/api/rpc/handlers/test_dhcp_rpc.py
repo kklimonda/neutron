@@ -140,9 +140,10 @@ class TestDhcpRpcCallback(base.BaseTestCase):
             exc=n_exc.SubnetNotFound(subnet_id='foo_subnet_id'),
             action='create_port')
 
-    def test_create_port_catch_db_error(self):
-        self._test__port_action_with_failures(exc=db_exc.DBError(),
-                                              action='create_port')
+    def test_create_port_catch_db_reference_error(self):
+        self._test__port_action_with_failures(
+            exc=db_exc.DBReferenceError('a', 'b', 'c', 'd'),
+            action='create_port')
 
     def test_create_port_catch_ip_generation_failure_reraise(self):
         self.assertRaises(
@@ -156,6 +157,9 @@ class TestDhcpRpcCallback(base.BaseTestCase):
             n_exc.SubnetNotFound(subnet_id='foo_subnet_id'))
         self._test__port_action_with_failures(
             exc=n_exc.IpAddressGenerationFailure(net_id='foo_network_id'),
+            action='create_port')
+        self._test__port_action_with_failures(
+            exc=n_exc.InvalidInput(error_message='sorry'),
             action='create_port')
 
     def test_get_network_info_return_none_on_not_found(self):

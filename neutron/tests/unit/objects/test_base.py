@@ -299,6 +299,21 @@ class FakeNeutronObjectSyntheticField(base.NeutronDbObject):
 
 
 @obj_base.VersionedObjectRegistry.register_if(False)
+class FakeNeutronObjectSyntheticField2(base.NeutronDbObject):
+    # Version 1.0: Initial version
+    VERSION = '1.0'
+
+    db_model = FakeModel
+
+    fields = {
+        'id': obj_fields.UUIDField(),
+        'obj_field': obj_fields.ObjectField('FakeSmallNeutronObject')
+    }
+
+    synthetic_fields = ['obj_field']
+
+
+@obj_base.VersionedObjectRegistry.register_if(False)
 class FakeNeutronObjectWithProjectId(base.NeutronDbObject):
     # Version 1.0: Initial version
     VERSION = '1.0'
@@ -343,6 +358,10 @@ def get_random_dscp_mark():
     return random.choice(constants.VALID_DSCP_MARKS)
 
 
+def get_random_direction():
+    return random.choice(constants.VALID_DIRECTIONS)
+
+
 def get_list_of_random_networks(num=10):
     for i in range(5):
         res = [tools.get_random_ip_network() for i in range(num)]
@@ -360,6 +379,7 @@ FIELD_TYPE_VALUE_GENERATOR_MAP = {
     obj_fields.ObjectField: lambda: None,
     obj_fields.ListOfObjectsField: lambda: [],
     common_types.DscpMarkField: get_random_dscp_mark,
+    common_types.FlowDirectionEnumField: get_random_direction,
     obj_fields.IPNetworkField: tools.get_random_ip_network,
     common_types.IPNetworkField: tools.get_random_ip_network,
     common_types.IPNetworkPrefixLenField: tools.get_random_prefixlen,
@@ -952,6 +972,17 @@ class BaseDbObjectMultipleForeignKeysTestCase(_BaseObjectTestCase,
     def test_load_synthetic_db_fields_with_multiple_foreign_keys(self):
         obj = self._test_class(self.context, **self.obj_fields[0])
         self.assertRaises(base.NeutronSyntheticFieldMultipleForeignKeys,
+                          obj.load_synthetic_db_fields)
+
+
+class BaseDbObjectForeignKeysNotFoundTestCase(_BaseObjectTestCase,
+                                              test_base.BaseTestCase):
+
+    _test_class = FakeNeutronObjectSyntheticField2
+
+    def test_load_foreign_keys_not_belong_class(self):
+        obj = self._test_class(self.context, **self.obj_fields[0])
+        self.assertRaises(base.NeutronSyntheticFieldsForeignKeysNotFound,
                           obj.load_synthetic_db_fields)
 
 

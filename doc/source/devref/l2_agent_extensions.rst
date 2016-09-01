@@ -33,7 +33,7 @@ Open vSwitch agent API
 * neutron.plugins.ml2.drivers.openvswitch.agent.ovs_agent_extension_api
 
 Open vSwitch agent API object includes two methods that return wrapped and
-hardened bridge objects with cookie values allocated for calling extensions.
+hardened bridge objects with cookie values allocated for calling extensions::
 
 #. request_int_br
 #. request_tun_br
@@ -41,29 +41,3 @@ hardened bridge objects with cookie values allocated for calling extensions.
 Bridge objects returned by those methods already have new default cookie values
 allocated for extension flows. All flow management methods (add_flow, mod_flow,
 ...) enforce those allocated cookies.
-
-Extensions are able to use those wrapped bridge objects to set their own flows,
-while the agent relies on the collection of those allocated values when
-cleaning up stale flows from the previous agent session::
-
-  +-----------+
-  | Agent API +--------------------------------------------------+
-  +-----+-----+                                                  |
-        |                                   +-----------+        |
-        |1                               +--+ Extension +--+     |
-        |                                |  +-----------+  |     |
-  +---+-+-+---+  2  +--------------+  3  |                 |  4  |
-  |   Agent   +-----+ Ext. manager +-----+--+   ....    +--+-----+
-  +-----------+     +--------------+     |                 |
-                                         |  +-----------+  |
-                                         +--+ Extension +--+
-                                            +-----------+
-
-Interactions with the agent API object are in the following order:
-
-#. The agent initializes the agent API object (bridges, other internal state).
-#. The agent passes the agent API object into the extension manager.
-#. The manager passes the agent API object into each extension.
-#. An extension calls the new agent API object method to receive bridge wrappers with cookies allocated.
-
-Call #4 also registers allocated cookies with the agent bridge objects.

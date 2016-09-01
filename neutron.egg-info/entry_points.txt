@@ -88,14 +88,9 @@ message_queue = neutron.services.qos.notification_drivers.message_queue:RpcQosSe
 [neutron.service_plugins]
 auto_allocate = neutron.services.auto_allocate.plugin:Plugin
 dummy = neutron.tests.unit.dummy_plugin:DummyServicePlugin
-firewall = neutron_fwaas.services.firewall.fwaas_plugin:FirewallPlugin
 flavors = neutron.services.flavors.flavors_plugin:FlavorsPlugin
-lbaas = neutron_lbaas.services.loadbalancer.plugin:LoadBalancerPlugin
 metering = neutron.services.metering.metering_plugin:MeteringPlugin
 network_ip_availability = neutron.services.network_ip_availability.plugin:NetworkIPAvailabilityPlugin
-neutron.services.firewall.fwaas_plugin.FirewallPlugin = neutron_fwaas.services.firewall.fwaas_plugin:FirewallPlugin
-neutron.services.loadbalancer.plugin.LoadBalancerPlugin = neutron_lbaas.services.loadbalancer.plugin:LoadBalancerPlugin
-neutron.services.vpn.plugin.VPNDriverPlugin = neutron_vpnaas.services.vpn.plugin:VPNDriverPlugin
 qos = neutron.services.qos.qos_plugin:QoSPlugin
 revisions = neutron.services.revisions.revision_plugin:RevisionPlugin
 router = neutron.services.l3_router.l3_router_plugin:L3RouterPlugin
@@ -103,7 +98,6 @@ segments = neutron.services.segments.plugin:Plugin
 tag = neutron.services.tag.tag_plugin:TagPlugin
 timestamp_core = neutron.services.timestamp.timestamp_plugin:TimeStampPlugin
 trunk = neutron.services.trunk.plugin:TrunkPlugin
-vpnaas = neutron_vpnaas.services.vpn.plugin:VPNDriverPlugin
 
 [neutron.services.external_dns_drivers]
 designate = neutron.services.externaldns.drivers.designate.driver:Designate
