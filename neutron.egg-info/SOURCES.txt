@@ -31,7 +31,6 @@ devstack/lib/qos
 devstack/lib/trunk
 devstack/lib/ml2_drivers/sriovnicswitch
 doc/Makefile
-doc/pom.xml
 doc/source/conf.py
 doc/source/index.rst
 doc/source/dashboards/index.rst
@@ -55,6 +54,7 @@ doc/source/devref/i18n.rst
 doc/source/devref/index.rst
 doc/source/devref/l2_agent_extensions.rst
 doc/source/devref/l2_agents.rst
+doc/source/devref/l3_agent_extensions.rst
 doc/source/devref/layer3.rst
 doc/source/devref/linuxbridge_agent.rst
 doc/source/devref/ml2_ext_manager.rst
@@ -180,6 +180,7 @@ neutron/agent/l3/ha_router.py
 neutron/agent/l3/item_allocator.py
 neutron/agent/l3/keepalived_state_change.py
 neutron/agent/l3/l3_agent_extension.py
+neutron/agent/l3/l3_agent_extension_api.py
 neutron/agent/l3/l3_agent_extensions_manager.py
 neutron/agent/l3/legacy_router.py
 neutron/agent/l3/link_local_allocator.py
@@ -356,7 +357,6 @@ neutron/db/extradhcpopt_db.py
 neutron/db/extraroute_db.py
 neutron/db/flavors_db.py
 neutron/db/ipam_backend_mixin.py
-neutron/db/ipam_non_pluggable_backend.py
 neutron/db/ipam_pluggable_backend.py
 neutron/db/l3_agentschedulers_db.py
 neutron/db/l3_attrs_db.py
@@ -485,13 +485,16 @@ neutron/db/migration/alembic_migrations/versions/newton/contract/89ab9a816d70_re
 neutron/db/migration/alembic_migrations/versions/newton/contract/8fd3918ef6f4_add_segment_host_mapping.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/a84ccf28f06a_migrate_dns_name_from_port.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/a8b517cff8ab_add_routerport_bindings_for_ha.py
+neutron/db/migration/alembic_migrations/versions/newton/contract/b12a3ef66e62_add_standardattr_to_qos_policies.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/b67e765a3524_remove_mtu_column_from_networks.py
 neutron/db/migration/alembic_migrations/versions/newton/contract/c879c5e1ee90_add_segment_id_to_subnet.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/030a959ceafa_uniq_routerports0port_id.py
+neutron/db/migration/alembic_migrations/versions/newton/expand/0f5bef0f87d4_add_qos_minimum_bandwidth_rules.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/30107ab6a3ee_provisioning_blocks.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/3d0e74aa7d37_add_flavor_id_to_routers.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/45f8dd33480b_qos_dscp_db_addition.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/5abc0278ca73_add_support_for_vlan_trunking.py
+neutron/db/migration/alembic_migrations/versions/newton/expand/67daae611b6e_add_standard_attr_to_qos_policies.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/a5648cfeeadf_add_subnet_service_types.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/a963b38d82f4_add_dns_name_to_portdnses.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/c415aab1c048_add_revisions_column.py
@@ -642,7 +645,6 @@ neutron/pecan_wsgi/controllers/extensions.py
 neutron/pecan_wsgi/controllers/quota.py
 neutron/pecan_wsgi/controllers/resource.py
 neutron/pecan_wsgi/controllers/root.py
-neutron/pecan_wsgi/controllers/router.py
 neutron/pecan_wsgi/controllers/utils.py
 neutron/pecan_wsgi/hooks/__init__.py
 neutron/pecan_wsgi/hooks/body_validation.py
@@ -653,6 +655,7 @@ neutron/pecan_wsgi/hooks/policy_enforcement.py
 neutron/pecan_wsgi/hooks/query_parameters.py
 neutron/pecan_wsgi/hooks/quota_enforcement.py
 neutron/pecan_wsgi/hooks/translation.py
+neutron/pecan_wsgi/hooks/utils.py
 neutron/plugins/__init__.py
 neutron/plugins/common/__init__.py
 neutron/plugins/common/constants.py
@@ -977,6 +980,7 @@ neutron/tests/functional/db/test_models.py
 neutron/tests/functional/db/migrations/__init__.py
 neutron/tests/functional/db/migrations/test_3b935b28e7a0_migrate_to_pluggable_ipam.py
 neutron/tests/functional/db/migrations/test_a8b517cff8ab_add_routerport_bindings_for_ha.py
+neutron/tests/functional/db/migrations/test_b12a3ef66e62_add_standardattr_to_qos_policies.py
 neutron/tests/functional/pecan_wsgi/__init__.py
 neutron/tests/functional/pecan_wsgi/config.py
 neutron/tests/functional/pecan_wsgi/test_controllers.py
@@ -1115,6 +1119,7 @@ neutron/tests/unit/agent/l3/test_dvr_local_router.py
 neutron/tests/unit/agent/l3/test_fip_rule_priority_allocator.py
 neutron/tests/unit/agent/l3/test_ha_router.py
 neutron/tests/unit/agent/l3/test_item_allocator.py
+neutron/tests/unit/agent/l3/test_l3_agent_extension_api.py
 neutron/tests/unit/agent/l3/test_legacy_router.py
 neutron/tests/unit/agent/l3/test_link_local_allocator.py
 neutron/tests/unit/agent/l3/test_namespace_manager.py
@@ -1189,6 +1194,10 @@ neutron/tests/unit/cmd/test_ovs_cleanup.py
 neutron/tests/unit/cmd/test_sanity_check.py
 neutron/tests/unit/cmd/server/__init__.py
 neutron/tests/unit/common/__init__.py
+neutron/tests/unit/common/moved_globals_code1.py
+neutron/tests/unit/common/moved_globals_code2.py
+neutron/tests/unit/common/moved_globals_target.py
+neutron/tests/unit/common/test__deprecate.py
 neutron/tests/unit/common/test_cache_utils.py
 neutron/tests/unit/common/test_ipv6_utils.py
 neutron/tests/unit/common/test_rpc.py
@@ -1205,7 +1214,6 @@ neutron/tests/unit/db/test_db_base_plugin_common.py
 neutron/tests/unit/db/test_db_base_plugin_v2.py
 neutron/tests/unit/db/test_dvr_mac_db.py
 neutron/tests/unit/db/test_ipam_backend_mixin.py
-neutron/tests/unit/db/test_ipam_non_pluggable_backend.py
 neutron/tests/unit/db/test_ipam_pluggable_backend.py
 neutron/tests/unit/db/test_l3_db.py
 neutron/tests/unit/db/test_l3_dvr_db.py
@@ -1462,9 +1470,11 @@ releasenotes/notes/QoS-for-linuxbridge-agent-bdb13515aac4e555.yaml
 releasenotes/notes/access_as_external_rbac-455dc74b9fa22761.yaml
 releasenotes/notes/add-availability-zone-4440cf00be7c54ba.yaml
 releasenotes/notes/add-designate-driver-ssl-options-169c299c96f2aff0.yaml
+releasenotes/notes/add-dhcp_release6-ff1b8d62fd7fe76d.yaml
 releasenotes/notes/add-get-me-a-network-56321aeef5389001.yaml
 releasenotes/notes/add-integration-with-external-dns-f56ec8a4993b1fc4.yaml
 releasenotes/notes/add-ip-protocols-in-sg-60467a073e771aee.yaml
+releasenotes/notes/add-minimum-bandwidth-support-sriov-63664b89f4dd1c1b.yaml
 releasenotes/notes/add-osprofiler-support-7fc2de3001187075.yaml
 releasenotes/notes/add-port-rebinding-chance-33178b9abacf5804.yaml
 releasenotes/notes/add-rbac-qos-8b1154ee756c66df.yaml
@@ -1528,6 +1538,7 @@ releasenotes/notes/ovsdb-native-by-default-38835d6963592396.yaml
 releasenotes/notes/path-mtu-back-to-zero-e4f9e8bdd8317ad4.yaml
 releasenotes/notes/physical_network-aware-dhcp-scheduling-94e9fadc7c7c5fec.yaml
 releasenotes/notes/pluggable-ipam-is-default-15c2ee15dc5b4a7b.yaml
+releasenotes/notes/qos-min-egress-bw-rule-b1c80f5675a4c1c3.yaml
 releasenotes/notes/remove-driver-60eb7e26d95f7322.yaml
 releasenotes/notes/remove-force_gateway_on_subnet-77cb79f0b35d0c6d.yaml
 releasenotes/notes/remove-network_device_mtu-option-a1a96e99dc7f0a02.yaml
@@ -1539,6 +1550,7 @@ releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml
 releasenotes/notes/segment_mtu_to_global_physnet_mtu-9cee5ff09557edeb.yaml
 releasenotes/notes/set-of-default-qos-burst-value-0790773703fa08fc.yaml
 releasenotes/notes/sorting-pagination-extensions-e66e99e2a8f5e563.yaml
+releasenotes/notes/sriov-agent-num-vf-0-0c06424247e7efe0.yaml
 releasenotes/notes/sriov_allow_use_many_nics_for_one_physnet-3570aa67a60ce6c4.yaml
 releasenotes/notes/sriov_show_l2_agent_extensions-ca852e155a529e99.yaml
 releasenotes/notes/use-keystoneauth-24f309566001a16b.yaml

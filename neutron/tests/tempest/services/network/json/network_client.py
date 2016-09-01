@@ -55,6 +55,7 @@ class NetworkClientJSON(service_client.RestClient):
             'metering_label_rules': 'metering',
             'policies': 'qos',
             'bandwidth_limit_rules': 'qos',
+            'minimum_bandwidth_rules': 'qos',
             'rule_types': 'qos',
             'rbac-policies': '',
         }
@@ -652,6 +653,53 @@ class NetworkClientJSON(service_client.RestClient):
         self.expected_success(204, resp.status)
         return service_client.ResponseBody(resp, body)
 
+    def create_minimum_bandwidth_rule(self, policy_id, direction,
+                                      min_kbps=None):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules' % (
+            self.uri_prefix, policy_id)
+        data = {
+            'direction': direction,
+        }
+        if min_kbps is not None:
+            data['min_kbps'] = min_kbps
+        post_data = self.serialize({'minimum_bandwidth_rule': data})
+        resp, body = self.post(uri, post_data)
+        self.expected_success(201, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def list_minimum_bandwidth_rules(self, policy_id):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules' % (
+            self.uri_prefix, policy_id)
+        resp, body = self.get(uri)
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def show_minimum_bandwidth_rule(self, policy_id, rule_id):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules/%s' % (
+            self.uri_prefix, policy_id, rule_id)
+        resp, body = self.get(uri)
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def update_minimum_bandwidth_rule(self, policy_id, rule_id, **kwargs):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules/%s' % (
+            self.uri_prefix, policy_id, rule_id)
+        post_data = {'minimum_bandwidth_rule': kwargs}
+        resp, body = self.put(uri, jsonutils.dumps(post_data))
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_minimum_bandwidth_rule(self, policy_id, rule_id):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules/%s' % (
+            self.uri_prefix, policy_id, rule_id)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
     def list_qos_rule_types(self):
         uri = '%s/qos/rule-types' % self.uri_prefix
         resp, body = self.get(uri)
@@ -660,7 +708,8 @@ class NetworkClientJSON(service_client.RestClient):
         return service_client.ResponseBody(resp, body)
 
     def create_trunk(self, parent_port_id, subports,
-                     tenant_id=None, name=None, admin_state_up=None):
+                     tenant_id=None, name=None, admin_state_up=None,
+                     description=None):
         uri = '%s/trunks' % self.uri_prefix
         post_data = {
             'trunk': {
@@ -673,6 +722,8 @@ class NetworkClientJSON(service_client.RestClient):
             post_data['trunk']['tenant_id'] = tenant_id
         if name is not None:
             post_data['trunk']['name'] = name
+        if description is not None:
+            post_data['trunk']['description'] = description
         if admin_state_up is not None:
             post_data['trunk']['admin_state_up'] = admin_state_up
         resp, body = self.post(uri, self.serialize(post_data))

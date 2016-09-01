@@ -62,7 +62,10 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
     L2 Agent presents in  order to manage port update events.
     """
 
-    supported_qos_rule_types = [qos_consts.RULE_TYPE_BANDWIDTH_LIMIT]
+    supported_qos_rule_types = [
+        qos_consts.RULE_TYPE_BANDWIDTH_LIMIT,
+        qos_consts.RULE_TYPE_MINIMUM_BANDWIDTH,
+    ]
 
     def __init__(self,
                  agent_type=constants.AGENT_TYPE_NIC_SWITCH,
@@ -175,6 +178,10 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 return segment[api.PHYSICAL_NETWORK] in mappings
             return True
         return False
+
+    def check_vlan_transparency(self, context):
+        """SR-IOV driver vlan transparency support."""
+        return True
 
     def _check_supported_pci_vendor_device(self, context):
         if self.pci_vendor_info is None:

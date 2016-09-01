@@ -18,6 +18,7 @@ import functools
 import netaddr
 from neutron_lib.api import validators
 from neutron_lib import constants
+from neutron_lib.db import model_base
 from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_db import exception as db_exc
@@ -39,7 +40,6 @@ from neutron.db import common_db_mixin
 from neutron.db import l3_db
 from neutron.db import l3_dvr_db
 from neutron.db.l3_dvr_db import is_distributed_router
-from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.extensions import l3
 from neutron.extensions import l3_ext_ha_mode as l3_ha
@@ -655,7 +655,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             dead_agents = [
                 binding.agent for binding in bindings
                 if binding.state == n_const.HA_ROUTER_STATE_ACTIVE and
-                not binding.agent.is_active]
+                not (binding.agent.is_active and binding.agent.admin_state_up)]
+
             for dead_agent in dead_agents:
                 self.update_routers_states(
                     context, {router_id: n_const.HA_ROUTER_STATE_STANDBY},

@@ -101,9 +101,10 @@ class DhcpRpcCallback(object):
             else:
                 msg = _('Unrecognized action')
                 raise exceptions.Invalid(message=msg)
-        except (db_exc.DBError,
+        except (db_exc.DBReferenceError,
                 exceptions.NetworkNotFound,
                 exceptions.SubnetNotFound,
+                exceptions.InvalidInput,
                 exceptions.IpAddressGenerationFailure) as e:
             with excutils.save_and_reraise_exception(reraise=False) as ctxt:
                 if isinstance(e, exceptions.IpAddressGenerationFailure):
