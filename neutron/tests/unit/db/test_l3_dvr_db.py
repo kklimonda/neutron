@@ -399,7 +399,8 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         # NOTE: mock.patch is not needed here since self.mixin is created fresh
         # for each test.  It doesn't work with some methods since the mixin is
         # tested in isolation (e.g. _get_agent_by_type_and_host).
-        self.mixin._get_vm_port_hostid = mock.Mock(return_value=hostid)
+        self.mixin._get_dvr_service_port_hostid = mock.Mock(
+            return_value=hostid)
         self.mixin._get_agent_by_type_and_host = mock.Mock(
             return_value=fipagent)
         self.mixin._get_fip_sync_interfaces = mock.Mock(
@@ -437,7 +438,8 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         }
 
         with mock.patch.object(self.mixin, 'get_router') as grtr,\
-                mock.patch.object(self.mixin, '_get_vm_port_hostid') as vmp,\
+                mock.patch.object(self.mixin,
+                                  '_get_dvr_service_port_hostid') as vmp,\
                 mock.patch.object(
                     self.mixin,
                     'create_fip_agent_gw_port_if_not_exists') as c_fip,\
@@ -544,10 +546,11 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
     def _test_update_arp_entry_for_dvr_service_port(
             self, device_owner, action):
-        with mock.patch.object(manager.NeutronManager, 'get_plugin') as gp,\
-                mock.patch.object(self.mixin, '_get_router') as grtr:
+        router_dict = {'name': 'test_router', 'admin_state_up': True,
+                       'distributed': True}
+        router = self._create_router(router_dict)
+        with mock.patch.object(manager.NeutronManager, 'get_plugin') as gp:
             plugin = mock.Mock()
-            dvr_router = mock.Mock()
             l3_notify = self.mixin.l3_rpc_notifier = mock.Mock()
             gp.return_value = plugin
             port = {
@@ -566,17 +569,17 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                 'id': 'dvr_port_id',
                 'fixed_ips': mock.ANY,
                 'device_owner': l3_const.DEVICE_OWNER_DVR_INTERFACE,
-                'device_id': 'dvr_router_id'
+                'device_id': router['id']
             }
-            plugin.get_ports.return_value = [port, dvr_port]
-            grtr.return_value = dvr_router
-            dvr_router.extra_attributes.distributed = True
-            self.mixin.update_arp_entry_for_dvr_service_port(
-                self.ctx, port, action)
+            plugin.get_ports.return_value = [dvr_port]
             if action == 'add':
+                self.mixin.update_arp_entry_for_dvr_service_port(
+                    self.ctx, port)
                 self.assertEqual(3, l3_notify.add_arp_entry.call_count)
             elif action == 'del':
-                self.assertTrue(3, l3_notify.del_arp_entry.call_count)
+                self.mixin.delete_arp_entry_for_dvr_service_port(
+                    self.ctx, port)
+                self.assertEqual(3, l3_notify.del_arp_entry.call_count)
 
     def test_update_arp_entry_for_dvr_service_port_added(self):
         action = 'add'

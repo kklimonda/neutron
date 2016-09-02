@@ -248,17 +248,41 @@ class TestOvsNeutronAgent(object):
                           'physical_network': 'fake_network'}
         if segmentation_id is not None:
             local_vlan_map['segmentation_id'] = segmentation_id
-        with mock.patch.object(self.agent, 'int_br') as int_br:
-            int_br.get_vif_ports.return_value = [port]
-            int_br.get_ports_attributes.return_value = [{
-                'name': port.port_name, 'other_config': local_vlan_map,
-                'tag': tag
-            }]
+
+        # this is for the call inside get_vif_ports()
+        get_interfaces = [{'name': port.port_name,
+                           'ofport': '1',
+                           'external_ids': {
+                               'iface-id': '1',
+                               'attached-mac': 'mac1'}},
+                          {'name': 'invalid',
+                           'ofport': ovs_lib.INVALID_OFPORT,
+                           'external_ids': {
+                               'iface-id': '2',
+                               'attached-mac': 'mac2'}},
+                          {'name': 'unassigned',
+                           'ofport': ovs_lib.UNASSIGNED_OFPORT,
+                           'external_ids': {
+                               'iface-id': '3',
+                               'attached-mac': 'mac3'}}]
+        # this is for the call inside _restore_local_vlan_map()
+        get_ports = [{'name': port.port_name,
+                      'other_config': local_vlan_map,
+                      'tag': tag}]
+
+        with mock.patch.object(self.agent.int_br,
+                               'get_ports_attributes',
+                               side_effect=[get_interfaces, get_ports]) as gpa:
             self.agent._restore_local_vlan_map()
             expected_hints = {}
             if tag:
                 expected_hints[net_uuid] = tag
             self.assertEqual(expected_hints, self.agent._local_vlan_hints)
+            # make sure invalid and unassigned ports were skipped
+            gpa.assert_has_calls([
+                mock.call('Interface', columns=mock.ANY, if_exists=True),
+                mock.call('Port', columns=mock.ANY, ports=['fake_port'])
+            ])
 
     def test_restore_local_vlan_map_with_device_has_tag(self):
         self._test_restore_local_vlan_maps(2)
@@ -2215,6 +2239,26 @@ class TestOvsDvrNeutronAgent(object):
                 False)
         return int_br, tun_br
 
+    def test_port_bound_for_dvr_with_csnat_ports_without_subnet(self):
+        self._setup_for_dvr_test()
+        int_br = mock.create_autospec(self.agent.int_br)
+        tun_br = mock.create_autospec(self.agent.tun_br)
+
+        # get_subnet_for_dvr RPC returns {} on error
+        with mock.patch.object(self.agent.dvr_agent.plugin_rpc,
+                               'get_subnet_for_dvr',
+                               return_value={}),\
+                mock.patch.object(self.agent, 'int_br', new=int_br),\
+                mock.patch.object(self.agent, 'tun_br', new=tun_br),\
+                mock.patch.object(self.agent.dvr_agent, 'int_br', new=int_br),\
+                mock.patch.object(self.agent.dvr_agent, 'tun_br', new=tun_br):
+            self.agent.port_bound(
+                self._port, self._net_uuid, 'vxlan',
+                None, None, self._fixed_ips,
+                n_const.DEVICE_OWNER_ROUTER_SNAT,
+                False)
+            self.assertFalse(int_br.install_dvr_to_src_mac.called)
+
     def test_treat_devices_removed_for_dvr_interface(self):
         self._test_treat_devices_removed_for_dvr_interface()
         self._test_treat_devices_removed_for_dvr_interface(ip_version=6)
@@ -2703,12 +2747,11 @@ class TestOvsDvrNeutronAgent(object):
                 mock.patch.object(self.agent,
                                   '_agent_has_updates',
                                   side_effect=TypeError('loop exit')),\
-                mock.patch.object(self.agent, 'tun_br', new=tun_br):
-            # block RPC calls and bridge calls
-            self.agent.setup_physical_bridges = mock.Mock()
-            self.agent.setup_integration_br = mock.Mock()
-            self.agent.setup_tunnel_br = mock.Mock()
-            self.agent.state_rpc = mock.Mock()
+                mock.patch.object(self.agent, 'tun_br', new=tun_br),\
+                mock.patch.object(self.agent, 'setup_physical_bridges'),\
+                mock.patch.object(self.agent, 'setup_integration_br'),\
+                mock.patch.object(self.agent, 'setup_tunnel_br'),\
+                mock.patch.object(self.agent, 'state_rpc'):
             try:
                 self.agent.rpc_loop(polling_manager=mock.Mock())
             except TypeError:
@@ -2724,12 +2767,11 @@ class TestOvsDvrNeutronAgent(object):
                 mock.patch.object(self.agent, '_agent_has_updates',
                                   return_value=True),\
                 mock.patch.object(self.agent, '_check_and_handle_signal',
-                                  side_effect=[True, False]):
+                                  side_effect=[True, False]),\
+                mock.patch.object(self.agent, 'setup_physical_bridges'),\
+                mock.patch.object(self.agent, 'setup_integration_br'),\
+                mock.patch.object(self.agent, 'state_rpc'):
             # block RPC calls and bridge calls
-            self.agent.setup_physical_bridges = mock.Mock()
-            self.agent.setup_integration_br = mock.Mock()
-            self.agent.reset_tunnel_br = mock.Mock()
-            self.agent.state_rpc = mock.Mock()
             self.agent.rpc_loop(polling_manager=mock.Mock())
 
     def test_scan_ports_failure(self):

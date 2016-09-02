@@ -1,14 +1,57 @@
 CHANGES
 =======
 
+7.1.2
+-----
+
+* Fix of ping usage in net_helpers.async_ping()
+* Lower ML2 message severity
+* Allow tox to be run with python 3
+* Fix misuse of assertTrue in L3 DVR test case
+* Check compatibility when auto schedule ha routers
+* Update ml2 delete_subnet to deallocate via ipam
+* Always call ipam driver on subnet update
+* Continue the fwaas decoupling and cleanup
+* Update network object in DHCP agent with router interface changes
+* Use new DB context when checking if agent is online during rescheduling
+* L3HA: Do not wrap create/delete in transaction
+* DVR: Ensure that only one fg device can exist at a time in fip ns
+* Add API test ensure tenant can't delete other ports
+* Remove fwaas tests from the Neutron API tree
+* DVR: handle floating IP reassociation on the same host
+* DVR: Fix allowed_address_pair port binding with delayed fip
+* ovs: set device MTU after it's moved into a namespace
+* When deleting floating IP catch PortNotFound
+* Skip INVALID and UNASSIGNED ofport in vlan restore
+* sriov: Fix macvtap vf interface regex pattern
+* De-dup user-defined SG rules before iptables call
+* Remove disable_service from DBs configuration
+* After a migration clean up the floating ip on the source host
+* Add fip nat rules even if router disables shared snat
+
 7.1.1
 -----
 
+* DVR: Fix TypeError in arp update with allowed_address_pairs
+* DVR: Handle unbound allowed_address_pair port with FIP
+* DVR:Remove unwanted check in _get_dvr_service_port_hostid
+* Rename _get_vm_port_hostid in dvr to reflect the right functionality
+* DVR: Remove unwanted call to _get_routers while arp update
+* DVR: Add action specific functions for arp_entry_update
+* Filter by device_owner instead of iterating by all subnet ports
 * DVR: Rename dvr_vmarp_table_update
 * DVR: Rename dvr_update_router_addvm function
 * DVR: Remove get_port call from dvr_update_router_addvm
 * Revert "DVR: Clear SNAT namespace when agent restarts after router move"
+* qos: Add API test for shared policy
+* item allocator should return same value for same key
+* Fix get_free_namespace_port to actually avoid used ports
+* metadata: log MessagingException triggering fallback to neutron API
 * Make deepcopy of update body in API layer
+* Fix invalid mock name in test_ovs_neutron_agent
+* Fix keepalived functional tests
+* Avoid testing oslo.service library internals
+* Fix regexp for ss output
 * fullstack: Use noop firewall
 * Allow to control to use constraint env for functional jobs
 
@@ -45,6 +88,7 @@ CHANGES
 * Switched from fixtures to mock to mock out starting RPC consumers
 * DVR: Increase the link-local address pair range
 * L3 agent: match format used by iptables
+* Log warning message if get_subnet_for_dvr fails
 * Don't drop 'protocol' from client supplied security_group_rule dict
 * Split the FIP Namespace delete in L3 agent for DVR
 * Don't delete br-int to br-tun patch on startup

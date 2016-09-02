@@ -45,6 +45,7 @@ class RouterInfo(object):
         self.router_id = router_id
         self.ex_gw_port = None
         self._snat_enabled = None
+        self.fip_map = {}
         self.internal_ports = []
         self.floating_ips = set()
         # Invoke the setter for establishing initial SNAT action
@@ -199,6 +200,9 @@ class RouterInfo(object):
     def remove_floating_ip(self, device, ip_cidr):
         device.delete_addr_and_conntrack_state(ip_cidr)
 
+    def move_floating_ip(self, fip):
+        return l3_constants.FLOATINGIP_STATUS_ACTIVE
+
     def remove_external_gateway_ip(self, device, ip_cidr):
         device.delete_addr_and_conntrack_state(ip_cidr)
 
@@ -235,6 +239,13 @@ class RouterInfo(object):
                 LOG.debug('Floating ip %(id)s added, status %(status)s',
                           {'id': fip['id'],
                            'status': fip_statuses.get(fip['id'])})
+            elif (fip_ip in self.fip_map and
+                  self.fip_map[fip_ip] != fip['fixed_ip_address']):
+                LOG.debug("Floating IP was moved from fixed IP "
+                          "%(old)s to %(new)s",
+                          {'old': self.fip_map[fip_ip],
+                           'new': fip['fixed_ip_address']})
+                fip_statuses[fip['id']] = self.move_floating_ip(fip)
             elif fip_statuses[fip['id']] == fip['status']:
                 # mark the status as not changed. we can't remove it because
                 # that's how the caller determines that it was removed
@@ -605,17 +616,12 @@ class RouterInfo(object):
         gw_port = self._router.get('gw_port')
         self._handle_router_snat_rules(gw_port, interface_name)
 
-    def external_gateway_nat_rules(self, ex_gw_ip, interface_name):
+    def external_gateway_nat_fip_rules(self, ex_gw_ip, interface_name):
         dont_snat_traffic_to_internal_ports_if_not_to_floating_ip = (
             'POSTROUTING', '! -i %(interface_name)s '
                            '! -o %(interface_name)s -m conntrack ! '
                            '--ctstate DNAT -j ACCEPT' %
                            {'interface_name': interface_name})
-
-        snat_normal_external_traffic = (
-            'snat', '-o %s -j SNAT --to-source %s' %
-                    (interface_name, ex_gw_ip))
-
         # Makes replies come back through the router to reverse DNAT
         ext_in_mark = self.agent_conf.external_ingress_mark
         snat_internal_traffic_to_floating_ip = (
@@ -623,10 +629,14 @@ class RouterInfo(object):
                     '-m conntrack --ctstate DNAT '
                     '-j SNAT --to-source %s'
                     % (ext_in_mark, l3_constants.ROUTER_MARK_MASK, ex_gw_ip))
-
         return [dont_snat_traffic_to_internal_ports_if_not_to_floating_ip,
-                snat_normal_external_traffic,
                 snat_internal_traffic_to_floating_ip]
+
+    def external_gateway_nat_snat_rules(self, ex_gw_ip, interface_name):
+        snat_normal_external_traffic = (
+            'snat', '-o %s -j SNAT --to-source %s' %
+                    (interface_name, ex_gw_ip))
+        return [snat_normal_external_traffic]
 
     def external_gateway_mangle_rules(self, interface_name):
         mark = self.agent_conf.external_ingress_mark
@@ -642,19 +652,26 @@ class RouterInfo(object):
 
     def _add_snat_rules(self, ex_gw_port, iptables_manager,
                         interface_name):
-        if self._snat_enabled and ex_gw_port:
+        if ex_gw_port:
             # ex_gw_port should not be None in this case
             # NAT rules are added only if ex_gw_port has an IPv4 address
             for ip_addr in ex_gw_port['fixed_ips']:
                 ex_gw_ip = ip_addr['ip_address']
                 if netaddr.IPAddress(ex_gw_ip).version == 4:
-                    rules = self.external_gateway_nat_rules(ex_gw_ip,
-                                                            interface_name)
+                    if self._snat_enabled:
+                        rules = self.external_gateway_nat_snat_rules(
+                            ex_gw_ip, interface_name)
+                        for rule in rules:
+                            iptables_manager.ipv4['nat'].add_rule(*rule)
+
+                    rules = self.external_gateway_nat_fip_rules(
+                        ex_gw_ip, interface_name)
                     for rule in rules:
                         iptables_manager.ipv4['nat'].add_rule(*rule)
                     rules = self.external_gateway_mangle_rules(interface_name)
                     for rule in rules:
                         iptables_manager.ipv4['mangle'].add_rule(*rule)
+
                     break
 
     def _handle_router_snat_rules(self, ex_gw_port, interface_name):
@@ -750,5 +767,8 @@ class RouterInfo(object):
 
         # Update ex_gw_port and enable_snat on the router info cache
         self.ex_gw_port = self.get_ex_gw_port()
+        self.fip_map = dict([(fip['floating_ip_address'],
+                              fip['fixed_ip_address'])
+                             for fip in self.get_floating_ips()])
         # TODO(Carl) FWaaS uses this.  Why is it set after processing is done?
         self.enable_snat = self.router.get('enable_snat')
