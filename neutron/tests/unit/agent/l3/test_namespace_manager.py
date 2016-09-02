@@ -31,7 +31,8 @@ class NamespaceManagerTestCaseFramework(base.BaseTestCase):
     def _create_namespace_manager(self):
         self.agent_conf = mock.Mock()
         self.driver = mock.Mock()
-        return namespace_manager.NamespaceManager(self.agent_conf, self.driver)
+        return namespace_manager.NamespaceManager(self.agent_conf,
+                                                  self.driver, True)
 
 
 class TestNamespaceManager(NamespaceManagerTestCaseFramework):
@@ -45,13 +46,13 @@ class TestNamespaceManager(NamespaceManagerTestCaseFramework):
 
         ns_prefix, ns_id = self.ns_manager.get_prefix_and_id(
             namespaces.NS_PREFIX + router_id)
-        self.assertEqual(namespaces.NS_PREFIX, ns_prefix)
-        self.assertEqual(router_id, ns_id)
+        self.assertEqual(ns_prefix, namespaces.NS_PREFIX)
+        self.assertEqual(ns_id, router_id)
 
         ns_prefix, ns_id = self.ns_manager.get_prefix_and_id(
             dvr_snat_ns.SNAT_NS_PREFIX + router_id)
-        self.assertEqual(dvr_snat_ns.SNAT_NS_PREFIX, ns_prefix)
-        self.assertEqual(router_id, ns_id)
+        self.assertEqual(ns_prefix, dvr_snat_ns.SNAT_NS_PREFIX)
+        self.assertEqual(ns_id, router_id)
 
         ns_name = 'dhcp-' + router_id
         self.assertIsNone(self.ns_manager.get_prefix_and_id(ns_name))
@@ -90,13 +91,6 @@ class TestNamespaceManager(NamespaceManagerTestCaseFramework):
                                side_effect=RuntimeError):
             retrieved_ns_names = self.ns_manager.list_all()
         self.assertFalse(retrieved_ns_names)
-
-    def test_ensure_snat_cleanup(self):
-        router_id = _uuid()
-        with mock.patch.object(self.ns_manager, '_cleanup') as mock_cleanup:
-            self.ns_manager.ensure_snat_cleanup(router_id)
-            mock_cleanup.assert_called_once_with(dvr_snat_ns.SNAT_NS_PREFIX,
-                                                 router_id)
 
     def test_ensure_router_cleanup(self):
         router_id = _uuid()

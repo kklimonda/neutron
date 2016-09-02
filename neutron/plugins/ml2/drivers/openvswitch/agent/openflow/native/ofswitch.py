@@ -23,7 +23,7 @@ from oslo_utils import timeutils
 import ryu.app.ofctl.api as ofctl_api
 import ryu.exception as ryu_exc
 
-from neutron._i18n import _, _LW
+from neutron.i18n import _LE, _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class OpenFlowSwitchMixin(object):
             # The switch has not established a connection to us.
             # Wait for a little.
             if timeutils.now() > start_time + timeout_sec:
-                m = _("Switch connection timeout")
+                m = _LE("Switch connection timeout")
                 LOG.error(m)
                 # NOTE(yamamoto): use RuntimeError for compat with ovs_lib
                 raise RuntimeError(m)
@@ -70,7 +70,7 @@ class OpenFlowSwitchMixin(object):
         try:
             result = ofctl_api.send_msg(self._app, msg, reply_cls, reply_multi)
         except ryu_exc.RyuException as e:
-            m = _("ofctl request %(request)s error %(error)s") % {
+            m = _LE("ofctl request %(request)s error %(error)s") % {
                 "request": msg,
                 "error": e,
             }
@@ -81,7 +81,7 @@ class OpenFlowSwitchMixin(object):
             with excutils.save_and_reraise_exception() as ctx:
                 if e is timeout:
                     ctx.reraise = False
-                    m = _("ofctl request %(request)s timed out") % {
+                    m = _LE("ofctl request %(request)s timed out") % {
                         "request": msg,
                     }
                     LOG.error(m)
@@ -135,11 +135,12 @@ class OpenFlowSwitchMixin(object):
         return flows
 
     def cleanup_flows(self):
-        cookies = set([f.cookie for f in self.dump_flows()]) - \
-                  self.reserved_cookies
+        cookies = set([f.cookie for f in self.dump_flows()])
         for c in cookies:
-            LOG.warning(_LW("Deleting flow with cookie 0x%(cookie)x"),
-                        {'cookie': c})
+            if c == self.agent_uuid_stamp:
+                continue
+            LOG.warn(_LW("Deleting flow with cookie 0x%(cookie)x") % {
+                'cookie': c})
             self.delete_flows(cookie=c, cookie_mask=((1 << 64) - 1))
 
     def install_goto_next(self, table_id):
@@ -181,7 +182,7 @@ class OpenFlowSwitchMixin(object):
         match = self._match(ofp, ofpp, match, **match_kwargs)
         msg = ofpp.OFPFlowMod(dp,
                               table_id=table_id,
-                              cookie=self.default_cookie,
+                              cookie=self.agent_uuid_stamp,
                               match=match,
                               priority=priority,
                               instructions=instructions)

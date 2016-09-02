@@ -13,12 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib import exceptions
-
-from neutron._i18n import _
+from neutron.common import exceptions as n_exc
 
 
-class SriovNicError(exceptions.NeutronException):
+class SriovNicError(n_exc.NeutronException):
     pass
 
 

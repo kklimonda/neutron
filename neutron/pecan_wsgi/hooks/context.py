@@ -24,10 +24,8 @@ class ContextHook(hooks.PecanHook):
     The following HTTP request headers are used:
     X-User-Id or X-User:
         Used for context.user_id.
-    X-Project-Id:
-        Used for context.tenant_id.
-    X-Project-Name:
-        Used for context.tenant_name.
+    X-Tenant-Id or X-Tenant:
+        Used for context.tenant.
     X-Auth-Token:
         Used for context.auth_token.
     X-Roles:
@@ -39,15 +37,22 @@ class ContextHook(hooks.PecanHook):
     priority = 95
 
     def before(self, state):
+        user_id = state.request.headers.get('X-User-Id')
+        user_id = state.request.headers.get('X-User', user_id)
         user_name = state.request.headers.get('X-User-Name', '')
-        tenant_name = state.request.headers.get('X-Project-Name')
+        tenant_id = state.request.headers.get('X-Tenant-Id')
+        tenant_name = state.request.headers.get('X-Tenant-Name')
+        auth_token = state.request.headers.get('X-Auth-Token')
+        roles = state.request.headers.get('X-Roles', '').split(',')
+        roles = [r.strip() for r in roles]
+        creds = {'roles': roles}
         req_id = state.request.headers.get(request_id.ENV_REQUEST_ID)
         # TODO(kevinbenton): is_admin logic
         # Create a context with the authentication data
-        ctx = context.Context.from_environ(state.request.environ,
-                                           user_name=user_name,
-                                           tenant_name=tenant_name,
-                                           request_id=req_id)
+        ctx = context.Context(user_id, tenant_id=tenant_id,
+                              roles=creds['roles'],
+                              user_name=user_name, tenant_name=tenant_name,
+                              request_id=req_id, auth_token=auth_token)
 
         # Inject the context...
         state.request.context['neutron_context'] = ctx

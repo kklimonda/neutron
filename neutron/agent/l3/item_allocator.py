@@ -14,12 +14,6 @@
 
 import os
 
-from oslo_log import log as logging
-
-from neutron._i18n import _LW
-
-LOG = logging.getLogger(__name__)
-
 
 class ItemAllocator(object):
     """Manages allocation of items from a pool
@@ -48,21 +42,11 @@ class ItemAllocator(object):
         self.remembered = {}
         self.pool = item_pool
 
-        read_error = False
         for line in self._read():
-            try:
-                key, saved_value = line.strip().split(delimiter)
-                self.remembered[key] = self.ItemClass(saved_value)
-            except ValueError:
-                read_error = True
-                LOG.warning(_LW("Invalid line in %(file)s, "
-                                "ignoring: %(line)s"),
-                            {'file': state_file, 'line': line})
+            key, saved_value = line.strip().split(delimiter)
+            self.remembered[key] = self.ItemClass(saved_value)
 
         self.pool.difference_update(self.remembered.values())
-        if read_error:
-            LOG.debug("Re-writing file %s due to read error", state_file)
-            self._write_allocations()
 
     def allocate(self, key):
         """Try to allocate an item of ItemClass type.
@@ -95,7 +79,7 @@ class ItemAllocator(object):
             if not self.pool:
                 # The number of address pairs allocated from the
                 # pool depends upon the prefix length specified
-                # in DVR_FIP_LL_CIDR
+                # in FIP_LL_SUBNET
                 raise RuntimeError("Cannot allocate item of type:"
                                    " %s from pool using file %s"
                                    % (self.ItemClass, self.state_file))

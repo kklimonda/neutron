@@ -16,14 +16,12 @@
 import os
 
 import mock
-from neutron_lib.api import converters
-from neutron_lib import constants
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_policy import policy as oslo_policy
 from oslo_utils import uuidutils
 import six
+from six import moves
 import six.moves.urllib.parse as urlparse
 import webob
 from webob import exc
@@ -31,10 +29,11 @@ import webtest
 
 from neutron.api import api_common
 from neutron.api import extensions
+from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
 from neutron.api.v2 import attributes
 from neutron.api.v2 import base as v2_base
 from neutron.api.v2 import router
-from neutron.callbacks import registry
+from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron import manager
 from neutron import policy
@@ -72,23 +71,23 @@ class ResourceIndexTestCase(base.BaseTestCase):
         res = index.get('')
 
         self.assertIn('resources', res.json)
-        self.assertEqual(1, len(res.json['resources']))
+        self.assertEqual(len(res.json['resources']), 1)
 
         resource = res.json['resources'][0]
         self.assertIn('collection', resource)
-        self.assertEqual('bar', resource['collection'])
+        self.assertEqual(resource['collection'], 'bar')
 
         self.assertIn('name', resource)
-        self.assertEqual('foo', resource['name'])
+        self.assertEqual(resource['name'], 'foo')
 
         self.assertIn('links', resource)
-        self.assertEqual(1, len(resource['links']))
+        self.assertEqual(len(resource['links']), 1)
 
         link = resource['links'][0]
         self.assertIn('href', link)
         self.assertEqual(link['href'], 'http://localhost/bar')
         self.assertIn('rel', link)
-        self.assertEqual('self', link['rel'])
+        self.assertEqual(link['rel'], 'self')
 
 
 class APIv2TestBase(base.BaseTestCase):
@@ -148,8 +147,7 @@ class APIv2TestCase(APIv2TestBase):
         fields.extend(policy_attrs)
         return fields
 
-    def _get_collection_kwargs(self, skipargs=None, **kwargs):
-        skipargs = skipargs or []
+    def _get_collection_kwargs(self, skipargs=[], **kwargs):
         args_list = ['filters', 'fields', 'sorts', 'limit', 'marker',
                      'page_reverse']
         args_dict = dict(
@@ -328,7 +326,7 @@ class APIv2TestCase(APIv2TestBase):
 
         res = self.api.get(_get_path('networks'), {'limit': -1},
                            expect_errors=True)
-        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPBadRequest.code)
 
     def test_limit_with_non_integer(self):
         instance = self.plugin.return_value
@@ -336,7 +334,7 @@ class APIv2TestCase(APIv2TestBase):
 
         res = self.api.get(_get_path('networks'),
                            {'limit': 'abc'}, expect_errors=True)
-        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPBadRequest.code)
 
     def test_limit_with_infinite_pagination_max_limit(self):
         instance = self.plugin.return_value
@@ -438,7 +436,7 @@ class APIv2TestCase(APIv2TestBase):
 
         res = self.api.get(_get_path('networks'), {'sort_key': ['name']},
                            expect_errors=True)
-        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPBadRequest.code)
 
     def test_sort_with_invalid_attribute(self):
         instance = self.plugin.return_value
@@ -448,7 +446,7 @@ class APIv2TestCase(APIv2TestBase):
                            {'sort_key': 'abc',
                             'sort_dir': 'asc'},
                            expect_errors=True)
-        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPBadRequest.code)
 
     def test_sort_with_invalid_dirs(self):
         instance = self.plugin.return_value
@@ -458,7 +456,7 @@ class APIv2TestCase(APIv2TestBase):
                            {'sort_key': 'name',
                             'sort_dir': 'abc'},
                            expect_errors=True)
-        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPBadRequest.code)
 
     def test_emulated_sort(self):
         instance = self.plugin.return_value
@@ -548,7 +546,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         self.assertIn('networks', res)
         if not req_tenant_id or req_tenant_id == real_tenant_id:
             # expect full list returned
-            self.assertEqual(1, len(res['networks']))
+            self.assertEqual(len(res['networks']), 1)
             output_dict = res['networks'][0]
             input_dict['shared'] = False
             self.assertEqual(len(input_dict), len(output_dict))
@@ -556,7 +554,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                 self.assertEqual(v, output_dict[k])
         else:
             # expect no results
-            self.assertEqual(0, len(res['networks']))
+            self.assertEqual(len(res['networks']), 0)
 
     def test_list_noauth(self):
         self._test_list(None, _uuid())
@@ -596,7 +594,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         res = self.api.get(_get_path('networks'),
                            params=params).json
 
-        self.assertEqual(2, len(res['networks']))
+        self.assertEqual(len(res['networks']), 2)
         self.assertEqual(sorted([id1, id2]),
                          sorted([res['networks'][0]['id'],
                                 res['networks'][1]['id']]))
@@ -609,19 +607,19 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                 next_links.append(r)
             if r['rel'] == 'previous':
                 previous_links.append(r)
-        self.assertEqual(1, len(next_links))
-        self.assertEqual(1, len(previous_links))
+        self.assertEqual(len(next_links), 1)
+        self.assertEqual(len(previous_links), 1)
 
         url = urlparse.urlparse(next_links[0]['href'])
         self.assertEqual(url.path, _get_path('networks'))
         params['marker'] = [id2]
-        self.assertEqual(params, urlparse.parse_qs(url.query))
+        self.assertEqual(urlparse.parse_qs(url.query), params)
 
         url = urlparse.urlparse(previous_links[0]['href'])
         self.assertEqual(url.path, _get_path('networks'))
         params['marker'] = [id1]
         params['page_reverse'] = ['True']
-        self.assertEqual(params, urlparse.parse_qs(url.query))
+        self.assertEqual(urlparse.parse_qs(url.query), params)
 
     def test_list_pagination_with_last_page(self):
         id = str(_uuid())
@@ -640,7 +638,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         res = self.api.get(_get_path('networks'),
                            params=params).json
 
-        self.assertEqual(1, len(res['networks']))
+        self.assertEqual(len(res['networks']), 1)
         self.assertEqual(id, res['networks'][0]['id'])
 
         self.assertIn('networks_links', res)
@@ -649,14 +647,14 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
             self.assertNotEqual(r['rel'], 'next')
             if r['rel'] == 'previous':
                 previous_links.append(r)
-        self.assertEqual(1, len(previous_links))
+        self.assertEqual(len(previous_links), 1)
 
         url = urlparse.urlparse(previous_links[0]['href'])
         self.assertEqual(url.path, _get_path('networks'))
         expect_params = params.copy()
         expect_params['marker'] = [id]
         expect_params['page_reverse'] = ['True']
-        self.assertEqual(expect_params, urlparse.parse_qs(url.query))
+        self.assertEqual(urlparse.parse_qs(url.query), expect_params)
 
     def test_list_pagination_with_empty_page(self):
         return_value = []
@@ -667,7 +665,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         res = self.api.get(_get_path('networks'),
                            params=params).json
 
-        self.assertEqual([], res['networks'])
+        self.assertEqual(res['networks'], [])
 
         previous_links = []
         if 'networks_links' in res:
@@ -675,14 +673,14 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                 self.assertNotEqual(r['rel'], 'next')
                 if r['rel'] == 'previous':
                     previous_links.append(r)
-        self.assertEqual(1, len(previous_links))
+        self.assertEqual(len(previous_links), 1)
 
         url = urlparse.urlparse(previous_links[0]['href'])
         self.assertEqual(url.path, _get_path('networks'))
         expect_params = params.copy()
         del expect_params['marker']
         expect_params['page_reverse'] = ['True']
-        self.assertEqual(expect_params, urlparse.parse_qs(url.query))
+        self.assertEqual(urlparse.parse_qs(url.query), expect_params)
 
     def test_list_pagination_reverse_with_last_page(self):
         id = str(_uuid())
@@ -711,15 +709,15 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
             self.assertNotEqual(r['rel'], 'previous')
             if r['rel'] == 'next':
                 next_links.append(r)
-        self.assertEqual(1, len(next_links))
+        self.assertEqual(len(next_links), 1)
 
         url = urlparse.urlparse(next_links[0]['href'])
         self.assertEqual(url.path, _get_path('networks'))
         expected_params = params.copy()
         del expected_params['page_reverse']
         expected_params['marker'] = [id]
-        self.assertEqual(expected_params,
-                         urlparse.parse_qs(url.query))
+        self.assertEqual(urlparse.parse_qs(url.query),
+                         expected_params)
 
     def test_list_pagination_reverse_with_empty_page(self):
         return_value = []
@@ -730,7 +728,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                   'page_reverse': ['True']}
         res = self.api.get(_get_path('networks'),
                            params=params).json
-        self.assertEqual([], res['networks'])
+        self.assertEqual(res['networks'], [])
 
         next_links = []
         if 'networks_links' in res:
@@ -738,14 +736,14 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                 self.assertNotEqual(r['rel'], 'previous')
                 if r['rel'] == 'next':
                     next_links.append(r)
-        self.assertEqual(1, len(next_links))
+        self.assertEqual(len(next_links), 1)
 
         url = urlparse.urlparse(next_links[0]['href'])
         self.assertEqual(url.path, _get_path('networks'))
         expect_params = params.copy()
         del expect_params['marker']
         del expect_params['page_reverse']
-        self.assertEqual(expect_params, urlparse.parse_qs(url.query))
+        self.assertEqual(urlparse.parse_qs(url.query), expect_params)
 
     def test_create(self):
         net_id = _uuid()
@@ -762,12 +760,12 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         res = self.api.post(_get_path('networks', fmt=self.fmt),
                             self.serialize(data),
                             content_type='application/' + self.fmt)
-        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPCreated.code)
         res = self.deserialize(res)
         self.assertIn('network', res)
         net = res['network']
-        self.assertEqual(net_id, net['id'])
-        self.assertEqual("ACTIVE", net['status'])
+        self.assertEqual(net['id'], net_id)
+        self.assertEqual(net['status'], "ACTIVE")
 
     def test_create_use_defaults(self):
         net_id = _uuid()
@@ -788,13 +786,13 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                             content_type='application/' + self.fmt)
         instance.create_network.assert_called_with(mock.ANY,
                                                    network=full_input)
-        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPCreated.code)
         res = self.deserialize(res)
         self.assertIn('network', res)
         net = res['network']
-        self.assertEqual(net_id, net['id'])
-        self.assertTrue(net['admin_state_up'])
-        self.assertEqual("ACTIVE", net['status'])
+        self.assertEqual(net['id'], net_id)
+        self.assertEqual(net['admin_state_up'], True)
+        self.assertEqual(net['status'], "ACTIVE")
 
     def test_create_no_keystone_env(self):
         data = {'name': 'net1'}
@@ -824,7 +822,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
 
         instance.create_network.assert_called_with(mock.ANY,
                                                    network=full_input)
-        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPCreated.code)
 
     def test_create_bad_keystone_tenant(self):
         tenant_id = _uuid()
@@ -866,7 +864,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                             self.serialize(data),
                             content_type='application/' + self.fmt,
                             expect_errors=True)
-        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPBadRequest.code)
 
     def test_create_bulk(self):
         data = {'networks': [{'name': 'net1',
@@ -887,14 +885,14 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         res = self.api.post(_get_path('networks', fmt=self.fmt),
                             self.serialize(data),
                             content_type='application/' + self.fmt)
-        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPCreated.code)
 
     def _test_create_failure_bad_request(self, resource, data, **kwargs):
         res = self.api.post(_get_path(resource, fmt=self.fmt),
                             self.serialize(data),
                             content_type='application/' + self.fmt,
                             expect_errors=True, **kwargs)
-        self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPBadRequest.code)
 
     def test_create_bulk_networks_none(self):
         self._test_create_failure_bad_request('networks', {'networks': None})
@@ -921,8 +919,8 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                                   'device_id': device_id,
                                   'admin_state_up': True}}
         full_input = {'port': {'admin_state_up': True,
-                               'mac_address': constants.ATTR_NOT_SPECIFIED,
-                               'fixed_ips': constants.ATTR_NOT_SPECIFIED,
+                               'mac_address': attributes.ATTR_NOT_SPECIFIED,
+                               'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
                                'device_owner': ''}}
         full_input['port'].update(initial_input['port'])
         return_value = {'id': _uuid(), 'status': 'ACTIVE',
@@ -942,12 +940,12 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                             self.serialize(initial_input),
                             content_type='application/' + self.fmt)
         instance.create_port.assert_called_with(mock.ANY, port=full_input)
-        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPCreated.code)
         res = self.deserialize(res)
         self.assertIn('port', res)
         port = res['port']
-        self.assertEqual(net_id, port['network_id'])
-        self.assertEqual('ca:fe:de:ad:be:ef', port['mac_address'])
+        self.assertEqual(port['network_id'], net_id)
+        self.assertEqual(port['mac_address'], 'ca:fe:de:ad:be:ef')
 
     def test_create_return_extra_attr(self):
         net_id = _uuid()
@@ -964,12 +962,12 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         res = self.api.post(_get_path('networks', fmt=self.fmt),
                             self.serialize(data),
                             content_type='application/' + self.fmt)
-        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPCreated.code)
         res = self.deserialize(res)
         self.assertIn('network', res)
         net = res['network']
-        self.assertEqual(net_id, net['id'])
-        self.assertEqual("ACTIVE", net['status'])
+        self.assertEqual(net['id'], net_id)
+        self.assertEqual(net['status'], "ACTIVE")
         self.assertNotIn('v2attrs:something', net)
 
     def test_fields(self):
@@ -998,7 +996,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                                         fmt=self.fmt),
                               extra_environ=env,
                               expect_errors=expect_errors)
-        self.assertEqual(expected_code, res.status_int)
+        self.assertEqual(res.status_int, expected_code)
 
     def test_delete_noauth(self):
         self._test_delete(None, _uuid(), exc.HTTPNoContent.code)
@@ -1031,7 +1029,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                                      fmt=self.fmt),
                            extra_environ=env,
                            expect_errors=expect_errors)
-        self.assertEqual(expected_code, res.status_int)
+        self.assertEqual(res.status_int, expected_code)
         return res
 
     def test_get_noauth(self):
@@ -1099,18 +1097,13 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         self._test_update(tenant_id + "bad", tenant_id,
                           exc.HTTPNotFound.code, expect_errors=True)
 
-    def test_update_keystone_no_tenant(self):
-        tenant_id = _uuid()
-        self._test_update(tenant_id, None,
-                          exc.HTTPNotFound.code, expect_errors=True)
-
     def test_update_readonly_field(self):
         data = {'network': {'status': "NANANA"}}
         res = self.api.put(_get_path('networks', id=_uuid()),
                            self.serialize(data),
                            content_type='application/' + self.fmt,
                            expect_errors=True)
-        self.assertEqual(400, res.status_int)
+        self.assertEqual(res.status_int, 400)
 
     def test_invalid_attribute_field(self):
         data = {'network': {'invalid_key1': "foo1", 'invalid_key2': "foo2"}}
@@ -1118,7 +1111,7 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
                            self.serialize(data),
                            content_type='application/' + self.fmt,
                            expect_errors=True)
-        self.assertEqual(400, res.status_int)
+        self.assertEqual(res.status_int, 400)
 
     def test_retry_on_index(self):
         instance = self.plugin.return_value
@@ -1329,18 +1322,13 @@ class NotificationTest(APIv2TestBase):
 
         expected_events = ('.'.join([resource, opname, "start"]),
                            '.'.join([resource, opname, "end"]))
-        self.assertEqual(len(expected_events),
-                         len(fake_notifier.NOTIFICATIONS))
+        self.assertEqual(len(fake_notifier.NOTIFICATIONS),
+                         len(expected_events))
         for msg, event in zip(fake_notifier.NOTIFICATIONS, expected_events):
             self.assertEqual('INFO', msg['priority'])
             self.assertEqual(event, msg['event_type'])
-            if opname == 'delete' and event == 'network.delete.end':
-                self.assertIn('payload', msg)
-                resource = msg['payload']
-                self.assertIn('network_id', resource)
-                self.assertIn('network', resource)
 
-        self.assertEqual(expected_code, res.status_int)
+        self.assertEqual(res.status_int, expected_code)
 
     def test_network_create_notifer(self):
         self._resource_op_notifier('create', 'network')
@@ -1352,19 +1340,20 @@ class NotificationTest(APIv2TestBase):
         self._resource_op_notifier('update', 'network')
 
 
-class RegistryNotificationTest(APIv2TestBase):
+class DHCPNotificationTest(APIv2TestBase):
 
     def setUp(self):
         # This test does not have database support so tracking cannot be used
         cfg.CONF.set_override('track_quota_usage', False, group='QUOTAS')
-        super(RegistryNotificationTest, self).setUp()
+        super(DHCPNotificationTest, self).setUp()
 
-    def _test_registry_notify(self, opname, resource, initial_input=None):
+    def _test_dhcp_notifier(self, opname, resource, initial_input=None):
         instance = self.plugin.return_value
         instance.get_networks.return_value = initial_input
         instance.get_networks_count.return_value = 0
         expected_code = exc.HTTPCreated.code
-        with mock.patch.object(registry, 'notify') as notify:
+        with mock.patch.object(dhcp_rpc_agent_api.DhcpAgentNotifyAPI,
+                               'notify') as dhcp_notifier:
             if opname == 'create':
                 res = self.api.post_json(
                     _get_path('networks'),
@@ -1377,27 +1366,35 @@ class RegistryNotificationTest(APIv2TestBase):
             if opname == 'delete':
                 res = self.api.delete(_get_path('networks', id=_uuid()))
                 expected_code = exc.HTTPNoContent.code
-            self.assertTrue(notify.called)
+            expected_item = mock.call(mock.ANY, mock.ANY,
+                                      resource + "." + opname + ".end")
+            if initial_input and resource not in initial_input:
+                resource += 's'
+            num = len(initial_input[resource]) if initial_input and isinstance(
+                initial_input[resource], list) else 1
+            expected = [expected_item for x in moves.range(num)]
+            self.assertEqual(expected, dhcp_notifier.call_args_list)
+            self.assertEqual(num, dhcp_notifier.call_count)
         self.assertEqual(expected_code, res.status_int)
 
-    def test_network_create_registry_notify(self):
+    def test_network_create_dhcp_notifer(self):
         input = {'network': {'name': 'net',
                              'tenant_id': _uuid()}}
-        self._test_registry_notify('create', 'network', input)
+        self._test_dhcp_notifier('create', 'network', input)
 
-    def test_network_delete_registry_notify(self):
-        self._test_registry_notify('delete', 'network')
+    def test_network_delete_dhcp_notifer(self):
+        self._test_dhcp_notifier('delete', 'network')
 
-    def test_network_update_registry_notify(self):
+    def test_network_update_dhcp_notifer(self):
         input = {'network': {'name': 'net'}}
-        self._test_registry_notify('update', 'network', input)
+        self._test_dhcp_notifier('update', 'network', input)
 
-    def test_networks_create_bulk_registry_notify(self):
+    def test_networks_create_bulk_dhcp_notifer(self):
         input = {'networks': [{'name': 'net1',
                                'tenant_id': _uuid()},
                               {'name': 'net2',
                                'tenant_id': _uuid()}]}
-        self._test_registry_notify('create', 'network', input)
+        self._test_dhcp_notifier('create', 'network', input)
 
 
 class QuotaTest(APIv2TestBase):
@@ -1408,7 +1405,7 @@ class QuotaTest(APIv2TestBase):
         super(QuotaTest, self).setUp()
         # Use mock to let the API use a different QuotaEngine instance for
         # unit test in this class. This will ensure resource are registered
-        # again and instantiated with neutron.quota.resource.CountableResource
+        # again and instanciated with neutron.quota.resource.CountableResource
         replacement_registry = resource_registry.ResourceRegistry()
         registry_patcher = mock.patch('neutron.quota.resource_registry.'
                                       'ResourceRegistry.get_instance')
@@ -1457,7 +1454,7 @@ class QuotaTest(APIv2TestBase):
         instance.get_networks_count.return_value = 3
         res = self.api.post_json(
             _get_path('networks'), initial_input)
-        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPCreated.code)
 
 
 class ExtensionTestCase(base.BaseTestCase):
@@ -1517,12 +1514,12 @@ class ExtensionTestCase(base.BaseTestCase):
 
         instance.create_network.assert_called_with(mock.ANY,
                                                    network=data)
-        self.assertEqual(exc.HTTPCreated.code, res.status_int)
+        self.assertEqual(res.status_int, exc.HTTPCreated.code)
         self.assertIn('network', res.json)
         net = res.json['network']
-        self.assertEqual(net_id, net['id'])
-        self.assertEqual("ACTIVE", net['status'])
-        self.assertEqual("123", net['v2attrs:something'])
+        self.assertEqual(net['id'], net_id)
+        self.assertEqual(net['status'], "ACTIVE")
+        self.assertEqual(net['v2attrs:something'], "123")
         self.assertNotIn('v2attrs:something_else', net)
 
 
@@ -1554,7 +1551,7 @@ class ListArgsTestCase(base.BaseTestCase):
         request = webob.Request.blank(path)
         expect_val = ['2', '4']
         actual_val = api_common.list_args(request, 'fields')
-        self.assertEqual(expect_val, sorted(actual_val))
+        self.assertEqual(sorted(actual_val), expect_val)
 
     def test_list_args_with_empty(self):
         path = '/?foo=4&bar=3&baz=2&qux=1'
@@ -1579,7 +1576,7 @@ class FiltersTestCase(base.BaseTestCase):
         request = webob.Request.blank(path)
         expect_val = {'foo': ['4'], 'bar': ['3'], 'baz': ['2'], 'qux': ['1']}
         actual_val = api_common.get_filters(request, {})
-        self.assertEqual(expect_val, actual_val)
+        self.assertEqual(actual_val, expect_val)
 
     def test_attr_info_without_conversion(self):
         path = '/?foo=4&bar=3&baz=2&qux=1'
@@ -1587,14 +1584,14 @@ class FiltersTestCase(base.BaseTestCase):
         attr_info = {'foo': {'key': 'val'}}
         expect_val = {'foo': ['4'], 'bar': ['3'], 'baz': ['2'], 'qux': ['1']}
         actual_val = api_common.get_filters(request, attr_info)
-        self.assertEqual(expect_val, actual_val)
+        self.assertEqual(actual_val, expect_val)
 
     def test_attr_info_with_convert_list_to(self):
         path = '/?foo=key=4&bar=3&foo=key=2&qux=1'
         request = webob.Request.blank(path)
         attr_info = {
             'foo': {
-                'convert_list_to': converters.convert_kvp_list_to_dict,
+                'convert_list_to': attributes.convert_kvp_list_to_dict,
             }
         }
         expect_val = {'foo': {'key': ['2', '4']}, 'bar': ['3'], 'qux': ['1']}
@@ -1604,10 +1601,10 @@ class FiltersTestCase(base.BaseTestCase):
     def test_attr_info_with_convert_to(self):
         path = '/?foo=4&bar=3&baz=2&qux=1'
         request = webob.Request.blank(path)
-        attr_info = {'foo': {'convert_to': converters.convert_to_int}}
+        attr_info = {'foo': {'convert_to': attributes.convert_to_int}}
         expect_val = {'foo': [4], 'bar': ['3'], 'baz': ['2'], 'qux': ['1']}
         actual_val = api_common.get_filters(request, attr_info)
-        self.assertEqual(expect_val, actual_val)
+        self.assertEqual(actual_val, expect_val)
 
 
 class CreateResourceTestCase(base.BaseTestCase):

@@ -12,9 +12,9 @@
 
 from oslo_log import log as logging
 
-from neutron._i18n import _LE
 from neutron.agent.l3 import router_info as router
 from neutron.common import constants as l3_constants
+from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -25,7 +25,6 @@ class DvrRouterBase(router.RouterInfo):
 
         self.agent = agent
         self.host = host
-        self.snat_ports = None
 
     def process(self, agent):
         super(DvrRouterBase, self).process(agent)

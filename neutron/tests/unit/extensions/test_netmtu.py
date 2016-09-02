@@ -1,4 +1,4 @@
-# Copyright 2015 OpenStack Foundation.
+# Copyright 2015 Openstack Foundation.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -11,8 +11,6 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-
-from oslo_config import cfg
 
 from neutron.common import constants
 from neutron.db import db_base_plugin_v2
@@ -63,23 +61,14 @@ class NetmtuExtensionTestCase(test_db_base_plugin_v2.TestNetworksV2):
             self.assertEqual(1, len(res['networks']))
             self.assertEqual(res['networks'][0]['name'],
                              net1['network']['name'])
-            self.assertEqual(constants.DEFAULT_NETWORK_MTU,
-                             res['networks'][0].get('mtu'))
-
-    def _assert_network_mtu(self, net_id, expected_mtu):
-        req = self.new_show_request('networks', net_id)
-        res = self.deserialize(self.fmt, req.get_response(self.api))
-        self.assertEqual(expected_mtu, res['network']['mtu'])
+            self.assertEqual(res['networks'][0].get('mtu'),
+                             constants.DEFAULT_NETWORK_MTU)
 
     def test_show_network_mtu(self):
         with self.network(name='net1') as net:
-            self._assert_network_mtu(
-                net['network']['id'], constants.DEFAULT_NETWORK_MTU)
-
-    def test_network_mtu_immediately_reflects_config_option(self):
-        with self.network(name='net1') as net:
-            self._assert_network_mtu(
-                net['network']['id'], cfg.CONF.global_physnet_mtu)
-            cfg.CONF.set_override('global_physnet_mtu', 1400)
-            self._assert_network_mtu(
-                net['network']['id'], cfg.CONF.global_physnet_mtu)
+            req = self.new_show_request('networks', net['network']['id'])
+            res = self.deserialize(self.fmt, req.get_response(self.api))
+            self.assertEqual(res['network']['name'],
+                             net['network']['name'])
+            self.assertEqual(res['network']['mtu'],
+                             constants.DEFAULT_NETWORK_MTU)

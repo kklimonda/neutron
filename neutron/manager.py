@@ -13,19 +13,22 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from collections import defaultdict
+import sys
 import weakref
 
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import periodic_task
-from osprofiler import profiler
+from oslo_utils import importutils
 import six
 
-from neutron._i18n import _, _LI
 from neutron.common import utils
+from neutron.db import flavors_db
+from neutron.i18n import _LE, _LI
 from neutron.plugins.common import constants
+
+from stevedore import driver
 
 
 LOG = logging.getLogger(__name__)
@@ -33,13 +36,7 @@ LOG = logging.getLogger(__name__)
 CORE_PLUGINS_NAMESPACE = 'neutron.core_plugins'
 
 
-class ManagerMeta(profiler.TracedMeta, type(periodic_task.PeriodicTasks)):
-    pass
-
-
-@six.add_metaclass(ManagerMeta)
 class Manager(periodic_task.PeriodicTasks):
-    __trace_args__ = {"name": "rpc"}
 
     # Set RPC API version to 1.0 by default.
     target = oslo_messaging.Target(version='1.0')
@@ -94,7 +91,6 @@ def validate_pre_plugin_load():
         return msg
 
 
-@six.add_metaclass(profiler.TracedMeta)
 class NeutronManager(object):
     """Neutron's Manager class.
 
@@ -104,7 +100,6 @@ class NeutronManager(object):
     The caller should make sure that NeutronManager is a singleton.
     """
     _instance = None
-    __trace_args__ = {"name": "rpc"}
 
     def __init__(self, options=None, config_file=None):
         # If no options have been provided, create an empty dict
@@ -138,22 +133,28 @@ class NeutronManager(object):
         # Used by pecan WSGI
         self.resource_plugin_mappings = {}
         self.resource_controller_mappings = {}
-        self.path_prefix_resource_mappings = defaultdict(list)
 
     @staticmethod
     def load_class_for_provider(namespace, plugin_provider):
-        """Loads plugin using alias or class name
-        :param namespace: namespace where alias is defined
-        :param plugin_provider: plugin alias or class name
-        :returns plugin that is loaded
-        :raises ImportError if fails to load plugin
-        """
-
+        if not plugin_provider:
+            LOG.error(_LE("Error, plugin is not set"))
+            raise ImportError(_("Plugin not found."))
         try:
-            return utils.load_class_by_alias_or_classname(namespace,
-                    plugin_provider)
-        except ImportError:
-            raise ImportError(_("Plugin '%s' not found.") % plugin_provider)
+            # Try to resolve plugin by name
+            mgr = driver.DriverManager(namespace, plugin_provider)
+            plugin_class = mgr.driver
+        except RuntimeError:
+            e1_info = sys.exc_info()
+            # fallback to class name
+            try:
+                plugin_class = importutils.import_class(plugin_provider)
+            except ImportError:
+                LOG.error(_LE("Error loading plugin by name"),
+                          exc_info=e1_info)
+                LOG.error(_LE("Error loading plugin by class"),
+                          exc_info=True)
+                raise ImportError(_("Plugin not found."))
+        return plugin_class
 
     def _get_plugin_instance(self, namespace, plugin_provider):
         plugin_class = self.load_class_for_provider(namespace, plugin_provider)
@@ -172,9 +173,10 @@ class NeutronManager(object):
                 LOG.info(_LI("Service %s is supported by the core plugin"),
                          service_type)
 
-    def _get_default_service_plugins(self):
-        """Get default service plugins to be loaded."""
-        return constants.DEFAULT_SERVICE_PLUGINS.keys()
+    def _load_flavors_manager(self):
+        # pass manager instance to resolve cyclical import dependency
+        self.service_plugins[constants.FLAVORS] = (
+            flavors_db.FlavorManager(self))
 
     def _load_service_plugins(self):
         """Loads service plugins.
@@ -186,7 +188,6 @@ class NeutronManager(object):
         self._load_services_from_core_plugin()
 
         plugin_providers = cfg.CONF.service_plugins
-        plugin_providers.extend(self._get_default_service_plugins())
         LOG.debug("Loading service plugins: %s", plugin_providers)
         for provider in plugin_providers:
             if provider == '':
@@ -216,6 +217,9 @@ class NeutronManager(object):
                       "Description: %(desc)s",
                       {"type": plugin_inst.get_plugin_type(),
                        "desc": plugin_inst.get_plugin_description()})
+        # do it after the loading from conf to avoid conflict with
+        # configuration provided by unit tests.
+        self._load_flavors_manager()
 
     @classmethod
     @utils.synchronized("manager")
@@ -269,30 +273,4 @@ class NeutronManager(object):
 
     @classmethod
     def get_controller_for_resource(cls, resource):
-        resource = resource.replace('_', '-')
-        res_ctrl_mappings = cls.get_instance().resource_controller_mappings
-        # If no controller is found for resource, try replacing dashes with
-        # underscores
-        return res_ctrl_mappings.get(
-            resource,
-            res_ctrl_mappings.get(resource.replace('-', '_')))
-
-    # TODO(blogan): This isn't used by anything else other than tests and
-    # probably should be removed
-    @classmethod
-    def get_service_plugin_by_path_prefix(cls, path_prefix):
-        service_plugins = cls.get_unique_service_plugins()
-        for service_plugin in service_plugins:
-            plugin_path_prefix = getattr(service_plugin, 'path_prefix', None)
-            if plugin_path_prefix and plugin_path_prefix == path_prefix:
-                return service_plugin
-
-    @classmethod
-    def add_resource_for_path_prefix(cls, resource, path_prefix):
-        resources = cls.get_instance().path_prefix_resource_mappings[
-            path_prefix].append(resource)
-        return resources
-
-    @classmethod
-    def get_resources_for_path_prefix(cls, path_prefix):
-        return cls.get_instance().path_prefix_resource_mappings[path_prefix]
+        return cls.get_instance().resource_controller_mappings.get(resource)

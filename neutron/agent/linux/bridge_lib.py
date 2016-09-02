@@ -18,25 +18,12 @@
 
 import os
 
-from oslo_utils import excutils
-
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import utils
 
 # NOTE(toabctl): Don't use /sys/devices/virtual/net here because not all tap
 # devices are listed here (i.e. when using Xen)
 BRIDGE_FS = "/sys/class/net/"
-BRIDGE_INTERFACE_FS = BRIDGE_FS + "%(bridge)s/brif/%(interface)s"
-BRIDGE_INTERFACES_FS = BRIDGE_FS + "%s/brif/"
 BRIDGE_PORT_FS_FOR_DEVICE = BRIDGE_FS + "%s/brport"
-BRIDGE_PATH_FOR_DEVICE = BRIDGE_PORT_FS_FOR_DEVICE + '/bridge'
-
-
-def is_bridged_interface(interface):
-    if not interface:
-        return False
-    else:
-        return os.path.exists(BRIDGE_PORT_FS_FOR_DEVICE % interface)
 
 
 def get_interface_bridged_time(interface):
@@ -44,10 +31,6 @@ def get_interface_bridged_time(interface):
         return os.stat(BRIDGE_PORT_FS_FOR_DEVICE % interface).st_mtime
     except OSError:
         pass
-
-
-def get_bridge_names():
-    return os.listdir(BRIDGE_FS)
 
 
 class BridgeDevice(ip_lib.IPDevice):
@@ -59,22 +42,8 @@ class BridgeDevice(ip_lib.IPDevice):
     @classmethod
     def addbr(cls, name, namespace=None):
         bridge = cls(name, namespace)
-        try:
-            bridge._brctl(['addbr', bridge.name])
-        except RuntimeError:
-            with excutils.save_and_reraise_exception() as ectx:
-                ectx.reraise = not bridge.exists()
+        bridge._brctl(['addbr', bridge.name])
         return bridge
-
-    @classmethod
-    def get_interface_bridge(cls, interface):
-        try:
-            path = os.readlink(BRIDGE_PATH_FOR_DEVICE % interface)
-        except OSError:
-            return None
-        else:
-            name = path.rpartition('/')[-1]
-            return cls(name)
 
     def delbr(self):
         return self._brctl(['delbr', self.name])
@@ -90,35 +59,3 @@ class BridgeDevice(ip_lib.IPDevice):
 
     def disable_stp(self):
         return self._brctl(['stp', self.name, 'off'])
-
-    def owns_interface(self, interface):
-        return os.path.exists(
-            BRIDGE_INTERFACE_FS % {'bridge': self.name,
-                                   'interface': interface})
-
-    def get_interfaces(self):
-        try:
-            return os.listdir(BRIDGE_INTERFACES_FS % self.name)
-        except OSError:
-            return []
-
-
-class FdbInterface(object):
-    """provide basic functionality to edit the FDB table"""
-
-    @classmethod
-    def add(cls, mac, dev):
-        return utils.execute(['bridge', 'fdb', 'add', mac, 'dev', dev],
-                run_as_root=True)
-
-    @classmethod
-    def delete(cls, mac, dev):
-        return utils.execute(['bridge', 'fdb', 'delete', mac, 'dev', dev],
-                             run_as_root=True)
-
-    @classmethod
-    def show(cls, dev=None):
-        cmd = ['bridge', 'fdb', 'show']
-        if dev:
-            cmd += ['dev', dev]
-        return utils.execute(cmd, run_as_root=True)

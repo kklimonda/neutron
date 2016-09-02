@@ -19,11 +19,11 @@ from oslo_utils import uuidutils
 
 from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import agent as l3_agent
+from neutron.agent.l3 import config as l3_config
 from neutron.agent.l3 import ha as l3_ha_agent
 from neutron.agent.metadata import config
 from neutron.agent.metadata import driver as metadata_driver
 from neutron.common import constants
-from neutron.conf.agent.l3 import config as l3_config
 from neutron.tests import base
 
 
@@ -69,12 +69,13 @@ class TestMetadataDriverProcess(base.BaseTestCase):
         agent_config.register_interface_driver_opts_helper(cfg.CONF)
         cfg.CONF.set_override('interface_driver',
                               'neutron.agent.linux.interface.NullDriver')
+        agent_config.register_use_namespaces_opts_helper(cfg.CONF)
 
         mock.patch('neutron.agent.l3.agent.L3PluginApi').start()
         mock.patch('neutron.agent.l3.ha.AgentMixin'
                    '._init_ha_conf_path').start()
 
-        l3_config.register_l3_agent_config_opts(l3_config.OPTS, cfg.CONF)
+        cfg.CONF.register_opts(l3_config.OPTS)
         cfg.CONF.register_opts(l3_ha_agent.OPTS)
         cfg.CONF.register_opts(config.SHARED_OPTS)
         cfg.CONF.register_opts(config.DRIVER_OPTS)
@@ -115,6 +116,7 @@ class TestMetadataDriverProcess(base.BaseTestCase):
                 '--metadata_proxy_user=%s' % expected_user,
                 '--metadata_proxy_group=%s' % expected_group,
                 '--debug',
+                '--verbose',
                 '--log-file=neutron-ns-metadata-proxy-%s.log' %
                 router_id]
             if not watch_log:

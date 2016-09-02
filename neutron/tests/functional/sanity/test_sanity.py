@@ -77,9 +77,6 @@ class SanityTestCaseRoot(functional_base.BaseSudoTestCase):
     def test_vf_management_runs(self):
         checks.vf_management_supported()
 
-    def test_vf_extended_management_runs(self):
-        checks.vf_extended_management_supported()
-
     def test_namespace_root_read_detection_runs(self):
         checks.netns_read_requires_helper()
 

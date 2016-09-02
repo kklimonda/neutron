@@ -51,7 +51,7 @@ class TestDhcpAgentNotifyAPI(base.BaseTestCase):
             new_agents = []
         self.assertEqual(new_agents + existing_agents, agents)
         self.assertEqual(expected_casts, self.mock_cast.call_count)
-        self.assertEqual(expected_warnings, self.mock_log.warning.call_count)
+        self.assertEqual(expected_warnings, self.mock_log.warn.call_count)
 
     def test__schedule_network(self):
         agent = agents_db.Agent()
@@ -86,7 +86,7 @@ class TestDhcpAgentNotifyAPI(base.BaseTestCase):
         if not cfg.CONF.enable_services_on_agents_with_admin_state_down:
             agents = [x for x in agents if x.admin_state_up]
         self.assertEqual(agents, enabled_agents)
-        self.assertEqual(expected_warnings, self.mock_log.warning.call_count)
+        self.assertEqual(expected_warnings, self.mock_log.warn.call_count)
         self.assertEqual(expected_errors, self.mock_log.error.call_count)
 
     def test__get_enabled_agents(self):
@@ -151,12 +151,10 @@ class TestDhcpAgentNotifyAPI(base.BaseTestCase):
                 self.assertEqual(expected_casts, self.mock_cast.call_count)
 
     def _test__notify_agents(self, method,
-                             expected_scheduling=0, expected_casts=0,
-                             payload=None):
-        payload = payload or {'port': {}}
+                             expected_scheduling=0, expected_casts=0):
         self._test__notify_agents_with_function(
             lambda: self.notifier._notify_agents(
-                mock.Mock(), method, payload, 'foo_network_id'),
+                mock.Mock(), method, {'port': {}}, 'foo_network_id'),
             expected_scheduling, expected_casts)
 
     def test__notify_agents_cast_required_with_scheduling(self):
@@ -169,26 +167,7 @@ class TestDhcpAgentNotifyAPI(base.BaseTestCase):
 
     def test__notify_agents_cast_required_with_scheduling_subnet_create(self):
         self._test__notify_agents('subnet_create_end',
-                                  expected_scheduling=1, expected_casts=1,
-                                  payload={'subnet': {}})
-
-    def test__notify_agents_cast_required_with_scheduling_segment(self):
-        network_id = 'foo_network_id'
-        segment_id = 'foo_segment_id'
-        subnet = {'subnet': {'segment_id': segment_id}}
-        segment = {'id': segment_id, 'network_id': network_id,
-                   'hosts': ['host-a']}
-        self.notifier.plugin.get_network.return_value = {'id': network_id}
-        segment_sp = mock.Mock()
-        segment_sp.get_segment.return_value = segment
-        with mock.patch('neutron.manager.NeutronManager.get_service_plugins',
-                        return_value={'segments': segment_sp}):
-            self._test__notify_agents('subnet_create_end',
-                                      expected_scheduling=1, expected_casts=1,
-                                      payload=subnet)
-        get_agents = self.notifier.plugin.get_dhcp_agents_hosting_networks
-        get_agents.assert_called_once_with(
-            mock.ANY, [network_id], hosts=segment['hosts'])
+                                  expected_scheduling=1, expected_casts=1)
 
     def test__notify_agents_no_action(self):
         self._test__notify_agents('network_create_end',

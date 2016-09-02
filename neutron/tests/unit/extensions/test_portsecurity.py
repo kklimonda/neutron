@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib.api import validators
 from webob import exc
 
+from neutron.api.v2 import attributes as attr
 from neutron import context
 from neutron.db import db_base_plugin_v2
 from neutron.db import portsecurity_db
@@ -60,7 +60,7 @@ class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
     supported_extension_aliases = ["security-group", "port-security"]
 
     def create_network(self, context, network):
-        tenant_id = network['network'].get('tenant_id')
+        tenant_id = self._get_tenant_id_for_create(context, network['network'])
         self._ensure_default_security_group(context, tenant_id)
         with context.session.begin(subtransactions=True):
             neutron_db = super(PortSecurityTestPlugin, self).create_network(
@@ -99,7 +99,7 @@ class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
             p[psec.PORTSECURITY] = port_security
             self._process_port_port_security_create(context, p, neutron_db)
 
-            if (validators.is_attr_set(p.get(ext_sg.SECURITYGROUPS)) and
+            if (attr.is_attr_set(p.get(ext_sg.SECURITYGROUPS)) and
                 not (port_security and has_ip)):
                 raise psec.PortSecurityAndIPRequiredForSecurityGroups()
 
@@ -175,34 +175,34 @@ class TestPortSecurity(PortSecurityDBTestCase):
     def test_create_network_with_portsecurity_mac(self):
         res = self._create_network('json', 'net1', True)
         net = self.deserialize('json', res)
-        self.assertTrue(net['network'][psec.PORTSECURITY])
+        self.assertEqual(net['network'][psec.PORTSECURITY], True)
 
     def test_create_network_with_portsecurity_false(self):
         res = self._create_network('json', 'net1', True,
                                    arg_list=('port_security_enabled',),
                                    port_security_enabled=False)
         net = self.deserialize('json', res)
-        self.assertFalse(net['network'][psec.PORTSECURITY])
+        self.assertEqual(net['network'][psec.PORTSECURITY], False)
 
     def test_updating_network_port_security(self):
         res = self._create_network('json', 'net1', True,
                                    port_security_enabled='True')
         net = self.deserialize('json', res)
-        self.assertTrue(net['network'][psec.PORTSECURITY])
+        self.assertEqual(net['network'][psec.PORTSECURITY], True)
         update_net = {'network': {psec.PORTSECURITY: False}}
         req = self.new_update_request('networks', update_net,
                                       net['network']['id'])
         net = self.deserialize('json', req.get_response(self.api))
-        self.assertFalse(net['network'][psec.PORTSECURITY])
+        self.assertEqual(net['network'][psec.PORTSECURITY], False)
         req = self.new_show_request('networks', net['network']['id'])
         net = self.deserialize('json', req.get_response(self.api))
-        self.assertFalse(net['network'][psec.PORTSECURITY])
+        self.assertEqual(net['network'][psec.PORTSECURITY], False)
 
     def test_create_port_default_true(self):
         with self.network() as net:
             res = self._create_port('json', net['network']['id'])
             port = self.deserialize('json', res)
-            self.assertTrue(port['port'][psec.PORTSECURITY])
+            self.assertEqual(port['port'][psec.PORTSECURITY], True)
             self._delete('ports', port['port']['id'])
 
     def test_create_port_passing_true(self):
@@ -212,7 +212,7 @@ class TestPortSecurity(PortSecurityDBTestCase):
         net = self.deserialize('json', res)
         res = self._create_port('json', net['network']['id'])
         port = self.deserialize('json', res)
-        self.assertTrue(port['port'][psec.PORTSECURITY])
+        self.assertEqual(port['port'][psec.PORTSECURITY], True)
         self._delete('ports', port['port']['id'])
 
     def test_create_port_on_port_security_false_network(self):
@@ -222,7 +222,7 @@ class TestPortSecurity(PortSecurityDBTestCase):
         net = self.deserialize('json', res)
         res = self._create_port('json', net['network']['id'])
         port = self.deserialize('json', res)
-        self.assertFalse(port['port'][psec.PORTSECURITY])
+        self.assertEqual(port['port'][psec.PORTSECURITY], False)
         self._delete('ports', port['port']['id'])
 
     def test_create_port_security_overrides_network_value(self):
@@ -234,7 +234,7 @@ class TestPortSecurity(PortSecurityDBTestCase):
                                 arg_list=('port_security_enabled',),
                                 port_security_enabled=True)
         port = self.deserialize('json', res)
-        self.assertTrue(port['port'][psec.PORTSECURITY])
+        self.assertEqual(port['port'][psec.PORTSECURITY], True)
         self._delete('ports', port['port']['id'])
 
     def test_create_port_fails_with_secgroup_and_port_security_false(self):
@@ -251,7 +251,7 @@ class TestPortSecurity(PortSecurityDBTestCase):
                                                   'port_security_enabled'),
                                         security_groups=[security_group_id],
                                         port_security_enabled=False)
-                self.assertEqual(400, res.status_int)
+                self.assertEqual(res.status_int, 400)
 
     def test_create_port_with_default_security_group(self):
         if self._skip_security_group:
@@ -260,14 +260,14 @@ class TestPortSecurity(PortSecurityDBTestCase):
             with self.subnet(network=net):
                 res = self._create_port('json', net['network']['id'])
                 port = self.deserialize('json', res)
-                self.assertTrue(port['port'][psec.PORTSECURITY])
-                self.assertEqual(1, len(port['port'][ext_sg.SECURITYGROUPS]))
+                self.assertEqual(port['port'][psec.PORTSECURITY], True)
+                self.assertEqual(len(port['port'][ext_sg.SECURITYGROUPS]), 1)
                 self._delete('ports', port['port']['id'])
 
     def test_create_port_with_security_group_and_net_sec_false(self):
         # This tests that port_security_enabled is true when creating
         # a port on a network that is marked as port_security_enabled=False
-        # that has a subnet and security_groups are passed it.
+        # that has a subnet and securiy_groups are passed it.
         if self._skip_security_group:
             self.skipTest("Plugin does not support security groups")
         res = self._create_network('json', 'net1', True,
@@ -284,7 +284,7 @@ class TestPortSecurity(PortSecurityDBTestCase):
                                 port_security_enabled=True,
                                 security_groups=[security_group_id])
         port = self.deserialize('json', res)
-        self.assertTrue(port['port'][psec.PORTSECURITY])
+        self.assertEqual(port['port'][psec.PORTSECURITY], True)
         self.assertEqual(port['port']['security_groups'], [security_group_id])
         self._delete('ports', port['port']['id'])
 
@@ -306,13 +306,13 @@ class TestPortSecurity(PortSecurityDBTestCase):
             with self.subnet(network=net):
                 res = self._create_port('json', net['network']['id'])
                 port = self.deserialize('json', res)
-                self.assertTrue(port['port'][psec.PORTSECURITY])
+                self.assertEqual(port['port'][psec.PORTSECURITY], True)
 
                 update_port = {'port': {psec.PORTSECURITY: False}}
                 req = self.new_update_request('ports', update_port,
                                               port['port']['id'])
                 res = req.get_response(self.api)
-                self.assertEqual(409, res.status_int)
+                self.assertEqual(res.status_int, 409)
                 # remove security group on port
                 update_port = {'port': {ext_sg.SECURITYGROUPS: None}}
                 req = self.new_update_request('ports', update_port,
@@ -330,7 +330,7 @@ class TestPortSecurity(PortSecurityDBTestCase):
                                         arg_list=('port_security_enabled',),
                                         port_security_enabled=True)
                 port = self.deserialize('json', res)
-                self.assertTrue(port['port'][psec.PORTSECURITY])
+                self.assertEqual(port['port'][psec.PORTSECURITY], True)
 
                 # remove security group on port
                 update_port = {'port': {ext_sg.SECURITYGROUPS: None,
@@ -338,8 +338,8 @@ class TestPortSecurity(PortSecurityDBTestCase):
                 req = self.new_update_request('ports', update_port,
                                               port['port']['id'])
                 port = self.deserialize('json', req.get_response(self.api))
-                self.assertFalse(port['port'][psec.PORTSECURITY])
-                self.assertEqual(0, len(port['port'][ext_sg.SECURITYGROUPS]))
+                self.assertEqual(port['port'][psec.PORTSECURITY], False)
+                self.assertEqual(len(port['port'][ext_sg.SECURITYGROUPS]), 0)
                 self._delete('ports', port['port']['id'])
 
     def test_update_port_remove_port_security_security_group_read(self):
@@ -351,7 +351,7 @@ class TestPortSecurity(PortSecurityDBTestCase):
                                         arg_list=('port_security_enabled',),
                                         port_security_enabled=True)
                 port = self.deserialize('json', res)
-                self.assertTrue(port['port'][psec.PORTSECURITY])
+                self.assertEqual(port['port'][psec.PORTSECURITY], True)
 
                 # remove security group on port
                 update_port = {'port': {ext_sg.SECURITYGROUPS: None,
@@ -368,8 +368,8 @@ class TestPortSecurity(PortSecurityDBTestCase):
                                               port['port']['id'])
 
                 port = self.deserialize('json', req.get_response(self.api))
-                self.assertTrue(port['port'][psec.PORTSECURITY])
-                self.assertEqual(1, len(port['port'][ext_sg.SECURITYGROUPS]))
+                self.assertEqual(port['port'][psec.PORTSECURITY], True)
+                self.assertEqual(len(port['port'][ext_sg.SECURITYGROUPS]), 1)
                 self._delete('ports', port['port']['id'])
 
     def test_create_port_security_off_shared_network(self):
@@ -381,7 +381,7 @@ class TestPortSecurity(PortSecurityDBTestCase):
                                         tenant_id='not_network_owner',
                                         set_context=True)
                 self.deserialize('json', res)
-                self.assertEqual(403, res.status_int)
+                self.assertEqual(res.status_int, 403)
 
     def test_update_port_security_off_shared_network(self):
         with self.network(shared=True) as net:
@@ -398,4 +398,4 @@ class TestPortSecurity(PortSecurityDBTestCase):
                 req.environ['neutron.context'] = context.Context(
                     '', 'not_network_owner')
                 res = req.get_response(self.api)
-                self.assertEqual(exc.HTTPForbidden.code, res.status_int)
+                self.assertEqual(res.status_int, exc.HTTPForbidden.code)

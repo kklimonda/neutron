@@ -1,4 +1,4 @@
-# Copyright (c) 2015 OpenStack Foundation
+# Copyright (c) 2015 Openstack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -29,6 +29,8 @@ class TestBasicRouterOperations(base.BaseTestCase):
         if not router:
             router = mock.MagicMock()
         self.agent_conf = mock.Mock()
+        # NOTE The use_namespaces config will soon be deprecated
+        self.agent_conf.use_namespaces = True
         self.router_id = _uuid()
         return ha_router.HaRouter(mock.sentinel.enqueue_state,
                                   self.router_id,
@@ -68,7 +70,3 @@ class TestBasicRouterOperations(base.BaseTestCase):
                         'gateway_ip': '30.0.0.1'})
         ri._add_default_gw_virtual_route(ex_gw_port, 'qg-abc')
         self.assertEqual(1, len(mock_instance.virtual_routes.gateway_routes))
-
-        subnets[1]['gateway_ip'] = None
-        ri._add_default_gw_virtual_route(ex_gw_port, 'qg-abc')
-        self.assertEqual(0, len(mock_instance.virtual_routes.gateway_routes))

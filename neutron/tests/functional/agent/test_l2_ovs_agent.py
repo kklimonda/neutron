@@ -17,14 +17,13 @@
 import time
 
 from eventlet.timeout import Timeout
-
-from neutron.common import utils
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
 from neutron.tests.common import net_helpers
 from neutron.tests.functional.agent.l2 import base
 
 
 class TestOVSAgent(base.OVSAgentTestFramework):
+
     def test_port_creation_and_deletion(self):
         self.setup_agent_and_ports(
             port_dicts=self.create_test_ports())
@@ -35,53 +34,6 @@ class TestOVSAgent(base.OVSAgentTestFramework):
 
         self.wait_until_ports_state(self.ports, up=False)
 
-    def test_no_stale_flows_after_port_delete(self):
-        def find_drop_flow(ofport, flows):
-            for flow in flows.split("\n"):
-                if "in_port=%d" % ofport in flow and "actions=drop" in flow:
-                    return True
-            return False
-
-        def num_ports_with_drop_flows(ofports, flows):
-            count = 0
-            for ofport in ofports:
-                if find_drop_flow(ofport, flows):
-                    count = count + 1
-            return count
-        # setup
-        self.setup_agent_and_ports(
-            port_dicts=self.create_test_ports())
-        self.wait_until_ports_state(self.ports, up=True)
-
-        # call port_delete first
-        for port in self.ports:
-            self.agent.port_delete([], port_id=port['id'])
-        portnames = [port["vif_name"] for port in self.ports]
-        ofports = [port.ofport for port in self.agent.int_br.get_vif_ports()
-                   if port.port_name in portnames]
-
-        #wait until ports are marked dead, with drop flow
-        utils.wait_until_true(
-            lambda: num_ports_with_drop_flows(
-                ofports,
-                self.agent.int_br.dump_flows(
-                    constants.LOCAL_SWITCHING
-                )) == len(ofports))
-
-        #delete the ports on bridge
-        for port in self.ports:
-            self.agent.int_br.delete_port(port['vif_name'])
-        self.wait_until_ports_state(self.ports, up=False)
-
-        #verify no stale drop flows
-        self.assertEqual(0,
-            num_ports_with_drop_flows(
-                ofports,
-                self.agent.int_br.dump_flows(
-                    constants.LOCAL_SWITCHING
-                )
-            ))
-
     def _check_datapath_type_netdev(self, expected, default=False):
         if not default:
             self.config.set_override('datapath_type',
@@ -89,14 +41,14 @@ class TestOVSAgent(base.OVSAgentTestFramework):
                                      "OVS")
         agent = self.create_agent()
         self.start_agent(agent)
-        for br_name in (getattr(self, br) for br in
-                        ('br_int', 'br_tun', 'br_phys')):
-            actual = self.ovs.db_get_val('Bridge', br_name, 'datapath_type')
-            self.assertEqual(expected, actual)
-
-    def test_datapath_type_change(self):
-        self._check_datapath_type_netdev('system')
-        self._check_datapath_type_netdev('netdev')
+        actual = self.ovs.db_get_val('Bridge',
+                                     agent.int_br.br_name,
+                                     'datapath_type')
+        self.assertEqual(expected, actual)
+        actual = self.ovs.db_get_val('Bridge',
+                                     agent.tun_br.br_name,
+                                     'datapath_type')
+        self.assertEqual(expected, actual)
 
     def test_datapath_type_netdev(self):
         self._check_datapath_type_netdev(
@@ -125,79 +77,6 @@ class TestOVSAgent(base.OVSAgentTestFramework):
         self.agent.plugin_rpc.update_device_list.reset_mock()
         self.wait_until_ports_state(self.ports, up=True)
 
-    def test_resync_dev_up_after_failure(self):
-        self.setup_agent_and_ports(
-            port_dicts=self.create_test_ports(),
-            failed_dev_up=True)
-        # in the RPC mock the first port fails and should
-        # be re-synced
-        expected_ports = self.ports + [self.ports[0]]
-        self.wait_until_ports_state(expected_ports, up=True)
-
-    def test_resync_dev_down_after_failure(self):
-        self.setup_agent_and_ports(
-            port_dicts=self.create_test_ports(),
-            failed_dev_down=True)
-        self.wait_until_ports_state(self.ports, up=True)
-        for port in self.ports:
-            self.agent.int_br.delete_port(port['vif_name'])
-
-        # in the RPC mock the first port fails and should
-        # be re-synced
-        expected_ports = self.ports + [self.ports[0]]
-        self.wait_until_ports_state(expected_ports, up=False)
-
-    def test_ancillary_port_creation_and_deletion(self):
-        external_bridge = self.useFixture(
-            net_helpers.OVSBridgeFixture()).bridge
-        self.setup_agent_and_ports(
-            port_dicts=self.create_test_ports(),
-            ancillary_bridge=external_bridge)
-        self.wait_until_ports_state(self.ports, up=True)
-
-        for port in self.ports:
-            external_bridge.delete_port(port['vif_name'])
-
-        self.wait_until_ports_state(self.ports, up=False)
-
-    def test_resync_ancillary_devices(self):
-        external_bridge = self.useFixture(
-            net_helpers.OVSBridgeFixture()).bridge
-        self.setup_agent_and_ports(
-            port_dicts=self.create_test_ports(),
-            ancillary_bridge=external_bridge,
-            trigger_resync=True)
-        self.wait_until_ports_state(self.ports, up=True)
-
-    def test_resync_ancillary_dev_up_after_failure(self):
-        external_bridge = self.useFixture(
-            net_helpers.OVSBridgeFixture()).bridge
-        self.setup_agent_and_ports(
-            port_dicts=self.create_test_ports(),
-            ancillary_bridge=external_bridge,
-            failed_dev_up=True)
-        # in the RPC mock the first port fails and should
-        # be re-synced
-        expected_ports = self.ports + [self.ports[0]]
-        self.wait_until_ports_state(expected_ports, up=True)
-
-    def test_resync_ancillary_dev_down_after_failure(self):
-        external_bridge = self.useFixture(
-            net_helpers.OVSBridgeFixture()).bridge
-        self.setup_agent_and_ports(
-            port_dicts=self.create_test_ports(),
-            ancillary_bridge=external_bridge,
-            failed_dev_down=True)
-        self.wait_until_ports_state(self.ports, up=True)
-
-        for port in self.ports:
-            external_bridge.delete_port(port['vif_name'])
-
-        # in the RPC mock the first port fails and should
-        # be re-synced
-        expected_ports = self.ports + [self.ports[0]]
-        self.wait_until_ports_state(expected_ports, up=False)
-
     def test_port_vlan_tags(self):
         self.setup_agent_and_ports(
             port_dicts=self.create_test_ports(),
@@ -205,18 +84,12 @@ class TestOVSAgent(base.OVSAgentTestFramework):
         self.wait_until_ports_state(self.ports, up=True)
         self.assert_vlan_tags(self.ports, self.agent)
 
-    def _test_assert_bridges_ports_vxlan(self, local_ip=None):
-        agent = self.create_agent(local_ip=local_ip)
+    def test_assert_bridges_ports_vxlan(self):
+        agent = self.create_agent()
         self.assertTrue(self.ovs.bridge_exists(self.br_int))
         self.assertTrue(self.ovs.bridge_exists(self.br_tun))
         self.assert_bridge_ports()
         self.assert_patch_ports(agent)
-
-    def test_assert_bridges_ports_vxlan_ipv4(self):
-        self._test_assert_bridges_ports_vxlan()
-
-    def test_assert_bridges_ports_vxlan_ipv6(self):
-        self._test_assert_bridges_ports_vxlan(local_ip='2001:db8:100::1')
 
     def test_assert_bridges_ports_no_tunnel(self):
         self.create_agent(create_tunnels=False)
@@ -312,8 +185,7 @@ class TestOVSAgent(base.OVSAgentTestFramework):
         self.agent = self.create_agent(create_tunnels=False)
         self.network = self._create_test_network_dict()
         self._plug_ports(self.network, self.ports, self.agent)
-        self.start_agent(self.agent, ports=self.ports,
-                         unplug_ports=[self.ports[1]])
+        self.start_agent(self.agent, unplug_ports=[self.ports[1]])
         self.wait_until_ports_state([self.ports[0]], up=True)
         self.assertRaises(
             Timeout, self.wait_until_ports_state, [self.ports[1]], up=True,

@@ -12,13 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import mock
-from neutron_lib import exceptions
-from oslo_config import cfg
 from oslo_db import exception as db_exc
-import osprofiler
-import sqlalchemy
-from sqlalchemy.orm import exc
 import testtools
 
 from neutron.db import api as db_api
@@ -49,67 +43,3 @@ class TestExceptionToRetryContextManager(base.BaseTestCase):
                 raise exc
         except db_exc.RetryRequest as e:
             self.assertEqual(exc, e.inner_exc)
-
-    def test_retries_on_multi_exception_containing_target(self):
-        with testtools.ExpectedException(db_exc.RetryRequest):
-            with db_api.exc_to_retry(ValueError):
-                e = exceptions.MultipleExceptions([ValueError(), TypeError()])
-                raise e
-
-
-class TestDeadLockDecorator(base.BaseTestCase):
-
-    @db_api.retry_db_errors
-    def _decorated_function(self, fail_count, exc_to_raise):
-        self.fail_count = getattr(self, 'fail_count', fail_count + 1) - 1
-        if self.fail_count:
-            raise exc_to_raise
-
-    def test_regular_exception_excluded(self):
-        with testtools.ExpectedException(ValueError):
-            self._decorated_function(1, ValueError)
-
-    def test_staledata_error_caught(self):
-        e = exc.StaleDataError()
-        self.assertIsNone(self._decorated_function(1, e))
-
-    def test_dbconnection_error_caught(self):
-        e = db_exc.DBConnectionError()
-        self.assertIsNone(self._decorated_function(1, e))
-
-    def test_multi_exception_contains_retry(self):
-        e = exceptions.MultipleExceptions(
-            [ValueError(), db_exc.RetryRequest(TypeError())])
-        self.assertIsNone(self._decorated_function(1, e))
-
-    def test_multi_exception_contains_deadlock(self):
-        e = exceptions.MultipleExceptions([ValueError(), db_exc.DBDeadlock()])
-        self.assertIsNone(self._decorated_function(1, e))
-
-    def test_multi_nested_exception_contains_deadlock(self):
-        i = exceptions.MultipleExceptions([ValueError(), db_exc.DBDeadlock()])
-        e = exceptions.MultipleExceptions([ValueError(), i])
-        self.assertIsNone(self._decorated_function(1, e))
-
-    def test_multi_exception_raised_on_exceed(self):
-        e = exceptions.MultipleExceptions([ValueError(), db_exc.DBDeadlock()])
-        with testtools.ExpectedException(exceptions.MultipleExceptions):
-            self._decorated_function(db_api.MAX_RETRIES + 1, e)
-
-    def test_mysql_savepoint_error(self):
-        e = db_exc.DBError("(pymysql.err.InternalError) (1305, u'SAVEPOINT "
-                           "sa_savepoint_1 does not exist')")
-        self.assertIsNone(self._decorated_function(1, e))
-
-
-class TestCommonDBfunctions(base.BaseTestCase):
-
-    def test_set_hook(self):
-        with mock.patch.object(osprofiler.sqlalchemy,
-                               'add_tracing') as profiler:
-            cfg.CONF.set_override('enabled', True, group='profiler')
-            cfg.CONF.set_override('trace_sqlalchemy', True, group='profiler')
-            engine_mock = mock.Mock()
-            db_api.set_hook(engine_mock)
-            profiler.assert_called_with(sqlalchemy, engine_mock,
-                                        'neutron.db')

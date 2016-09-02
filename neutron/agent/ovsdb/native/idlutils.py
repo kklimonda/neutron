@@ -17,13 +17,12 @@ import os
 import time
 import uuid
 
-from neutron_lib import exceptions
 from ovs.db import idl
 from ovs import jsonrpc
 from ovs import poller
 from ovs import stream
 
-from neutron._i18n import _
+from neutron.common import exceptions
 
 
 RowLookup = collections.namedtuple('RowLookup',
@@ -98,15 +97,15 @@ def get_schema_helper(connection, schema_name):
     err, strm = stream.Stream.open_block(
         stream.Stream.open(connection))
     if err:
-        raise Exception(_("Could not connect to %s") % connection)
+        raise Exception("Could not connect to %s" % (
+            connection,))
     rpc = jsonrpc.Connection(strm)
     req = jsonrpc.Message.create_request('get_schema', [schema_name])
     err, resp = rpc.transact_block(req)
     rpc.close()
     if err:
-        raise Exception(_("Could not retrieve schema from %(conn)s: "
-                          "%(err)s") % {'conn': connection,
-                                        'err': os.strerror(err)})
+        raise Exception("Could not retrieve schema from %s: %s" % (
+            connection, os.strerror(err)))
     elif resp.error:
         raise Exception(resp.error)
     return idl.SchemaHelper(None, resp.result)
@@ -122,15 +121,10 @@ def wait_for_change(_idl, timeout, seqno=None):
         ovs_poller.timer_wait(timeout * 1000)
         ovs_poller.block()
         if time.time() > stop:
-            raise Exception(_("Timeout"))
+            raise Exception("Timeout")
 
 
 def get_column_value(row, col):
-    """Retrieve column value from the given row.
-
-    If column's type is optional, the value will be returned as a single
-    element instead of a list of length 1.
-    """
     if col == '_uuid':
         val = row.uuid
     else:
@@ -140,9 +134,8 @@ def get_column_value(row, col):
     if isinstance(val, list) and len(val):
         if isinstance(val[0], idl.Row):
             val = [v.uuid for v in val]
-        col_type = row._table.columns[col].type
         # ovs-vsctl treats lists of 1 as single results
-        if col_type.is_optional():
+        if len(val) == 1:
             val = val[0]
     return val
 
@@ -150,31 +143,12 @@ def get_column_value(row, col):
 def condition_match(row, condition):
     """Return whether a condition matches a row
 
-    :param row:       An OVSDB Row
-    :param condition: A 3-tuple containing (column, operation, match)
+    :param row       An OVSDB Row
+    :param condition A 3-tuple containing (column, operation, match)
     """
+
     col, op, match = condition
     val = get_column_value(row, col)
-
-    # both match and val are primitive types, so type can be used for type
-    # equality here.
-    if type(match) is not type(val):
-        # Types of 'val' and 'match' arguments MUST match in all cases with 2
-        # exceptions:
-        # - 'match' is an empty list and column's type is optional;
-        # - 'value' is an empty and  column's type is optional
-        if (not all([match, val]) and
-                row._table.columns[col].type.is_optional()):
-            # utilize the single elements comparison logic
-            if match == []:
-                match = None
-            elif val == []:
-                val = None
-        else:
-            # no need to process any further
-            raise ValueError(
-                _("Column type and condition operand do not match"))
-
     matched = True
 
     # TODO(twilson) Implement other operators and type comparisons
@@ -192,25 +166,7 @@ def condition_match(row, condition):
             else:
                 raise NotImplementedError()
     elif isinstance(match, list):
-        # According to rfc7047, lists support '=' and '!='
-        # (both strict and relaxed). Will follow twilson's dict comparison
-        # and implement relaxed version (excludes/includes as per standard)
-        if op == "=":
-            if not all([val, match]):
-                return val == match
-            for elem in set(match):
-                if elem not in val:
-                    matched = False
-                    break
-        elif op == '!=':
-            if not all([val, match]):
-                return val != match
-            for elem in set(match):
-                if elem in val:
-                    matched = False
-                    break
-        else:
-            raise NotImplementedError()
+        raise NotImplementedError()
     else:
         if op == '=':
             if val != match:

@@ -15,10 +15,9 @@ import collections
 from oslo_log import log as logging
 from oslo_utils import reflection
 
-from neutron._i18n import _LE
 from neutron.callbacks import events
 from neutron.callbacks import exceptions
-from neutron.db import api as db_api
+from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -107,7 +106,6 @@ class CallbacksManager(object):
                     del self._callbacks[resource][event][callback_id]
             del self._index[callback_id]
 
-    @db_api.reraise_as_retryrequest
     def notify(self, resource, event, trigger, **kwargs):
         """Notify all subscribed callback(s).
 
@@ -118,16 +116,11 @@ class CallbacksManager(object):
         :param trigger: the trigger. A reference to the sender of the event.
         """
         errors = self._notify_loop(resource, event, trigger, **kwargs)
-        if errors:
-            if event.startswith(events.BEFORE):
-                abort_event = event.replace(
-                    events.BEFORE, events.ABORT)
-                self._notify_loop(resource, abort_event, trigger, **kwargs)
-
-                raise exceptions.CallbackFailure(errors=errors)
-
-            if event.startswith(events.PRECOMMIT):
-                raise exceptions.CallbackFailure(errors=errors)
+        if errors and event.startswith(events.BEFORE):
+            abort_event = event.replace(
+                events.BEFORE, events.ABORT)
+            self._notify_loop(resource, abort_event, trigger)
+            raise exceptions.CallbackFailure(errors=errors)
 
     def clear(self):
         """Brings the manager to a clean slate."""
@@ -140,7 +133,7 @@ class CallbacksManager(object):
                   {'resource': resource, 'event': event})
 
         errors = []
-        callbacks = list(self._callbacks[resource].get(event, {}).items())
+        callbacks = self._callbacks[resource].get(event, {}).items()
         # TODO(armax): consider using a GreenPile
         for callback_id, callback in callbacks:
             try:
@@ -166,6 +159,4 @@ def _get_id(callback):
     # TODO(armax): consider using something other than names
     # https://www.python.org/dev/peps/pep-3155/, but this
     # might be okay for now.
-    parts = (reflection.get_callable_name(callback),
-             str(hash(callback)))
-    return '-'.join(parts)
+    return reflection.get_callable_name(callback)

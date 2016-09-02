@@ -13,19 +13,16 @@
 #    under the License.
 
 import math
-
 import netaddr
-from neutron_lib import constants
+
 from oslo_config import cfg
 
+from neutron.common import constants
 from neutron.common import utils
 from neutron import context
 from neutron.db import db_base_plugin_v2
 from neutron.extensions import dns
-from neutron import manager
-from neutron.plugins.ml2 import config
 from neutron.tests.unit.db import test_db_base_plugin_v2
-from neutron.tests.unit.plugins.ml2 import test_plugin
 
 
 class DnsExtensionManager(object):
@@ -47,40 +44,23 @@ class DnsExtensionTestPlugin(db_base_plugin_v2.NeutronDbPluginV2):
     """Test plugin to mixin the DNS Integration extensions.
     """
 
-    supported_extension_aliases = ["dns-integration", "router"]
+    supported_extension_aliases = ["dns-integration"]
 
 
-class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
+class DnsExtensionTestCase(test_db_base_plugin_v2.TestNetworksV2):
     """Test API extension dns attributes.
     """
 
-    _extension_drivers = ['dns']
-
     def setUp(self):
-        config.cfg.CONF.set_override('extension_drivers',
-                                     self._extension_drivers,
-                                     group='ml2')
-        super(DnsExtensionTestCase, self).setUp()
-
-    def _create_network(self, fmt, name, admin_state_up,
-                        arg_list=None, set_context=False, tenant_id=None,
-                        **kwargs):
-        new_arg_list = ('dns_domain',)
-        if arg_list is not None:
-            new_arg_list = arg_list + new_arg_list
-        return super(DnsExtensionTestCase,
-                     self)._create_network(fmt, name, admin_state_up,
-                                           arg_list=new_arg_list,
-                                           set_context=set_context,
-                                           tenant_id=tenant_id,
-                                           **kwargs)
+        plugin = ('neutron.tests.unit.extensions.test_dns.' +
+                  'DnsExtensionTestPlugin')
+        ext_mgr = DnsExtensionManager()
+        super(DnsExtensionTestCase, self).setUp(plugin=plugin, ext_mgr=ext_mgr)
 
     def _create_port(self, fmt, net_id, expected_res_status=None,
-                     arg_list=None, set_context=False, tenant_id=None,
-                     **kwargs):
-        tenant_id = tenant_id or self._tenant_id
+                     arg_list=None, **kwargs):
         data = {'port': {'network_id': net_id,
-                         'tenant_id': tenant_id}}
+                         'tenant_id': self._tenant_id}}
 
         for arg in (('admin_state_up', 'device_id',
                     'mac_address', 'name', 'fixed_ips',
@@ -97,14 +77,14 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
             device_id = utils.get_dhcp_agent_device_id(net_id, kwargs['host'])
             data['port']['device_id'] = device_id
         port_req = self.new_create_request('ports', data, fmt)
-        if set_context and tenant_id:
+        if (kwargs.get('set_context') and 'tenant_id' in kwargs):
             # create a specific auth context for this request
             port_req.environ['neutron.context'] = context.Context(
-                '', tenant_id)
+                '', kwargs['tenant_id'])
 
         port_res = port_req.get_response(self.api)
         if expected_res_status:
-            self.assertEqual(expected_res_status, port_res.status_int)
+            self.assertEqual(port_res.status_int, expected_res_status)
         return port_res
 
     def _test_list_resources(self, resource, items, neutron_context=None,
@@ -124,14 +104,11 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
                 self.assertEqual(port['port'][k], v)
             self.assertIn('mac_address', port['port'])
             ips = port['port']['fixed_ips']
-            self.assertEqual(1, len(ips))
-            subnet_db = manager.NeutronManager.get_plugin().get_subnet(
-                    context.get_admin_context(), ips[0]['subnet_id'])
-            self.assertIn(netaddr.IPAddress(ips[0]['ip_address']),
-                          netaddr.IPSet(netaddr.IPNetwork(subnet_db['cidr'])))
+            self.assertEqual(len(ips), 1)
+            self.assertEqual(ips[0]['ip_address'], '10.0.0.2')
             self.assertEqual('myname', port['port']['name'])
             self._verify_dns_assigment(port['port'],
-                                       ips_list=[ips[0]['ip_address']])
+                                       ips_list=['10.0.0.2'])
 
     def test_list_ports(self):
         # for this test we need to enable overlapping ips
@@ -154,35 +131,30 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
 
     def test_update_port_non_default_dns_domain_with_dns_name(self):
         with self.port() as port:
-            port_ip = port['port']['fixed_ips'][0]['ip_address']
             cfg.CONF.set_override('dns_domain', 'example.com')
             data = {'port': {'admin_state_up': False, 'dns_name': 'vm1'}}
             req = self.new_update_request('ports', data, port['port']['id'])
             res = self.deserialize(self.fmt, req.get_response(self.api))
-            self.assertEqual(data['port']['admin_state_up'],
-                             res['port']['admin_state_up'])
+            self.assertEqual(res['port']['admin_state_up'],
+                             data['port']['admin_state_up'])
             self._verify_dns_assigment(res['port'],
-                                       ips_list=[port_ip],
+                                       ips_list=['10.0.0.2'],
                                        dns_name='vm1')
 
     def test_update_port_default_dns_domain_with_dns_name(self):
         with self.port() as port:
-            port_ip = port['port']['fixed_ips'][0]['ip_address']
             data = {'port': {'admin_state_up': False, 'dns_name': 'vm1'}}
             req = self.new_update_request('ports', data, port['port']['id'])
             res = self.deserialize(self.fmt, req.get_response(self.api))
-            self.assertEqual(data['port']['admin_state_up'],
-                             res['port']['admin_state_up'])
+            self.assertEqual(res['port']['admin_state_up'],
+                             data['port']['admin_state_up'])
             self._verify_dns_assigment(res['port'],
-                                       ips_list=[port_ip])
+                                       ips_list=['10.0.0.2'])
 
-    def _verify_dns_assigment(self, port, ips_list=None, exp_ips_ipv4=0,
-                              exp_ips_ipv6=0, ipv4_cidrs=None, ipv6_cidrs=None,
+    def _verify_dns_assigment(self, port, ips_list=[], exp_ips_ipv4=0,
+                              exp_ips_ipv6=0, ipv4_cidrs=[], ipv6_cidrs=[],
                               dns_name=''):
-        ips_list = ips_list or []
-        ipv4_cidrs = ipv4_cidrs or []
-        ipv6_cidrs = ipv6_cidrs or []
-        self.assertEqual(dns_name, port['dns_name'])
+        self.assertEqual(port['dns_name'], dns_name)
         dns_assignment = port['dns_assignment']
         if ips_list:
             self.assertEqual(len(dns_assignment), len(ips_list))
@@ -263,10 +235,10 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
         Check that a configured IP 10.0.0.2 is replaced by 10.0.0.10.
         """
         with self.subnet() as subnet:
-            fixed_ip_data = [{'ip_address': '10.0.0.2'}]
-            with self.port(subnet=subnet, fixed_ips=fixed_ip_data) as port:
+            with self.port(subnet=subnet) as port:
                 ips = port['port']['fixed_ips']
-                self.assertEqual(1, len(ips))
+                self.assertEqual(len(ips), 1)
+                self.assertEqual(ips[0]['ip_address'], '10.0.0.2')
                 self.assertEqual(ips[0]['subnet_id'], subnet['subnet']['id'])
                 data = {'port': {'fixed_ips': [{'subnet_id':
                                                 subnet['subnet']['id'],
@@ -275,17 +247,17 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
                                               port['port']['id'])
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 ips = res['port']['fixed_ips']
-                self.assertEqual(1, len(ips))
+                self.assertEqual(len(ips), 1)
                 self.assertEqual(ips[0]['ip_address'], '10.0.0.10')
                 self.assertEqual(ips[0]['subnet_id'], subnet['subnet']['id'])
                 self._verify_dns_assigment(res['port'], ips_list=['10.0.0.10'])
 
     def test_update_port_update_ip_address_only(self):
         with self.subnet() as subnet:
-            fixed_ip_data = [{'ip_address': '10.0.0.2'}]
-            with self.port(subnet=subnet, fixed_ips=fixed_ip_data) as port:
+            with self.port(subnet=subnet) as port:
                 ips = port['port']['fixed_ips']
-                self.assertEqual(1, len(ips))
+                self.assertEqual(len(ips), 1)
+                self.assertEqual(ips[0]['ip_address'], '10.0.0.2')
                 self.assertEqual(ips[0]['subnet_id'], subnet['subnet']['id'])
                 data = {'port': {'fixed_ips': [{'subnet_id':
                                                 subnet['subnet']['id'],
@@ -295,7 +267,7 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
                                               port['port']['id'])
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 ips = res['port']['fixed_ips']
-                self.assertEqual(2, len(ips))
+                self.assertEqual(len(ips), 2)
                 self.assertIn({'ip_address': '10.0.0.2',
                                'subnet_id': subnet['subnet']['id']}, ips)
                 self.assertIn({'ip_address': '10.0.0.10',
@@ -306,54 +278,54 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
 
     def test_create_port_with_multiple_ipv4_and_ipv6_subnets(self):
         res = self._test_create_port_with_multiple_ipv4_and_ipv6_subnets()
-        self.assertEqual(201, res.status_code)
+        self.assertEqual(res.status_code, 201)
 
     def test_create_port_multiple_v4_v6_subnets_pqdn_and_dns_domain_no_period(
         self):
         cfg.CONF.set_override('dns_domain', 'example.com')
         res = self._test_create_port_with_multiple_ipv4_and_ipv6_subnets(
             dns_name='vm1')
-        self.assertEqual(201, res.status_code)
+        self.assertEqual(res.status_code, 201)
 
     def test_create_port_multiple_v4_v6_subnets_pqdn_and_dns_domain_period(
         self):
         cfg.CONF.set_override('dns_domain', 'example.com.')
         res = self._test_create_port_with_multiple_ipv4_and_ipv6_subnets(
             dns_name='vm1')
-        self.assertEqual(201, res.status_code)
+        self.assertEqual(res.status_code, 201)
 
     def test_create_port_multiple_v4_v6_subnets_pqdn_and_no_dns_domain(
         self):
         cfg.CONF.set_override('dns_domain', '')
         res = self._test_create_port_with_multiple_ipv4_and_ipv6_subnets()
-        self.assertEqual(201, res.status_code)
+        self.assertEqual(res.status_code, 201)
 
     def test_create_port_multiple_v4_v6_subnets_fqdn_and_dns_domain_no_period(
         self):
         cfg.CONF.set_override('dns_domain', 'example.com')
         res = self._test_create_port_with_multiple_ipv4_and_ipv6_subnets(
             dns_name='vm1.example.com.')
-        self.assertEqual(201, res.status_code)
+        self.assertEqual(res.status_code, 201)
 
     def test_create_port_multiple_v4_v6_subnets_fqdn_and_dns_domain_period(
         self):
         cfg.CONF.set_override('dns_domain', 'example.com.')
         res = self._test_create_port_with_multiple_ipv4_and_ipv6_subnets(
             dns_name='vm1.example.com.')
-        self.assertEqual(201, res.status_code)
+        self.assertEqual(res.status_code, 201)
 
     def test_create_port_multiple_v4_v6_subnets_fqdn_default_domain_period(
         self):
         cfg.CONF.set_override('dns_domain', 'openstacklocal.')
         res = self._test_create_port_with_multiple_ipv4_and_ipv6_subnets()
-        self.assertEqual(201, res.status_code)
+        self.assertEqual(res.status_code, 201)
 
     def test_create_port_multiple_v4_v6_subnets_bad_fqdn_and_dns_domain(
         self):
         cfg.CONF.set_override('dns_domain', 'example.com')
         res = self._test_create_port_with_multiple_ipv4_and_ipv6_subnets(
             dns_name='vm1.bad-domain.com.')
-        self.assertEqual(400, res.status_code)
+        self.assertEqual(res.status_code, 400)
         expected_error = ('The dns_name passed is a FQDN. Its higher level '
                           'labels must be equal to the dns_domain option in '
                           'neutron.conf')
@@ -370,7 +342,7 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
                     num_labels + 'a' * filler_len)
         res = self._test_create_port_with_multiple_ipv4_and_ipv6_subnets(
             dns_name=dns_name)
-        self.assertEqual(400, res.status_code)
+        self.assertEqual(res.status_code, 400)
         expected_error = ("When the two are concatenated to form a FQDN "
                           "(with a '.' at the end), the resulting length "
                           "exceeds the maximum size")
@@ -460,11 +432,10 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
         for dns_name in dns_names:
             res = self._create_port(self.fmt, net_id=network['network']['id'],
                                     dns_name=dns_name)
-            self.assertEqual(400, res.status_code)
-            error_message = res.json['NeutronError']['message']
+            self.assertEqual(res.status_code, 400)
             is_expected_message = (
-                'cannot be converted to lowercase string' in error_message or
-                'not a valid PQDN or FQDN. Reason:' in error_message)
+                'cannot be converted to lowercase string' in res.text or
+                'not a valid PQDN or FQDN. Reason:' in res.text)
             self.assertTrue(is_expected_message)
 
     def test_api_extension_validation_with_good_dns_names(self):
@@ -497,25 +468,4 @@ class DnsExtensionTestCase(test_plugin.Ml2PluginV2TestCase):
         for dns_name in dns_names:
             res = self._create_port(self.fmt, net_id=network['network']['id'],
                                     dns_name=dns_name)
-            self.assertEqual(201, res.status_code)
-
-
-class DnsExtensionTestNetworkDnsDomain(
-    test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
-    def setUp(self):
-        plugin = ('neutron.tests.unit.extensions.test_dns.' +
-                  'DnsExtensionTestPlugin')
-        ext_mgr = DnsExtensionManager()
-        super(DnsExtensionTestNetworkDnsDomain, self).setUp(
-            plugin=plugin, ext_mgr=ext_mgr)
-
-    def test_update_network_dns_domain(self):
-        with self.network() as network:
-            data = {'network': {'dns_domain': 'my-domain.org.'}}
-            req = self.new_update_request('networks',
-                                          data,
-                                          network['network']['id'])
-            res = req.get_response(self.api)
-            self.assertEqual(200, res.status_code)
-            self.assertNotIn('dns_domain',
-                             self.deserialize(self.fmt, res)['network'])
+            self.assertEqual(res.status_code, 201)

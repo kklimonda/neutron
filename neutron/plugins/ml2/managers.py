@@ -13,24 +13,22 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import validators
-from neutron_lib import constants
-from neutron_lib import exceptions as exc
 from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import excutils
 import six
 import stevedore
 
-from neutron._i18n import _, _LE, _LI, _LW
-from neutron.db import api as db_api
-from neutron.db import segments_db
+from neutron.api.v2 import attributes
+from neutron.common import exceptions as exc
 from neutron.extensions import external_net
 from neutron.extensions import multiprovidernet as mpnet
 from neutron.extensions import portbindings
 from neutron.extensions import providernet as provider
 from neutron.extensions import vlantransparent
+from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.ml2.common import exceptions as ml2_exc
+from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import models
 from neutron.services.qos import qos_consts
@@ -93,7 +91,7 @@ class TypeManager(stevedore.named.NamedExtensionManager):
          segmentation_id) = (self._get_attribute(segment, attr)
                              for attr in provider.ATTRIBUTES)
 
-        if validators.is_attr_set(network_type):
+        if attributes.is_attr_set(network_type):
             segment = {api.NETWORK_TYPE: network_type,
                        api.PHYSICAL_NETWORK: physical_network,
                        api.SEGMENTATION_ID: segmentation_id}
@@ -104,15 +102,15 @@ class TypeManager(stevedore.named.NamedExtensionManager):
         raise exc.InvalidInput(error_message=msg)
 
     def _process_provider_create(self, network):
-        if any(validators.is_attr_set(network.get(attr))
+        if any(attributes.is_attr_set(network.get(attr))
                for attr in provider.ATTRIBUTES):
             # Verify that multiprovider and provider attributes are not set
             # at the same time.
-            if validators.is_attr_set(network.get(mpnet.SEGMENTS)):
+            if attributes.is_attr_set(network.get(mpnet.SEGMENTS)):
                 raise mpnet.SegmentsSetInConjunctionWithProviders()
             segment = self._get_provider_segment(network)
             return [self._process_provider_segment(segment)]
-        elif validators.is_attr_set(network.get(mpnet.SEGMENTS)):
+        elif attributes.is_attr_set(network.get(mpnet.SEGMENTS)):
             segments = [self._process_provider_segment(s)
                         for s in network[mpnet.SEGMENTS]]
             mpnet.check_duplicate_segments(segments, self.is_partial_segment)
@@ -134,10 +132,10 @@ class TypeManager(stevedore.named.NamedExtensionManager):
     def network_matches_filters(self, network, filters):
         if not filters:
             return True
-        if any(validators.is_attr_set(network.get(attr))
+        if any(attributes.is_attr_set(network.get(attr))
                for attr in provider.ATTRIBUTES):
             segments = [self._get_provider_segment(network)]
-        elif validators.is_attr_set(network.get(mpnet.SEGMENTS)):
+        elif attributes.is_attr_set(network.get(mpnet.SEGMENTS)):
             segments = self._get_attribute(network, mpnet.SEGMENTS)
         else:
             return True
@@ -145,7 +143,7 @@ class TypeManager(stevedore.named.NamedExtensionManager):
 
     def _get_attribute(self, attrs, key):
         value = attrs.get(key)
-        if value is constants.ATTR_NOT_SPECIFIED:
+        if value is attributes.ATTR_NOT_SPECIFIED:
             value = None
         return value
 
@@ -156,7 +154,7 @@ class TypeManager(stevedore.named.NamedExtensionManager):
 
     def extend_networks_dict_provider(self, context, networks):
         ids = [network['id'] for network in networks]
-        net_segments = segments_db.get_networks_segments(context.session, ids)
+        net_segments = db.get_networks_segments(context.session, ids)
         for network in networks:
             segments = net_segments[network['id']]
             self._extend_network_dict_provider(network, segments)
@@ -183,50 +181,33 @@ class TypeManager(stevedore.named.NamedExtensionManager):
             LOG.info(_LI("Initializing driver for type '%s'"), network_type)
             driver.obj.initialize()
 
-    def _add_network_segment(self, context, network_id, segment,
+    def _add_network_segment(self, session, network_id, segment, mtu,
                              segment_index=0):
-        segments_db.add_network_segment(
-            context, network_id, segment, segment_index)
+        db.add_network_segment(session, network_id, segment, segment_index)
+        if segment.get(api.MTU, 0) > 0:
+            mtu.append(segment[api.MTU])
 
     def create_network_segments(self, context, network, tenant_id):
         """Call type drivers to create network segments."""
         segments = self._process_provider_create(network)
         session = context.session
+        mtu = []
         with session.begin(subtransactions=True):
             network_id = network['id']
             if segments:
                 for segment_index, segment in enumerate(segments):
                     segment = self.reserve_provider_segment(
                         session, segment)
-                    self._add_network_segment(context, network_id, segment,
-                                              segment_index)
+                    self._add_network_segment(session, network_id, segment,
+                                              mtu, segment_index)
             elif (cfg.CONF.ml2.external_network_type and
                   self._get_attribute(network, external_net.EXTERNAL)):
                 segment = self._allocate_ext_net_segment(session)
-                self._add_network_segment(context, network_id, segment)
+                self._add_network_segment(session, network_id, segment, mtu)
             else:
                 segment = self._allocate_tenant_net_segment(session)
-                self._add_network_segment(context, network_id, segment)
-
-    def reserve_network_segment(self, session, segment_data):
-        """Call type drivers to reserve a network segment."""
-        # Validate the data of segment
-        if not validators.is_attr_set(segment_data[api.NETWORK_TYPE]):
-            msg = _("network_type required")
-            raise exc.InvalidInput(error_message=msg)
-
-        net_type = self._get_attribute(segment_data, api.NETWORK_TYPE)
-        phys_net = self._get_attribute(segment_data, api.PHYSICAL_NETWORK)
-        seg_id = self._get_attribute(segment_data, api.SEGMENTATION_ID)
-        segment = {api.NETWORK_TYPE: net_type,
-                   api.PHYSICAL_NETWORK: phys_net,
-                   api.SEGMENTATION_ID: seg_id}
-
-        self.validate_provider_segment(segment)
-
-        # Reserve segment in type driver
-        with session.begin(subtransactions=True):
-            return self.reserve_provider_segment(session, segment)
+                self._add_network_segment(session, network_id, segment, mtu)
+        network[api.MTU] = min(mtu) if mtu else 0
 
     def is_partial_segment(self, segment):
         network_type = segment[api.NETWORK_TYPE]
@@ -270,45 +251,41 @@ class TypeManager(stevedore.named.NamedExtensionManager):
         raise exc.NoNetworkAvailable()
 
     def release_network_segments(self, session, network_id):
-        segments = segments_db.get_network_segments(session, network_id,
-                                                    filter_dynamic=None)
+        segments = db.get_network_segments(session, network_id,
+                                           filter_dynamic=None)
 
         for segment in segments:
-            self.release_network_segment(session, segment)
+            network_type = segment.get(api.NETWORK_TYPE)
+            driver = self.drivers.get(network_type)
+            if driver:
+                driver.obj.release_segment(session, segment)
+            else:
+                LOG.error(_LE("Failed to release segment '%s' because "
+                              "network type is not supported."), segment)
 
-    def release_network_segment(self, session, segment):
-        network_type = segment.get(api.NETWORK_TYPE)
-        driver = self.drivers.get(network_type)
-        if driver:
-            driver.obj.release_segment(session, segment)
-        else:
-            LOG.error(_LE("Failed to release segment '%s' because "
-                          "network type is not supported."), segment)
-
-    def allocate_dynamic_segment(self, context, network_id, segment):
+    def allocate_dynamic_segment(self, session, network_id, segment):
         """Allocate a dynamic segment using a partial or full segment dict."""
-        dynamic_segment = segments_db.get_dynamic_segment(
-            context.session, network_id, segment.get(api.PHYSICAL_NETWORK),
+        dynamic_segment = db.get_dynamic_segment(
+            session, network_id, segment.get(api.PHYSICAL_NETWORK),
             segment.get(api.SEGMENTATION_ID))
 
         if dynamic_segment:
             return dynamic_segment
 
         driver = self.drivers.get(segment.get(api.NETWORK_TYPE))
-        dynamic_segment = driver.obj.reserve_provider_segment(context.session,
-                                                              segment)
-        segments_db.add_network_segment(context, network_id, dynamic_segment,
-                                        is_dynamic=True)
+        dynamic_segment = driver.obj.reserve_provider_segment(session, segment)
+        db.add_network_segment(session, network_id, dynamic_segment,
+                               is_dynamic=True)
         return dynamic_segment
 
     def release_dynamic_segment(self, session, segment_id):
         """Delete a dynamic segment."""
-        segment = segments_db.get_segment_by_id(session, segment_id)
+        segment = db.get_segment_by_id(session, segment_id)
         if segment:
             driver = self.drivers.get(segment.get(api.NETWORK_TYPE))
             if driver:
                 driver.obj.release_segment(session, segment)
-                segments_db.delete_network_segment(session, segment_id)
+                db.delete_network_segment(session, segment_id)
             else:
                 LOG.error(_LE("Failed to release segment '%s' because "
                               "network type is not supported."), segment)
@@ -334,10 +311,6 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                                                name_order=True)
         LOG.info(_LI("Loaded mechanism driver names: %s"), self.names())
         self._register_mechanisms()
-        self.host_filtering_supported = self.is_host_filtering_supported()
-        if not self.host_filtering_supported:
-            LOG.warning(_LW("Host filtering is disabled because at least one "
-                            "mechanism doesn't support it."))
 
     def _register_mechanisms(self):
         """Register all mechanism drivers.
@@ -379,7 +352,7 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                 else:
                     # at least one of drivers does not support QoS, meaning
                     # there are no rule types supported by all of them
-                    LOG.warning(
+                    LOG.warn(
                         _LW("%s does not support QoS; "
                             "no rule types available"),
                         driver.name)
@@ -406,67 +379,55 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         VlanTransparencyDriverError if any mechanism driver doesn't
         support vlan transparency.
         """
-        if context.current.get('vlan_transparent'):
+        if context.current['vlan_transparent'] is None:
+            return
+
+        if context.current['vlan_transparent']:
             for driver in self.ordered_mech_drivers:
                 if not driver.obj.check_vlan_transparency(context):
                     raise vlantransparent.VlanTransparencyDriverError()
 
     def _call_on_drivers(self, method_name, context,
-                         continue_on_failure=False, raise_db_retriable=False):
+                         continue_on_failure=False):
         """Helper method for calling a method across all mechanism drivers.
 
         :param method_name: name of the method to call
         :param context: context parameter to pass to each method call
         :param continue_on_failure: whether or not to continue to call
         all mechanism drivers once one has raised an exception
-        :param raise_db_retriable: whether or not to treat retriable db
-        exception by mechanism drivers to propagate up to upper layer so
-        that upper layer can handle it or error in ML2 player
         :raises: neutron.plugins.ml2.common.MechanismDriverError
-        if any mechanism driver call fails. or DB retriable error when
-        raise_db_retriable=False. See neutron.db.api.is_retriable for
-        what db exception is retriable
+        if any mechanism driver call fails.
         """
-        errors = []
+        error = False
         for driver in self.ordered_mech_drivers:
             try:
                 getattr(driver.obj, method_name)(context)
-            except Exception as e:
-                if raise_db_retriable and db_api.is_retriable(e):
-                    with excutils.save_and_reraise_exception():
-                        LOG.debug("DB exception raised by Mechanism driver "
-                                  "'%(name)s' in %(method)s",
-                                  {'name': driver.name, 'method': method_name},
-                                  exc_info=e)
+            except Exception:
                 LOG.exception(
                     _LE("Mechanism driver '%(name)s' failed in %(method)s"),
                     {'name': driver.name, 'method': method_name}
                 )
-                errors.append(e)
+                error = True
                 if not continue_on_failure:
                     break
-        if errors:
+        if error:
             raise ml2_exc.MechanismDriverError(
-                method=method_name,
-                errors=errors
+                method=method_name
             )
 
     def create_network_precommit(self, context):
         """Notify all mechanism drivers during network creation.
 
-        :raises: DB retriable error if create_network_precommit raises them
-        See neutron.db.api.is_retriable for what db exception is retriable
-        or neutron.plugins.ml2.common.MechanismDriverError
+        :raises: neutron.plugins.ml2.common.MechanismDriverError
         if any mechanism driver create_network_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
         self._check_vlan_transparency(context)
-        self._call_on_drivers("create_network_precommit", context,
-                              raise_db_retriable=True)
+        self._call_on_drivers("create_network_precommit", context)
 
     def create_network_postcommit(self, context):
         """Notify all mechanism drivers after network creation.
@@ -485,18 +446,15 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
     def update_network_precommit(self, context):
         """Notify all mechanism drivers during network update.
 
-        :raises: DB retriable error if create_network_precommit raises them
-        See neutron.db.api.is_retriable for what db exception is retriable
-        or neutron.plugins.ml2.common.MechanismDriverError
+        :raises: neutron.plugins.ml2.common.MechanismDriverError
         if any mechanism driver update_network_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
-        self._call_on_drivers("update_network_precommit", context,
-                              raise_db_retriable=True)
+        self._call_on_drivers("update_network_precommit", context)
 
     def update_network_postcommit(self, context):
         """Notify all mechanism drivers after network update.
@@ -515,18 +473,15 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
     def delete_network_precommit(self, context):
         """Notify all mechanism drivers during network deletion.
 
-        :raises: DB retriable error if create_network_precommit raises them
-        See neutron.db.api.is_retriable for what db exception is retriable
-        or neutron.plugins.ml2.common.MechanismDriverError
+        :raises: neutron.plugins.ml2.common.MechanismDriverError
         if any mechanism driver delete_network_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
-        self._call_on_drivers("delete_network_precommit", context,
-                              raise_db_retriable=True)
+        self._call_on_drivers("delete_network_precommit", context)
 
     def delete_network_postcommit(self, context):
         """Notify all mechanism drivers after network deletion.
@@ -549,18 +504,15 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
     def create_subnet_precommit(self, context):
         """Notify all mechanism drivers during subnet creation.
 
-        :raises: DB retriable error if create_network_precommit raises them
-        See neutron.db.api.is_retriable for what db exception is retriable
-        or neutron.plugins.ml2.common.MechanismDriverError
+        :raises: neutron.plugins.ml2.common.MechanismDriverError
         if any mechanism driver create_subnet_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
-        self._call_on_drivers("create_subnet_precommit", context,
-                              raise_db_retriable=True)
+        self._call_on_drivers("create_subnet_precommit", context)
 
     def create_subnet_postcommit(self, context):
         """Notify all mechanism drivers after subnet creation.
@@ -579,18 +531,15 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
     def update_subnet_precommit(self, context):
         """Notify all mechanism drivers during subnet update.
 
-        :raises: DB retriable error if create_network_precommit raises them
-        See neutron.db.api.is_retriable for what db exception is retriable
-        or neutron.plugins.ml2.common.MechanismDriverError
+        :raises: neutron.plugins.ml2.common.MechanismDriverError
         if any mechanism driver update_subnet_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
-        self._call_on_drivers("update_subnet_precommit", context,
-                              raise_db_retriable=True)
+        self._call_on_drivers("update_subnet_precommit", context)
 
     def update_subnet_postcommit(self, context):
         """Notify all mechanism drivers after subnet update.
@@ -609,18 +558,15 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
     def delete_subnet_precommit(self, context):
         """Notify all mechanism drivers during subnet deletion.
 
-        :raises: DB retriable error if create_network_precommit raises them
-        See neutron.db.api.is_retriable for what db exception is retriable
-        or neutron.plugins.ml2.common.MechanismDriverError
+        :raises: neutron.plugins.ml2.common.MechanismDriverError
         if any mechanism driver delete_subnet_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
-        self._call_on_drivers("delete_subnet_precommit", context,
-                              raise_db_retriable=True)
+        self._call_on_drivers("delete_subnet_precommit", context)
 
     def delete_subnet_postcommit(self, context):
         """Notify all mechanism drivers after subnet deletion.
@@ -643,18 +589,15 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
     def create_port_precommit(self, context):
         """Notify all mechanism drivers during port creation.
 
-        :raises: DB retriable error if create_network_precommit raises them
-        See neutron.db.api.is_retriable for what db exception is retriable
-        or neutron.plugins.ml2.common.MechanismDriverError
+        :raises: neutron.plugins.ml2.common.MechanismDriverError
         if any mechanism driver create_port_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
-        self._call_on_drivers("create_port_precommit", context,
-                              raise_db_retriable=True)
+        self._call_on_drivers("create_port_precommit", context)
 
     def create_port_postcommit(self, context):
         """Notify all mechanism drivers of port creation.
@@ -673,18 +616,15 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
     def update_port_precommit(self, context):
         """Notify all mechanism drivers during port update.
 
-        :raises: DB retriable error if create_network_precommit raises them
-        See neutron.db.api.is_retriable for what db exception is retriable
-        or neutron.plugins.ml2.common.MechanismDriverError
+        :raises: neutron.plugins.ml2.common.MechanismDriverError
         if any mechanism driver update_port_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
-        self._call_on_drivers("update_port_precommit", context,
-                              raise_db_retriable=True)
+        self._call_on_drivers("update_port_precommit", context)
 
     def update_port_postcommit(self, context):
         """Notify all mechanism drivers after port update.
@@ -703,18 +643,15 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
     def delete_port_precommit(self, context):
         """Notify all mechanism drivers during port deletion.
 
-        :raises:DB retriable error if create_network_precommit raises them
-        See neutron.db.api.is_retriable for what db exception is retriable
-        or neutron.plugins.ml2.common.MechanismDriverError
+        :raises: neutron.plugins.ml2.common.MechanismDriverError
         if any mechanism driver delete_port_precommit call fails.
 
         Called within the database transaction. If a mechanism driver
-        raises an exception, then a MechanismDriverError is propagated
+        raises an exception, then a MechanismDriverError is propogated
         to the caller, triggering a rollback. There is no guarantee
         that all mechanism drivers are called in this case.
         """
-        self._call_on_drivers("delete_port_precommit", context,
-                              raise_db_retriable=True)
+        self._call_on_drivers("delete_port_precommit", context)
 
     def delete_port_postcommit(self, context):
         """Notify all mechanism drivers after port deletion.
@@ -753,13 +690,9 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         if not self._bind_port_level(context, 0,
                                      context.network.network_segments):
             binding.vif_type = portbindings.VIF_TYPE_BINDING_FAILED
-            LOG.error(_LE("Failed to bind port %(port)s on host %(host)s "
-                          "for vnic_type %(vnic_type)s using segments "
-                          "%(segments)s"),
+            LOG.error(_LE("Failed to bind port %(port)s on host %(host)s"),
                       {'port': context.current['id'],
-                       'host': context.host,
-                       'vnic_type': binding.vnic_type,
-                       'segments': context.network.network_segments})
+                       'host': context.host})
 
     def _bind_port_level(self, context, level, segments_to_bind):
         binding = context._binding
@@ -800,11 +733,6 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                                                  next_segments):
                             return True
                         else:
-                            LOG.warning(_LW("Failed to bind port %(port)s on "
-                                            "host %(host)s at level %(lvl)s"),
-                                        {'port': context.current['id'],
-                                         'host': context.host,
-                                         'lvl': level + 1})
                             context._pop_binding_level()
                     else:
                         # Binding complete.
@@ -823,45 +751,19 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
                 LOG.exception(_LE("Mechanism driver %s failed in "
                                   "bind_port"),
                               driver.name)
-
-    def is_host_filtering_supported(self):
-        return all(driver.obj.is_host_filtering_supported()
-                   for driver in self.ordered_mech_drivers)
-
-    def filter_hosts_with_segment_access(
-            self, context, segments, candidate_hosts, agent_getter):
-        """Filter hosts with access to at least one segment.
-
-        :returns: a subset of candidate_hosts.
-
-        This method returns all hosts from candidate_hosts with access to a
-        segment according to at least one driver.
-        """
-        candidate_hosts = set(candidate_hosts)
-        if not self.host_filtering_supported:
-            return candidate_hosts
-
-        hosts_with_access = set()
-        for driver in self.ordered_mech_drivers:
-            hosts = driver.obj.filter_hosts_with_segment_access(
-                context, segments, candidate_hosts, agent_getter)
-            hosts_with_access |= hosts
-            candidate_hosts -= hosts
-            if not candidate_hosts:
-                break
-        return hosts_with_access
+        LOG.error(_LE("Failed to bind port %(port)s on host %(host)s"),
+                  {'port': context.current['id'],
+                   'host': binding.host})
 
     def _check_driver_to_bind(self, driver, segments_to_bind, binding_levels):
         # To prevent a possible binding loop, don't try to bind with
         # this driver if the same driver has already bound at a higher
         # level to one of the segments we are currently trying to
-        # bind. Note that it is OK for the same driver to bind at
+        # bind. Note that is is OK for the same driver to bind at
         # multiple levels using different segments.
-        segment_ids_to_bind = {s[api.SEGMENTATION_ID]
-                               for s in segments_to_bind}
         for level in binding_levels:
             if (level.driver == driver and
-                level.segment_id in segment_ids_to_bind):
+                level.segment_id in segments_to_bind):
                 return False
         return True
 

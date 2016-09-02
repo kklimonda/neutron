@@ -18,12 +18,11 @@ import shutil
 import tempfile
 
 import netaddr
-from neutron_lib import constants as n_consts
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import uuidutils
+import six
 
-from neutron._i18n import _LE
 from neutron.agent.common import ovs_lib
 from neutron.agent.l3 import ha_router
 from neutron.agent.l3 import namespaces
@@ -32,30 +31,29 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ip_link_support
 from neutron.agent.linux import keepalived
 from neutron.agent.linux import utils as agent_utils
-from neutron.common import constants
-from neutron.common import utils as common_utils
+from neutron.common import constants as n_consts
+from neutron.common import utils
+from neutron.i18n import _LE
 from neutron.plugins.common import constants as const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants as ovs_const
-from neutron.tests import base
 
 LOG = logging.getLogger(__name__)
 
 
 MINIMUM_DNSMASQ_VERSION = 2.67
-DNSMASQ_VERSION_DHCP_RELEASE6 = 2.76
 MINIMUM_DIBBLER_VERSION = '1.0.1'
 
 
 def ovs_vxlan_supported(from_ip='192.0.2.1', to_ip='192.0.2.2'):
-    name = base.get_rand_device_name(prefix='vxlantest-')
+    name = "vxlantest-" + utils.get_random_string(6)
     with ovs_lib.OVSBridge(name) as br:
         port = br.add_tunnel_port(from_ip, to_ip, const.TYPE_VXLAN)
         return port != ovs_lib.INVALID_OFPORT
 
 
 def ovs_geneve_supported(from_ip='192.0.2.3', to_ip='192.0.2.4'):
-    name = base.get_rand_device_name(prefix='genevetest-')
+    name = "genevetest-" + utils.get_random_string(6)
     with ovs_lib.OVSBridge(name) as br:
         port = br.add_tunnel_port(from_ip, to_ip, const.TYPE_GENEVE)
         return port != ovs_lib.INVALID_OFPORT
@@ -63,15 +61,17 @@ def ovs_geneve_supported(from_ip='192.0.2.3', to_ip='192.0.2.4'):
 
 def iproute2_vxlan_supported():
     ip = ip_lib.IPWrapper()
-    name = base.get_rand_device_name(prefix='vxlantest-')
+    name = "vxlantest-" + utils.get_random_string(4)
     port = ip.add_vxlan(name, 3000)
     ip.del_veth(name)
     return name == port.name
 
 
 def patch_supported():
-    name, peer_name, patch_name = base.get_related_rand_device_names(
-        ['patchtest-', 'peertest0-', 'peertest1-'])
+    seed = utils.get_random_string(6)
+    name = "patchtest-" + seed
+    peer_name = "peertest0-" + seed
+    patch_name = "peertest1-" + seed
     with ovs_lib.OVSBridge(name) as br:
         port = br.add_patch_port(patch_name, peer_name)
         return port != ovs_lib.INVALID_OFPORT
@@ -92,7 +92,7 @@ def ofctl_arg_supported(cmd, **kwargs):
     :param **kwargs: arguments to test with the command.
     :returns: a boolean if the supplied arguments are supported.
     """
-    br_name = base.get_rand_device_name(prefix='br-test-')
+    br_name = 'br-test-%s' % utils.get_random_string(6)
     with ovs_lib.OVSBridge(br_name) as test_br:
         full_args = ["ovs-ofctl", cmd, test_br.br_name,
                      ovs_lib._build_flow_expr_str(kwargs, cmd.split('-')[0])]
@@ -138,15 +138,19 @@ def icmpv6_header_match_supported():
     return ofctl_arg_supported(cmd='add-flow',
                                table=ovs_const.ARP_SPOOF_TABLE,
                                priority=1,
-                               dl_type=constants.ETHERTYPE_IPV6,
-                               nw_proto=n_consts.PROTO_NUM_IPV6_ICMP,
+                               dl_type=n_consts.ETHERTYPE_IPV6,
+                               nw_proto=n_consts.PROTO_NUM_ICMP_V6,
                                icmp_type=n_consts.ICMPV6_TYPE_NA,
                                nd_target='fdf8:f53b:82e4::10',
                                actions="NORMAL")
 
 
-def _vf_management_support(required_caps):
+def vf_management_supported():
     is_supported = True
+    required_caps = (
+        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_STATE,
+        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_SPOOFCHK,
+        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE)
     try:
         vf_section = ip_link_support.IpLinkSupport.get_vf_mgmt_section()
         for cap in required_caps:
@@ -160,24 +164,6 @@ def _vf_management_support(required_caps):
                           "ip link command"))
         return False
     return is_supported
-
-
-def vf_management_supported():
-    required_caps = (
-        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_STATE,
-        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_SPOOFCHK,
-        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE)
-    return _vf_management_support(required_caps)
-
-
-def vf_extended_management_supported():
-    required_caps = (
-        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_STATE,
-        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_SPOOFCHK,
-        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE,
-        ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_MIN_TX_RATE,
-    )
-    return _vf_management_support(required_caps)
 
 
 def netns_read_requires_helper():
@@ -197,10 +183,6 @@ def get_minimal_dnsmasq_version_supported():
     return MINIMUM_DNSMASQ_VERSION
 
 
-def get_dnsmasq_version_with_dhcp_release6():
-    return DNSMASQ_VERSION_DHCP_RELEASE6
-
-
 def dnsmasq_version_supported():
     try:
         cmd = ['dnsmasq', '--version']
@@ -212,18 +194,6 @@ def dnsmasq_version_supported():
             return False
     except (OSError, RuntimeError, IndexError, ValueError) as e:
         LOG.debug("Exception while checking minimal dnsmasq version. "
-                  "Exception: %s", e)
-        return False
-    return True
-
-
-def dhcp_release6_supported():
-    try:
-        cmd = ['dhcp_release6', '--help']
-        env = {'LC_ALL': 'C'}
-        agent_utils.execute(cmd, addl_env=env)
-    except (OSError, RuntimeError, IndexError, ValueError) as e:
-        LOG.debug("Exception while checking dhcp_release6. "
                   "Exception: %s", e)
         return False
     return True
@@ -276,14 +246,14 @@ class KeepalivedIPv6Test(object):
 
     def verify_ipv6_address_assignment(self, gw_dev):
         process = self.manager.get_process()
-        common_utils.wait_until_true(lambda: process.active)
+        agent_utils.wait_until_true(lambda: process.active)
 
         def _gw_vip_assigned():
             iface_ip = gw_dev.addr.list(ip_version=6, scope='global')
             if iface_ip:
                 return self.gw_vip == iface_ip[0]['cidr']
 
-        common_utils.wait_until_true(_gw_vip_assigned)
+        agent_utils.wait_until_true(_gw_vip_assigned)
 
     def __enter__(self):
         ip_lib.IPWrapper().netns.add(self.nsname)
@@ -312,8 +282,10 @@ def keepalived_ipv6_supported():
     6. Verify if IPv6 default route is configured by keepalived.
     """
 
-    br_name, ha_port, gw_port = base.get_related_rand_device_names(
-        ['ka-test-', ha_router.HA_DEV_PREFIX, namespaces.INTERNAL_DEV_PREFIX])
+    random_str = utils.get_random_string(6)
+    br_name = "ka-test-" + random_str
+    ha_port = ha_router.HA_DEV_PREFIX + random_str
+    gw_port = namespaces.INTERNAL_DEV_PREFIX + random_str
     gw_vip = 'fdf8:f53b:82e4::10/64'
     expected_default_gw = 'fe80:f816::1'
 
@@ -355,22 +327,10 @@ def ovsdb_native_supported():
         LOG.error(_LE("Failed to import required modules. Ensure that the "
                       "python-openvswitch package is installed. Error: %s"),
                   ex)
-    except Exception:
-        LOG.exception(_LE("Unexpected exception occurred."))
+    except Exception as ex:
+        LOG.exception(six.text_type(ex))
 
     return False
-
-
-def ovs_conntrack_supported():
-    br_name = base.get_rand_device_name(prefix="ovs-test-")
-
-    with ovs_lib.OVSBridge(br_name) as br:
-        try:
-            br.set_protocols(["OpenFlow%d" % i for i in range(10, 15)])
-        except RuntimeError as e:
-            LOG.debug("Exception while checking ovs conntrack support: %s", e)
-            return False
-    return ofctl_arg_supported(cmd='add-flow', ct_state='+trk', actions='drop')
 
 
 def ebtables_supported():

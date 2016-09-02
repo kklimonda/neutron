@@ -12,12 +12,12 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from neutron_lib import constants as consts
 from oslo_log import log as logging
 import oslo_messaging
 
-from neutron._i18n import _LE
+from neutron.common import constants as consts
 from neutron.common import utils
+from neutron.i18n import _LE
 from neutron import manager
 from neutron.plugins.common import constants as service_constants
 

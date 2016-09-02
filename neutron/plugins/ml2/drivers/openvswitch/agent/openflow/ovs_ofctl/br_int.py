@@ -21,9 +21,7 @@
 
 import netaddr
 
-from neutron_lib import constants as const
-
-from neutron.common import constants as n_const
+from neutron.common import constants as const
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
 from neutron.plugins.ml2.drivers.openvswitch.agent.openflow.ovs_ofctl \
@@ -121,15 +119,14 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
         for ip in ip_addresses:
             self.install_normal(
                 table_id=constants.ARP_SPOOF_TABLE, priority=2,
-                dl_type=n_const.ETHERTYPE_IPV6,
-                nw_proto=const.PROTO_NUM_IPV6_ICMP,
+                dl_type=const.ETHERTYPE_IPV6, nw_proto=const.PROTO_NUM_ICMP_V6,
                 icmp_type=const.ICMPV6_TYPE_NA, nd_target=ip, in_port=port)
 
         # Now that the rules are ready, direct icmpv6 neighbor advertisement
         # traffic from the port into the anti-spoof table.
         self.add_flow(table=constants.LOCAL_SWITCHING,
-                      priority=10, dl_type=n_const.ETHERTYPE_IPV6,
-                      nw_proto=const.PROTO_NUM_IPV6_ICMP,
+                      priority=10, dl_type=const.ETHERTYPE_IPV6,
+                      nw_proto=const.PROTO_NUM_ICMP_V6,
                       icmp_type=const.ICMPV6_TYPE_NA, in_port=port,
                       actions=("resubmit(,%s)" % constants.ARP_SPOOF_TABLE))
 
@@ -146,10 +143,9 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
                 eth_src=address, in_port=port)
         # normalize so we can see if macs are the same
         mac_addresses = {netaddr.EUI(mac) for mac in mac_addresses}
-        flows = self.dump_flows_for(table=constants.MAC_SPOOF_TABLE,
-                                    in_port=port).splitlines()
+        flows = self.dump_flows(constants.MAC_SPOOF_TABLE).splitlines()
         for flow in flows:
-            if 'dl_src' not in flow:
+            if 'dl_src' not in flow or 'in_port=%s' % port not in flow:
                 continue
             flow_mac = flow.split('dl_src=')[1].split(' ')[0].split(',')[0]
             if netaddr.EUI(flow_mac) not in mac_addresses:
@@ -180,7 +176,7 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
         self.delete_flows(table_id=constants.LOCAL_SWITCHING,
                           in_port=port, proto='arp')
         self.delete_flows(table_id=constants.LOCAL_SWITCHING,
-                          in_port=port, nw_proto=const.PROTO_NUM_IPV6_ICMP,
+                          in_port=port, nw_proto=const.PROTO_NUM_ICMP_V6,
                           icmp_type=const.ICMPV6_TYPE_NA)
         self.delete_arp_spoofing_allow_rules(port)
 

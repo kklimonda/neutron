@@ -14,12 +14,12 @@
 #    under the License.
 
 import mock
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 import webob.exc as webexc
 import webtest
 
 from neutron.api import extensions
+from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import servicetype_db as st_db
 from neutron.extensions import servicetype
@@ -73,13 +73,13 @@ class ServiceTypeManagerTestCase(testlib_api.SqlTestCase):
             ctx,
             filters=dict(service_type=[constants.LOADBALANCER])
         )
-        self.assertEqual(1, len(res))
+        self.assertEqual(len(res), 1)
 
         res = self.manager.get_service_providers(
             ctx,
             filters=dict(service_type=[constants.FIREWALL])
         )
-        self.assertEqual(1, len(res))
+        self.assertEqual(len(res), 1)
 
     def test_multiple_default_providers_specified_for_service(self):
         self.assertRaises(
@@ -98,32 +98,16 @@ class ServiceTypeManagerTestCase(testlib_api.SqlTestCase):
         # can pass None as a context
         p = self.manager.get_default_service_provider(None,
                                                       constants.LOADBALANCER)
-        self.assertEqual({'service_type': constants.LOADBALANCER,
-                          'name': 'lbaas1',
-                          'driver': 'driver_path',
-                          'default': True}, p)
+        self.assertEqual(p, {'service_type': constants.LOADBALANCER,
+                             'name': 'lbaas1',
+                             'driver': 'driver_path',
+                             'default': True})
 
         self.assertRaises(
             provconf.DefaultServiceProviderNotFound,
             self.manager.get_default_service_provider,
             None, constants.DUMMY
         )
-
-    def test_get_provider_names_by_resource_ids(self):
-        self._set_override([constants.DUMMY + ':dummy1:driver_path',
-                            constants.DUMMY + ':dummy2:driver_path2'])
-        ctx = context.get_admin_context()
-        self.manager.add_resource_association(ctx, constants.DUMMY,
-                                              'dummy1', '1')
-        self.manager.add_resource_association(ctx, constants.DUMMY,
-                                              'dummy1', '2')
-        self.manager.add_resource_association(ctx, constants.DUMMY,
-                                              'dummy2', '3')
-        names_by_id = self.manager.get_provider_names_by_resource_ids(
-            ctx, ['1', '2', '3', '4'])
-        # unmatched IDs will be excluded from the result
-        self.assertEqual({'1': 'dummy1', '2': 'dummy1', '3': 'dummy2'},
-                         names_by_id)
 
     def test_add_resource_association(self):
         self._set_override([constants.LOADBALANCER +
@@ -202,7 +186,7 @@ class ServiceTypeExtensionTestCase(ServiceTypeExtensionTestCaseBase):
         instance.get_service_providers.assert_called_with(mock.ANY,
                                                           filters={},
                                                           fields=[])
-        self.assertEqual(webexc.HTTPOk.code, res.status_int)
+        self.assertEqual(res.status_int, webexc.HTTPOk.code)
 
 
 class ServiceTypeManagerExtTestCase(ServiceTypeExtensionTestCaseBase):
@@ -228,7 +212,7 @@ class ServiceTypeManagerExtTestCase(ServiceTypeExtensionTestCaseBase):
 
     def test_list_service_providers(self):
         res = self._list_service_providers()
-        self.assertEqual(webexc.HTTPOk.code, res.status_int)
+        self.assertEqual(res.status_int, webexc.HTTPOk.code)
         data = self.deserialize(res)
         self.assertIn('service_providers', data)
         self.assertGreaterEqual(len(data['service_providers']), 2)

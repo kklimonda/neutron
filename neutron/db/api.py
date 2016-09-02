@@ -15,133 +15,121 @@
 
 import contextlib
 
-from debtcollector import moves
-from debtcollector import removals
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_db import api as oslo_db_api
 from oslo_db import exception as db_exc
-from oslo_db.sqlalchemy import enginefacade
-from oslo_log import log as logging
+from oslo_db.sqlalchemy import session
 from oslo_utils import excutils
-import osprofiler.sqlalchemy
-import six
-import sqlalchemy
-from sqlalchemy.orm import exc
-import traceback
+from oslo_utils import uuidutils
+from sqlalchemy import exc
 
-from neutron.common import profiler  # noqa
+from neutron.common import exceptions as n_exc
+from neutron.db import common_db_mixin
 
 
-def set_hook(engine):
-    if cfg.CONF.profiler.enabled and cfg.CONF.profiler.trace_sqlalchemy:
-        osprofiler.sqlalchemy.add_tracing(sqlalchemy, engine, 'neutron.db')
-
-
-context_manager = enginefacade.transaction_context()
-
-context_manager.configure(sqlite_fk=True)
-context_manager.append_on_engine_create(set_hook)
-
+_FACADE = None
 
 MAX_RETRIES = 10
-LOG = logging.getLogger(__name__)
-
-
-def is_retriable(e):
-    if _is_nested_instance(e, (db_exc.DBDeadlock, exc.StaleDataError,
-                               db_exc.DBConnectionError,
-                               db_exc.DBDuplicateEntry, db_exc.RetryRequest)):
-        return True
-    # looking savepoints mangled by deadlocks. see bug/1590298 for details.
-    return _is_nested_instance(e, db_exc.DBError) and '1305' in str(e)
-
-is_deadlock = moves.moved_function(is_retriable, 'is_deadlock', __name__,
-                                   message='use "is_retriable" instead',
-                                   version='newton', removal_version='ocata')
-_retry_db_errors = oslo_db_api.wrap_db_retry(
+is_deadlock = lambda e: isinstance(e, db_exc.DBDeadlock)
+retry_db_errors = oslo_db_api.wrap_db_retry(
     max_retries=MAX_RETRIES,
-    retry_interval=0.1,
-    inc_retry_interval=True,
-    exception_checker=is_retriable
+    retry_on_request=True,
+    exception_checker=is_deadlock
 )
 
 
-def retry_db_errors(f):
-    """Log retriable exceptions before retry to help debugging."""
-
-    @_retry_db_errors
-    @six.wraps(f)
-    def wrapped(*args, **kwargs):
-        try:
-            return f(*args, **kwargs)
-        except Exception as e:
-            with excutils.save_and_reraise_exception():
-                if is_retriable(e):
-                    LOG.debug("Retry wrapper got retriable exception: %s",
-                              traceback.format_exc())
-    return wrapped
-
-
-def reraise_as_retryrequest(f):
-    """Packs retriable exceptions into a RetryRequest."""
-
-    @six.wraps(f)
-    def wrapped(*args, **kwargs):
-        try:
-            return f(*args, **kwargs)
-        except Exception as e:
-            with excutils.save_and_reraise_exception() as ctx:
-                if is_retriable(e):
-                    ctx.reraise = False
-                    raise db_exc.RetryRequest(e)
-    return wrapped
-
-
-def _is_nested_instance(e, etypes):
-    """Check if exception or its inner excepts are an instance of etypes."""
-    return (isinstance(e, etypes) or
-            isinstance(e, exceptions.MultipleExceptions) and
-            any(_is_nested_instance(i, etypes) for i in e.inner_exceptions))
-
-
 @contextlib.contextmanager
-def exc_to_retry(etypes):
+def exc_to_retry(exceptions):
     try:
         yield
     except Exception as e:
         with excutils.save_and_reraise_exception() as ctx:
-            if _is_nested_instance(e, etypes):
+            if isinstance(e, exceptions):
                 ctx.reraise = False
                 raise db_exc.RetryRequest(e)
 
 
-@removals.remove(version='Newton', removal_version='Ocata')
+def _create_facade_lazily():
+    global _FACADE
+
+    if _FACADE is None:
+        _FACADE = session.EngineFacade.from_config(cfg.CONF, sqlite_fk=True)
+
+    return _FACADE
+
+
 def get_engine():
     """Helper method to grab engine."""
-    return context_manager.get_legacy_facade().get_engine()
+    facade = _create_facade_lazily()
+    return facade.get_engine()
 
 
-@removals.remove(version='newton', removal_version='Ocata')
 def dispose():
-    context_manager.dispose_pool()
+    # Don't need to do anything if an enginefacade hasn't been created
+    if _FACADE is not None:
+        get_engine().pool.dispose()
 
 
-#TODO(akamyshnikova): when all places in the code, which use sessions/
-# connections will be updated, this won't be needed
 def get_session(autocommit=True, expire_on_commit=False, use_slave=False):
     """Helper method to grab session."""
-    return context_manager.get_legacy_facade().get_session(
-        autocommit=autocommit, expire_on_commit=expire_on_commit,
-        use_slave=use_slave)
+    facade = _create_facade_lazily()
+    return facade.get_session(autocommit=autocommit,
+                              expire_on_commit=expire_on_commit,
+                              use_slave=use_slave)
 
 
 @contextlib.contextmanager
 def autonested_transaction(sess):
     """This is a convenience method to not bother with 'nested' parameter."""
-    if sess.is_active:
-        session_context = sess.begin(nested=True)
-    else:
+    try:
+        session_context = sess.begin_nested()
+    except exc.InvalidRequestError:
         session_context = sess.begin(subtransactions=True)
-    with session_context as tx:
-        yield tx
+    finally:
+        with session_context as tx:
+            yield tx
+
+
+# Common database operation implementations
+def get_object(context, model, **kwargs):
+    with context.session.begin(subtransactions=True):
+        return (common_db_mixin.model_query(context, model)
+                .filter_by(**kwargs)
+                .first())
+
+
+def get_objects(context, model, **kwargs):
+    with context.session.begin(subtransactions=True):
+        return (common_db_mixin.model_query(context, model)
+                .filter_by(**kwargs)
+                .all())
+
+
+def create_object(context, model, values):
+    with context.session.begin(subtransactions=True):
+        if 'id' not in values:
+            values['id'] = uuidutils.generate_uuid()
+        db_obj = model(**values)
+        context.session.add(db_obj)
+    return db_obj.__dict__
+
+
+def _safe_get_object(context, model, id):
+    db_obj = get_object(context, model, id=id)
+    if db_obj is None:
+        raise n_exc.ObjectNotFound(id=id)
+    return db_obj
+
+
+def update_object(context, model, id, values):
+    with context.session.begin(subtransactions=True):
+        db_obj = _safe_get_object(context, model, id)
+        db_obj.update(values)
+        db_obj.save(session=context.session)
+    return db_obj.__dict__
+
+
+def delete_object(context, model, id):
+    with context.session.begin(subtransactions=True):
+        db_obj = _safe_get_object(context, model, id)
+        context.session.delete(db_obj)

@@ -15,7 +15,6 @@
 #
 
 import mock
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_serialization import jsonutils
@@ -23,7 +22,7 @@ from oslo_utils import uuidutils
 import testscenarios
 from webob import exc
 
-from neutron import context as nctx
+from neutron.common import constants
 from neutron.db import api as db_api
 from neutron.db import external_net_db
 from neutron.db import l3_db
@@ -31,7 +30,6 @@ from neutron.db import l3_gwmode_db
 from neutron.db import models_v2
 from neutron.extensions import l3
 from neutron.extensions import l3_ext_gw_mode
-from neutron import manager
 from neutron.tests import base
 from neutron.tests.unit.db import test_db_base_plugin_v2
 from neutron.tests.unit.extensions import test_l3
@@ -134,7 +132,7 @@ class TestL3GwModeMixin(testlib_api.SqlTestCase):
         self.net_ext = external_net_db.ExternalNetwork(
             network_id=self.ext_net_id)
         self.context.session.add(self.network)
-        # The following is to avoid complaints from SQLite on
+        # The following is to avoid complains from sqlite on
         # foreign key violations
         self.context.session.flush()
         self.context.session.add(self.net_ext)
@@ -208,7 +206,7 @@ class TestL3GwModeMixin(testlib_api.SqlTestCase):
             tenant_id=self.tenant_id,
             admin_state_up=True,
             device_id='something',
-            device_owner=constants.DEVICE_OWNER_COMPUTE_PREFIX + 'nova',
+            device_owner='compute:nova',
             status=constants.PORT_STATUS_ACTIVE,
             mac_address=FAKE_FIP_INT_PORT_MAC,
             network_id=self.int_net_id)
@@ -392,20 +390,6 @@ class ExtGwModeIntTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
                             expected_code=expected_code,
                             neutron_context=neutron_context)
 
-    def test_router_gateway_set_fail_after_port_create(self):
-        with self.router() as r, self.subnet() as s:
-            ext_net_id = s['subnet']['network_id']
-            self._set_net_external(ext_net_id)
-            plugin = manager.NeutronManager.get_plugin()
-            with mock.patch.object(plugin, '_get_port',
-                                   side_effect=ValueError()):
-                self._set_router_external_gateway(r['router']['id'],
-                                                  ext_net_id,
-                                                  expected_code=500)
-            ports = [p for p in plugin.get_ports(nctx.get_admin_context())
-                     if p['device_owner'] == l3_db.DEVICE_OWNER_ROUTER_GW]
-            self.assertFalse(ports)
-
     def test_router_gateway_set_retry(self):
         with self.router() as r, self.subnet() as s:
             ext_net_id = s['subnet']['network_id']
@@ -499,9 +483,9 @@ class ExtGwModeIntTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
                         return
                     body = self._show('routers', r['router']['id'])
                     res_gw_info = body['router']['external_gateway_info']
-                    self.assertEqual(ext_net_id, res_gw_info['network_id'])
-                    self.assertEqual(snat_expected_value,
-                                     res_gw_info['enable_snat'])
+                    self.assertEqual(res_gw_info['network_id'], ext_net_id)
+                    self.assertEqual(res_gw_info['enable_snat'],
+                                     snat_expected_value)
                 finally:
                     self._remove_external_gateway_from_router(
                         r['router']['id'], ext_net_id)

@@ -13,26 +13,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from itertools import chain as iter_chain
-
 import jinja2
 import netaddr
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import six
 
-from neutron._i18n import _
 from neutron.agent.linux import external_process
 from neutron.agent.linux import utils
-from neutron.common import constants as n_const
-from neutron.common import utils as common_utils
+from neutron.common import constants
 
 
 RADVD_SERVICE_NAME = 'radvd'
 RADVD_SERVICE_CMD = 'radvd'
-# We can configure max of 3 DNS servers in radvd RDNSS section.
-MAX_RDNSS_ENTRIES = 3
 
 LOG = logging.getLogger(__name__)
 
@@ -40,21 +33,15 @@ OPTS = [
     cfg.StrOpt('ra_confs',
                default='$state_path/ra',
                help=_('Location to store IPv6 RA config files')),
-    cfg.IntOpt('min_rtr_adv_interval',
-               default=30,
-               help=_('MinRtrAdvInterval setting for radvd.conf')),
-    cfg.IntOpt('max_rtr_adv_interval',
-               default=100,
-               help=_('MaxRtrAdvInterval setting for radvd.conf')),
 ]
 
 CONFIG_TEMPLATE = jinja2.Template("""interface {{ interface_name }}
 {
    AdvSendAdvert on;
-   MinRtrAdvInterval {{ min_rtr_adv_interval }};
-   MaxRtrAdvInterval {{ max_rtr_adv_interval }};
+   MinRtrAdvInterval 3;
+   MaxRtrAdvInterval 10;
 
-   {% if network_mtu >= n_const.IPV6_MIN_MTU %}
+   {% if network_mtu >= constants.IPV6_MIN_MTU %}
    AdvLinkMTU {{network_mtu}};
    {% endif %}
 
@@ -64,10 +51,6 @@ CONFIG_TEMPLATE = jinja2.Template("""interface {{ interface_name }}
 
    {% if constants.DHCPV6_STATEFUL in ra_modes %}
    AdvManagedFlag on;
-   {% endif %}
-
-   {% if dns_servers %}
-   RDNSS {% for dns in dns_servers %} {{ dns }} {% endfor %} {};
    {% endif %}
 
    {% for prefix in auto_config_prefixes %}
@@ -120,10 +103,6 @@ class DaemonMonitor(object):
             stateful_config_prefixes = [subnet['cidr'] for subnet in v6_subnets
                     if subnet['ipv6_ra_mode'] == constants.DHCPV6_STATEFUL]
             interface_name = self._dev_name_helper(p['id'])
-            slaac_subnets = [subnet for subnet in v6_subnets if
-                subnet['ipv6_ra_mode'] == constants.IPV6_SLAAC]
-            dns_servers = list(iter_chain(*[subnet['dns_nameservers'] for
-                subnet in slaac_subnets if subnet.get('dns_nameservers')]))
             if self._agent_conf.advertise_mtu:
                 network_mtu = p.get('mtu', 0)
 
@@ -132,14 +111,10 @@ class DaemonMonitor(object):
                 interface_name=interface_name,
                 auto_config_prefixes=auto_config_prefixes,
                 stateful_config_prefixes=stateful_config_prefixes,
-                dns_servers=dns_servers[0:MAX_RDNSS_ENTRIES],
-                n_const=n_const,
                 constants=constants,
-                min_rtr_adv_interval=self._agent_conf.min_rtr_adv_interval,
-                max_rtr_adv_interval=self._agent_conf.max_rtr_adv_interval,
                 network_mtu=int(network_mtu)))
 
-        common_utils.replace_file(radvd_conf, buf.getvalue())
+        utils.replace_file(radvd_conf, buf.getvalue())
         return radvd_conf
 
     def _get_radvd_process_manager(self, callback=None):

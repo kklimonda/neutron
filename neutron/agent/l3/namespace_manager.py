@@ -12,12 +12,12 @@
 
 from oslo_log import log as logging
 
-from neutron._i18n import _LE
 from neutron.agent.l3 import dvr_fip_ns
 from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
+from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -49,16 +49,17 @@ class NamespaceManager(object):
         dvr_fip_ns.FIP_NS_PREFIX: dvr_fip_ns.FipNamespace,
     }
 
-    def __init__(self, agent_conf, driver, metadata_driver=None):
+    def __init__(self, agent_conf, driver, clean_stale, metadata_driver=None):
         """Initialize the NamespaceManager.
 
         :param agent_conf: configuration from l3 agent
         :param driver: to perform operations on devices
+        :param clean_stale: Whether to try to clean stale namespaces
         :param metadata_driver: used to cleanup stale metadata proxy processes
         """
         self.agent_conf = agent_conf
         self.driver = driver
-        self._clean_stale = True
+        self._clean_stale = clean_stale
         self.metadata_driver = metadata_driver
         if metadata_driver:
             self.process_monitor = external_process.ProcessMonitor(
@@ -116,6 +117,7 @@ class NamespaceManager(object):
         """Get a set of all namespaces on host managed by this manager."""
         try:
             root_ip = ip_lib.IPWrapper()
+
             namespaces = root_ip.get_namespaces()
             return set(ns for ns in namespaces if self.is_managed(ns))
         except RuntimeError:
@@ -129,10 +131,6 @@ class NamespaceManager(object):
             if ns.endswith(router_id):
                 ns_prefix, ns_id = self.get_prefix_and_id(ns)
                 self._cleanup(ns_prefix, ns_id)
-
-    def ensure_snat_cleanup(self, router_id):
-        prefix = dvr_snat_ns.SNAT_NS_PREFIX
-        self._cleanup(prefix, router_id)
 
     def _cleanup(self, ns_prefix, ns_id):
         ns_class = self.ns_prefix_to_class_map[ns_prefix]

@@ -19,10 +19,8 @@ from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log
 
-from neutron._i18n import _LE
 from neutron.common import exceptions as exc
 from neutron.common import utils
-from neutron.plugins.common import utils as p_utils
 from neutron.plugins.ml2 import driver_api as api
 
 
@@ -37,14 +35,13 @@ class BaseTypeDriver(api.TypeDriver):
     def __init__(self):
         try:
             self.physnet_mtus = utils.parse_mappings(
-                cfg.CONF.ml2.physical_network_mtus, unique_values=False
+                cfg.CONF.ml2.physical_network_mtus
             )
-        except Exception as e:
-            LOG.error(_LE("Failed to parse physical_network_mtus: %s"), e)
+        except Exception:
             self.physnet_mtus = []
 
     def get_mtu(self, physical_network=None):
-        return p_utils.get_deployment_physnet_mtu()
+        return cfg.CONF.ml2.segment_mtu
 
 
 class SegmentTypeDriver(BaseTypeDriver):

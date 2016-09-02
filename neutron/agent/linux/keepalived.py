@@ -17,19 +17,21 @@ import itertools
 import os
 
 import netaddr
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LE
 from neutron.agent.linux import external_process
-from neutron.common import constants
+from neutron.agent.linux import utils
+from neutron.common import exceptions
 from neutron.common import utils as common_utils
+from neutron.i18n import _, _LE
 
 VALID_STATES = ['MASTER', 'BACKUP']
 VALID_AUTH_TYPES = ['AH', 'PASS']
 HA_DEFAULT_PRIORITY = 50
 PRIMARY_VIP_RANGE_SIZE = 24
+# TODO(amuller): Use L3 agent constant when new constants module is introduced.
+FIP_LL_SUBNET = '169.254.64.0/18'
 KEEPALIVED_SERVICE_NAME = 'keepalived'
 GARP_MASTER_DELAY = 60
 
@@ -75,6 +77,17 @@ class InvalidAuthenticationTypeException(exceptions.NeutronException):
         if 'valid_auth_types' not in kwargs:
             kwargs['valid_auth_types'] = ', '.join(VALID_AUTH_TYPES)
         super(InvalidAuthenticationTypeException, self).__init__(**kwargs)
+
+
+class VIPDuplicateAddressException(exceptions.NeutronException):
+    message = _('Attempted to add duplicate VIP address, '
+                'existing vips are: %(existing_vips)s, '
+                'duplicate vip is: %(duplicate_vip)s')
+
+    def __init__(self, **kwargs):
+        kwargs['existing_vips'] = ', '.join(str(vip) for vip in
+                                            kwargs['existing_vips'])
+        super(VIPDuplicateAddressException, self).__init__(**kwargs)
 
 
 class KeepalivedVipAddress(object):
@@ -175,10 +188,10 @@ class KeepalivedInstance(object):
         self.vips = []
         self.virtual_routes = KeepalivedInstanceRoutes()
         self.authentication = None
+        metadata_cidr = '169.254.169.254/32'
         self.primary_vip_range = get_free_range(
-            parent_range=constants.PRIVATE_CIDR_RANGE,
-            excluded_ranges=[constants.METADATA_CIDR,
-                             constants.DVR_FIP_LL_CIDR] + ha_cidrs,
+            parent_range='169.254.0.0/16',
+            excluded_ranges=[metadata_cidr, FIP_LL_SUBNET] + ha_cidrs,
             size=PRIMARY_VIP_RANGE_SIZE)
 
     def set_authentication(self, auth_type, password):
@@ -189,10 +202,10 @@ class KeepalivedInstance(object):
 
     def add_vip(self, ip_cidr, interface_name, scope):
         vip = KeepalivedVipAddress(ip_cidr, interface_name, scope)
-        if vip not in self.vips:
-            self.vips.append(vip)
-        else:
-            LOG.debug('VIP %s already present in %s', vip, self.vips)
+        if vip in self.vips:
+            raise VIPDuplicateAddressException(existing_vips=self.vips,
+                                               duplicate_vip=vip)
+        self.vips.append(vip)
 
     def remove_vips_vroutes_by_interface(self, interface_name):
         self.vips = [vip for vip in self.vips
@@ -362,7 +375,7 @@ class KeepalivedManager(object):
     def _output_config_file(self):
         config_str = self.config.get_config_str()
         config_path = self.get_full_config_file_path('keepalived.conf')
-        common_utils.replace_file(config_path, config_str)
+        utils.replace_file(config_path, config_str)
 
         return config_path
 
@@ -412,12 +425,13 @@ class KeepalivedManager(object):
         pm = self.get_process()
         pm.disable(sig='15')
 
-    def get_process(self):
+    def get_process(self, callback=None):
         return external_process.ProcessManager(
             cfg.CONF,
             self.resource_id,
             self.namespace,
-            pids_path=self.conf_path)
+            pids_path=self.conf_path,
+            default_cmd_callback=callback)
 
     def _get_vrrp_process(self, pid_file):
         return external_process.ProcessManager(

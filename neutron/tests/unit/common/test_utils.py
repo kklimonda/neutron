@@ -13,31 +13,26 @@
 #    under the License.
 
 import errno
-import os.path
 import re
-import sys
 
 import eventlet
 import mock
 import netaddr
-from neutron_lib import constants
-from neutron_lib import exceptions as exc
-from oslo_log import log as logging
-import six
 import testtools
 
+from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
 from neutron.tests import base
-from neutron.tests.common import helpers
-from neutron.tests.unit import tests
+
+from oslo_log import log as logging
 
 
 class TestParseMappings(base.BaseTestCase):
-    def parse(self, mapping_list, unique_values=True, unique_keys=True):
-        return utils.parse_mappings(mapping_list, unique_values, unique_keys)
+    def parse(self, mapping_list, unique_values=True):
+        return utils.parse_mappings(mapping_list, unique_values)
 
     def test_parse_mappings_fails_for_missing_separator(self):
         with testtools.ExpectedException(ValueError):
@@ -64,32 +59,27 @@ class TestParseMappings(base.BaseTestCase):
             self.parse(['key1:val', 'key2:val'])
 
     def test_parse_mappings_succeeds_for_one_mapping(self):
-        self.assertEqual({'key': 'val'}, self.parse(['key:val']))
+        self.assertEqual(self.parse(['key:val']), {'key': 'val'})
 
     def test_parse_mappings_succeeds_for_n_mappings(self):
-        self.assertEqual({'key1': 'val1', 'key2': 'val2'},
-                         self.parse(['key1:val1', 'key2:val2']))
+        self.assertEqual(self.parse(['key1:val1', 'key2:val2']),
+                         {'key1': 'val1', 'key2': 'val2'})
 
     def test_parse_mappings_succeeds_for_duplicate_value(self):
-        self.assertEqual({'key1': 'val', 'key2': 'val'},
-                         self.parse(['key1:val', 'key2:val'], False))
+        self.assertEqual(self.parse(['key1:val', 'key2:val'], False),
+                         {'key1': 'val', 'key2': 'val'})
 
     def test_parse_mappings_succeeds_for_no_mappings(self):
-        self.assertEqual({}, self.parse(['']))
-
-    def test_parse_mappings_succeeds_for_nonuniq_key(self):
-        self.assertEqual({'key': ['val1', 'val2']},
-                         self.parse(['key:val1', 'key:val2', 'key:val2'],
-                                    unique_keys=False))
+        self.assertEqual(self.parse(['']), {})
 
 
 class TestParseTunnelRangesMixin(object):
     TUN_MIN = None
     TUN_MAX = None
     TYPE = None
-    _err_prefix = "Invalid network tunnel range: '%d:%d' - "
-    _err_suffix = "%s is not a valid %s identifier."
-    _err_range = "End of tunnel range is less than start of tunnel range."
+    _err_prefix = "Invalid network Tunnel range: '%d:%d' - "
+    _err_suffix = "%s is not a valid %s identifier"
+    _err_range = "End of tunnel range is less than start of tunnel range"
 
     def _build_invalid_tunnel_range_msg(self, t_range_tuple, n):
         bad_id = t_range_tuple[n - 1]
@@ -107,12 +97,12 @@ class TestParseTunnelRangesMixin(object):
 
     def _check_range_invalid_ranges(self, bad_range, which):
         expected_msg = self._build_invalid_tunnel_range_msg(bad_range, which)
-        err = self.assertRaises(exc.NetworkTunnelRangeError,
+        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         self.assertEqual(expected_msg, str(err))
 
     def _check_range_reversed(self, bad_range):
-        err = self.assertRaises(exc.NetworkTunnelRangeError,
+        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         expected_msg = self._build_range_reversed_msg(bad_range)
         self.assertEqual(expected_msg, str(err))
@@ -147,16 +137,20 @@ class TestVxlanTunnelRangeVerifyValid(TestParseTunnelRangesMixin,
 
 class UtilTestParseVlanRanges(base.BaseTestCase):
     _err_prefix = "Invalid network VLAN range: '"
-    _err_bad_count = "' - 'Need exactly two values for VLAN range'."
-    _err_bad_vlan = "' - '%s is not a valid VLAN tag'."
-    _err_range = "' - 'End of VLAN range is less than start of VLAN range'."
+    _err_too_few = "' - 'need more than 2 values to unpack'"
+    _err_too_many_prefix = "' - 'too many values to unpack"
+    _err_not_int = "' - 'invalid literal for int() with base 10: '%s''"
+    _err_bad_vlan = "' - '%s is not a valid VLAN tag'"
+    _err_range = "' - 'End of VLAN range is less than start of VLAN range'"
 
-    def _range_err_bad_count(self, nv_range):
-        return self._err_prefix + nv_range + self._err_bad_count
+    def _range_too_few_err(self, nv_range):
+        return self._err_prefix + nv_range + self._err_too_few
 
-    def _range_invalid_vlan(self, nv_range, n):
-        vlan = nv_range.split(':')[n]
-        return self._err_prefix + nv_range + (self._err_bad_vlan % vlan)
+    def _range_too_many_err_prefix(self, nv_range):
+        return self._err_prefix + nv_range + self._err_too_many_prefix
+
+    def _vlan_not_int_err(self, nv_range, vlan):
+        return self._err_prefix + nv_range + (self._err_not_int % vlan)
 
     def _nrange_invalid_vlan(self, nv_range, n):
         vlan = nv_range.split(':')[n]
@@ -258,59 +252,62 @@ class TestParseOneVlanRange(UtilTestParseVlanRanges):
     def test_parse_one_net_no_vlan_range(self):
         config_str = "net1"
         expected_networks = ("net1", None)
-        self.assertEqual(expected_networks, self.parse_one(config_str))
+        self.assertEqual(self.parse_one(config_str), expected_networks)
 
     def test_parse_one_net_and_vlan_range(self):
         config_str = "net1:100:199"
         expected_networks = ("net1", (100, 199))
-        self.assertEqual(expected_networks, self.parse_one(config_str))
+        self.assertEqual(self.parse_one(config_str), expected_networks)
 
     def test_parse_one_net_incomplete_range(self):
         config_str = "net1:100"
-        expected_msg = self._range_err_bad_count(config_str)
+        expected_msg = self._range_too_few_err(config_str)
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_one_net_range_too_many(self):
         config_str = "net1:100:150:200"
-        expected_msg = self._range_err_bad_count(config_str)
+        expected_msg_prefix = self._range_too_many_err_prefix(config_str)
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        # The error message is not same in Python 2 and Python 3. In Python 3,
+        # it depends on the amount of values used when unpacking, so it cannot
+        # be predicted as a fixed string.
+        self.assertTrue(str(err).startswith(expected_msg_prefix))
 
     def test_parse_one_net_vlan1_not_int(self):
         config_str = "net1:foo:199"
-        expected_msg = self._range_invalid_vlan(config_str, 1)
+        expected_msg = self._vlan_not_int_err(config_str, 'foo')
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_one_net_vlan2_not_int(self):
         config_str = "net1:100:bar"
-        expected_msg = self._range_invalid_vlan(config_str, 2)
+        expected_msg = self._vlan_not_int_err(config_str, 'bar')
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_one_net_and_max_range(self):
         config_str = "net1:1:4094"
         expected_networks = ("net1", (1, 4094))
-        self.assertEqual(expected_networks, self.parse_one(config_str))
+        self.assertEqual(self.parse_one(config_str), expected_networks)
 
     def test_parse_one_net_range_bad_vlan1(self):
         config_str = "net1:9000:150"
         expected_msg = self._nrange_invalid_vlan(config_str, 1)
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_one_net_range_bad_vlan2(self):
         config_str = "net1:4000:4999"
         expected_msg = self._nrange_invalid_vlan(config_str, 2)
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
 
 class TestParseVlanRangeList(UtilTestParseVlanRanges):
@@ -320,49 +317,49 @@ class TestParseVlanRangeList(UtilTestParseVlanRanges):
     def test_parse_list_one_net_no_vlan_range(self):
         config_list = ["net1"]
         expected_networks = {"net1": []}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_list_one_net_vlan_range(self):
         config_list = ["net1:100:199"]
         expected_networks = {"net1": [(100, 199)]}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_no_vlan_range(self):
         config_list = ["net1",
                        "net2"]
         expected_networks = {"net1": [],
                              "net2": []}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_range_and_no_range(self):
         config_list = ["net1:100:199",
                        "net2"]
         expected_networks = {"net1": [(100, 199)],
                              "net2": []}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_no_range_and_range(self):
         config_list = ["net1",
                        "net2:200:299"]
         expected_networks = {"net1": [],
                              "net2": [(200, 299)]}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_bad_vlan_range1(self):
         config_list = ["net1:100",
                        "net2:200:299"]
-        expected_msg = self._range_err_bad_count(config_list[0])
+        expected_msg = self._range_too_few_err(config_list[0])
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_list, config_list)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_two_nets_vlan_not_int2(self):
         config_list = ["net1:100:199",
                        "net2:200:0x200"]
-        expected_msg = self._range_invalid_vlan(config_list[1], 2)
+        expected_msg = self._vlan_not_int_err(config_list[1], '0x200')
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_list, config_list)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_two_nets_and_append_1_2(self):
         config_list = ["net1:100:199",
@@ -371,7 +368,7 @@ class TestParseVlanRangeList(UtilTestParseVlanRanges):
         expected_networks = {"net1": [(100, 199),
                                       (1000, 1099)],
                              "net2": [(200, 299)]}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
     def test_parse_two_nets_and_append_1_3(self):
         config_list = ["net1:100:199",
@@ -380,23 +377,23 @@ class TestParseVlanRangeList(UtilTestParseVlanRanges):
         expected_networks = {"net1": [(100, 199),
                                       (1000, 1099)],
                              "net2": [(200, 299)]}
-        self.assertEqual(expected_networks, self.parse_list(config_list))
+        self.assertEqual(self.parse_list(config_list), expected_networks)
 
 
 class TestDictUtils(base.BaseTestCase):
     def test_dict2str(self):
         dic = {"key1": "value1", "key2": "value2", "key3": "value3"}
         expected = "key1=value1,key2=value2,key3=value3"
-        self.assertEqual(expected, utils.dict2str(dic))
+        self.assertEqual(utils.dict2str(dic), expected)
 
     def test_str2dict(self):
         string = "key1=value1,key2=value2,key3=value3"
         expected = {"key1": "value1", "key2": "value2", "key3": "value3"}
-        self.assertEqual(expected, utils.str2dict(string))
+        self.assertEqual(utils.str2dict(string), expected)
 
     def test_dict_str_conversion(self):
         dic = {"key1": "value1", "key2": "value2"}
-        self.assertEqual(dic, utils.str2dict(utils.dict2str(dic)))
+        self.assertEqual(utils.str2dict(utils.dict2str(dic)), dic)
 
     def test_diff_list_of_dict(self):
         old_list = [{"key1": "value1"},
@@ -406,8 +403,66 @@ class TestDictUtils(base.BaseTestCase):
                     {"key2": "value2"},
                     {"key4": "value4"}]
         added, removed = utils.diff_list_of_dict(old_list, new_list)
-        self.assertEqual([dict(key4="value4")], added)
-        self.assertEqual([dict(key3="value3")], removed)
+        self.assertEqual(added, [dict(key4="value4")])
+        self.assertEqual(removed, [dict(key3="value3")])
+
+
+class _CachingDecorator(object):
+    def __init__(self):
+        self.func_retval = 'bar'
+        self._cache = mock.Mock()
+
+    @utils.cache_method_results
+    def func(self, *args, **kwargs):
+        return self.func_retval
+
+
+class TestCachingDecorator(base.BaseTestCase):
+    def setUp(self):
+        super(TestCachingDecorator, self).setUp()
+        self.decor = _CachingDecorator()
+        self.func_name = '%(module)s._CachingDecorator.func' % {
+            'module': self.__module__
+        }
+        self.not_cached = self.decor.func.func.__self__._not_cached
+
+    def test_cache_miss(self):
+        expected_key = (self.func_name, 1, 2, ('foo', 'bar'))
+        args = (1, 2)
+        kwargs = {'foo': 'bar'}
+        self.decor._cache.get.return_value = self.not_cached
+        retval = self.decor.func(*args, **kwargs)
+        self.decor._cache.set.assert_called_once_with(
+            expected_key, self.decor.func_retval, None)
+        self.assertEqual(self.decor.func_retval, retval)
+
+    def test_cache_hit(self):
+        expected_key = (self.func_name, 1, 2, ('foo', 'bar'))
+        args = (1, 2)
+        kwargs = {'foo': 'bar'}
+        retval = self.decor.func(*args, **kwargs)
+        self.assertFalse(self.decor._cache.set.called)
+        self.assertEqual(self.decor._cache.get.return_value, retval)
+        self.decor._cache.get.assert_called_once_with(expected_key,
+                                                      self.not_cached)
+
+    def test_get_unhashable(self):
+        expected_key = (self.func_name, [1], 2)
+        self.decor._cache.get.side_effect = TypeError
+        retval = self.decor.func([1], 2)
+        self.assertFalse(self.decor._cache.set.called)
+        self.assertEqual(self.decor.func_retval, retval)
+        self.decor._cache.get.assert_called_once_with(expected_key,
+                                                      self.not_cached)
+
+    def test_missing_cache(self):
+        delattr(self.decor, '_cache')
+        self.assertRaises(NotImplementedError, self.decor.func, (1, 2))
+
+    def test_no_cache(self):
+        self.decor._cache = False
+        retval = self.decor.func((1, 2))
+        self.assertEqual(self.decor.func_retval, retval)
 
 
 class TestDict2Tuples(base.BaseTestCase):
@@ -515,7 +570,7 @@ class TestDvrServices(base.BaseTestCase):
         self._test_is_dvr_serviced(constants.DEVICE_OWNER_DHCP, True)
 
     def test_is_dvr_serviced_with_vm_port(self):
-        self._test_is_dvr_serviced(constants.DEVICE_OWNER_COMPUTE_PREFIX, True)
+        self._test_is_dvr_serviced('compute:', True)
 
 
 class TestIpToCidr(base.BaseTestCase):
@@ -577,12 +632,12 @@ class TestCidrIsHost(base.BaseTestCase):
 
 class TestIpVersionFromInt(base.BaseTestCase):
     def test_ip_version_from_int_ipv4(self):
-        self.assertEqual(constants.IPv4,
-                         utils.ip_version_from_int(4))
+        self.assertEqual(utils.ip_version_from_int(4),
+                         constants.IPv4)
 
     def test_ip_version_from_int_ipv6(self):
-        self.assertEqual(constants.IPv6,
-                         utils.ip_version_from_int(6))
+        self.assertEqual(utils.ip_version_from_int(6),
+                         constants.IPv6)
 
     def test_ip_version_from_int_illegal_int(self):
         self.assertRaises(ValueError,
@@ -661,134 +716,3 @@ class TestGetRandomString(base.BaseTestCase):
         self.assertEqual(length, len(random_string))
         regex = re.compile('^[0-9a-fA-F]+$')
         self.assertIsNotNone(regex.match(random_string))
-
-
-class TestSafeDecodeUtf8(base.BaseTestCase):
-
-    @helpers.requires_py2
-    def test_py2_does_nothing(self):
-        s = 'test-py2'
-        self.assertIs(s, utils.safe_decode_utf8(s))
-
-    @helpers.requires_py3
-    def test_py3_decoded_valid_bytes(self):
-        s = bytes('test-py2', 'utf-8')
-        decoded_str = utils.safe_decode_utf8(s)
-        self.assertIsInstance(decoded_str, six.text_type)
-        self.assertEqual(s, decoded_str.encode('utf-8'))
-
-    @helpers.requires_py3
-    def test_py3_decoded_invalid_bytes(self):
-        s = bytes('test-py2', 'utf_16')
-        decoded_str = utils.safe_decode_utf8(s)
-        self.assertIsInstance(decoded_str, six.text_type)
-
-
-class TestPortRuleMasking(base.BaseTestCase):
-    def test_port_rule_masking(self):
-        compare_rules = lambda x, y: set(x) == set(y) and len(x) == len(y)
-
-        # Test 1.
-        port_min = 5
-        port_max = 12
-        expected_rules = ['0x0005', '0x000c', '0x0006/0xfffe',
-                          '0x0008/0xfffc']
-        rules = utils.port_rule_masking(port_min, port_max)
-        self.assertTrue(compare_rules(rules, expected_rules))
-
-        # Test 2.
-        port_min = 20
-        port_max = 130
-        expected_rules = ['0x0014/0xfffe', '0x0016/0xfffe', '0x0018/0xfff8',
-                          '0x0020/0xffe0', '0x0040/0xffc0', '0x0080/0xfffe',
-                          '0x0082']
-        rules = utils.port_rule_masking(port_min, port_max)
-        self.assertEqual(expected_rules, rules)
-
-        # Test 3.
-        port_min = 4501
-        port_max = 33057
-        expected_rules = ['0x1195', '0x1196/0xfffe', '0x1198/0xfff8',
-                          '0x11a0/0xffe0', '0x11c0/0xffc0', '0x1200/0xfe00',
-                          '0x1400/0xfc00', '0x1800/0xf800', '0x2000/0xe000',
-                          '0x4000/0xc000', '0x8021/0xff00', '0x8101/0xffe0',
-                          '0x8120/0xfffe']
-
-        rules = utils.port_rule_masking(port_min, port_max)
-        self.assertEqual(expected_rules, rules)
-
-    def test_port_rule_masking_min_higher_than_max(self):
-        port_min = 10
-        port_max = 5
-        with testtools.ExpectedException(ValueError):
-            utils.port_rule_masking(port_min, port_max)
-
-
-class TestAuthenticEUI(base.BaseTestCase):
-
-    def test_retains_original_format(self):
-        for mac_str in ('FA-16-3E-73-A2-E9', 'fa:16:3e:73:a2:e9'):
-            self.assertEqual(mac_str, str(utils.AuthenticEUI(mac_str)))
-
-    def test_invalid_values(self):
-        for mac in ('XXXX', 'ypp', 'g3:vvv'):
-            with testtools.ExpectedException(netaddr.core.AddrFormatError):
-                utils.AuthenticEUI(mac)
-
-
-class TestAuthenticIPNetwork(base.BaseTestCase):
-
-    def test_retains_original_format(self):
-        for addr_str in ('10.0.0.0/24', '10.0.0.10/32', '100.0.0.1'):
-            self.assertEqual(addr_str, str(utils.AuthenticIPNetwork(addr_str)))
-
-    def test_invalid_values(self):
-        for addr in ('XXXX', 'ypp', 'g3:vvv'):
-            with testtools.ExpectedException(netaddr.core.AddrFormatError):
-                utils.AuthenticIPNetwork(addr)
-
-
-class TestExcDetails(base.BaseTestCase):
-
-    def test_attach_exc_details(self):
-        e = Exception()
-        utils.attach_exc_details(e, 'details')
-        self.assertEqual('details', utils.extract_exc_details(e))
-
-    def test_attach_exc_details_with_interpolation(self):
-        e = Exception()
-        utils.attach_exc_details(e, 'details: %s', 'foo')
-        self.assertEqual('details: foo', utils.extract_exc_details(e))
-
-    def test_attach_exc_details_with_None_interpolation(self):
-        e = Exception()
-        utils.attach_exc_details(e, 'details: %s', None)
-        self.assertEqual(
-            'details: %s' % str(None), utils.extract_exc_details(e))
-
-    def test_attach_exc_details_with_multiple_interpolation(self):
-        e = Exception()
-        utils.attach_exc_details(
-            e, 'details: %s, %s', ('foo', 'bar'))
-        self.assertEqual('details: foo, bar', utils.extract_exc_details(e))
-
-    def test_attach_exc_details_with_dict_interpolation(self):
-        e = Exception()
-        utils.attach_exc_details(
-            e, 'details: %(foo)s, %(bar)s', {'foo': 'foo', 'bar': 'bar'})
-        self.assertEqual('details: foo, bar', utils.extract_exc_details(e))
-
-    def test_extract_exc_details_no_details_attached(self):
-        self.assertIsInstance(
-            utils.extract_exc_details(Exception()), six.text_type)
-
-
-class ImportModulesRecursivelyTestCase(base.BaseTestCase):
-
-    def test_object_modules(self):
-        example_module = 'neutron.tests.unit.tests.example.dir.example_module'
-        sys.modules.pop(example_module, None)
-        modules = utils.import_modules_recursively(
-            os.path.dirname(tests.__file__))
-        self.assertIn(example_module, modules)
-        self.assertIn(example_module, sys.modules)

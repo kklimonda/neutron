@@ -11,15 +11,15 @@
 #    under the License.
 
 import abc
-
 import netaddr
-from neutron_lib.api import validators
-from neutron_lib import constants
-from oslo_utils import netutils
+
+from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
 
-from neutron._i18n import _
+from neutron.api.v2 import attributes
+from neutron.common import constants
+from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
 from neutron.ipam import exceptions as ipam_exc
 
@@ -66,9 +66,9 @@ class SubnetRequest(object):
             previous = None
             for pool in allocation_pools:
                 if not isinstance(pool, netaddr.ip.IPRange):
-                    raise TypeError(_("Ranges must be netaddr.IPRange"))
+                    raise TypeError("Ranges must be netaddr.IPRange")
                 if previous and pool.first <= previous.last:
-                    raise ValueError(_("Ranges must not overlap"))
+                    raise ValueError("Ranges must not overlap")
                 previous = pool
             if 1 < len(allocation_pools):
                 # Checks that all the ranges are in the same IP version.
@@ -78,14 +78,13 @@ class SubnetRequest(object):
                 first_version = allocation_pools[0].version
                 last_version = allocation_pools[-1].version
                 if first_version != last_version:
-                    raise ValueError(_("Ranges must be in the same IP "
-                                       "version"))
+                    raise ValueError("Ranges must be in the same IP version")
             self._allocation_pools = allocation_pools
 
         if self.gateway_ip and self.allocation_pools:
             if self.gateway_ip.version != self.allocation_pools[0].version:
-                raise ValueError(_("Gateway IP version inconsistent with "
-                                   "allocation pool version"))
+                raise ValueError("Gateway IP version inconsistent with "
+                                 "allocation pool version")
 
     @property
     def tenant_id(self):
@@ -104,6 +103,15 @@ class SubnetRequest(object):
         return self._allocation_pools
 
     def _validate_with_subnet(self, subnet_cidr):
+        if self.gateway_ip and cfg.CONF.force_gateway_on_subnet:
+            gw_ip = netaddr.IPAddress(self.gateway_ip)
+            if (gw_ip.version == 4 or (gw_ip.version == 6
+                                       and not gw_ip.is_link_local())):
+                if self.gateway_ip not in subnet_cidr:
+                    raise ipam_exc.IpamValueInvalid(_(
+                                        "gateway_ip %s is not in the subnet") %
+                                        self.gateway_ip)
+
         if self.allocation_pools:
             if subnet_cidr.version != self.allocation_pools[0].version:
                 raise ipam_exc.IpamValueInvalid(_(
@@ -117,9 +125,9 @@ class SubnetRequest(object):
 class AnySubnetRequest(SubnetRequest):
     """A template for allocating an unspecified subnet from IPAM
 
-    Support for this type of request in a driver is optional. For example, the
-    initial reference implementation will not support this.  The API has no way
-    of creating a subnet without a specific address until subnet-allocation is
+    A driver may not implement this type of request.  For example, The initial
+    reference implementation will not support this.  The API has no way of
+    creating a subnet without a specific address until subnet-allocation is
     implemented.
     """
     WILDCARDS = {constants.IPv4: '0.0.0.0',
@@ -206,10 +214,6 @@ class AnyAddressRequest(AddressRequest):
     """Used to request any available address from the pool."""
 
 
-class PreferNextAddressRequest(AnyAddressRequest):
-    """Used to request next available IP address from the pool."""
-
-
 class AutomaticAddressRequest(SpecificAddressRequest):
     """Used to create auto generated addresses, such as EUI64"""
     EUI64 = 'eui64'
@@ -218,10 +222,10 @@ class AutomaticAddressRequest(SpecificAddressRequest):
         if set(kwargs) != set(['prefix', 'mac']):
             raise ipam_exc.AddressCalculationFailure(
                 address_type='eui-64',
-                reason=_('must provide exactly 2 arguments - cidr and MAC'))
+                reason='must provide exactly 2 arguments - cidr and MAC')
         prefix = kwargs['prefix']
         mac_address = kwargs['mac']
-        return netutils.get_ipv6_addr_by_EUI64(prefix, mac_address)
+        return ipv6_utils.get_ipv6_addr_by_EUI64(prefix, mac_address)
 
     _address_generators = {EUI64: _generate_eui64_address}
 
@@ -231,8 +235,8 @@ class AutomaticAddressRequest(SpecificAddressRequest):
         generating it can be passed as optional keyword arguments.
 
         :param address_type: the type of address to generate.
-            It could be an eui-64 address, a random IPv6 address, or
-            an ipv4 link-local address.
+            It could be a eui-64 address, a random IPv6 address, or
+            a ipv4 link-local address.
             For the Kilo release only eui-64 addresses will be supported.
         """
         address_generator = self._address_generators.get(address_type)
@@ -269,9 +273,6 @@ class AddressRequestFactory(object):
         elif ip_dict.get('eui64_address'):
             return AutomaticAddressRequest(prefix=ip_dict['subnet_cidr'],
                                            mac=ip_dict['mac'])
-        elif port['device_owner'] == constants.DEVICE_OWNER_DHCP:
-            # preserve previous behavior of DHCP ports choosing start of pool
-            return PreferNextAddressRequest()
         else:
             return AnyAddressRequest()
 
@@ -283,11 +284,11 @@ class SubnetRequestFactory(object):
     def get_request(cls, context, subnet, subnetpool):
         cidr = subnet.get('cidr')
         subnet_id = subnet.get('id', uuidutils.generate_uuid())
-        is_any_subnetpool_request = not validators.is_attr_set(cidr)
+        is_any_subnetpool_request = not attributes.is_attr_set(cidr)
 
         if is_any_subnetpool_request:
             prefixlen = subnet['prefixlen']
-            if not validators.is_attr_set(prefixlen):
+            if not attributes.is_attr_set(prefixlen):
                 prefixlen = int(subnetpool['default_prefixlen'])
 
             return AnySubnetRequest(

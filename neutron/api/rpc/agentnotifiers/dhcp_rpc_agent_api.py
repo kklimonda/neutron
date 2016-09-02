@@ -13,19 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 
-from neutron._i18n import _LE, _LW
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants as n_const
+from neutron.common import constants
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
+from neutron.i18n import _LE, _LW
 from neutron import manager
 
 
@@ -36,7 +35,7 @@ class DhcpAgentNotifyAPI(object):
     """API for plugin to notify DHCP agent.
 
     This class implements the client side of an rpc interface.  The server side
-    is neutron.agent.dhcp.agent.DhcpAgent.  For more information about changing
+    is neutron.agent.dhcp_agent.DhcpAgent.  For more information about changing
     rpc interfaces, please see doc/source/devref/rpc_api.rst.
     """
     # It seems dhcp agent does not support bulk operation
@@ -60,18 +59,6 @@ class DhcpAgentNotifyAPI(object):
                            resources.ROUTER_INTERFACE, events.AFTER_CREATE)
         registry.subscribe(self._after_router_interface_deleted,
                            resources.ROUTER_INTERFACE, events.AFTER_DELETE)
-        # register callbacks for events pertaining resources affecting DHCP
-        callback_resources = (
-            resources.NETWORK,
-            resources.NETWORKS,
-            resources.PORT,
-            resources.PORTS,
-            resources.SUBNET,
-            resources.SUBNETS,
-        )
-        for resource in callback_resources:
-            registry.subscribe(self._send_dhcp_notification,
-                               resource, events.BEFORE_RESPONSE)
 
     @property
     def plugin(self):
@@ -91,10 +78,9 @@ class DhcpAgentNotifyAPI(object):
                     context, 'network_create_end',
                     {'network': {'id': network['id']}}, agent['host'])
         elif not existing_agents:
-            LOG.warning(_LW('Unable to schedule network %s: no agents '
-                            'available; will retry on subsequent port '
-                            'and subnet creation events.'),
-                        network['id'])
+            LOG.warn(_LW('Unable to schedule network %s: no agents available; '
+                         'will retry on subsequent port and subnet creation '
+                         'events.'), network['id'])
         return new_agents + existing_agents
 
     def _get_enabled_agents(self, context, network, agents, method, payload):
@@ -109,13 +95,12 @@ class DhcpAgentNotifyAPI(object):
         len_enabled_agents = len(enabled_agents)
         len_active_agents = len(active_agents)
         if len_active_agents < len_enabled_agents:
-            LOG.warning(_LW("Only %(active)d of %(total)d DHCP agents "
-                            "associated with network '%(net_id)s' "
-                            "are marked as active, so notifications "
-                            "may be sent to inactive agents."),
-                        {'active': len_active_agents,
-                         'total': len_enabled_agents,
-                         'net_id': network_id})
+            LOG.warn(_LW("Only %(active)d of %(total)d DHCP agents associated "
+                         "with network '%(net_id)s' are marked as active, so "
+                         "notifications may be sent to inactive agents."),
+                     {'active': len_active_agents,
+                      'total': len_enabled_agents,
+                      'net_id': network_id})
         if not enabled_agents:
             num_ports = self.plugin.get_ports_count(
                 context, {'network_id': [network_id]})
@@ -131,7 +116,7 @@ class DhcpAgentNotifyAPI(object):
         return enabled_agents
 
     def _is_reserved_dhcp_port(self, port):
-        return port.get('device_id') == n_const.DEVICE_ID_RESERVED_DHCP_PORT
+        return port.get('device_id') == constants.DEVICE_ID_RESERVED_DHCP_PORT
 
     def _notify_agents(self, context, method, payload, network_id):
         """Notify all the agents that are hosting the network."""
@@ -149,17 +134,9 @@ class DhcpAgentNotifyAPI(object):
         elif cast_required:
             admin_ctx = (context if context.is_admin else context.elevated())
             network = self.plugin.get_network(admin_ctx, network_id)
-            if 'subnet' in payload and payload['subnet'].get('segment_id'):
-                # if segment_id exists then the segment service plugin
-                # must be loaded
-                nm = manager.NeutronManager
-                segment_plugin = nm.get_service_plugins()['segments']
-                segment = segment_plugin.get_segment(
-                    context, payload['subnet']['segment_id'])
-                network['candidate_hosts'] = segment['hosts']
-
             agents = self.plugin.get_dhcp_agents_hosting_networks(
-                context, [network_id], hosts=network.get('candidate_hosts'))
+                context, [network_id])
+
             # schedule the network first, if needed
             schedule_required = (
                 method == 'subnet_create_end' or
@@ -211,17 +188,6 @@ class DhcpAgentNotifyAPI(object):
         self._notify_agents(kwargs['context'], 'port_delete_end',
                             {'port_id': kwargs['port']['id']},
                             kwargs['port']['network_id'])
-
-    def _send_dhcp_notification(self, resource, event, trigger, context=None,
-                                data=None, method_name=None, collection=None,
-                                **kwargs):
-        if cfg.CONF.dhcp_agent_notification:
-            if collection and collection in data:
-                for body in data[collection]:
-                    item = {resource: body}
-                    self.notify(context, item, method_name)
-            else:
-                self.notify(context, data, method_name)
 
     def notify(self, context, data, method_name):
         # data is {'key' : 'value'} with only one key
