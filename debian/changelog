@@ -1,3 +1,11 @@
+neutron (2:9.0.0~b3-0ubuntu3) UNRELEASED; urgency=medium
+
+  * d/neutron-linuxbridge-agent.service.in: Attempt load of br_netfilter
+    module prior to starting service, ensuring that security rules will
+    be applied to instances (LP: #1621854).
+
+ -- James Page <james.page@ubuntu.com>  Fri, 09 Sep 2016 14:20:07 +0100
+
 neutron (2:9.0.0~b3-0ubuntu2) yakkety; urgency=medium
 
   * d/control: Set minimum version of neutron-fwaas to 9.0.0~b3, resolving

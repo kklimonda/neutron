@@ -10,6 +10,7 @@ WorkingDirectory=/var/lib/neutron
 PermissionsStartOnly=true
 ExecStartPre=/bin/mkdir -p /var/lock/neutron /var/log/neutron /var/lib/neutron
 ExecStartPre=/bin/chown neutron:neutron /var/lock/neutron /var/log/neutron /var/lib/neutron
+ExecStartPre=-/sbin/modprobe br_netfilter
 ExecStart=/etc/init.d/neutron-linuxbridge-agent systemd-start
 Restart=on-failure
 LimitNOFILE=65535
