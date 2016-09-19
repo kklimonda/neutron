@@ -16,16 +16,21 @@
 import abc
 import sys
 
+from neutron_lib import constants
+from oslo_utils import versionutils
 from oslo_versionedobjects import base as obj_base
+from oslo_versionedobjects import exception
 from oslo_versionedobjects import fields as obj_fields
 import six
 
-from neutron.common import constants
 from neutron.common import utils
 from neutron.db import api as db_api
 from neutron.db.qos import models as qos_db_model
 from neutron.objects import base
+from neutron.objects import common_types
 from neutron.services.qos import qos_consts
+
+DSCP_MARK = 'dscp_mark'
 
 
 def get_rules(context, qos_policy_id):
@@ -42,6 +47,14 @@ def get_rules(context, qos_policy_id):
 
 @six.add_metaclass(abc.ABCMeta)
 class QosRule(base.NeutronDbObject):
+    # Version 1.0: Initial version, only BandwidthLimitRule
+    #         1.1: Added DscpMarkingRule
+    #         1.2: Added QosMinimumBandwidthRule
+    #
+    #NOTE(mangelajo): versions need to be handled from the top QosRule object
+    #                 because it's the only reference QosPolicy can make
+    #                 to them via obj_relationships version map
+    VERSION = '1.2'
 
     fields = {
         'id': obj_fields.UUIDField(),
@@ -86,3 +99,42 @@ class QosBandwidthLimitRule(QosRule):
     }
 
     rule_type = qos_consts.RULE_TYPE_BANDWIDTH_LIMIT
+
+
+@obj_base.VersionedObjectRegistry.register
+class QosDscpMarkingRule(QosRule):
+
+    db_model = qos_db_model.QosDscpMarkingRule
+
+    fields = {
+        DSCP_MARK: common_types.DscpMarkField(),
+    }
+
+    rule_type = qos_consts.RULE_TYPE_DSCP_MARKING
+
+    def obj_make_compatible(self, primitive, target_version):
+        _target_version = versionutils.convert_version_to_tuple(target_version)
+        if _target_version < (1, 1):
+            raise exception.IncompatibleObjectVersion(
+                                 objver=target_version,
+                                 objname="QosDscpMarkingRule")
+
+
+@obj_base.VersionedObjectRegistry.register
+class QosMinimumBandwidthRule(QosRule):
+
+    db_model = qos_db_model.QosMinimumBandwidthRule
+
+    fields = {
+        'min_kbps': obj_fields.IntegerField(nullable=True),
+        'direction': common_types.FlowDirectionEnumField(),
+    }
+
+    rule_type = qos_consts.RULE_TYPE_MINIMUM_BANDWIDTH
+
+    def obj_make_compatible(self, primitive, target_version):
+        _target_version = versionutils.convert_version_to_tuple(target_version)
+        if _target_version < (1, 2):
+            raise exception.IncompatibleObjectVersion(
+                                 objver=target_version,
+                                 objname="QosMinimumBandwidthRule")

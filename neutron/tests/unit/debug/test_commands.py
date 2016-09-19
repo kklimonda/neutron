@@ -23,6 +23,7 @@ from neutron.agent.linux import interface
 from neutron.common import config as common_config
 from neutron.debug import commands
 from neutron.debug import debug_agent
+from neutron.extensions import portbindings
 from neutron.tests import base
 
 
@@ -35,11 +36,9 @@ class TestDebugCommands(base.BaseTestCase):
     def setUp(self):
         super(TestDebugCommands, self).setUp()
         cfg.CONF.register_opts(interface.OPTS)
-        cfg.CONF.register_opts(debug_agent.NeutronDebugAgent.OPTS)
+        cfg.CONF.register_opts(config.EXT_NET_BRIDGE_OPTS)
         common_config.init([])
         config.register_interface_driver_opts_helper(cfg.CONF)
-        config.register_use_namespaces_opts_helper(cfg.CONF)
-        cfg.CONF.set_override('use_namespaces', True)
 
         device_exists_p = mock.patch(
             'neutron.agent.linux.ip_lib.device_exists', return_value=False)
@@ -116,7 +115,7 @@ class TestDebugCommands(base.BaseTestCase):
                      'admin_state_up': True,
                      'network_id': 'fake_net',
                      'tenant_id': 'fake_tenant',
-                     'binding:host_id': cfg.CONF.host,
+                     portbindings.HOST_ID: cfg.CONF.host,
                      'fixed_ips': [{'subnet_id': 'fake_subnet'}],
                      'device_id': socket.gethostname()}}
         namespace = 'qprobe-fake_port'
@@ -161,7 +160,7 @@ class TestDebugCommands(base.BaseTestCase):
                      'admin_state_up': True,
                      'network_id': 'fake_net',
                      'tenant_id': 'fake_tenant',
-                     'binding:host_id': cfg.CONF.host,
+                     portbindings.HOST_ID: cfg.CONF.host,
                      'fixed_ips': [{'subnet_id': 'fake_subnet'}],
                      'device_id': socket.gethostname()}}
         namespace = 'qprobe-fake_port'
@@ -174,7 +173,7 @@ class TestDebugCommands(base.BaseTestCase):
                                                      'fake_port',
                                                      'tap12345678-12',
                                                      'aa:bb:cc:dd:ee:ffa',
-                                                     bridge='br-ex',
+                                                     bridge='',
                                                      namespace=namespace),
                                       mock.call.init_l3('tap12345678-12',
                                                         ['10.0.0.3/24'],
@@ -224,22 +223,7 @@ class TestDebugCommands(base.BaseTestCase):
         self.driver.assert_has_calls([mock.call.get_device_name(mock.ANY),
                                       mock.call.unplug('tap12345678-12',
                                                        namespace=namespace,
-                                                       bridge='br-ex')])
-
-    def test_delete_probe_without_namespace(self):
-        cfg.CONF.set_override('use_namespaces', False)
-        cmd = commands.DeleteProbe(self.app, None)
-        cmd_parser = cmd.get_parser('delete_probe')
-        args = ['fake_port']
-        parsed_args = cmd_parser.parse_args(args)
-        cmd.run(parsed_args)
-        self.client.assert_has_calls([mock.call.show_port('fake_port'),
-                                      mock.call.show_network('fake_net'),
-                                      mock.call.show_subnet('fake_subnet'),
-                                      mock.call.delete_port('fake_port')])
-        self.driver.assert_has_calls([mock.call.get_device_name(mock.ANY),
-                                      mock.call.unplug('tap12345678-12',
-                                                       bridge=None)])
+                                                       bridge='')])
 
     def test_list_probe(self):
         cmd = commands.ListProbe(self.app, None)
@@ -260,17 +244,6 @@ class TestDebugCommands(base.BaseTestCase):
         with mock.patch('neutron.agent.linux.ip_lib.IpNetnsCommand') as ns:
             cmd.run(parsed_args)
             ns.assert_has_calls([mock.call.execute(mock.ANY)])
-        self.client.assert_has_calls([mock.call.show_port('fake_port')])
-
-    def test_exec_command_without_namespace(self):
-        cfg.CONF.set_override('use_namespaces', False)
-        cmd = commands.ExecProbe(self.app, None)
-        cmd_parser = cmd.get_parser('exec_command')
-        args = ['fake_port', 'fake_command']
-        parsed_args = cmd_parser.parse_args(args)
-        with mock.patch('neutron.agent.linux.utils.execute') as exe:
-            cmd.run(parsed_args)
-            exe.assert_has_calls([mock.call.execute(mock.ANY)])
         self.client.assert_has_calls([mock.call.show_port('fake_port')])
 
     def test_clear_probe(self):
@@ -316,7 +289,7 @@ class TestDebugCommands(base.BaseTestCase):
                      'admin_state_up': True,
                      'network_id': 'fake_net',
                      'tenant_id': 'fake_tenant',
-                     'binding:host_id': cfg.CONF.host,
+                     portbindings.HOST_ID: cfg.CONF.host,
                      'fixed_ips': [{'subnet_id': 'fake_subnet'}],
                      'device_id': socket.gethostname()}}
         expected = [mock.call.show_network('fake_net'),

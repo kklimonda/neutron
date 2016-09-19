@@ -26,6 +26,7 @@ from neutron.tests import base
 
 class TestOVSCleanup(base.BaseTestCase):
 
+    @mock.patch('neutron.agent.ovsdb.native.connection.Connection.start')
     @mock.patch('neutron.common.config.setup_logging')
     @mock.patch('neutron.cmd.ovs_cleanup.setup_conf')
     @mock.patch('neutron.agent.common.ovs_lib.BaseOVS.get_bridges')
@@ -33,7 +34,7 @@ class TestOVSCleanup(base.BaseTestCase):
     @mock.patch.object(util, 'collect_neutron_ports')
     @mock.patch.object(util, 'delete_neutron_ports')
     def test_main(self, mock_delete, mock_collect, mock_ovs,
-                  mock_get_bridges, mock_conf, mock_logging):
+                  mock_get_bridges, mock_conf, mock_logging, mock_conn):
         bridges = ['br-int', 'br-ex']
         ports = ['p1', 'p2', 'p3']
         conf = mock.Mock()
@@ -70,13 +71,14 @@ class TestOVSCleanup(base.BaseTestCase):
         ports = ['tap1234', 'tap5678', 'tap09ab']
         port_found = [True, False, True]
 
-        with mock.patch.object(
-                ip_lib, 'device_exists',
-                side_effect=port_found) as device_exists:
-            util.delete_neutron_ports(ports)
-            device_exists.assert_has_calls([mock.call(p) for p in ports])
-            mock_ip.assert_has_calls(
-                [mock.call('tap1234'),
+        mock_ip.return_value.exists.side_effect = port_found
+        util.delete_neutron_ports(ports)
+        mock_ip.assert_has_calls(
+            [mock.call('tap1234'),
+             mock.call().exists(),
              mock.call().link.delete(),
+             mock.call('tap5678'),
+             mock.call().exists(),
              mock.call('tap09ab'),
+             mock.call().exists(),
              mock.call().link.delete()])

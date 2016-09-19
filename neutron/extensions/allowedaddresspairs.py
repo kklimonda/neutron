@@ -12,20 +12,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api import converters
+from neutron_lib.api import validators
+from neutron_lib import constants
+from neutron_lib import exceptions as nexception
+from oslo_config import cfg
 import webob.exc
 
+from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
-from neutron.common import exceptions as nexception
-from oslo_config import cfg
+from neutron.conf.extensions import allowedaddresspairs as addr_pair
 
-allowed_address_pair_opts = [
-    #TODO(limao): use quota framework when it support quota for attributes
-    cfg.IntOpt('max_allowed_address_pair', default=10,
-               help=_("Maximum number of allowed address pairs")),
-]
-
-cfg.CONF.register_opts(allowed_address_pair_opts)
+addr_pair.register_allowed_address_pair_opts()
 
 
 class AllowedAddressPairsMissingIP(nexception.InvalidInput):
@@ -60,7 +59,7 @@ def _validate_allowed_address_pairs(address_pairs, valid_values=None):
     for address_pair in address_pairs:
         # mac_address is optional, if not set we use the mac on the port
         if 'mac_address' in address_pair:
-            msg = attr._validate_mac_address(address_pair['mac_address'])
+            msg = validators.validate_mac_address(address_pair['mac_address'])
             if msg:
                 raise webob.exc.HTTPBadRequest(msg)
         if 'ip_address' not in address_pair:
@@ -83,26 +82,26 @@ def _validate_allowed_address_pairs(address_pairs, valid_values=None):
             raise webob.exc.HTTPBadRequest(msg)
 
         if '/' in ip_address:
-            msg = attr._validate_subnet(ip_address)
+            msg = validators.validate_subnet(ip_address)
         else:
-            msg = attr._validate_ip_address(ip_address)
+            msg = validators.validate_ip_address(ip_address)
         if msg:
             raise webob.exc.HTTPBadRequest(msg)
 
-attr.validators['type:validate_allowed_address_pairs'] = (
-    _validate_allowed_address_pairs)
+validators.add_validator('validate_allowed_address_pairs',
+                         _validate_allowed_address_pairs)
 
 ADDRESS_PAIRS = 'allowed_address_pairs'
 EXTENDED_ATTRIBUTES_2_0 = {
     'ports': {
         ADDRESS_PAIRS: {'allow_post': True, 'allow_put': True,
-                        'convert_to': attr.convert_none_to_empty_list,
+                        'convert_to': converters.convert_none_to_empty_list,
                         'convert_list_to':
-                        attr.convert_kvp_list_to_dict,
+                        converters.convert_kvp_list_to_dict,
                         'validate': {'type:validate_allowed_address_pairs':
                                      None},
                         'enforce_policy': True,
-                        'default': attr.ATTR_NOT_SPECIFIED,
+                        'default': constants.ATTR_NOT_SPECIFIED,
                         'is_visible': True},
     }
 }

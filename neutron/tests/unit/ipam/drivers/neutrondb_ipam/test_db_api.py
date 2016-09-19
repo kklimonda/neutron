@@ -56,85 +56,18 @@ class TestIpamSubnetManager(testlib_api.SqlTestCase):
                                                 'non-existent')
         self.assertEqual(0, count)
 
-    def _create_pools(self, pools):
-        db_pools = []
-        for pool in pools:
-            db_pool = self.subnet_manager.create_pool(self.ctx.session,
-                                                      pool[0],
-                                                      pool[1])
-            db_pools.append(db_pool)
-        return db_pools
-
     def _validate_ips(self, pools, db_pool):
         self.assertTrue(
             any(pool == (db_pool.first_ip, db_pool.last_ip) for pool in pools))
 
     def test_create_pool(self):
-        db_pools = self._create_pools([self.single_pool])
+        self.subnet_manager.create_pool(self.ctx.session,
+                                        self.single_pool[0],
+                                        self.single_pool[1])
 
         ipam_pool = self.ctx.session.query(db_models.IpamAllocationPool).\
             filter_by(ipam_subnet_id=self.ipam_subnet_id).first()
         self._validate_ips([self.single_pool], ipam_pool)
-
-        range = self.ctx.session.query(db_models.IpamAvailabilityRange).\
-            filter_by(allocation_pool_id=db_pools[0].id).first()
-        self._validate_ips([self.single_pool], range)
-
-    def _test_get_first_range(self, locking):
-        self._create_pools(self.multi_pool)
-        range = self.subnet_manager.get_first_range(self.ctx.session,
-                                                    locking=locking)
-        self._validate_ips(self.multi_pool, range)
-
-    def test_get_first_range(self):
-        self._test_get_first_range(False)
-
-    def test_get_first_range_locking(self):
-        self._test_get_first_range(True)
-
-    def test_list_ranges_by_subnet_id(self):
-        self._create_pools(self.multi_pool)
-
-        db_ranges = self.subnet_manager.list_ranges_by_subnet_id(
-            self.ctx.session,
-            self.ipam_subnet_id).all()
-        self.assertEqual(2, len(db_ranges))
-        self.assertEqual(db_models.IpamAvailabilityRange, type(db_ranges[0]))
-
-    def test_list_ranges_by_allocation_pool(self):
-        db_pools = self._create_pools([self.single_pool])
-        # generate ids for allocation pools on flush
-        self.ctx.session.flush()
-        db_ranges = self.subnet_manager.list_ranges_by_allocation_pool(
-            self.ctx.session,
-            db_pools[0].id).all()
-        self.assertEqual(1, len(db_ranges))
-        self.assertEqual(db_models.IpamAvailabilityRange, type(db_ranges[0]))
-        self._validate_ips([self.single_pool], db_ranges[0])
-
-    def test_create_range(self):
-        self._create_pools([self.single_pool])
-        pool = self.ctx.session.query(db_models.IpamAllocationPool).\
-            filter_by(ipam_subnet_id=self.ipam_subnet_id).first()
-        self._validate_ips([self.single_pool], pool)
-        allocation_pool_id = pool.id
-
-        # delete the range
-        db_range = self.subnet_manager.list_ranges_by_allocation_pool(
-            self.ctx.session,
-            pool.id).first()
-        self._validate_ips([self.single_pool], db_range)
-        self.ctx.session.delete(db_range)
-
-        # create a new range
-        range_start = '1.2.3.5'
-        range_end = '1.2.3.9'
-        new_range = self.subnet_manager.create_range(self.ctx.session,
-                                                     allocation_pool_id,
-                                                     range_start,
-                                                     range_end)
-        self.assertEqual(range_start, new_range.first_ip)
-        self.assertEqual(range_end, new_range.last_ip)
 
     def test_check_unique_allocation(self):
         self.assertTrue(self.subnet_manager.check_unique_allocation(

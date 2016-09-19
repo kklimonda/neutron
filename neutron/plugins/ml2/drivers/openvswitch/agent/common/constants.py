@@ -35,11 +35,40 @@ NONEXISTENT_PEER = 'nonexistent-peer'
 TUNNEL_NETWORK_TYPES = [p_const.TYPE_GRE, p_const.TYPE_VXLAN,
                         p_const.TYPE_GENEVE]
 
+### OpenFlow table IDs
+
+## Integration bridge (int_br)
+
+LOCAL_SWITCHING = 0
 
 # Various tables for DVR use of integration bridge flows
-LOCAL_SWITCHING = 0
 DVR_TO_SRC_MAC = 1
 DVR_TO_SRC_MAC_VLAN = 2
+
+CANARY_TABLE = 23
+
+# Table for ARP poison/spoofing prevention rules
+ARP_SPOOF_TABLE = 24
+
+# Table for MAC spoof filtering
+MAC_SPOOF_TABLE = 25
+
+# Tables used for ovs firewall
+BASE_EGRESS_TABLE = 71
+RULES_EGRESS_TABLE = 72
+ACCEPT_OR_INGRESS_TABLE = 73
+BASE_INGRESS_TABLE = 81
+RULES_INGRESS_TABLE = 82
+
+OVS_FIREWALL_TABLES = (
+    BASE_EGRESS_TABLE,
+    RULES_EGRESS_TABLE,
+    ACCEPT_OR_INGRESS_TABLE,
+    BASE_INGRESS_TABLE,
+    RULES_INGRESS_TABLE,
+)
+
+## Tunnel bridge (tun_br)
 
 # Various tables for tunneling flows
 DVR_PROCESS = 1
@@ -54,20 +83,14 @@ UCAST_TO_TUN = 20
 ARP_RESPONDER = 21
 FLOOD_TO_TUN = 22
 
+## Physical Bridges (phys_brs)
+
 # Various tables for DVR use of physical bridge flows
 DVR_PROCESS_VLAN = 1
 LOCAL_VLAN_TRANSLATION = 2
 DVR_NOT_LEARN_VLAN = 3
 
-# Tables for integration bridge
-# Table 0 is used for forwarding.
-CANARY_TABLE = 23
-
-# Table for ARP poison/spoofing prevention rules
-ARP_SPOOF_TABLE = 24
-
-# Table for MAC spoof filtering
-MAC_SPOOF_TABLE = 25
+### end of OpenFlow table IDs
 
 # type for ARP reply in ARP header
 ARP_REPLY = '0x2'
@@ -103,5 +126,25 @@ EXTENSION_DRIVER_TYPE = 'ovs'
 # ovs datapath types
 OVS_DATAPATH_SYSTEM = 'system'
 OVS_DATAPATH_NETDEV = 'netdev'
+OVS_DPDK_VHOST_USER = 'dpdkvhostuser'
+
+# default ovs vhost-user socket location
+VHOST_USER_SOCKET_DIR = '/var/run/openvswitch'
 
 MAX_DEVICE_RETRIES = 5
+
+# OpenFlow version constants
+OPENFLOW10 = "OpenFlow10"
+OPENFLOW11 = "OpenFlow11"
+OPENFLOW12 = "OpenFlow12"
+OPENFLOW13 = "OpenFlow13"
+OPENFLOW14 = "OpenFlow14"
+
+# A placeholder for dead vlans.
+DEAD_VLAN_TAG = p_const.MAX_VLAN_TAG + 1
+
+# callback resource for setting 'bridge_name' in the 'binding:vif_details'
+OVS_BRIDGE_NAME = 'ovs_bridge_name'
+
+# callback resource for notifying to ovsdb handler
+OVSDB_RESOURCE = 'ovsdb'

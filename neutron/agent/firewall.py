@@ -18,9 +18,34 @@ import contextlib
 
 import six
 
+from neutron_lib import constants as n_const
 
-INGRESS_DIRECTION = 'ingress'
-EGRESS_DIRECTION = 'egress'
+import neutron.common.constants as const
+from neutron.common import utils
+from neutron.extensions import portsecurity as psec
+
+INGRESS_DIRECTION = const.INGRESS_DIRECTION
+EGRESS_DIRECTION = const.EGRESS_DIRECTION
+
+DIRECTION_IP_PREFIX = {INGRESS_DIRECTION: 'source_ip_prefix',
+                       EGRESS_DIRECTION: 'dest_ip_prefix'}
+
+# List of ICMPv6 types that should be permitted (ingress) by default. This list
+# depends on iptables conntrack behavior of recognizing ICMP errors (types 1-4)
+# as related traffic.
+ICMPV6_ALLOWED_TYPES = [n_const.ICMPV6_TYPE_MLD_QUERY,
+                        n_const.ICMPV6_TYPE_RA,
+                        n_const.ICMPV6_TYPE_NS,
+                        n_const.ICMPV6_TYPE_NA]
+
+
+def port_sec_enabled(port):
+    return port.get(psec.PORTSECURITY, True)
+
+
+def load_firewall_driver_class(driver):
+    return utils.load_class_by_alias_or_classname(
+        'neutron.agent.firewall_drivers', driver)
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -57,12 +82,16 @@ class FirewallDriver(object):
       remote_group_id will also remaining membership update management
     """
 
+    # OVS agent installs arp spoofing openflow rules. If firewall is capable
+    # of handling that, ovs agent doesn't need to install the protection.
+    provides_arp_spoofing_protection = False
+
+    @abc.abstractmethod
     def prepare_port_filter(self, port):
         """Prepare filters for the port.
 
         This method should be called before the port is created.
         """
-        raise NotImplementedError()
 
     def apply_port_filter(self, port):
         """Apply port filter.
@@ -74,14 +103,14 @@ class FirewallDriver(object):
         """
         raise NotImplementedError()
 
+    @abc.abstractmethod
     def update_port_filter(self, port):
         """Refresh security group rules from data store
 
-        Gets called when an port gets added to or removed from
+        Gets called when a port gets added to or removed from
         the security group the port is a member of or if the
         group gains or looses a rule.
         """
-        raise NotImplementedError()
 
     def remove_port_filter(self, port):
         """Stop filtering port."""
@@ -119,7 +148,11 @@ class FirewallDriver(object):
 
     def security_group_updated(self, action_type, sec_group_ids,
                                device_id=None):
-        """Called when a security group is updated."""
+        """Called when a security group is updated.
+
+        Note: This method needs to be implemented by the firewall drivers
+        which use enhanced RPC for security_groups.
+        """
         raise NotImplementedError()
 
 

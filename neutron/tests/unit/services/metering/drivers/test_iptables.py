@@ -146,7 +146,7 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 10.0.0.0/24'
+                                    '-s 10.0.0.0/24 -i qg-6d411f48-ec'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False),
                  mock.call.add_chain('neutron-meter-l-eeef45da-c60',
@@ -160,11 +160,41 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-eeef45da-c60',
-                                    '-o qg-7d411f48-ec -s 20.0.0.0/24'
+                                    '-d 20.0.0.0/24 -o qg-7d411f48-ec'
                                     ' -j neutron-meter-l-eeef45da-c60',
                                     wrap=False, top=False)]
 
         self.v4filter_inst.assert_has_calls(calls)
+
+    def test_process_metering_label_rules_with_no_gateway_router(self):
+        routers = copy.deepcopy(TEST_ROUTERS)
+        for router in routers:
+            router['gw_port_id'] = None
+
+        self.metering.add_metering_label(None, routers)
+
+        calls = [mock.call.add_chain('neutron-meter-l-c5df2fe5-c60',
+                                     wrap=False),
+                 mock.call.add_chain('neutron-meter-r-c5df2fe5-c60',
+                                     wrap=False),
+                 mock.call.add_rule('neutron-meter-FORWARD', '-j '
+                                    'neutron-meter-r-c5df2fe5-c60',
+                                    wrap=False),
+                 mock.call.add_rule('neutron-meter-l-c5df2fe5-c60',
+                                    '',
+                                    wrap=False),
+                 mock.call.add_chain('neutron-meter-l-eeef45da-c60',
+                                     wrap=False),
+                 mock.call.add_chain('neutron-meter-r-eeef45da-c60',
+                                     wrap=False),
+                 mock.call.add_rule('neutron-meter-FORWARD', '-j '
+                                    'neutron-meter-r-eeef45da-c60',
+                                    wrap=False),
+                 mock.call.add_rule('neutron-meter-l-eeef45da-c60',
+                                    '',
+                                    wrap=False)]
+
+        self.v4filter_inst.assert_has_calls(calls, any_order=False)
 
     def test_add_metering_label_with_rules(self):
         routers = copy.deepcopy(TEST_ROUTERS)
@@ -185,7 +215,7 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 10.0.0.0/24'
+                                    '-s 10.0.0.0/24 -i qg-6d411f48-ec'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False),
                  mock.call.add_chain('neutron-meter-l-eeef45da-c60',
@@ -199,7 +229,7 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-eeef45da-c60',
-                                    '-i qg-7d411f48-ec -d 20.0.0.0/24'
+                                    '-s 20.0.0.0/24 -i qg-7d411f48-ec'
                                     ' -j RETURN',
                                     wrap=False, top=True)]
 
@@ -236,17 +266,17 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 10.0.0.0/24'
+                                    '-s 10.0.0.0/24 -i qg-6d411f48-ec'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False),
                  mock.call.empty_chain('neutron-meter-r-c5df2fe5-c60',
                                        wrap=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-o qg-6d411f48-ec -s 10.0.0.0/24'
+                                    '-d 10.0.0.0/24 -o qg-6d411f48-ec'
                                     ' -j RETURN',
                                     wrap=False, top=True),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 20.0.0.0/24 -j '
+                                    '-s 20.0.0.0/24 -i qg-6d411f48-ec -j '
                                     'neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False)]
 
@@ -278,17 +308,17 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 10.0.0.0/24'
+                                    '-s 10.0.0.0/24 -i qg-6d411f48-ec'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 20.0.0.0/24'
+                                    '-s 20.0.0.0/24 -i qg-6d411f48-ec'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False),
                  mock.call.empty_chain('neutron-meter-r-c5df2fe5-c60',
                                        wrap=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 10.0.0.0/24'
+                                    '-s 10.0.0.0/24 -i qg-6d411f48-ec'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False)]
 
@@ -300,11 +330,11 @@ class IptablesDriverTestCase(base.BaseTestCase):
         self.metering.add_metering_label_rule(None, new_routers_rules)
         calls = [
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 30.0.0.0/24'
+                                    '-s 30.0.0.0/24 -i qg-6d411f48-ec'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False),
                  mock.call.add_rule('neutron-meter-r-eeef45da-c60',
-                                    '-o qg-7d411f48-ec -s 40.0.0.0/24'
+                                    '-d 40.0.0.0/24 -o qg-7d411f48-ec'
                                     ' -j neutron-meter-l-eeef45da-c60',
                                     wrap=False, top=False),
 
@@ -318,11 +348,11 @@ class IptablesDriverTestCase(base.BaseTestCase):
         self.metering.remove_metering_label_rule(None, new_routers_rules)
         calls = [
             mock.call.remove_rule('neutron-meter-r-c5df2fe5-c60',
-                                  '-i qg-6d411f48-ec -d 30.0.0.0/24'
+                                  '-s 30.0.0.0/24 -i qg-6d411f48-ec'
                                   ' -j neutron-meter-l-c5df2fe5-c60',
                                   wrap=False, top=False),
             mock.call.remove_rule('neutron-meter-r-eeef45da-c60',
-                                  '-o qg-7d411f48-ec -s 40.0.0.0/24'
+                                  '-d 40.0.0.0/24 -o qg-7d411f48-ec'
                                   ' -j neutron-meter-l-eeef45da-c60',
                                   wrap=False, top=False)
                 ]
@@ -344,7 +374,7 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 10.0.0.0/24'
+                                    '-s 10.0.0.0/24 -i qg-6d411f48-ec'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False),
                  mock.call.remove_chain('neutron-meter-l-c5df2fe5-c60',
@@ -378,7 +408,7 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-6d411f48-ec -d 10.0.0.0/24'
+                                    '-s 10.0.0.0/24 -i qg-6d411f48-ec'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False),
                  mock.call.add_chain('neutron-meter-l-eeef45da-c60',
@@ -392,7 +422,7 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-eeef45da-c60',
-                                    '-i qg-7d411f48-ec -d 20.0.0.0/24'
+                                    '-s 20.0.0.0/24 -i qg-7d411f48-ec'
                                     ' -j RETURN',
                                     wrap=False, top=True),
                  mock.call.remove_chain('neutron-meter-l-c5df2fe5-c60',
@@ -410,7 +440,7 @@ class IptablesDriverTestCase(base.BaseTestCase):
                                     '',
                                     wrap=False),
                  mock.call.add_rule('neutron-meter-r-c5df2fe5-c60',
-                                    '-i qg-587b63c1-22 -d 10.0.0.0/24'
+                                    '-s 10.0.0.0/24 -i qg-587b63c1-22'
                                     ' -j neutron-meter-l-c5df2fe5-c60',
                                     wrap=False, top=False)]
 

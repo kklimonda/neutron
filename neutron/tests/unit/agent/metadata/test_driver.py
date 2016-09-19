@@ -19,11 +19,12 @@ from oslo_utils import uuidutils
 
 from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import agent as l3_agent
-from neutron.agent.l3 import config as l3_config
 from neutron.agent.l3 import ha as l3_ha_agent
+from neutron.agent.l3 import router_info
 from neutron.agent.metadata import config
 from neutron.agent.metadata import driver as metadata_driver
 from neutron.common import constants
+from neutron.conf.agent.l3 import config as l3_config
 from neutron.tests import base
 
 
@@ -69,16 +70,28 @@ class TestMetadataDriverProcess(base.BaseTestCase):
         agent_config.register_interface_driver_opts_helper(cfg.CONF)
         cfg.CONF.set_override('interface_driver',
                               'neutron.agent.linux.interface.NullDriver')
-        agent_config.register_use_namespaces_opts_helper(cfg.CONF)
 
         mock.patch('neutron.agent.l3.agent.L3PluginApi').start()
         mock.patch('neutron.agent.l3.ha.AgentMixin'
                    '._init_ha_conf_path').start()
 
-        cfg.CONF.register_opts(l3_config.OPTS)
+        l3_config.register_l3_agent_config_opts(l3_config.OPTS, cfg.CONF)
         cfg.CONF.register_opts(l3_ha_agent.OPTS)
         cfg.CONF.register_opts(config.SHARED_OPTS)
         cfg.CONF.register_opts(config.DRIVER_OPTS)
+
+    def test_after_router_updated_called_on_agent_process_update(self):
+        with mock.patch.object(metadata_driver, 'after_router_updated') as f,\
+                mock.patch.object(router_info.RouterInfo, 'process'):
+            agent = l3_agent.L3NATAgent('localhost')
+            router_id = _uuid()
+            router = {'id': router_id}
+            ri = router_info.RouterInfo(router_id, router,
+                                        agent.conf, mock.ANY)
+            agent.router_info[router_id] = ri
+            agent._process_updated_router(router)
+            f.assert_called_once_with(
+                'router', 'after_update', agent, router=ri)
 
     def _test_spawn_metadata_proxy(self, expected_user, expected_group,
                                    user='', group='', watch_log=True):
@@ -116,7 +129,6 @@ class TestMetadataDriverProcess(base.BaseTestCase):
                 '--metadata_proxy_user=%s' % expected_user,
                 '--metadata_proxy_group=%s' % expected_group,
                 '--debug',
-                '--verbose',
                 '--log-file=neutron-ns-metadata-proxy-%s.log' %
                 router_id]
             if not watch_log:

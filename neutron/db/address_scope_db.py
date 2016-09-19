@@ -12,25 +12,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_log import log as logging
+from neutron_lib import constants
 from oslo_utils import uuidutils
-import sqlalchemy as sa
 from sqlalchemy.orm import exc
 
-from neutron.db import model_base
-from neutron.db import models_v2
+from neutron._i18n import _
+from neutron.api.v2 import attributes as attr
+from neutron.common import _deprecate
+from neutron.db import db_base_plugin_v2
+from neutron.db.models import address_scope as address_scope_model
 from neutron.extensions import address_scope as ext_address_scope
+from neutron.objects import subnetpool as subnetpool_obj
 
-LOG = logging.getLogger(__name__)
 
-
-class AddressScope(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
-    """Represents a neutron address scope."""
-
-    __tablename__ = "address_scopes"
-
-    name = sa.Column(sa.String(255), nullable=False)
-    shared = sa.Column(sa.Boolean, nullable=False)
+_deprecate._moved_global('AddressScope', new_module=address_scope_model)
 
 
 class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
@@ -42,12 +37,14 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
         res = {'id': address_scope['id'],
                'name': address_scope['name'],
                'tenant_id': address_scope['tenant_id'],
-               'shared': address_scope['shared']}
+               'shared': address_scope['shared'],
+               'ip_version': address_scope['ip_version']}
         return self._fields(res, fields)
 
     def _get_address_scope(self, context, id):
         try:
-            return self._get_by_id(context, AddressScope, id)
+            return self._get_by_id(context, address_scope_model.AddressScope,
+                                   id)
         except exc.NoResultFound:
             raise ext_address_scope.AddressScopeNotFound(address_scope_id=id)
 
@@ -66,17 +63,21 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
         return context.is_admin or (
             address_scope.tenant_id == context.tenant_id)
 
+    def get_ip_version_for_address_scope(self, context, id):
+        address_scope = self._get_address_scope(context, id)
+        return address_scope.ip_version
+
     def create_address_scope(self, context, address_scope):
-        """Create a address scope."""
+        """Create an address scope."""
         a_s = address_scope['address_scope']
-        tenant_id = self._get_tenant_id_for_create(context, a_s)
         address_scope_id = a_s.get('id') or uuidutils.generate_uuid()
         with context.session.begin(subtransactions=True):
-            pool_args = {'tenant_id': tenant_id,
+            pool_args = {'tenant_id': a_s['tenant_id'],
                          'id': address_scope_id,
                          'name': a_s['name'],
-                         'shared': a_s['shared']}
-            address_scope = AddressScope(**pool_args)
+                         'shared': a_s['shared'],
+                         'ip_version': a_s['ip_version']}
+            address_scope = address_scope_model.AddressScope(**pool_args)
             context.session.add(address_scope)
 
         return self._make_address_scope_dict(address_scope)
@@ -101,7 +102,8 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
                            sorts=None, limit=None, marker=None,
                            page_reverse=False):
         marker_obj = self._get_marker_obj(context, 'addrscope', limit, marker)
-        collection = self._get_collection(context, AddressScope,
+        collection = self._get_collection(context,
+                                          address_scope_model.AddressScope,
                                           self._make_address_scope_dict,
                                           filters=filters, fields=fields,
                                           sorts=sorts,
@@ -111,12 +113,36 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
         return collection
 
     def get_address_scopes_count(self, context, filters=None):
-        return self._get_collection_count(context, AddressScope,
+        return self._get_collection_count(context,
+                                          address_scope_model.AddressScope,
                                           filters=filters)
 
     def delete_address_scope(self, context, id):
         with context.session.begin(subtransactions=True):
-            if self._get_subnetpools_by_address_scope_id(context, id):
+            if subnetpool_obj.SubnetPool.get_objects(context,
+                                                     address_scope_id=id):
                 raise ext_address_scope.AddressScopeInUse(address_scope_id=id)
             address_scope = self._get_address_scope(context, id)
             context.session.delete(address_scope)
+
+    def _extend_network_dict_address_scope(self, network_res, network_db):
+        network_res[ext_address_scope.IPV4_ADDRESS_SCOPE] = None
+        network_res[ext_address_scope.IPV6_ADDRESS_SCOPE] = None
+        subnetpools = {subnet.subnetpool for subnet in network_db.subnets
+                       if subnet.subnetpool}
+        for subnetpool in subnetpools:
+            # A network will be constrained to only one subnetpool per address
+            # family. Retrieve the address scope of subnetpools as the address
+            # scopes of network.
+            as_id = subnetpool[ext_address_scope.ADDRESS_SCOPE_ID]
+            if subnetpool['ip_version'] == constants.IP_VERSION_4:
+                network_res[ext_address_scope.IPV4_ADDRESS_SCOPE] = as_id
+            if subnetpool['ip_version'] == constants.IP_VERSION_6:
+                network_res[ext_address_scope.IPV6_ADDRESS_SCOPE] = as_id
+        return network_res
+
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+        attr.NETWORKS, ['_extend_network_dict_address_scope'])
+
+
+_deprecate._MovedGlobals()

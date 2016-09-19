@@ -15,12 +15,15 @@
 
 import abc
 
-from oslo_config import cfg
+from neutron_lib.api import converters
+from neutron_lib import exceptions as nexception
+import six
 
+from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import resource_helper
-from neutron.common import exceptions as nexception
+from neutron.conf import quota
 from neutron.plugins.common import constants
 
 
@@ -77,6 +80,8 @@ class RouterExternalGatewayInUseByFloatingIp(nexception.InUse):
                 "more floating IPs.")
 
 ROUTERS = 'routers'
+FLOATINGIP = 'floatingip'
+FLOATINGIPS = '%ss' % FLOATINGIP
 EXTERNAL_GW_INFO = 'external_gateway_info'
 
 RESOURCE_ATTRIBUTE_MAP = {
@@ -90,7 +95,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                  'is_visible': True, 'default': ''},
         'admin_state_up': {'allow_post': True, 'allow_put': True,
                            'default': True,
-                           'convert_to': attr.convert_to_boolean,
+                           'convert_to': converters.convert_to_boolean,
                            'is_visible': True},
         'status': {'allow_post': False, 'allow_put': False,
                    'is_visible': True},
@@ -107,7 +112,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                                                   'required': True},
                                    'external_fixed_ips': {
                                        'convert_list_to':
-                                       attr.convert_kvp_list_to_dict,
+                                       converters.convert_kvp_list_to_dict,
                                        'type:fixed_ips': None,
                                        'default': None,
                                        'required': False,
@@ -115,7 +120,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                                }
                            }}
     },
-    'floatingips': {
+    FLOATINGIPS: {
         'id': {'allow_post': False, 'allow_put': False,
                'validate': {'type:uuid': None},
                'is_visible': True,
@@ -150,17 +155,8 @@ RESOURCE_ATTRIBUTE_MAP = {
     },
 }
 
-l3_quota_opts = [
-    cfg.IntOpt('quota_router',
-               default=10,
-               help=_('Number of routers allowed per tenant. '
-                      'A negative value means unlimited.')),
-    cfg.IntOpt('quota_floatingip',
-               default=50,
-               help=_('Number of floating IPs allowed per tenant. '
-                      'A negative value means unlimited.')),
-]
-cfg.CONF.register_opts(l3_quota_opts, 'QUOTAS')
+# Register the configuration options
+quota.register_quota_opts(quota.l3_quota_opts)
 
 
 class L3(extensions.ExtensionDescriptor):
@@ -209,6 +205,7 @@ class L3(extensions.ExtensionDescriptor):
             return {}
 
 
+@six.add_metaclass(abc.ABCMeta)
 class RouterPluginBase(object):
 
     @abc.abstractmethod

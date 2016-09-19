@@ -20,10 +20,10 @@ from oslo_config import cfg
 from oslo_log import log as logging
 import webob
 
+from neutron._i18n import _, _LI
 from neutron.agent.linux import keepalived
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import utils as common_utils
-from neutron.i18n import _LI
 from neutron.notifiers import batch_notifier
 
 LOG = logging.getLogger(__name__)
@@ -134,11 +134,13 @@ class AgentMixin(object):
         # include any IPv6 subnet, enable the gateway interface to accept
         # Router Advts from upstream router for default route.
         ex_gw_port_id = ri.ex_gw_port and ri.ex_gw_port['id']
-        if state == 'master' and ex_gw_port_id and ri.use_ipv6:
-            gateway_ips = ri._get_external_gw_ips(ri.ex_gw_port)
-            if not ri.is_v6_gateway_set(gateway_ips):
-                interface_name = ri.get_external_device_name(ex_gw_port_id)
-                ri.driver.configure_ipv6_ra(ri.ns_name, interface_name)
+        if state == 'master' and ex_gw_port_id:
+            interface_name = ri.get_external_device_name(ex_gw_port_id)
+            if ri.router.get('distributed', False):
+                namespace = ri.ha_namespace
+            else:
+                namespace = ri.ns_name
+            ri._enable_ra_on_gw(ri.ex_gw_port, namespace, interface_name)
 
     def _update_metadata_proxy(self, ri, router_id, state):
         if state == 'master':

@@ -19,7 +19,9 @@ import functools
 import ryu.app.ofctl.api  # noqa
 from ryu.base import app_manager
 from ryu.lib import hub
+from ryu.lib import type_desc
 from ryu.ofproto import ofproto_v1_3
+from ryu.ofproto import oxm_fields
 
 from neutron.plugins.ml2.drivers.openvswitch.agent.openflow.native \
     import br_int
@@ -31,12 +33,26 @@ from neutron.plugins.ml2.drivers.openvswitch.agent \
     import ovs_neutron_agent as ovs_agent
 
 
+def agent_main_wrapper(bridge_classes):
+    ovs_agent.main(bridge_classes)
+    # The following call terminates Ryu's AppManager.run_apps(),
+    # which is needed for clean shutdown of an agent process.
+    # The close() call must be called in another thread, otherwise
+    # it suicides and ends prematurely.
+    hub.spawn(app_manager.AppManager.get_instance().close)
+
+
 class OVSNeutronAgentRyuApp(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
     def start(self):
         # Start Ryu event loop thread
         super(OVSNeutronAgentRyuApp, self).start()
+
+        # patch ryu
+        ofproto_v1_3.oxm_types.append(
+            oxm_fields.NiciraExtended0('vlan_tci', 4, type_desc.Int2))
+        oxm_fields.generate(ofproto_v1_3.__name__)
 
         def _make_br_cls(br_cls):
             return functools.partial(br_cls, ryu_app=self)
@@ -47,4 +63,4 @@ class OVSNeutronAgentRyuApp(app_manager.RyuApp):
             'br_phys': _make_br_cls(br_phys.OVSPhysicalBridge),
             'br_tun': _make_br_cls(br_tun.OVSTunnelBridge),
         }
-        return hub.spawn(ovs_agent.main, bridge_classes)
+        return hub.spawn(agent_main_wrapper, bridge_classes)

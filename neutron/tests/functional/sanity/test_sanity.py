@@ -26,9 +26,6 @@ class SanityTestCase(base.BaseTestCase):
     where someone modifies the API without updating the check script.
     """
 
-    def setUp(self):
-        super(SanityTestCase, self).setUp()
-
     def test_nova_notify_runs(self):
         checks.nova_notify_supported()
 
@@ -76,6 +73,9 @@ class SanityTestCaseRoot(functional_base.BaseSudoTestCase):
 
     def test_vf_management_runs(self):
         checks.vf_management_supported()
+
+    def test_vf_extended_management_runs(self):
+        checks.vf_extended_management_supported()
 
     def test_namespace_root_read_detection_runs(self):
         checks.netns_read_requires_helper()

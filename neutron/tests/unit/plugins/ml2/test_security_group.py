@@ -15,9 +15,10 @@
 #    under the License.
 
 import math
-import mock
 
-from neutron.common import constants as const
+import mock
+from neutron_lib import constants as const
+
 from neutron import context
 from neutron.extensions import securitygroup as ext_sg
 from neutron import manager
@@ -26,12 +27,10 @@ from neutron.tests.unit.agent import test_securitygroups_rpc as test_sg_rpc
 from neutron.tests.unit.api.v2 import test_base
 from neutron.tests.unit.extensions import test_securitygroup as test_sg
 
-PLUGIN_NAME = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 NOTIFIER = 'neutron.plugins.ml2.rpc.AgentNotifierApi'
 
 
 class Ml2SecurityGroupsTestCase(test_sg.SecurityGroupDBTestCase):
-    _plugin_name = PLUGIN_NAME
 
     def setUp(self, plugin=None):
         test_sg_rpc.set_firewall_driver(test_sg_rpc.FIREWALL_HYBRID_DRIVER)
@@ -40,7 +39,7 @@ class Ml2SecurityGroupsTestCase(test_sg.SecurityGroupDBTestCase):
         self.notifier = mock.Mock()
         notifier_cls.return_value = self.notifier
         self.useFixture(tools.AttributeMapMemento())
-        super(Ml2SecurityGroupsTestCase, self).setUp(PLUGIN_NAME)
+        super(Ml2SecurityGroupsTestCase, self).setUp('ml2')
 
     def tearDown(self):
         super(Ml2SecurityGroupsTestCase, self).tearDown()
@@ -136,7 +135,7 @@ class TestMl2SecurityGroups(Ml2SecurityGroupsTestCase,
     def test_full_uuids_skip_port_id_lookup(self):
         plugin = manager.NeutronManager.get_plugin()
         # when full UUIDs are provided, the _or statement should only
-        # have one matching 'IN' critiera for all of the IDs
+        # have one matching 'IN' criteria for all of the IDs
         with mock.patch('neutron.plugins.ml2.db.or_') as or_mock,\
                 mock.patch('sqlalchemy.orm.Session.query') as qmock:
             fmock = qmock.return_value.outerjoin.return_value.filter

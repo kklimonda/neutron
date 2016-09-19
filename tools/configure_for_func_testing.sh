@@ -51,14 +51,10 @@ done
 # Default to environment variables to permit the gate_hook to override
 # when sourcing.
 VENV=${VENV:-dsvm-functional}
-# If executed in the gate, run in a constrained env
-if [[ "$IS_GATE" == "True" && "$USE_CONSTRAINT_ENV" == "True" ]]
-then
-    VENV=$VENV-constraints
-fi
 DEVSTACK_PATH=${DEVSTACK_PATH:-$1}
 PROJECT_NAME=${PROJECT_NAME:-neutron}
 REPO_BASE=${GATE_DEST:-$(cd $(dirname "$0")/../.. && pwd)}
+INSTALL_MYSQL_ONLY=${INSTALL_MYSQL_ONLY:-False}
 # The gate should automatically install dependencies.
 INSTALL_BASE_DEPENDENCIES=${INSTALL_BASE_DEPENDENCIES:-$IS_GATE}
 
@@ -115,7 +111,10 @@ function _install_rpc_backend {
 }
 
 
+# _install_databases [install_pg]
 function _install_databases {
+    local install_pg=${1:-True}
+
     echo_summary "Installing databases"
 
     # Avoid attempting to configure the db if it appears to already
@@ -135,10 +134,12 @@ function _install_databases {
     install_database
     configure_database_mysql
 
-    enable_service postgresql
-    initialize_database_backends
-    install_database
-    configure_database_postgresql
+    if [[ "$install_pg" == "True" ]]; then
+        enable_service postgresql
+        initialize_database_backends
+        install_database
+        configure_database_postgresql
+    fi
 
     # Set up the 'openstack_citest' user and database in each backend
     tmp_dir=$(mktemp -d)
@@ -154,14 +155,16 @@ FLUSH PRIVILEGES;
 EOF
     /usr/bin/mysql -u root < $tmp_dir/mysql.sql
 
-    cat << EOF > $tmp_dir/postgresql.sql
+    if [[ "$install_pg" == "True" ]]; then
+        cat << EOF > $tmp_dir/postgresql.sql
 CREATE USER openstack_citest WITH CREATEDB LOGIN PASSWORD 'openstack_citest';
 CREATE DATABASE openstack_citest WITH OWNER openstack_citest;
 EOF
 
-    # User/group postgres needs to be given access to tmp_dir
-    setfacl -m g:postgres:rwx $tmp_dir
-    sudo -u postgres /usr/bin/psql --file=$tmp_dir/postgresql.sql
+        # User/group postgres needs to be given access to tmp_dir
+        setfacl -m g:postgres:rwx $tmp_dir
+        sudo -u postgres /usr/bin/psql --file=$tmp_dir/postgresql.sql
+    fi
 }
 
 
@@ -218,8 +221,8 @@ function _install_post_devstack {
     _install_rootwrap_sudoers
 
     if is_ubuntu; then
-        install_package netcat-openbsd
         install_package isc-dhcp-client
+        install_package netcat-openbsd
     elif is_fedora; then
         install_package dhclient
     else
@@ -235,6 +238,15 @@ function _install_post_devstack {
     # NOTE: the package name 'python-openvswitch' is common across
     # supported distros.
     install_package python-openvswitch
+}
+
+
+function _configure_iptables_rules {
+    # For linuxbridge agent fullstack tests we need to add special rules to
+    # iptables for connection of agents to rabbitmq:
+    CHAIN_NAME="openstack-INPUT"
+    sudo iptables -n --list $CHAIN_NAME 1> /dev/null 2>&1 || CHAIN_NAME="INPUT"
+    sudo iptables -I $CHAIN_NAME -s 240.0.0.0/8 -p tcp -m tcp -d 240.0.0.0/8 --dport 5672 -j ACCEPT
 }
 
 
@@ -257,5 +269,13 @@ _init
 
 
 if [[ "$IS_GATE" != "True" ]]; then
-    configure_host_for_func_testing
+    if [[ "$INSTALL_MYSQL_ONLY" == "True" ]]; then
+        _install_databases nopg
+    else
+        configure_host_for_func_testing
+    fi
+fi
+
+if [[ "$VENV" =~ "dsvm-fullstack" ]]; then
+    _configure_iptables_rules
 fi

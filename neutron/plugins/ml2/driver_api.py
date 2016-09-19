@@ -14,6 +14,7 @@
 #    under the License.
 
 import abc
+
 import six
 
 # The following keys are used in the segment dictionaries passed via
@@ -362,7 +363,7 @@ class PortContext(object):
     def original_bottom_bound_segment(self):
         """Return the original bottom-level bound segment dictionary.
 
-        This property returns the orignal bottom-level bound segment
+        This property returns the original bottom-level bound segment
         dictionary, or None if the port was previously unbound. For a
         previously bound port, original_bottom_bound_segment is
         equivalent to original_binding_levels[-1][BOUND_SEGMENT], and
@@ -904,6 +905,25 @@ class MechanismDriver(object):
         workers, can return a sequence of NeutronWorker instances.
         """
         return ()
+
+    @classmethod
+    def is_host_filtering_supported(cls):
+        return (cls.filter_hosts_with_segment_access !=
+                MechanismDriver.filter_hosts_with_segment_access)
+
+    def filter_hosts_with_segment_access(
+            self, context, segments, candidate_hosts, agent_getter):
+        """Filter hosts with access to at least one segment.
+
+        :returns: a set with a subset of candidate_hosts.
+
+        A driver can overload this method to return a subset of candidate_hosts
+        with the ones with access to at least one segment.
+
+        Default implementation returns all hosts to disable filtering
+        (backward compatibility).
+        """
+        return candidate_hosts
 
 
 @six.add_metaclass(abc.ABCMeta)

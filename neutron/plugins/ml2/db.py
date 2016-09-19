@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from debtcollector import moves
+from neutron_lib import constants as n_const
 from oslo_db import exception as db_exc
 from oslo_log import log
 from oslo_utils import uuidutils
@@ -20,110 +22,47 @@ import six
 from sqlalchemy import or_
 from sqlalchemy.orm import exc
 
-from neutron.common import constants as n_const
+from neutron._i18n import _, _LE
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
+from neutron.db.models import securitygroup as sg_models
 from neutron.db import models_v2
-from neutron.db import securitygroups_db as sg_db
+from neutron.db import segments_db
 from neutron.extensions import portbindings
-from neutron.i18n import _LE, _LI
 from neutron import manager
-from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import models
+from neutron.services.segments import exceptions as seg_exc
 
 LOG = log.getLogger(__name__)
 
 # limit the number of port OR LIKE statements in one query
 MAX_PORTS_PER_QUERY = 500
 
+# The API methods from segments_db
+add_network_segment = moves.moved_function(
+    segments_db.add_network_segment, 'add_network_segment', __name__,
+    version='Newton', removal_version='Ocata')
 
-def _make_segment_dict(record):
-    """Make a segment dictionary out of a DB record."""
-    return {api.ID: record.id,
-            api.NETWORK_TYPE: record.network_type,
-            api.PHYSICAL_NETWORK: record.physical_network,
-            api.SEGMENTATION_ID: record.segmentation_id}
+get_network_segments = moves.moved_function(
+    segments_db.get_network_segments, 'get_network_segments', __name__,
+    version='Newton', removal_version='Ocata')
 
+get_networks_segments = moves.moved_function(
+    segments_db.get_networks_segments, 'get_networks_segments', __name__,
+    version='Newton', removal_version='Ocata')
 
-def add_network_segment(session, network_id, segment, segment_index=0,
-                        is_dynamic=False):
-    with session.begin(subtransactions=True):
-        record = models.NetworkSegment(
-            id=uuidutils.generate_uuid(),
-            network_id=network_id,
-            network_type=segment.get(api.NETWORK_TYPE),
-            physical_network=segment.get(api.PHYSICAL_NETWORK),
-            segmentation_id=segment.get(api.SEGMENTATION_ID),
-            segment_index=segment_index,
-            is_dynamic=is_dynamic
-        )
-        session.add(record)
-        segment[api.ID] = record.id
-    LOG.info(_LI("Added segment %(id)s of type %(network_type)s for network"
-                 " %(network_id)s"),
-             {'id': record.id,
-              'network_type': record.network_type,
-              'network_id': record.network_id})
+get_segment_by_id = moves.moved_function(
+    segments_db.get_segment_by_id, 'get_segment_by_id', __name__,
+    version='Newton', removal_version='Ocata')
 
+get_dynamic_segment = moves.moved_function(
+    segments_db.get_dynamic_segment, 'get_dynamic_segment', __name__,
+    version='Newton', removal_version='Ocata')
 
-def get_network_segments(session, network_id, filter_dynamic=False):
-    return get_networks_segments(
-        session, [network_id], filter_dynamic)[network_id]
-
-
-def get_networks_segments(session, network_ids, filter_dynamic=False):
-    with session.begin(subtransactions=True):
-        query = (session.query(models.NetworkSegment).
-                 filter(models.NetworkSegment.network_id.in_(network_ids)).
-                 order_by(models.NetworkSegment.segment_index))
-        if filter_dynamic is not None:
-            query = query.filter_by(is_dynamic=filter_dynamic)
-        records = query.all()
-        result = {net_id: [] for net_id in network_ids}
-        for record in records:
-            result[record.network_id].append(_make_segment_dict(record))
-        return result
-
-
-def get_segment_by_id(session, segment_id):
-    with session.begin(subtransactions=True):
-        try:
-            record = (session.query(models.NetworkSegment).
-                      filter_by(id=segment_id).
-                      one())
-            return _make_segment_dict(record)
-        except exc.NoResultFound:
-            return
-
-
-def get_dynamic_segment(session, network_id, physical_network=None,
-                        segmentation_id=None):
-        """Return a dynamic segment for the filters provided if one exists."""
-        with session.begin(subtransactions=True):
-            query = (session.query(models.NetworkSegment).
-                     filter_by(network_id=network_id, is_dynamic=True))
-            if physical_network:
-                query = query.filter_by(physical_network=physical_network)
-            if segmentation_id:
-                query = query.filter_by(segmentation_id=segmentation_id)
-            record = query.first()
-
-        if record:
-            return _make_segment_dict(record)
-        else:
-            LOG.debug("No dynamic segment found for "
-                      "Network:%(network_id)s, "
-                      "Physical network:%(physnet)s, "
-                      "segmentation_id:%(segmentation_id)s",
-                      {'network_id': network_id,
-                       'physnet': physical_network,
-                       'segmentation_id': segmentation_id})
-            return None
-
-
-def delete_network_segment(session, segment_id):
-    """Release a dynamic segment for the params provided if one exists."""
-    with session.begin(subtransactions=True):
-        (session.query(models.NetworkSegment).
-         filter_by(id=segment_id).delete())
+delete_network_segment = moves.moved_function(
+    segments_db.delete_network_segment, 'delete_network_segment', __name__,
+    version='Newton', removal_version='Ocata')
 
 
 def add_port_binding(session, port_id):
@@ -196,15 +135,15 @@ def clear_binding_levels(session, port_id, host):
                    'host': host})
 
 
-def ensure_dvr_port_binding(session, port_id, host, router_id=None):
-    record = (session.query(models.DVRPortBinding).
+def ensure_distributed_port_binding(session, port_id, host, router_id=None):
+    record = (session.query(models.DistributedPortBinding).
               filter_by(port_id=port_id, host=host).first())
     if record:
         return record
 
     try:
         with session.begin(subtransactions=True):
-            record = models.DVRPortBinding(
+            record = models.DistributedPortBinding(
                 port_id=port_id,
                 host=host,
                 router_id=router_id,
@@ -214,27 +153,20 @@ def ensure_dvr_port_binding(session, port_id, host, router_id=None):
             session.add(record)
             return record
     except db_exc.DBDuplicateEntry:
-        LOG.debug("DVR Port %s already bound", port_id)
-        return (session.query(models.DVRPortBinding).
+        LOG.debug("Distributed Port %s already bound", port_id)
+        return (session.query(models.DistributedPortBinding).
                 filter_by(port_id=port_id, host=host).one())
 
 
-def delete_dvr_port_binding(session, port_id, host):
-    with session.begin(subtransactions=True):
-        (session.query(models.DVRPortBinding).
-         filter_by(port_id=port_id, host=host).
-         delete(synchronize_session=False))
-
-
-def delete_dvr_port_binding_if_stale(session, binding):
+def delete_distributed_port_binding_if_stale(session, binding):
     if not binding.router_id and binding.status == n_const.PORT_STATUS_DOWN:
         with session.begin(subtransactions=True):
-            LOG.debug("DVR: Deleting binding %s", binding)
+            LOG.debug("Distributed port: Deleting binding %s", binding)
             session.delete(binding)
 
 
 def get_port(session, port_id):
-    """Get port record for update within transcation."""
+    """Get port record for update within transaction."""
 
     with session.begin(subtransactions=True):
         try:
@@ -281,7 +213,7 @@ def get_ports_and_sgs(context, port_ids):
 
 def get_sg_ids_grouped_by_port(context, port_ids):
     sg_ids_grouped_by_port = {}
-    sg_binding_port = sg_db.SecurityGroupPortBinding.port_id
+    sg_binding_port = sg_models.SecurityGroupPortBinding.port_id
 
     with context.session.begin(subtransactions=True):
         # partial UUIDs must be individually matched with startswith.
@@ -295,8 +227,9 @@ def get_sg_ids_grouped_by_port(context, port_ids):
             or_criteria.append(models_v2.Port.id.in_(full_uuids))
 
         query = context.session.query(
-            models_v2.Port, sg_db.SecurityGroupPortBinding.security_group_id)
-        query = query.outerjoin(sg_db.SecurityGroupPortBinding,
+            models_v2.Port,
+            sg_models.SecurityGroupPortBinding.security_group_id)
+        query = query.outerjoin(sg_models.SecurityGroupPortBinding,
                                 models_v2.Port.id == sg_binding_port)
         query = query.filter(or_(*or_criteria))
 
@@ -336,12 +269,12 @@ def get_port_binding_host(session, port_id):
     return query.host
 
 
-def generate_dvr_port_status(session, port_id):
+def generate_distributed_port_status(session, port_id):
     # an OR'ed value of status assigned to parent port from the
-    # dvrportbinding bucket
-    query = session.query(models.DVRPortBinding)
+    # distributedportbinding bucket
+    query = session.query(models.DistributedPortBinding)
     final_status = n_const.PORT_STATUS_BUILD
-    for bind in query.filter(models.DVRPortBinding.port_id == port_id):
+    for bind in query.filter(models.DistributedPortBinding.port_id == port_id):
         if bind.status == n_const.PORT_STATUS_ACTIVE:
             return bind.status
         elif bind.status == n_const.PORT_STATUS_DOWN:
@@ -349,22 +282,57 @@ def generate_dvr_port_status(session, port_id):
     return final_status
 
 
-def get_dvr_port_binding_by_host(session, port_id, host):
+def get_distributed_port_binding_by_host(session, port_id, host):
     with session.begin(subtransactions=True):
-        binding = (session.query(models.DVRPortBinding).
-                   filter(models.DVRPortBinding.port_id.startswith(port_id),
-                          models.DVRPortBinding.host == host).first())
+        binding = (session.query(models.DistributedPortBinding).
+            filter(models.DistributedPortBinding.port_id.startswith(port_id),
+                   models.DistributedPortBinding.host == host).first())
     if not binding:
-        LOG.debug("No binding for DVR port %(port_id)s with host "
+        LOG.debug("No binding for distributed port %(port_id)s with host "
                   "%(host)s", {'port_id': port_id, 'host': host})
     return binding
 
 
-def get_dvr_port_bindings(session, port_id):
+def get_distributed_port_bindings(session, port_id):
     with session.begin(subtransactions=True):
-        bindings = (session.query(models.DVRPortBinding).
-                    filter(models.DVRPortBinding.port_id.startswith(port_id)).
-                    all())
+        bindings = (session.query(models.DistributedPortBinding).
+                    filter(models.DistributedPortBinding.port_id.startswith(
+                           port_id)).all())
     if not bindings:
-        LOG.debug("No bindings for DVR port %s", port_id)
+        LOG.debug("No bindings for distributed port %s", port_id)
     return bindings
+
+
+def is_dhcp_active_on_any_subnet(context, subnet_ids):
+    if not subnet_ids:
+        return False
+    return bool(context.session.query(models_v2.Subnet).
+                enable_eagerloads(False).filter_by(enable_dhcp=True).
+                filter(models_v2.Subnet.id.in_(subnet_ids)).count())
+
+
+def _prevent_segment_delete_with_port_bound(resource, event, trigger,
+                                            context, segment):
+    """Raise exception if there are any ports bound with segment_id."""
+    segment_id = segment['id']
+    query = context.session.query(models_v2.Port)
+    query = query.join(
+        models.PortBindingLevel,
+        models.PortBindingLevel.port_id == models_v2.Port.id)
+    query = query.filter(models.PortBindingLevel.segment_id == segment_id)
+    port_ids = [p.id for p in query]
+
+    # There are still some ports in the segment, segment should not be deleted
+    # TODO(xiaohhui): Should we delete the dhcp port automatically here?
+    if port_ids:
+        reason = _("The segment is still bound with port(s) "
+                   "%s") % ", ".join(port_ids)
+        raise seg_exc.SegmentInUse(segment_id=segment_id, reason=reason)
+
+
+def subscribe():
+    registry.subscribe(_prevent_segment_delete_with_port_bound,
+                       resources.SEGMENT,
+                       events.BEFORE_DELETE)
+
+subscribe()

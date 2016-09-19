@@ -13,8 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from neutron_lib import constants
 from oslo_config import cfg
-from oslo_log import log as logging
+from oslo_service import wsgi as base_wsgi
 import routes as routes_mapper
 import six
 import six.moves.urllib.parse as urlparse
@@ -31,8 +32,6 @@ from neutron.quota import resource_registry
 from neutron import wsgi
 
 
-LOG = logging.getLogger(__name__)
-
 RESOURCES = {'network': 'networks',
              'subnet': 'subnets',
              'subnetpool': 'subnetpools',
@@ -40,7 +39,7 @@ RESOURCES = {'network': 'networks',
 SUB_RESOURCES = {}
 COLLECTION_ACTIONS = ['index', 'create']
 MEMBER_ACTIONS = ['show', 'update', 'delete']
-REQUIREMENTS = {'id': attributes.UUID_PATTERN, 'format': 'json'}
+REQUIREMENTS = {'id': constants.UUID_PATTERN, 'format': 'json'}
 
 
 class Index(wsgi.Application):
@@ -66,7 +65,7 @@ class Index(wsgi.Application):
         return webob.Response(body=body, content_type=content_type)
 
 
-class APIRouter(wsgi.Router):
+class APIRouter(base_wsgi.Router):
 
     @classmethod
     def factory(cls, global_config, **local_config):

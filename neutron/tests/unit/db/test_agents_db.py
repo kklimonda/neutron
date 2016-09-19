@@ -1,3 +1,4 @@
+# pylint: disable=pointless-string-statement
 # Copyright (c) 2013 OpenStack Foundation.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,16 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import datetime
 import mock
 
+from neutron_lib import constants
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_db import exception as exc
 from oslo_utils import timeutils
 import testscenarios
 
-from neutron.common import constants
-from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import db_base_plugin_v2 as base_plugin
@@ -36,6 +38,15 @@ from neutron.tests.unit import testlib_api
     automatically work across tests in the module.
 """
 load_tests = testscenarios.load_tests_apply_scenarios
+
+
+TEST_RESOURCE_VERSIONS = {"A": "1.0"}
+AGENT_STATUS = {'agent_type': 'Open vSwitch agent',
+                'binary': 'neutron-openvswitch-agent',
+                'host': 'overcloud-notcompute',
+                'topic': 'N/A',
+                'resource_versions': TEST_RESOURCE_VERSIONS}
+TEST_TIME = '2016-02-26T17:08:06.116'
 
 
 class FakePlugin(base_plugin.NeutronDbPluginV2, agents_db.AgentDbMixin):
@@ -55,7 +66,8 @@ class TestAgentsDbBase(testlib_api.SqlTestCase):
                 host=host,
                 agent_type=agent_type,
                 topic='foo_topic',
-                configurations="",
+                configurations="{}",
+                resource_versions="{}",
                 created_at=timeutils.utcnow(),
                 started_at=timeutils.utcnow(),
                 heartbeat_timestamp=timeutils.utcnow())
@@ -67,11 +79,18 @@ class TestAgentsDbBase(testlib_api.SqlTestCase):
             with self.context.session.begin(subtransactions=True):
                 self.context.session.add(agent)
 
-    def _create_and_save_agents(self, hosts, agent_type, down_agents_count=0):
+    def _create_and_save_agents(self, hosts, agent_type, down_agents_count=0,
+                                down_but_version_considered=0):
         agents = self._get_agents(hosts, agent_type)
         # bring down the specified agents
         for agent in agents[:down_agents_count]:
             agent['heartbeat_timestamp'] -= datetime.timedelta(minutes=60)
+
+        # bring down just enough so their version is still considered
+        for agent in agents[down_agents_count:(
+                down_but_version_considered + down_agents_count)]:
+            agent['heartbeat_timestamp'] -= datetime.timedelta(
+                seconds=(cfg.CONF.agent_down_time + 1))
 
         self._save_agents(agents)
         return agents
@@ -81,12 +100,7 @@ class TestAgentsDbMixin(TestAgentsDbBase):
     def setUp(self):
         super(TestAgentsDbMixin, self).setUp()
 
-        self.agent_status = {
-            'agent_type': 'Open vSwitch agent',
-            'binary': 'neutron-openvswitch-agent',
-            'host': 'overcloud-notcompute',
-            'topic': 'N/A'
-        }
+        self.agent_status = dict(AGENT_STATUS)
 
     def test_get_enabled_agent_on_host_found(self):
         agents = self._create_and_save_agents(['foo_host'],
@@ -161,6 +175,69 @@ class TestAgentsDbMixin(TestAgentsDbBase):
         agent = self.plugin.get_agents(self.context)[0]
         self.assertFalse(agent['admin_state_up'])
 
+    def test_agent_health_check(self):
+        agents = [{'agent_type': "DHCP Agent",
+                   'heartbeat_timestamp': '2015-05-06 22:40:40.432295',
+                   'host': 'some.node',
+                   'alive': True}]
+        with mock.patch.object(self.plugin, 'get_agents',
+                               return_value=agents),\
+                mock.patch.object(agents_db.LOG, 'warning') as warn,\
+                mock.patch.object(agents_db.LOG, 'debug') as debug:
+            self.plugin.agent_health_check()
+            self.assertTrue(debug.called)
+            self.assertFalse(warn.called)
+            agents[0]['alive'] = False
+            self.plugin.agent_health_check()
+            warn.assert_called_once_with(
+                mock.ANY,
+                {'count': 1, 'total': 1,
+                 'data': "                Type       Last heartbeat host\n"
+                 "          DHCP Agent 2015-05-06 22:40:40.432295 some.node"}
+            )
+
+    def test__get_dict(self):
+        db_obj = mock.Mock(conf1='{"test": "1234"}')
+        conf1 = self.plugin._get_dict(db_obj, 'conf1')
+        self.assertIn('test', conf1)
+        self.assertEqual("1234", conf1['test'])
+
+    def test__get_dict_missing(self):
+        with mock.patch.object(agents_db.LOG, 'warning') as warn:
+            db_obj = mock.Mock(spec=['agent_type', 'host'])
+            self.plugin._get_dict(db_obj, 'missing_conf')
+            self.assertTrue(warn.called)
+
+    def test__get_dict_ignore_missing(self):
+        with mock.patch.object(agents_db.LOG, 'warning') as warn:
+            db_obj = mock.Mock(spec=['agent_type', 'host'])
+            missing_conf = self.plugin._get_dict(db_obj, 'missing_conf',
+                                                 ignore_missing=True)
+            self.assertEqual({}, missing_conf)
+            warn.assert_not_called()
+
+    def test__get_dict_broken(self):
+        with mock.patch.object(agents_db.LOG, 'warning') as warn:
+            db_obj = mock.Mock(conf1='{"test": BROKEN')
+            conf1 = self.plugin._get_dict(db_obj, 'conf1', ignore_missing=True)
+            self.assertEqual({}, conf1)
+            self.assertTrue(warn.called)
+
+    def get_configurations_dict(self):
+        db_obj = mock.Mock(configurations='{"cfg1": "val1"}')
+        cfg = self.plugin.get_configuration_dict(db_obj)
+        self.assertIn('cfg', cfg)
+
+    def test_get_agents_resource_versions(self):
+        tracker = mock.Mock()
+        self._create_and_save_agents(
+            ['host-%d' % i for i in range(5)],
+            constants.AGENT_TYPE_L3,
+            down_agents_count=3,
+            down_but_version_considered=2)
+        self.plugin.get_agents_resource_versions(tracker)
+        self.assertEqual(tracker.set_versions.call_count, 2)
+
 
 class TestAgentsDbGetAgents(TestAgentsDbBase):
     scenarios = [
@@ -213,3 +290,76 @@ class TestAgentsDbGetAgents(TestAgentsDbBase):
                          self.agents_alive == 'true')
                 for agent in returned_agents:
                     self.assertEqual(alive, agent['alive'])
+
+
+class TestAgentExtRpcCallback(TestAgentsDbBase):
+
+    def setUp(self):
+        super(TestAgentExtRpcCallback, self).setUp()
+        self.callback = agents_db.AgentExtRpcCallback(self.plugin)
+        self.callback.server_versions_rpc = mock.Mock()
+        self.versions_rpc = self.callback.server_versions_rpc
+        self.callback.START_TIME = datetime.datetime(datetime.MINYEAR, 1, 1)
+        self.update_versions = mock.patch(
+            'neutron.api.rpc.callbacks.version_manager.'
+            'update_versions').start()
+        self.agent_state = {'agent_state': dict(AGENT_STATUS)}
+
+    def test_create_or_update_agent_updates_version_manager(self):
+        self.callback.report_state(self.context, agent_state=self.agent_state,
+                                   time=TEST_TIME)
+        self.update_versions.assert_called_once_with(
+                mock.ANY, TEST_RESOURCE_VERSIONS)
+
+    def test_create_or_update_agent_updates_other_servers(self):
+        callback = self.callback
+        callback.report_state(self.context, agent_state=self.agent_state,
+                              time=TEST_TIME)
+        report_agent_resource_versions = (
+                self.versions_rpc.report_agent_resource_versions)
+        report_agent_resource_versions.assert_called_once_with(
+                mock.ANY, mock.ANY, mock.ANY, TEST_RESOURCE_VERSIONS)
+
+    def test_no_version_updates_on_further_state_reports(self):
+        self.test_create_or_update_agent_updates_version_manager()
+        # agents include resource_versions only in the first report after
+        # start so versions should not be updated on the second report
+        second_agent_state = copy.deepcopy(self.agent_state)
+        second_agent_state['agent_state'].pop('resource_versions')
+        self.update_versions.reset_mock()
+        report_agent_resource_versions = (
+                self.versions_rpc.report_agent_resource_versions)
+        report_agent_resource_versions.reset_mock()
+
+        self.callback.report_state(self.context,
+                                   agent_state=second_agent_state,
+                                   time=TEST_TIME)
+        self.assertFalse(self.update_versions.called)
+        self.assertFalse(report_agent_resource_versions.called)
+
+    def test_version_updates_on_agent_revival(self):
+        self.test_create_or_update_agent_updates_version_manager()
+        second_agent_state = copy.deepcopy(self.agent_state)
+        second_agent_state['agent_state'].pop('resource_versions')
+        self._take_down_agent()
+        self.update_versions.reset_mock()
+        report_agent_resource_versions = (
+                self.versions_rpc.report_agent_resource_versions)
+        report_agent_resource_versions.reset_mock()
+
+        # agent didn't include resource_versions in report but server will
+        # take them from db for the revived agent
+        self.callback.report_state(self.context,
+                                   agent_state=second_agent_state,
+                                   time=TEST_TIME)
+        self.update_versions.assert_called_once_with(
+                mock.ANY, TEST_RESOURCE_VERSIONS)
+        report_agent_resource_versions.assert_called_once_with(
+                mock.ANY, mock.ANY, mock.ANY, TEST_RESOURCE_VERSIONS)
+
+    def _take_down_agent(self):
+        with self.context.session.begin(subtransactions=True):
+            query = self.context.session.query(agents_db.Agent)
+            agt = query.first()
+            agt.heartbeat_timestamp = (
+                agt.heartbeat_timestamp - datetime.timedelta(hours=1))

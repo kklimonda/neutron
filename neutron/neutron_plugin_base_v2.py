@@ -21,11 +21,14 @@ methods that needs to be implemented by a v2 Neutron Plug-in.
 """
 
 import abc
+
 import six
+
+from neutron import worker as neutron_worker
 
 
 @six.add_metaclass(abc.ABCMeta)
-class NeutronPluginBaseV2(object):
+class NeutronPluginBaseV2(neutron_worker.WorkerSupportServiceMixin):
 
     @abc.abstractmethod
     def create_subnet(self, context, subnet):
@@ -83,7 +86,7 @@ class NeutronPluginBaseV2(object):
         :param filters: a dictionary with keys that are valid keys for
                         a subnet as listed in the :obj:`RESOURCE_ATTRIBUTE_MAP`
                         object in :file:`neutron/api/v2/attributes.py`.
-                        Values in this dictiontary are an iterable containing
+                        Values in this dictionary are an iterable containing
                         values that will be used for an exact match comparison
                         for that value.  Each result returned by this
                         function will have matched one of the values for each
@@ -108,7 +111,7 @@ class NeutronPluginBaseV2(object):
                         a network as listed in the
                         :obj:`RESOURCE_ATTRIBUTE_MAP` object in
                         :file:`neutron/api/v2/attributes.py`.  Values in this
-                        dictiontary are an iterable containing values that
+                        dictionary are an iterable containing values that
                         will be used for an exact match comparison for that
                         value.  Each result returned by this function will
                         have matched one of the values for each key in filters.
@@ -224,7 +227,7 @@ class NeutronPluginBaseV2(object):
                         a network as listed in the
                         :obj:`RESOURCE_ATTRIBUTE_MAP` object in
                         :file:`neutron/api/v2/attributes.py`.  Values in this
-                        dictiontary are an iterable containing values that will
+                        dictionary are an iterable containing values that will
                         be used for an exact match comparison for that value.
                         Each result returned by this function will have matched
                         one of the values for each key in filters.
@@ -248,7 +251,7 @@ class NeutronPluginBaseV2(object):
                         a network as listed in the
                         :obj:`RESOURCE_ATTRIBUTE_MAP` object
                         in :file:`neutron/api/v2/attributes.py`. Values in
-                        this dictiontary are an iterable containing values that
+                        this dictionary are an iterable containing values that
                         will be used for an exact match comparison for that
                         value.  Each result returned by this function will have
                         matched one of the values for each key in filters.
@@ -321,7 +324,7 @@ class NeutronPluginBaseV2(object):
         :param filters: a dictionary with keys that are valid keys for
                         a port as listed in the  :obj:`RESOURCE_ATTRIBUTE_MAP`
                         object in :file:`neutron/api/v2/attributes.py`. Values
-                        in this dictiontary are an iterable containing values
+                        in this dictionary are an iterable containing values
                         that will be used for an exact match comparison for
                         that value.  Each result returned by this function will
                         have matched one of the values for each key in filters.
@@ -344,7 +347,7 @@ class NeutronPluginBaseV2(object):
                         a network as listed in the
                         :obj:`RESOURCE_ATTRIBUTE_MAP` object in
                         :file:`neutron/api/v2/attributes.py`.  Values in this
-                        dictiontary are an iterable containing values that will
+                        dictionary are an iterable containing values that will
                         be used for an exact match comparison for that value.
                         Each result returned by this function will have matched
                         one of the values for each key in filters.
@@ -375,6 +378,16 @@ class NeutronPluginBaseV2(object):
         """
         raise NotImplementedError()
 
+    def start_rpc_state_reports_listener(self):
+        """Start the RPC listeners consuming state reports queue.
+
+        This optional method creates rpc consumer for REPORTS queue only.
+
+        .. note:: this method is optional, as it was not part of the originally
+                  defined plugin API.
+        """
+        raise NotImplementedError()
+
     def rpc_workers_supported(self):
         """Return whether the plugin supports multiple RPC workers.
 
@@ -390,11 +403,11 @@ class NeutronPluginBaseV2(object):
         return (self.__class__.start_rpc_listeners !=
                 NeutronPluginBaseV2.start_rpc_listeners)
 
-    def get_workers(self):
-        """Returns a collection NeutronWorker instances
+    def rpc_state_report_workers_supported(self):
+        """Return whether the plugin supports state report RPC workers.
 
-        If a plugin needs to define worker processes outside of API/RPC workers
-        then it will override this and return a collection of NeutronWorker
-        instances
+        .. note:: this method is optional, as it was not part of the originally
+                  defined plugin API.
         """
-        return ()
+        return (self.__class__.start_rpc_state_reports_listener !=
+                NeutronPluginBaseV2.start_rpc_state_reports_listener)

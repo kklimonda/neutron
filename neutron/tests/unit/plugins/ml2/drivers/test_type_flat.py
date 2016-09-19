@@ -13,12 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.common import exceptions as exc
+from neutron_lib import exceptions as exc
+
+from neutron.common import exceptions as n_exc
 import neutron.db.api as db
+from neutron.db.models.plugins.ml2 import flatallocation as type_flat_model
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import config
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import type_flat
+from neutron.tests import base
 from neutron.tests.unit import testlib_api
 
 
@@ -36,7 +40,7 @@ class FlatTypeTest(testlib_api.SqlTestCase):
         self.driver.physnet_mtus = []
 
     def _get_allocation(self, session, segment):
-        return session.query(type_flat.FlatAllocation).filter_by(
+        return session.query(type_flat_model.FlatAllocation).filter_by(
             physical_network=segment[api.PHYSICAL_NETWORK]).first()
 
     def test_is_partial_segment(self):
@@ -50,14 +54,21 @@ class FlatTypeTest(testlib_api.SqlTestCase):
         self.driver.validate_provider_segment(segment)
 
     def test_validate_provider_phynet_name(self):
+        self.driver._parse_networks([])
+        segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
+                   api.PHYSICAL_NETWORK: 'flat_net1'}
         self.assertRaises(exc.InvalidInput,
-                          self.driver._parse_networks,
-                          entries=[''])
+                          self.driver.validate_provider_segment,
+                          segment=segment)
 
     def test_validate_provider_phynet_name_multiple(self):
-        self.assertRaises(exc.InvalidInput,
-                          self.driver._parse_networks,
-                          entries=['flat_net1', ''])
+        self.driver._parse_networks(['flat_net1', 'flat_net2'])
+        segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
+                   api.PHYSICAL_NETWORK: 'flat_net1'}
+        self.driver.validate_provider_segment(segment)
+        segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
+                   api.PHYSICAL_NETWORK: 'flat_net2'}
+        self.driver.validate_provider_segment(segment)
 
     def test_validate_provider_segment_without_physnet_restriction(self):
         self.driver._parse_networks('*')
@@ -105,7 +116,7 @@ class FlatTypeTest(testlib_api.SqlTestCase):
         segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
                    api.PHYSICAL_NETWORK: 'flat_net1'}
         self.driver.reserve_provider_segment(self.session, segment)
-        self.assertRaises(exc.FlatNetworkInUse,
+        self.assertRaises(n_exc.FlatNetworkInUse,
                           self.driver.reserve_provider_segment,
                           self.session, segment)
 
@@ -114,22 +125,45 @@ class FlatTypeTest(testlib_api.SqlTestCase):
         self.assertIsNone(observed)
 
     def test_get_mtu(self):
-        config.cfg.CONF.set_override('segment_mtu', 1475, group='ml2')
+        config.cfg.CONF.set_override('global_physnet_mtu', 1475)
         config.cfg.CONF.set_override('path_mtu', 1400, group='ml2')
         self.driver.physnet_mtus = {'physnet1': 1450, 'physnet2': 1400}
         self.assertEqual(1450, self.driver.get_mtu('physnet1'))
 
-        config.cfg.CONF.set_override('segment_mtu', 1375, group='ml2')
+        config.cfg.CONF.set_override('global_physnet_mtu', 1375)
         config.cfg.CONF.set_override('path_mtu', 1400, group='ml2')
         self.driver.physnet_mtus = {'physnet1': 1450, 'physnet2': 1400}
         self.assertEqual(1375, self.driver.get_mtu('physnet1'))
 
-        config.cfg.CONF.set_override('segment_mtu', 0, group='ml2')
+        config.cfg.CONF.set_override('global_physnet_mtu', 0)
         config.cfg.CONF.set_override('path_mtu', 1425, group='ml2')
         self.driver.physnet_mtus = {'physnet1': 1450, 'physnet2': 1400}
         self.assertEqual(1400, self.driver.get_mtu('physnet2'))
 
-        config.cfg.CONF.set_override('segment_mtu', 0, group='ml2')
+        config.cfg.CONF.set_override('global_physnet_mtu', 0)
         config.cfg.CONF.set_override('path_mtu', 0, group='ml2')
         self.driver.physnet_mtus = {}
         self.assertEqual(0, self.driver.get_mtu('physnet1'))
+
+    def test_parse_physical_network_mtus(self):
+        config.cfg.CONF.set_override(
+            'physical_network_mtus',
+            ['physnet1:1500', 'physnet2:1500', 'physnet3:9000'],
+            group='ml2')
+        driver = type_flat.FlatTypeDriver()
+        self.assertEqual('1500', driver.physnet_mtus['physnet1'])
+        self.assertEqual('1500', driver.physnet_mtus['physnet2'])
+        self.assertEqual('9000', driver.physnet_mtus['physnet3'])
+
+
+class FlatTypeDefaultTest(base.BaseTestCase):
+
+    def setUp(self):
+        super(FlatTypeDefaultTest, self).setUp()
+        self.driver = type_flat.FlatTypeDriver()
+        self.driver.physnet_mtus = []
+
+    def test_validate_provider_segment_default(self):
+        segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
+                   api.PHYSICAL_NETWORK: 'other_flat_net'}
+        self.driver.validate_provider_segment(segment)

@@ -13,15 +13,15 @@
 #    under the License.
 
 import mock
-
 from oslo_config import cfg
 
 from neutron.agent.common import config
-from neutron.agent.dhcp import config as dhcp_conf
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
-from neutron.common import config as common_conf
+from neutron.common import utils as common_utils
+from neutron.conf.agent import dhcp as dhcp_conf
+from neutron.conf import common as common_conf
 from neutron.tests import base as tests_base
 from neutron.tests.common import net_helpers
 from neutron.tests.functional import base as functional_base
@@ -32,14 +32,11 @@ class TestDhcp(functional_base.BaseSudoTestCase):
         super(TestDhcp, self).setUp()
         conf = cfg.ConfigOpts()
         conf.register_opts(config.INTERFACE_DRIVER_OPTS)
-        conf.register_opts(config.USE_NAMESPACES_OPTS)
         conf.register_opts(interface.OPTS)
         conf.register_opts(common_conf.core_opts)
         conf.register_opts(dhcp_conf.DHCP_AGENT_OPTS)
-        conf.set_override('interface_driver',
-                          'neutron.agent.linux.interface.OVSInterfaceDriver')
+        conf.set_override('interface_driver', 'openvswitch')
         conf.set_override('host', 'foo_host')
-        conf.set_override('use_namespaces', True)
         self.conf = conf
         br_int = self.useFixture(net_helpers.OVSBridgeFixture()).bridge
         self.conf.set_override('ovs_integration_bridge', br_int.br_name)
@@ -83,7 +80,10 @@ class TestDhcp(functional_base.BaseSudoTestCase):
         self.assertEqual(2, len(devices))
         # setting up dhcp for the network
         dev_mgr.setup(tests_base.AttributeDict(network))
+        common_utils.wait_until_true(
+            lambda: 1 == len(ipw.get_devices(exclude_loopback=True)),
+            timeout=5,
+            sleep=0.1,
+            exception=RuntimeError("only one non-loopback device must remain"))
         devices = ipw.get_devices(exclude_loopback=True)
-        # only one non-loopback device should remain
-        self.assertEqual(1, len(devices))
         self.assertEqual("tapfoo_port_id", devices[0].name)

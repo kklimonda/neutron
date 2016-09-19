@@ -15,111 +15,86 @@
 
 from oslo_log import log
 
+from neutron._i18n import _LW
 from neutron.api import extensions
 from neutron.api.v2 import attributes
+from neutron.api.v2 import base
 from neutron.api.v2 import router
-from neutron.i18n import _LI, _LW
 from neutron import manager
-from neutron.pecan_wsgi.controllers import root
+from neutron.pecan_wsgi.controllers import resource as res_ctrl
+from neutron.pecan_wsgi.controllers import utils
 from neutron import policy
 from neutron.quota import resource_registry
+from neutron import wsgi
 
 LOG = log.getLogger(__name__)
-
-
-def _plugin_for_resource(collection):
-    if collection in router.RESOURCES.values():
-        # this is a core resource, return the core plugin
-        return manager.NeutronManager.get_plugin()
-    ext_mgr = extensions.PluginAwareExtensionManager.get_instance()
-    # Multiple extensions can map to the same resource. This happens
-    # because of 'attribute' extensions. Due to the way in which neutron
-    # plugins and request dispatching is constructed, it is impossible for
-    # the same resource to be handled by more than one plugin. Therefore
-    # all the extensions mapped to a given resource will necessarily be
-    # implemented by the same plugin.
-    ext_res_mappings = dict((ext.get_alias(), collection) for
-                            ext in ext_mgr.extensions.values() if
-                            collection in ext.get_extended_resources('2.0'))
-    LOG.debug("Extension mappings for: %(collection)s: %(aliases)s",
-              {'collection': collection, 'aliases': ext_res_mappings.keys()})
-    # find the plugin that supports this extension
-    for plugin in ext_mgr.plugins.values():
-        ext_aliases = getattr(plugin, 'supported_extension_aliases', [])
-        for alias in ext_aliases:
-            if alias in ext_res_mappings:
-                # This plugin implements this resource
-                return plugin
-    LOG.warn(_LW("No plugin found for:%s"), collection)
-
-
-def _handle_plurals(collection):
-    resource = attributes.PLURALS.get(collection)
-    if not resource:
-        if collection.endswith('ies'):
-            resource = "%sy" % collection[:-3]
-        else:
-            resource = collection[:-1]
-    attributes.PLURALS[collection] = resource
-    return resource
 
 
 def initialize_all():
     ext_mgr = extensions.PluginAwareExtensionManager.get_instance()
     ext_mgr.extend_resources("2.0", attributes.RESOURCE_ATTRIBUTE_MAP)
     # At this stage we have a fully populated resource attribute map;
-    # build Pecan controllers and routes for every resource (both core
-    # and extensions)
-    pecanized_exts = [ext for ext in ext_mgr.extensions.values() if
-                      hasattr(ext, 'get_pecan_controllers')]
-    pecan_controllers = {}
-    for ext in pecanized_exts:
-        LOG.debug("Extension %s is pecan-enabled. Fetching resources "
-                  "and controllers", ext.get_name())
-        controllers = ext.get_pecan_controllers()
-        # controllers is actually a list of pairs where the first element is
-        # the collection name and the second the actual controller
-        for (collection, coll_controller) in controllers:
-            pecan_controllers[collection] = coll_controller
-
-    for collection in attributes.RESOURCE_ATTRIBUTE_MAP:
-        if collection not in pecan_controllers:
-            resource = _handle_plurals(collection)
-            LOG.debug("Building controller for resource:%s", resource)
-            plugin = _plugin_for_resource(collection)
-            if plugin:
-                manager.NeutronManager.set_plugin_for_resource(
-                    resource, plugin)
-            controller = root.CollectionsController(collection, resource)
-            manager.NeutronManager.set_controller_for_resource(
-                collection, controller)
-            LOG.info(_LI("Added controller for resource %(resource)s "
-                         "via URI path segment:%(collection)s"),
-                     {'resource': resource,
-                      'collection': collection})
-        else:
-            LOG.debug("There are already controllers for resource:%s",
-                      resource)
-
-    # NOTE(salv-orlando): If you are care about code quality, please read below
-    # Hackiness is strong with the piece of code below. It is used for
-    # populating resource plurals and registering resources with the quota
-    # engine, but the method it calls were not coinceived with this aim.
-    # Therefore it only leverages side-effects from those methods. Moreover,
-    # as it is really not advisable to load an instance of
-    # neutron.api.v2.router.APIRouter just to register resources with the
-    # quota  engine, core resources are explicitly registered here.
-    # TODO(salv-orlando): The Pecan WSGI support should provide its own
-    # solution to manage resource plurals and registration of resources with
-    # the quota engine
-    for resource in router.RESOURCES.keys():
+    # build Pecan controllers and routes for all core resources
+    for resource, collection in router.RESOURCES.items():
         resource_registry.register_resource_by_name(resource)
-    for ext in ext_mgr.extensions.values():
-        # make each extension populate its plurals
-        if hasattr(ext, 'get_resources'):
-            ext.get_resources()
-        if hasattr(ext, 'get_extended_resources'):
-            ext.get_extended_resources('v2.0')
+        plugin = manager.NeutronManager.get_plugin()
+        new_controller = res_ctrl.CollectionsController(collection, resource,
+                                                        plugin=plugin)
+        manager.NeutronManager.set_controller_for_resource(
+            collection, new_controller)
+        manager.NeutronManager.set_plugin_for_resource(resource, plugin)
+
+    pecanized_resources = ext_mgr.get_pecan_resources()
+    for pec_res in pecanized_resources:
+        resource = attributes.PLURALS[pec_res.collection]
+        manager.NeutronManager.set_controller_for_resource(
+            pec_res.collection, pec_res.controller)
+        manager.NeutronManager.set_plugin_for_resource(
+            resource, pec_res.plugin)
+
+    # Now build Pecan Controllers and routes for all extensions
+    resources = ext_mgr.get_resources()
+    # Extensions controller is already defined, we don't need it.
+    resources.pop(0)
+    for ext_res in resources:
+        path_prefix = ext_res.path_prefix.strip('/')
+        collection = ext_res.collection
+        if manager.NeutronManager.get_controller_for_resource(collection):
+            # This is a collection that already has a pecan controller, we
+            # do not need to do anything else
+            continue
+        legacy_controller = getattr(ext_res.controller, 'controller',
+                                    ext_res.controller)
+        new_controller = None
+        if isinstance(legacy_controller, base.Controller):
+            resource = legacy_controller.resource
+            plugin = legacy_controller.plugin
+            attr_info = legacy_controller.attr_info
+            member_actions = legacy_controller.member_actions
+            # Retrieving the parent resource.  It is expected the format of
+            # the parent resource to be:
+            # {'collection_name': 'name-of-collection',
+            #  'member_name': 'name-of-resource'}
+            # collection_name does not appear to be used in the legacy code
+            # inside the controller logic, so we can assume we do not need it.
+            parent = legacy_controller.parent or {}
+            parent_resource = parent.get('member_name')
+            new_controller = res_ctrl.CollectionsController(
+                collection, resource, resource_info=attr_info,
+                parent_resource=parent_resource, member_actions=member_actions)
+            manager.NeutronManager.set_plugin_for_resource(resource, plugin)
+            if path_prefix:
+                manager.NeutronManager.add_resource_for_path_prefix(
+                    collection, path_prefix)
+        elif isinstance(legacy_controller, wsgi.Controller):
+            new_controller = utils.ShimCollectionsController(
+                collection, None, legacy_controller)
+        else:
+            LOG.warning(_LW("Unknown controller type encountered %s.  It will"
+                            "be ignored."), legacy_controller)
+        manager.NeutronManager.set_controller_for_resource(
+            collection, new_controller)
+
     # Certain policy checks require that the extensions are loaded
     # and the RESOURCE_ATTRIBUTE_MAP populated before they can be
     # properly initialized. This can only be claimed with certainty

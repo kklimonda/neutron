@@ -31,8 +31,22 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
     dvr_process_next_table_id = ovs_const.PATCH_LV_TO_TUN
 
     def setUp(self):
+        conn_patcher = mock.patch(
+            'neutron.agent.ovsdb.native.connection.Connection.start')
+        conn_patcher.start()
         super(OVSTunnelBridgeTest, self).setUp()
+        # NOTE(ivasilevskaya) The behaviour of oslotest.base.addCleanup()
+        # according to https://review.openstack.org/#/c/119201/4 guarantees
+        # that all started mocks will be stopped even without direct call to
+        # patcher.stop().
+        # If any individual mocks should be stopped by other than default
+        # mechanism, their cleanup has to be added after
+        # oslotest.BaseTestCase.setUp() not to be included in the stopall set
+        # that will be cleaned up by mock.patch.stopall. This way the mock
+        # won't be attempted to be stopped twice.
+        self.addCleanup(conn_patcher.stop)
         self.setup_bridge_mock('br-tun', self.br_tun_cls)
+        self.stamp = self.br.default_cookie
 
     def test_setup_default_table(self):
         patch_int_ofport = 5555
@@ -42,64 +56,64 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=2)],
                 match=ofpp.OFPMatch(in_port=patch_int_ofport),
                 priority=1, table_id=0)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0, table_id=0)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=20)],
                 match=ofpp.OFPMatch(
                     eth_dst=('00:00:00:00:00:00', '01:00:00:00:00:00')),
                 priority=0,
                 table_id=2)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=22)],
                 match=ofpp.OFPMatch(
                     eth_dst=('01:00:00:00:00:00', '01:00:00:00:00:00')),
                 priority=0,
                 table_id=2)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0, table_id=3)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0, table_id=4)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0, table_id=6)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.NXActionLearn(
-                            cookie=0,
+                            cookie=self.stamp,
                             hard_timeout=300,
                             priority=1,
                             specs=[
                                 ofpp.NXFlowSpecMatch(
-                                    dst=('vlan_vid', 0),
+                                    dst=('vlan_tci', 0),
                                     n_bits=12,
-                                    src=('vlan_vid', 0)),
+                                    src=('vlan_tci', 0)),
                                 ofpp.NXFlowSpecMatch(
                                     dst=('eth_dst', 0),
                                     n_bits=48,
                                     src=('eth_src', 0)),
                                 ofpp.NXFlowSpecLoad(
-                                    dst=('vlan_vid', 0),
-                                    n_bits=12,
+                                    dst=('vlan_tci', 0),
+                                    n_bits=16,
                                     src=0),
                                 ofpp.NXFlowSpecLoad(
                                     dst=('tunnel_id', 0),
@@ -118,13 +132,13 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
                 priority=1,
                 table_id=10)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=22)],
                 match=ofpp.OFPMatch(),
                 priority=0,
                 table_id=20)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0,
@@ -140,17 +154,17 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=2)],
                 match=ofpp.OFPMatch(in_port=patch_int_ofport),
                 priority=1, table_id=0)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0, table_id=0)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=21)],
                 match=ofpp.OFPMatch(
                     eth_dst='ff:ff:ff:ff:ff:ff',
@@ -158,54 +172,54 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
                 priority=1,
                 table_id=2)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=20)],
                 match=ofpp.OFPMatch(
                     eth_dst=('00:00:00:00:00:00', '01:00:00:00:00:00')),
                 priority=0,
                 table_id=2)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=22)],
                 match=ofpp.OFPMatch(
                     eth_dst=('01:00:00:00:00:00', '01:00:00:00:00:00')),
                 priority=0,
                 table_id=2)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0, table_id=3)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0, table_id=4)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0, table_id=6)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.NXActionLearn(
-                            cookie=0,
+                            cookie=self.stamp,
                             hard_timeout=300,
                             priority=1,
                             specs=[
                                 ofpp.NXFlowSpecMatch(
-                                    dst=('vlan_vid', 0),
+                                    dst=('vlan_tci', 0),
                                     n_bits=12,
-                                    src=('vlan_vid', 0)),
+                                    src=('vlan_tci', 0)),
                                 ofpp.NXFlowSpecMatch(
                                     dst=('eth_dst', 0),
                                     n_bits=48,
                                     src=('eth_src', 0)),
                                 ofpp.NXFlowSpecLoad(
-                                    dst=('vlan_vid', 0),
-                                    n_bits=12,
+                                    dst=('vlan_tci', 0),
+                                    n_bits=16,
                                     src=0),
                                 ofpp.NXFlowSpecLoad(
                                     dst=('tunnel_id', 0),
@@ -224,19 +238,19 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
                 priority=1,
                 table_id=10)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=22)],
                 match=ofpp.OFPMatch(),
                 priority=0,
                 table_id=20)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[ofpp.OFPInstructionGotoTable(table_id=22)],
                 match=ofpp.OFPMatch(),
                 priority=0,
                 table_id=21)),
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[],
                 match=ofpp.OFPMatch(),
                 priority=0,
@@ -255,7 +269,7 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionPushVlan(),
@@ -293,7 +307,7 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionPopVlan(),
@@ -328,7 +342,7 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionPopVlan(),
@@ -374,7 +388,7 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionSetField(arp_op=self.arp.ARP_REPLY),
@@ -388,6 +402,10 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
                             src_field='arp_spa'),
                         ofpp.OFPActionSetField(arp_sha=mac),
                         ofpp.OFPActionSetField(arp_spa=ip),
+                        ofpp.NXActionRegMove(src_field='eth_src',
+                                             dst_field='eth_dst',
+                                             n_bits=48),
+                        ofpp.OFPActionSetField(eth_src_nxm=mac),
                         ofpp.OFPActionOutput(ofp.OFPP_IN_PORT, 0),
                     ]),
                 ],
@@ -436,7 +454,7 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[
                     ofpp.OFPInstructionGotoTable(table_id=4),
                 ],
@@ -462,7 +480,7 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
             call._send_msg(ofpp.OFPFlowMod(dp,
-                cookie=0,
+                cookie=self.stamp,
                 instructions=[
                     ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [
                         ofpp.OFPActionOutput(port, 0),

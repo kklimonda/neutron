@@ -10,12 +10,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_log import log as logging
-
 from neutron.api.rpc.callbacks import resource_manager
-
-
-LOG = logging.getLogger(__name__)
 
 
 #TODO(ajo): consider adding locking to _get_manager, it's
@@ -32,12 +27,12 @@ def unsubscribe(callback, resource_type):
     _get_manager().unregister(callback, resource_type)
 
 
-def push(resource_type, resource, event_type):
-    """Push resource events into all registered callbacks for the type."""
+def push(resource_type, resource_list, event_type):
+    """Push resource list into all registered callbacks for the event type."""
 
     callbacks = _get_manager().get_callbacks(resource_type)
     for callback in callbacks:
-        callback(resource, event_type)
+        callback(resource_list, event_type)
 
 
 def clear():

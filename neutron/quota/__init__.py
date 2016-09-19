@@ -16,6 +16,7 @@
 
 import sys
 
+from neutron_lib import exceptions as lib_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_log import versionutils
@@ -23,53 +24,20 @@ from oslo_utils import importutils
 import six
 import webob
 
+from neutron._i18n import _, _LI, _LW
 from neutron.common import exceptions
+from neutron.conf import quota
 from neutron.db.quota import api as quota_api
-from neutron.i18n import _LI, _LW
 from neutron.quota import resource_registry
 
-
 LOG = logging.getLogger(__name__)
-QUOTA_DB_MODULE = 'neutron.db.quota.driver'
-QUOTA_DB_DRIVER = '%s.DbQuotaDriver' % QUOTA_DB_MODULE
-QUOTA_CONF_DRIVER = 'neutron.quota.ConfDriver'
-default_quota_items = ['network', 'subnet', 'port']
+QUOTA_DB_MODULE = quota.QUOTA_DB_MODULE
+QUOTA_DB_DRIVER = quota.QUOTA_DB_DRIVER
+QUOTA_CONF_DRIVER = quota.QUOTA_CONF_DRIVER
 
 
-quota_opts = [
-    cfg.ListOpt('quota_items',
-                default=default_quota_items,
-                deprecated_for_removal=True,
-                help=_('Resource name(s) that are supported in quota '
-                       'features. This option is now deprecated for '
-                       'removal.')),
-    cfg.IntOpt('default_quota',
-               default=-1,
-               help=_('Default number of resource allowed per tenant. '
-                      'A negative value means unlimited.')),
-    cfg.IntOpt('quota_network',
-               default=10,
-               help=_('Number of networks allowed per tenant. '
-                      'A negative value means unlimited.')),
-    cfg.IntOpt('quota_subnet',
-               default=10,
-               help=_('Number of subnets allowed per tenant, '
-                      'A negative value means unlimited.')),
-    cfg.IntOpt('quota_port',
-               default=50,
-               help=_('Number of ports allowed per tenant. '
-                      'A negative value means unlimited.')),
-    cfg.StrOpt('quota_driver',
-               default=QUOTA_DB_DRIVER,
-               help=_('Default driver to use for quota checks')),
-    cfg.BoolOpt('track_quota_usage',
-                default=True,
-                help=_('Keep in track in the database of current resource'
-                       'quota usage. Plugins which do not leverage the '
-                       'neutron database should set this flag to False')),
-]
 # Register the configuration options
-cfg.CONF.register_opts(quota_opts, 'QUOTAS')
+quota.register_quota_opts(quota.core_quota_opts)
 
 
 class ConfDriver(object):
@@ -110,7 +78,7 @@ class ConfDriver(object):
         nothing.
 
         :param context: The request context, for access checks.
-        :param tennant_id: The tenant_id to check quota.
+        :param tenant_id: The tenant_id to check quota.
         :param resources: A dictionary of the registered resources.
         :param values: A dictionary of the values to check against the
                        quota.
@@ -128,8 +96,8 @@ class ConfDriver(object):
         overs = [key for key, val in values.items()
                  if quotas[key] >= 0 and quotas[key] < val]
         if overs:
-            raise exceptions.OverQuota(overs=sorted(overs), quotas=quotas,
-                                       usages={})
+            raise lib_exc.OverQuota(overs=sorted(overs), quotas=quotas,
+                                    usages={})
 
     @staticmethod
     def get_tenant_quotas(context, resources, tenant_id):
@@ -175,10 +143,10 @@ class ConfDriver(object):
         return quota_api.ReservationInfo('fake', None, None, None)
 
     def commit_reservation(self, context, reservation_id):
-        """Tnis is a noop as this driver does not support reservations."""
+        """This is a noop as this driver does not support reservations."""
 
     def cancel_reservation(self, context, reservation_id):
-        """Tnis is a noop as this driver does not support reservations."""
+        """This is a noop as this driver does not support reservations."""
 
 
 class QuotaEngine(object):
@@ -311,15 +279,3 @@ class QuotaEngine(object):
 
 
 QUOTAS = QuotaEngine.get_instance()
-
-
-def register_resources_from_config():
-    # This operation is now deprecated. All the neutron core and extended
-    # resource for which  quota limits are enforced explicitly register
-    # themselves with the quota engine.
-    for resource_item in (set(cfg.CONF.QUOTAS.quota_items) -
-                          set(default_quota_items)):
-        resource_registry.register_resource_by_name(resource_item)
-
-
-register_resources_from_config()

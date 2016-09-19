@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Openstack Foundation
+# Copyright (c) 2015 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -14,6 +14,7 @@
 
 import copy
 import mock
+from oslo_config import cfg
 from oslo_utils import uuidutils
 
 from neutron.agent.common import utils
@@ -30,7 +31,7 @@ class TestDvrFipNs(base.BaseTestCase):
     def setUp(self):
         super(TestDvrFipNs, self).setUp()
         self.conf = mock.Mock()
-        self.conf.state_path = '/tmp'
+        self.conf.state_path = cfg.CONF.state_path
         self.driver = mock.Mock()
         self.driver.DEV_NAME_LEN = 14
         self.net_id = _uuid()
@@ -40,23 +41,23 @@ class TestDvrFipNs(base.BaseTestCase):
                                               use_ipv6=True)
 
     def test_subscribe(self):
-        is_first = self.fip_ns.subscribe(mock.sentinel.router_id)
+        is_first = self.fip_ns.subscribe(mock.sentinel.external_net_id)
         self.assertTrue(is_first)
 
     def test_subscribe_not_first(self):
-        self.fip_ns.subscribe(mock.sentinel.router_id)
-        is_first = self.fip_ns.subscribe(mock.sentinel.router_id2)
+        self.fip_ns.subscribe(mock.sentinel.external_net_id)
+        is_first = self.fip_ns.subscribe(mock.sentinel.external_net_id2)
         self.assertFalse(is_first)
 
     def test_unsubscribe(self):
-        self.fip_ns.subscribe(mock.sentinel.router_id)
-        is_last = self.fip_ns.unsubscribe(mock.sentinel.router_id)
+        self.fip_ns.subscribe(mock.sentinel.external_net_id)
+        is_last = self.fip_ns.unsubscribe(mock.sentinel.external_net_id)
         self.assertTrue(is_last)
 
     def test_unsubscribe_not_last(self):
-        self.fip_ns.subscribe(mock.sentinel.router_id)
-        self.fip_ns.subscribe(mock.sentinel.router_id2)
-        is_last = self.fip_ns.unsubscribe(mock.sentinel.router_id2)
+        self.fip_ns.subscribe(mock.sentinel.external_net_id)
+        self.fip_ns.subscribe(mock.sentinel.external_net_id2)
+        is_last = self.fip_ns.unsubscribe(mock.sentinel.external_net_id2)
         self.assertFalse(is_last)
 
     def test_allocate_rule_priority(self):
@@ -164,10 +165,10 @@ class TestDvrFipNs(base.BaseTestCase):
     @mock.patch.object(ip_lib.IpNetnsCommand, 'exists')
     def _test_create(self, old_kernel, exists, execute, IPTables):
         exists.return_value = True
-        # There are up to four sysctl calls - two for ip_nonlocal_bind,
-        # and two to enable forwarding
-        execute.side_effect = [RuntimeError if old_kernel else None,
-                               None, None, None]
+        # There are up to four sysctl calls - two to enable forwarding,
+        # and two for ip_nonlocal_bind
+        execute.side_effect = [None, None,
+                               RuntimeError if old_kernel else None, None]
 
         self.fip_ns._iptables_manager = IPTables()
         self.fip_ns.create()
@@ -203,9 +204,13 @@ class TestDvrFipNs(base.BaseTestCase):
         dev2.name = 'fg-aaaa'
         ip_wrapper.get_devices.return_value = [dev1, dev2]
 
-        self.conf.router_delete_namespaces = False
-
-        self.fip_ns.delete()
+        with mock.patch.object(self.fip_ns.ip_wrapper_root.netns,
+                               'delete') as delete,\
+                mock.patch.object(self.fip_ns.ip_wrapper_root.netns,
+                                  'exists', return_value=True) as exists:
+            self.fip_ns.delete()
+            exists.assert_called_once_with(self.fip_ns.name)
+            delete.assert_called_once_with(self.fip_ns.name)
 
         ext_net_bridge = self.conf.external_network_bridge
         ns_name = self.fip_ns.get_name()
@@ -215,14 +220,24 @@ class TestDvrFipNs(base.BaseTestCase):
                                                    namespace=ns_name)
         ip_wrapper.del_veth.assert_called_once_with('fpr-aaaa')
 
+    def test_destroy_no_namespace(self):
+        with mock.patch.object(self.fip_ns.ip_wrapper_root.netns,
+                               'delete') as delete,\
+                mock.patch.object(self.fip_ns.ip_wrapper_root.netns,
+                                  'exists', return_value=False) as exists:
+            self.fip_ns.delete()
+            exists.assert_called_once_with(self.fip_ns.name)
+            self.assertFalse(delete.called)
+
     @mock.patch.object(ip_lib, 'IPWrapper')
     @mock.patch.object(ip_lib, 'IPDevice')
-    @mock.patch.object(ip_lib, 'device_exists')
-    def test_create_rtr_2_fip_link(self, device_exists, IPDevice, IPWrapper):
+    def _test_create_rtr_2_fip_link(self, dev_exists, addr_exists,
+                                    IPDevice, IPWrapper):
         ri = mock.Mock()
         ri.router_id = _uuid()
         ri.rtr_fip_subnet = None
         ri.ns_name = mock.sentinel.router_ns
+        ri.get_ex_gw_port.return_value = {'mtu': 2000}
 
         rtr_2_fip_name = self.fip_ns.get_rtr_ext_device_name(ri.router_id)
         fip_2_rtr_name = self.fip_ns.get_int_device_name(ri.router_id)
@@ -231,64 +246,60 @@ class TestDvrFipNs(base.BaseTestCase):
         self.fip_ns.local_subnets = allocator = mock.Mock()
         pair = lla.LinkLocalAddressPair('169.254.31.28/31')
         allocator.allocate.return_value = pair
-        device_exists.return_value = False
+        addr_pair = pair.get_pair()
         ip_wrapper = IPWrapper()
-        self.conf.network_device_mtu = 2000
         ip_wrapper.add_veth.return_value = (IPDevice(), IPDevice())
+        device = IPDevice()
+        device.exists.return_value = dev_exists
+        device.addr.list.return_value = addr_exists
 
         self.fip_ns.create_rtr_2_fip_link(ri)
 
-        ip_wrapper.add_veth.assert_called_with(rtr_2_fip_name,
-                                               fip_2_rtr_name,
-                                               fip_ns_name)
+        if not dev_exists:
+            ip_wrapper.add_veth.assert_called_with(rtr_2_fip_name,
+                                                   fip_2_rtr_name,
+                                                   fip_ns_name)
 
-        device = IPDevice()
-        device.link.set_mtu.assert_called_with(2000)
-        self.assertEqual(device.link.set_mtu.call_count, 2)
+            device.link.set_mtu.assert_called_with(2000)
+            self.assertEqual(2, device.link.set_mtu.call_count)
+            self.assertEqual(2, device.link.set_up.call_count)
+
+        if not addr_exists:
+            expected = [mock.call(str(addr_pair[0]), add_broadcast=False),
+                        mock.call(str(addr_pair[1]), add_broadcast=False)]
+            device.addr.add.assert_has_calls(expected)
+            self.assertEqual(2, device.addr.add.call_count)
+
         device.route.add_gateway.assert_called_once_with(
             '169.254.31.29', table=16)
 
-    @mock.patch.object(ip_lib, 'IPWrapper')
-    @mock.patch.object(ip_lib, 'IPDevice')
-    @mock.patch.object(ip_lib, 'device_exists')
-    def test_create_rtr_2_fip_link_already_exists(self,
-                                                  device_exists,
-                                                  IPDevice,
-                                                  IPWrapper):
-        ri = mock.Mock()
-        ri.router_id = _uuid()
-        ri.rtr_fip_subnet = None
-        device_exists.return_value = True
+    def test_create_rtr_2_fip_link(self):
+        self._test_create_rtr_2_fip_link(False, False)
 
-        self.fip_ns.local_subnets = allocator = mock.Mock()
-        pair = lla.LinkLocalAddressPair('169.254.31.28/31')
-        allocator.allocate.return_value = pair
-        self.fip_ns.create_rtr_2_fip_link(ri)
+    def test_create_rtr_2_fip_link_already_exists(self):
+        self._test_create_rtr_2_fip_link(True, False)
 
-        ip_wrapper = IPWrapper()
-        self.assertFalse(ip_wrapper.add_veth.called)
+    def test_create_rtr_2_fip_link_and_addr_already_exist(self):
+        self._test_create_rtr_2_fip_link(True, True)
 
     @mock.patch.object(ip_lib, 'IPDevice')
     def _test_scan_fip_ports(self, ri, ip_list, IPDevice):
         IPDevice.return_value = device = mock.Mock()
-        device.addr.list.return_value = ip_list
+        device.exists.return_value = True
+        ri.get_router_cidrs.return_value = ip_list
         self.fip_ns.get_rtr_ext_device_name = mock.Mock(
             return_value=mock.sentinel.rtr_ext_device_name)
         self.fip_ns.scan_fip_ports(ri)
 
-    @mock.patch.object(ip_lib, 'device_exists')
-    def test_scan_fip_ports_restart_fips(self, device_exists):
-        device_exists.return_value = True
+    def test_scan_fip_ports_restart_fips(self):
         ri = mock.Mock()
         ri.dist_fip_count = None
         ri.floating_ips_dict = {}
-        ip_list = [{'cidr': '111.2.3.4/32'}, {'cidr': '111.2.3.5/32'}]
+        ip_list = [{'cidr': '111.2.3.4'}, {'cidr': '111.2.3.5'}]
         self._test_scan_fip_ports(ri, ip_list)
         self.assertEqual(2, ri.dist_fip_count)
 
-    @mock.patch.object(ip_lib, 'device_exists')
-    def test_scan_fip_ports_restart_none(self, device_exists):
-        device_exists.return_value = True
+    def test_scan_fip_ports_restart_none(self):
         ri = mock.Mock()
         ri.dist_fip_count = None
         ri.floating_ips_dict = {}

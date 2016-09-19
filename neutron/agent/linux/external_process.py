@@ -15,19 +15,19 @@
 import abc
 import collections
 import os.path
-import six
 
 import eventlet
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import fileutils
+import six
 
+from neutron._i18n import _, _LW, _LE
 from neutron.agent.common import config as agent_cfg
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
 from neutron.common import utils as common_utils
-from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -61,7 +61,8 @@ class ProcessManager(MonitoredProcess):
     """
     def __init__(self, conf, uuid, namespace=None, service=None,
                  pids_path=None, default_cmd_callback=None,
-                 cmd_addl_env=None, pid_file=None, run_as_root=False):
+                 cmd_addl_env=None, pid_file=None, run_as_root=False,
+                 custom_reload_callback=None):
 
         self.conf = conf
         self.uuid = uuid
@@ -71,6 +72,7 @@ class ProcessManager(MonitoredProcess):
         self.pids_path = pids_path or self.conf.external_pids
         self.pid_file = pid_file
         self.run_as_root = run_as_root
+        self.custom_reload_callback = custom_reload_callback
 
         if service:
             self.service_pid_fname = 'pid.' + service
@@ -94,7 +96,10 @@ class ProcessManager(MonitoredProcess):
             self.reload_cfg()
 
     def reload_cfg(self):
-        self.disable('HUP')
+        if self.custom_reload_callback:
+            self.disable(get_stop_command=self.custom_reload_callback)
+        else:
+            self.disable('HUP')
 
     def disable(self, sig='9', get_stop_command=None):
         pid = self.pid
@@ -247,10 +252,9 @@ class ProcessMonitor(object):
         action_function(service_id)
 
     def _respawn_action(self, service_id):
-        # _LE used to avoid dropping translation for the message
-        LOG.warning(_LE("respawning %(service)s for uuid %(uuid)s"),
+        LOG.warning(_LW("Respawning %(service)s for uuid %(uuid)s"),
                     {'service': service_id.service,
-                     'uuid': service_id.uuid})  # noqa
+                     'uuid': service_id.uuid})
         self._monitored_processes[service_id].enable()
 
     def _exit_action(self, service_id):

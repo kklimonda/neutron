@@ -11,19 +11,16 @@
 #    under the License.
 
 import time
-import urllib
 
+from oslo_serialization import jsonutils
+from six.moves.urllib import parse as urlparse
+from tempest.lib.common import rest_client as service_client
+from tempest.lib import exceptions as lib_exc
 
-from oslo_serialization import jsonutils as json
-from six.moves.urllib import parse
-from tempest_lib.common.utils import misc
-from tempest_lib import exceptions as lib_exc
-
-from neutron.tests.tempest.common import service_client
 from neutron.tests.tempest import exceptions
 
 
-class NetworkClientJSON(service_client.ServiceClient):
+class NetworkClientJSON(service_client.RestClient):
 
     """
     Tempest REST client for Neutron. Uses v2 of the Neutron API, since the
@@ -46,7 +43,7 @@ class NetworkClientJSON(service_client.ServiceClient):
 
         # The following list represents resource names that do not require
         # changing underscore to a hyphen
-        hyphen_exceptions = ["health_monitors", "service_profiles"]
+        hyphen_exceptions = ["service_profiles"]
         # the following map is used to construct proper URI
         # for the given neutron resource
         service_resource_prefix_map = {
@@ -54,18 +51,11 @@ class NetworkClientJSON(service_client.ServiceClient):
             'subnets': '',
             'subnetpools': '',
             'ports': '',
-            'pools': 'lb',
-            'vips': 'lb',
-            'health_monitors': 'lb',
-            'members': 'lb',
-            'ipsecpolicies': 'vpn',
-            'vpnservices': 'vpn',
-            'ikepolicies': 'vpn',
-            'ipsec-site-connections': 'vpn',
             'metering_labels': 'metering',
             'metering_label_rules': 'metering',
             'policies': 'qos',
             'bandwidth_limit_rules': 'qos',
+            'minimum_bandwidth_rules': 'qos',
             'rule_types': 'qos',
             'rbac-policies': '',
         }
@@ -80,6 +70,12 @@ class NetworkClientJSON(service_client.ServiceClient):
             uri = '%s/%s' % (self.uri_prefix, plural_name)
         return uri
 
+    def build_uri(self, plural_name, **kwargs):
+        uri = self.get_uri(plural_name)
+        if kwargs:
+            uri += '?' + urlparse.urlencode(kwargs, doseq=1)
+        return uri
+
     def pluralize(self, resource_name):
         # get plural from map or just add 's'
 
@@ -88,20 +84,22 @@ class NetworkClientJSON(service_client.ServiceClient):
         resource_plural_map = {
             'security_groups': 'security_groups',
             'security_group_rules': 'security_group_rules',
-            'ipsecpolicy': 'ipsecpolicies',
-            'ikepolicy': 'ikepolicies',
-            'ipsec_site_connection': 'ipsec-site-connections',
             'quotas': 'quotas',
             'qos_policy': 'policies',
             'rbac_policy': 'rbac_policies',
         }
         return resource_plural_map.get(resource_name, resource_name + 's')
 
+    def get_uri_with_links(self, plural_name, uri):
+        resp, body = self.get(uri)
+        result = {plural_name: self.deserialize_list(body)}
+        links = self.deserialize_links(body)
+        self.expected_success(200, resp.status)
+        return links, service_client.ResponseBody(resp, result)
+
     def _lister(self, plural_name):
         def _list(**filters):
-            uri = self.get_uri(plural_name)
-            if filters:
-                uri += '?' + parse.urlencode(filters, doseq=1)
+            uri = self.build_uri(plural_name, **filters)
             resp, body = self.get(uri)
             result = {plural_name: self.deserialize_list(body)}
             self.expected_success(200, resp.status)
@@ -127,7 +125,7 @@ class NetworkClientJSON(service_client.ServiceClient):
             plural = self.pluralize(resource_name)
             uri = '%s/%s' % (self.get_uri(plural), resource_id)
             if fields:
-                uri += '?' + parse.urlencode(fields, doseq=1)
+                uri += '?' + urlparse.urlencode(fields, doseq=1)
             resp, body = self.get(uri)
             body = self.deserialize_single(body)
             self.expected_success(200, resp.status)
@@ -173,7 +171,12 @@ class NetworkClientJSON(service_client.ServiceClient):
         raise AttributeError(name)
 
     # Subnetpool methods
-    def create_subnetpool(self, post_data):
+    def create_subnetpool(self, name, **kwargs):
+        subnetpool_data = {'name': name}
+        for arg in kwargs:
+            subnetpool_data[arg] = kwargs[arg]
+
+        post_data = {'subnetpool': subnetpool_data}
         body = self.serialize_list(post_data, "subnetpools", "subnetpool")
         uri = self.get_uri("subnetpools")
         resp, body = self.post(uri, body)
@@ -196,14 +199,21 @@ class NetworkClientJSON(service_client.ServiceClient):
         self.expected_success(204, resp.status)
         return service_client.ResponseBody(resp, body)
 
-    def list_subnetpools(self):
+    def list_subnetpools(self, **filters):
         uri = self.get_uri("subnetpools")
+        if filters:
+            uri = '?'.join([uri, urlparse.urlencode(filters)])
         resp, body = self.get(uri)
         body = {'subnetpools': self.deserialize_list(body)}
         self.expected_success(200, resp.status)
         return service_client.ResponseBody(resp, body)
 
-    def update_subnetpool(self, id, post_data):
+    def update_subnetpool(self, id, **kwargs):
+        subnetpool_data = {}
+        for arg in kwargs:
+            subnetpool_data[arg] = kwargs[arg]
+
+        post_data = {'subnetpool': subnetpool_data}
         body = self.serialize_list(post_data, "subnetpools", "subnetpool")
         uri = self.get_uri("subnetpools")
         subnetpool_uri = '%s/%s' % (uri, id)
@@ -261,48 +271,11 @@ class NetworkClientJSON(service_client.ServiceClient):
             return True
         return False
 
-    def wait_for_resource_status(self, fetch, status, interval=None,
-                                 timeout=None):
-        """
-        @summary: Waits for a network resource to reach a status
-        @param fetch: the callable to be used to query the resource status
-        @type fecth: callable that takes no parameters and returns the resource
-        @param status: the status that the resource has to reach
-        @type status: String
-        @param interval: the number of seconds to wait between each status
-          query
-        @type interval: Integer
-        @param timeout: the maximum number of seconds to wait for the resource
-          to reach the desired status
-        @type timeout: Integer
-        """
-        if not interval:
-            interval = self.build_interval
-        if not timeout:
-            timeout = self.build_timeout
-        start_time = time.time()
-
-        while time.time() - start_time <= timeout:
-            resource = fetch()
-            if resource['status'] == status:
-                return
-            time.sleep(interval)
-
-        # At this point, the wait has timed out
-        message = 'Resource %s' % (str(resource))
-        message += ' failed to reach status %s' % status
-        message += ' (current: %s)' % resource['status']
-        message += ' within the required time %s' % timeout
-        caller = misc.find_test_caller()
-        if caller:
-            message = '(%s) %s' % (caller, message)
-        raise exceptions.TimeoutException(message)
-
     def deserialize_single(self, body):
-        return json.loads(body)
+        return jsonutils.loads(body)
 
     def deserialize_list(self, body):
-        res = json.loads(body)
+        res = jsonutils.loads(body)
         # expecting response in form
         # {'resources': [ res1, res2] } => when pagination disabled
         # {'resources': [..], 'resources_links': {}} => if pagination enabled
@@ -311,19 +284,32 @@ class NetworkClientJSON(service_client.ServiceClient):
                 continue
             return res[k]
 
+    def deserialize_links(self, body):
+        res = jsonutils.loads(body)
+        # expecting response in form
+        # {'resources': [ res1, res2] } => when pagination disabled
+        # {'resources': [..], 'resources_links': {}} => if pagination enabled
+        for k in res.keys():
+            if k.endswith("_links"):
+                return {
+                    link['rel']: link['href']
+                    for link in res[k]
+                }
+        return {}
+
     def serialize(self, data):
-        return json.dumps(data)
+        return jsonutils.dumps(data)
 
     def serialize_list(self, data, root=None, item=None):
         return self.serialize(data)
 
     def update_quotas(self, tenant_id, **kwargs):
         put_body = {'quota': kwargs}
-        body = json.dumps(put_body)
+        body = jsonutils.dumps(put_body)
         uri = '%s/quotas/%s' % (self.uri_prefix, tenant_id)
         resp, body = self.put(uri, body)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body['quota'])
 
     def reset_quotas(self, tenant_id):
@@ -336,22 +322,24 @@ class NetworkClientJSON(service_client.ServiceClient):
         post_body = {'router': kwargs}
         post_body['router']['name'] = name
         post_body['router']['admin_state_up'] = admin_state_up
-        body = json.dumps(post_body)
+        body = jsonutils.dumps(post_body)
         uri = '%s/routers' % (self.uri_prefix)
         resp, body = self.post(uri, body)
         self.expected_success(201, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def _update_router(self, router_id, set_enable_snat, **kwargs):
         uri = '%s/routers/%s' % (self.uri_prefix, router_id)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         update_body = {}
         update_body['name'] = kwargs.get('name', body['router']['name'])
         update_body['admin_state_up'] = kwargs.get(
             'admin_state_up', body['router']['admin_state_up'])
+        if 'description' in kwargs:
+            update_body['description'] = kwargs['description']
         cur_gw_info = body['router']['external_gateway_info']
         if cur_gw_info:
             # TODO(kevinbenton): setting the external gateway info is not
@@ -366,10 +354,10 @@ class NetworkClientJSON(service_client.ServiceClient):
         if 'distributed' in kwargs:
             update_body['distributed'] = kwargs['distributed']
         update_body = dict(router=update_body)
-        update_body = json.dumps(update_body)
+        update_body = jsonutils.dumps(update_body)
         resp, body = self.put(uri, update_body)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def update_router(self, router_id, **kwargs):
@@ -393,70 +381,47 @@ class NetworkClientJSON(service_client.ServiceClient):
         uri = '%s/routers/%s/add_router_interface' % (self.uri_prefix,
                                                       router_id)
         update_body = {"subnet_id": subnet_id}
-        update_body = json.dumps(update_body)
+        update_body = jsonutils.dumps(update_body)
         resp, body = self.put(uri, update_body)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def add_router_interface_with_port_id(self, router_id, port_id):
         uri = '%s/routers/%s/add_router_interface' % (self.uri_prefix,
                                                       router_id)
         update_body = {"port_id": port_id}
-        update_body = json.dumps(update_body)
+        update_body = jsonutils.dumps(update_body)
         resp, body = self.put(uri, update_body)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def remove_router_interface_with_subnet_id(self, router_id, subnet_id):
         uri = '%s/routers/%s/remove_router_interface' % (self.uri_prefix,
                                                          router_id)
         update_body = {"subnet_id": subnet_id}
-        update_body = json.dumps(update_body)
+        update_body = jsonutils.dumps(update_body)
         resp, body = self.put(uri, update_body)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def remove_router_interface_with_port_id(self, router_id, port_id):
         uri = '%s/routers/%s/remove_router_interface' % (self.uri_prefix,
                                                          router_id)
         update_body = {"port_id": port_id}
-        update_body = json.dumps(update_body)
+        update_body = jsonutils.dumps(update_body)
         resp, body = self.put(uri, update_body)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
-    def associate_health_monitor_with_pool(self, health_monitor_id,
-                                           pool_id):
-        post_body = {
-            "health_monitor": {
-                "id": health_monitor_id,
-            }
-        }
-        body = json.dumps(post_body)
-        uri = '%s/lb/pools/%s/health_monitors' % (self.uri_prefix,
-                                                  pool_id)
-        resp, body = self.post(uri, body)
-        self.expected_success(201, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
-    def disassociate_health_monitor_with_pool(self, health_monitor_id,
-                                              pool_id):
-        uri = '%s/lb/pools/%s/health_monitors/%s' % (self.uri_prefix, pool_id,
-                                                     health_monitor_id)
-        resp, body = self.delete(uri)
-        self.expected_success(204, resp.status)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def list_router_interfaces(self, uuid):
         uri = '%s/ports?device_id=%s' % (self.uri_prefix, uuid)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def update_agent(self, agent_id, agent_info):
@@ -466,48 +431,33 @@ class NetworkClientJSON(service_client.ServiceClient):
         """
         uri = '%s/agents/%s' % (self.uri_prefix, agent_id)
         agent = {"agent": agent_info}
-        body = json.dumps(agent)
+        body = jsonutils.dumps(agent)
         resp, body = self.put(uri, body)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
-    def list_pools_hosted_by_one_lbaas_agent(self, agent_id):
-        uri = '%s/agents/%s/loadbalancer-pools' % (self.uri_prefix, agent_id)
-        resp, body = self.get(uri)
-        self.expected_success(200, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
-    def show_lbaas_agent_hosting_pool(self, pool_id):
-        uri = ('%s/lb/pools/%s/loadbalancer-agent' %
-               (self.uri_prefix, pool_id))
-        resp, body = self.get(uri)
-        self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def list_routers_on_l3_agent(self, agent_id):
         uri = '%s/agents/%s/l3-routers' % (self.uri_prefix, agent_id)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def list_l3_agents_hosting_router(self, router_id):
         uri = '%s/routers/%s/l3-agents' % (self.uri_prefix, router_id)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def add_router_to_l3_agent(self, agent_id, router_id):
         uri = '%s/agents/%s/l3-routers' % (self.uri_prefix, agent_id)
         post_body = {"router_id": router_id}
-        body = json.dumps(post_body)
+        body = jsonutils.dumps(post_body)
         resp, body = self.post(uri, body)
         self.expected_success(201, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def remove_router_from_l3_agent(self, agent_id, router_id):
@@ -521,14 +471,14 @@ class NetworkClientJSON(service_client.ServiceClient):
         uri = '%s/networks/%s/dhcp-agents' % (self.uri_prefix, network_id)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def list_networks_hosted_by_one_dhcp_agent(self, agent_id):
         uri = '%s/agents/%s/dhcp-networks' % (self.uri_prefix, agent_id)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def remove_network_from_dhcp_agent(self, agent_id, network_id):
@@ -536,21 +486,6 @@ class NetworkClientJSON(service_client.ServiceClient):
                                                  network_id)
         resp, body = self.delete(uri)
         self.expected_success(204, resp.status)
-        return service_client.ResponseBody(resp, body)
-
-    def create_ikepolicy(self, name, **kwargs):
-        post_body = {
-            "ikepolicy": {
-                "name": name,
-            }
-        }
-        for key, val in kwargs.items():
-            post_body['ikepolicy'][key] = val
-        body = json.dumps(post_body)
-        uri = '%s/vpn/ikepolicies' % (self.uri_prefix)
-        resp, body = self.post(uri, body)
-        self.expected_success(201, resp.status)
-        body = json.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def update_extra_routes(self, router_id, nexthop, destination):
@@ -561,10 +496,10 @@ class NetworkClientJSON(service_client.ServiceClient):
                             "destination": destination}]
             }
         }
-        body = json.dumps(put_body)
+        body = jsonutils.dumps(put_body)
         resp, body = self.put(uri, body)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def delete_extra_routes(self, router_id):
@@ -575,46 +510,43 @@ class NetworkClientJSON(service_client.ServiceClient):
                 'routes': null_routes
             }
         }
-        body = json.dumps(put_body)
+        body = jsonutils.dumps(put_body)
         resp, body = self.put(uri, body)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
-        return service_client.ResponseBody(resp, body)
-
-    def list_lb_pool_stats(self, pool_id):
-        uri = '%s/lb/pools/%s/stats' % (self.uri_prefix, pool_id)
-        resp, body = self.get(uri)
-        self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def add_dhcp_agent_to_network(self, agent_id, network_id):
         post_body = {'network_id': network_id}
-        body = json.dumps(post_body)
+        body = jsonutils.dumps(post_body)
         uri = '%s/agents/%s/dhcp-networks' % (self.uri_prefix, agent_id)
         resp, body = self.post(uri, body)
         self.expected_success(201, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def list_qos_policies(self, **filters):
         if filters:
             uri = '%s/qos/policies?%s' % (self.uri_prefix,
-                                          urllib.urlencode(filters))
+                                          urlparse.urlencode(filters))
         else:
             uri = '%s/qos/policies' % self.uri_prefix
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
-    def create_qos_policy(self, name, description, shared, tenant_id=None):
+    def create_qos_policy(self, name, description=None, shared=False,
+                          tenant_id=None):
         uri = '%s/qos/policies' % self.uri_prefix
-        post_data = {'policy': {
+        post_data = {
+            'policy': {
                 'name': name,
-                'description': description,
                 'shared': shared
-            }}
+            }
+        }
+        if description is not None:
+            post_data['policy']['description'] = description
         if tenant_id is not None:
             post_data['policy']['tenant_id'] = tenant_id
         resp, body = self.post(uri, self.serialize(post_data))
@@ -633,14 +565,15 @@ class NetworkClientJSON(service_client.ServiceClient):
     def create_bandwidth_limit_rule(self, policy_id, max_kbps, max_burst_kbps):
         uri = '%s/qos/policies/%s/bandwidth_limit_rules' % (
             self.uri_prefix, policy_id)
-        post_data = self.serialize(
-            {'bandwidth_limit_rule': {
+        post_data = self.serialize({
+            'bandwidth_limit_rule': {
                 'max_kbps': max_kbps,
-                'max_burst_kbps': max_burst_kbps}
-            })
+                'max_burst_kbps': max_burst_kbps
+            }
+        })
         resp, body = self.post(uri, post_data)
         self.expected_success(201, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
 
     def list_bandwidth_limit_rules(self, policy_id):
@@ -663,7 +596,7 @@ class NetworkClientJSON(service_client.ServiceClient):
         uri = '%s/qos/policies/%s/bandwidth_limit_rules/%s' % (
             self.uri_prefix, policy_id, rule_id)
         post_data = {'bandwidth_limit_rule': kwargs}
-        resp, body = self.put(uri, json.dumps(post_data))
+        resp, body = self.put(uri, jsonutils.dumps(post_data))
         body = self.deserialize_single(body)
         self.expected_success(200, resp.status)
         return service_client.ResponseBody(resp, body)
@@ -675,9 +608,288 @@ class NetworkClientJSON(service_client.ServiceClient):
         self.expected_success(204, resp.status)
         return service_client.ResponseBody(resp, body)
 
+    def create_dscp_marking_rule(self, policy_id, dscp_mark):
+        uri = '%s/qos/policies/%s/dscp_marking_rules' % (
+            self.uri_prefix, policy_id)
+        post_data = self.serialize({
+            'dscp_marking_rule': {
+                'dscp_mark': dscp_mark
+            }
+        })
+        resp, body = self.post(uri, post_data)
+        self.expected_success(201, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def list_dscp_marking_rules(self, policy_id):
+        uri = '%s/qos/policies/%s/dscp_marking_rules' % (
+            self.uri_prefix, policy_id)
+        resp, body = self.get(uri)
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def show_dscp_marking_rule(self, policy_id, rule_id):
+        uri = '%s/qos/policies/%s/dscp_marking_rules/%s' % (
+            self.uri_prefix, policy_id, rule_id)
+        resp, body = self.get(uri)
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def update_dscp_marking_rule(self, policy_id, rule_id, **kwargs):
+        uri = '%s/qos/policies/%s/dscp_marking_rules/%s' % (
+            self.uri_prefix, policy_id, rule_id)
+        post_data = {'dscp_marking_rule': kwargs}
+        resp, body = self.put(uri, jsonutils.dumps(post_data))
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_dscp_marking_rule(self, policy_id, rule_id):
+        uri = '%s/qos/policies/%s/dscp_marking_rules/%s' % (
+            self.uri_prefix, policy_id, rule_id)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def create_minimum_bandwidth_rule(self, policy_id, direction,
+                                      min_kbps=None):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules' % (
+            self.uri_prefix, policy_id)
+        data = {
+            'direction': direction,
+        }
+        if min_kbps is not None:
+            data['min_kbps'] = min_kbps
+        post_data = self.serialize({'minimum_bandwidth_rule': data})
+        resp, body = self.post(uri, post_data)
+        self.expected_success(201, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def list_minimum_bandwidth_rules(self, policy_id):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules' % (
+            self.uri_prefix, policy_id)
+        resp, body = self.get(uri)
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def show_minimum_bandwidth_rule(self, policy_id, rule_id):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules/%s' % (
+            self.uri_prefix, policy_id, rule_id)
+        resp, body = self.get(uri)
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def update_minimum_bandwidth_rule(self, policy_id, rule_id, **kwargs):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules/%s' % (
+            self.uri_prefix, policy_id, rule_id)
+        post_data = {'minimum_bandwidth_rule': kwargs}
+        resp, body = self.put(uri, jsonutils.dumps(post_data))
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_minimum_bandwidth_rule(self, policy_id, rule_id):
+        uri = '%s/qos/policies/%s/minimum_bandwidth_rules/%s' % (
+            self.uri_prefix, policy_id, rule_id)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
     def list_qos_rule_types(self):
         uri = '%s/qos/rule-types' % self.uri_prefix
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
-        body = json.loads(body)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def create_trunk(self, parent_port_id, subports,
+                     tenant_id=None, name=None, admin_state_up=None,
+                     description=None):
+        uri = '%s/trunks' % self.uri_prefix
+        post_data = {
+            'trunk': {
+                'port_id': parent_port_id,
+            }
+        }
+        if subports is not None:
+            post_data['trunk']['sub_ports'] = subports
+        if tenant_id is not None:
+            post_data['trunk']['tenant_id'] = tenant_id
+        if name is not None:
+            post_data['trunk']['name'] = name
+        if description is not None:
+            post_data['trunk']['description'] = description
+        if admin_state_up is not None:
+            post_data['trunk']['admin_state_up'] = admin_state_up
+        resp, body = self.post(uri, self.serialize(post_data))
+        body = self.deserialize_single(body)
+        self.expected_success(201, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def update_trunk(self, trunk_id, **kwargs):
+        put_body = {'trunk': kwargs}
+        body = jsonutils.dumps(put_body)
+        uri = '%s/trunks/%s' % (self.uri_prefix, trunk_id)
+        resp, body = self.put(uri, body)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def show_trunk(self, trunk_id):
+        uri = '%s/trunks/%s' % (self.uri_prefix, trunk_id)
+        resp, body = self.get(uri)
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def list_trunks(self, **kwargs):
+        uri = '%s/trunks' % self.uri_prefix
+        if kwargs:
+            uri += '?' + urlparse.urlencode(kwargs, doseq=1)
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = self.deserialize_single(body)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_trunk(self, trunk_id):
+        uri = '%s/trunks/%s' % (self.uri_prefix, trunk_id)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def _subports_action(self, action, trunk_id, subports):
+        uri = '%s/trunks/%s/%s' % (self.uri_prefix, trunk_id, action)
+        resp, body = self.put(uri, jsonutils.dumps({'sub_ports': subports}))
+        body = self.deserialize_single(body)
+        self.expected_success(200, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def add_subports(self, trunk_id, subports):
+        return self._subports_action('add_subports', trunk_id, subports)
+
+    def remove_subports(self, trunk_id, subports):
+        return self._subports_action('remove_subports', trunk_id, subports)
+
+    def get_subports(self, trunk_id):
+        uri = '%s/trunks/%s/%s' % (self.uri_prefix, trunk_id, 'get_subports')
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def get_auto_allocated_topology(self, tenant_id=None):
+        uri = '%s/auto-allocated-topology/%s' % (self.uri_prefix, tenant_id)
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_auto_allocated_topology(self, tenant_id=None):
+        uri = '%s/auto-allocated-topology/%s' % (self.uri_prefix, tenant_id)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def create_flavor_service_profile(self, flavor_id, service_profile_id):
+        body = jsonutils.dumps({'service_profile': {'id': service_profile_id}})
+        uri = '%s/flavors/%s/service_profiles' % (self.uri_prefix, flavor_id)
+        resp, body = self.post(uri, body)
+        self.expected_success(201, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def list_flavor_service_profiles(self, flavor_id):
+        uri = '%s/flavors/%s/service_profiles' % (self.uri_prefix, flavor_id)
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_flavor_service_profile(self, flavor_id, service_profile_id):
+        uri = '%s/flavors/%s/service_profiles/%s' % (self.uri_prefix,
+                                                     flavor_id,
+                                                     service_profile_id)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def create_security_group_rule(self, direction, security_group_id,
+                                   **kwargs):
+        post_body = {'security_group_rule': kwargs}
+        post_body['security_group_rule']['direction'] = direction
+        post_body['security_group_rule'][
+            'security_group_id'] = security_group_id
+        body = jsonutils.dumps(post_body)
+        uri = '%s/security-group-rules' % self.uri_prefix
+        resp, body = self.post(uri, body)
+        self.expected_success(201, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def list_security_groups(self, **kwargs):
+        post_body = {'security_groups': kwargs}
+        body = jsonutils.dumps(post_body)
+        uri = '%s/security-groups' % self.uri_prefix
+        if kwargs:
+            uri += '?' + urlparse.urlencode(kwargs, doseq=1)
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_security_group(self, security_group_id):
+        uri = '%s/security-groups/%s' % (
+            self.uri_prefix, security_group_id)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def list_ports(self, **kwargs):
+        post_body = {'ports': kwargs}
+        body = jsonutils.dumps(post_body)
+        uri = '%s/ports' % self.uri_prefix
+        if kwargs:
+            uri += '?' + urlparse.urlencode(kwargs, doseq=1)
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def create_floatingip(self, floating_network_id, **kwargs):
+        post_body = {'floatingip': {
+            'floating_network_id': floating_network_id}}
+        if kwargs:
+            post_body['floatingip'].update(kwargs)
+        body = jsonutils.dumps(post_body)
+        uri = '%s/floatingips' % self.uri_prefix
+        resp, body = self.post(uri, body)
+        self.expected_success(201, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def create_network_keystone_v3(self, name, project_id):
+        uri = '%s/networks' % self.uri_prefix
+        post_data = {
+            'network': {
+                'name': name,
+                'project_id': project_id
+            }
+        }
+        resp, body = self.post(uri, self.serialize(post_data))
+        body = self.deserialize_single(body)
+        self.expected_success(201, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def list_extensions(self, **filters):
+        uri = self.get_uri("extensions")
+        if filters:
+            uri = '?'.join([uri, urlparse.urlencode(filters)])
+        resp, body = self.get(uri)
+        body = {'extensions': self.deserialize_list(body)}
+        self.expected_success(200, resp.status)
         return service_client.ResponseBody(resp, body)

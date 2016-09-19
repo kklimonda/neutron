@@ -16,25 +16,25 @@ import hashlib
 import hmac
 
 import httplib2
-from neutronclient.v2_0 import client
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import loopingcall
+from oslo_utils import encodeutils
 import six
 import six.moves.urllib.parse as urlparse
 import webob
 
+from neutron._i18n import _, _LE, _LW
 from neutron.agent.linux import utils as agent_utils
 from neutron.agent.metadata import config
 from neutron.agent import rpc as agent_rpc
+from neutron.common import cache_utils as cache
 from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
-from neutron.common import utils
 from neutron import context
-from neutron.i18n import _LE, _LW
-from neutron.openstack.common.cache import cache
 
 LOG = logging.getLogger(__name__)
 
@@ -75,36 +75,10 @@ class MetadataProxyHandler(object):
 
     def __init__(self, conf):
         self.conf = conf
-        self.auth_info = {}
-        if self.conf.cache_url:
-            self._cache = cache.get_cache(self.conf.cache_url)
-        else:
-            self._cache = False
+        self._cache = cache.get_cache(self.conf)
 
         self.plugin_rpc = MetadataPluginAPI(topics.PLUGIN)
         self.context = context.get_admin_context_without_session()
-        # Use RPC by default
-        self.use_rpc = True
-
-    def _get_neutron_client(self):
-        params = {
-            'username': self.conf.admin_user,
-            'password': self.conf.admin_password,
-            'tenant_name': self.conf.admin_tenant_name,
-            'auth_url': self.conf.auth_url,
-            'auth_strategy': self.conf.auth_strategy,
-            'region_name': self.conf.auth_region,
-            'token': self.auth_info.get('auth_token'),
-            'insecure': self.conf.auth_insecure,
-            'ca_cert': self.conf.auth_ca_cert,
-        }
-        if self.conf.endpoint_url:
-            params['endpoint_url'] = self.conf.endpoint_url
-        else:
-            params['endpoint_url'] = self.auth_info.get('endpoint_url')
-            params['endpoint_type'] = self.conf.endpoint_type
-
-        return client.Client(**params)
 
     @webob.dec.wsgify(RequestClass=webob.Request)
     def __call__(self, req):
@@ -126,27 +100,16 @@ class MetadataProxyHandler(object):
 
     def _get_ports_from_server(self, router_id=None, ip_address=None,
                                networks=None):
-        """Either get ports from server by RPC or fallback to neutron client"""
+        """Get ports from server."""
         filters = self._get_port_filters(router_id, ip_address, networks)
-        if self.use_rpc:
-            try:
-                return self.plugin_rpc.get_ports(self.context, filters)
-            except (oslo_messaging.MessagingException, AttributeError):
-                # TODO(obondarev): remove fallback once RPC is proven
-                # to work fine with metadata agent (K or L release at most)
-                LOG.exception(_LW(  # noqa
-                    'Server does not support metadata RPC, '  # noqa
-                    'fallback to using neutron client'))  # noqa
-                self.use_rpc = False
-
-        return self._get_ports_using_client(filters)
+        return self.plugin_rpc.get_ports(self.context, filters)
 
     def _get_port_filters(self, router_id=None, ip_address=None,
                           networks=None):
         filters = {}
         if router_id:
             filters['device_id'] = [router_id]
-            filters['device_owner'] = n_const.ROUTER_INTERFACE_OWNERS
+            filters['device_owner'] = constants.ROUTER_INTERFACE_OWNERS
         if ip_address:
             filters['fixed_ips'] = {'ip_address': [ip_address]}
         if networks:
@@ -154,13 +117,13 @@ class MetadataProxyHandler(object):
 
         return filters
 
-    @utils.cache_method_results
+    @cache.cache_method_results
     def _get_router_networks(self, router_id):
         """Find all networks connected to given router."""
         internal_ports = self._get_ports_from_server(router_id=router_id)
         return tuple(p['network_id'] for p in internal_ports)
 
-    @utils.cache_method_results
+    @cache.cache_method_results
     def _get_ports_for_remote_address(self, remote_address, networks):
         """Get list of ports that has given ip address and are part of
         given networks.
@@ -171,19 +134,6 @@ class MetadataProxyHandler(object):
         """
         return self._get_ports_from_server(networks=networks,
                                            ip_address=remote_address)
-
-    def _get_ports_using_client(self, filters):
-        # reformat filters for neutron client
-        if 'device_id' in filters:
-            filters['device_id'] = filters['device_id'][0]
-        if 'fixed_ips' in filters:
-            filters['fixed_ips'] = [
-                'ip_address=%s' % filters['fixed_ips']['ip_address'][0]]
-
-        client = self._get_neutron_client()
-        ports = client.list_ports(**filters)
-        self.auth_info = client.get_auth_info()
-        return ports['ports']
 
     def _get_ports(self, remote_address, network_id=None, router_id=None):
         """Search for all ports that contain passed ip address and belongs to
@@ -248,7 +198,7 @@ class MetadataProxyHandler(object):
             req.response.body = content
             return req.response
         elif resp.status == 403:
-            LOG.warn(_LW(
+            LOG.warning(_LW(
                 'The remote metadata server responded with Forbidden. This '
                 'response usually occurs when shared secrets do not match.'
             ))
@@ -263,7 +213,7 @@ class MetadataProxyHandler(object):
             msg = _(
                 'Remote metadata server experienced an internal server error.'
             )
-            LOG.warn(msg)
+            LOG.warning(msg)
             explanation = six.text_type(msg)
             return webob.exc.HTTPInternalServerError(explanation=explanation)
         else:
@@ -271,10 +221,8 @@ class MetadataProxyHandler(object):
 
     def _sign_instance_id(self, instance_id):
         secret = self.conf.metadata_proxy_shared_secret
-        if isinstance(secret, six.text_type):
-            secret = secret.encode('utf-8')
-        if isinstance(instance_id, six.text_type):
-            instance_id = instance_id.encode('utf-8')
+        secret = encodeutils.to_utf8(secret)
+        instance_id = encodeutils.to_utf8(instance_id)
         return hmac.new(secret, instance_id, hashlib.sha256).hexdigest()
 
 
@@ -284,11 +232,10 @@ class UnixDomainMetadataProxy(object):
         self.conf = conf
         agent_utils.ensure_directory_exists_without_file(
             cfg.CONF.metadata_proxy_socket)
-        self._init_state_reporting()
 
     def _init_state_reporting(self):
         self.context = context.get_admin_context_without_session()
-        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
         self.agent_state = {
             'binary': 'neutron-metadata-agent',
             'host': cfg.CONF.host,
@@ -300,7 +247,7 @@ class UnixDomainMetadataProxy(object):
                 'log_agent_heartbeats': cfg.CONF.AGENT.log_agent_heartbeats,
             },
             'start_flag': True,
-            'agent_type': n_const.AGENT_TYPE_METADATA}
+            'agent_type': constants.AGENT_TYPE_METADATA}
         report_interval = cfg.CONF.AGENT.report_interval
         if report_interval:
             self.heartbeat = loopingcall.FixedIntervalLoopingCall(
@@ -315,8 +262,8 @@ class UnixDomainMetadataProxy(object):
                 use_call=self.agent_state.get('start_flag'))
         except AttributeError:
             # This means the server does not support report_state
-            LOG.warn(_LW('Neutron server does not support state report.'
-                         ' State report for this agent will be disabled.'))
+            LOG.warning(_LW('Neutron server does not support state report.'
+                            ' State report for this agent will be disabled.'))
             self.heartbeat.stop()
             return
         except Exception:
@@ -349,4 +296,5 @@ class UnixDomainMetadataProxy(object):
                      workers=self.conf.metadata_workers,
                      backlog=self.conf.metadata_backlog,
                      mode=self._get_socket_mode())
+        self._init_state_reporting()
         server.wait()

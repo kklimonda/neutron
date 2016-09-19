@@ -25,7 +25,8 @@ from neutron.tests import base
 class AgentRPCPluginApi(base.BaseTestCase):
     def _test_rpc_call(self, method):
         agent = rpc.PluginApi('fake_topic')
-        ctxt = oslo_context.RequestContext('fake_user', 'fake_project')
+        ctxt = oslo_context.RequestContext(user='fake_user',
+                                           tenant='fake_project')
         expect_val = 'foo'
         with mock.patch.object(agent.client, 'call') as mock_call,\
                 mock.patch.object(agent.client, 'prepare') as mock_prepare:
@@ -46,7 +47,8 @@ class AgentRPCPluginApi(base.BaseTestCase):
 
     def test_devices_details_list_unsupported(self):
         agent = rpc.PluginApi('fake_topic')
-        ctxt = oslo_context.RequestContext('fake_user', 'fake_project')
+        ctxt = oslo_context.RequestContext(user='fake_user',
+                                           tenant='fake_project')
         expect_val_get_device_details = 'foo'
         expect_val = [expect_val_get_device_details]
         with mock.patch.object(agent.client, 'call') as mock_call, \
@@ -75,7 +77,8 @@ class AgentPluginReportState(base.BaseTestCase):
                 mock.patch.object(reportStateAPI.client, 'prepare'
                                   ) as mock_prepare:
             mock_prepare.return_value = reportStateAPI.client
-            ctxt = oslo_context.RequestContext('fake_user', 'fake_project')
+            ctxt = oslo_context.RequestContext(user='fake_user',
+                                               tenant='fake_project')
             reportStateAPI.report_state(ctxt, expected_agent_state,
                                         use_call=True)
             self.assertEqual(mock_call.call_args[0][0], ctxt)
@@ -94,7 +97,8 @@ class AgentPluginReportState(base.BaseTestCase):
                 mock.patch.object(reportStateAPI.client, 'prepare'
                                   ) as mock_prepare:
             mock_prepare.return_value = reportStateAPI.client
-            ctxt = oslo_context.RequestContext('fake_user', 'fake_project')
+            ctxt = oslo_context.RequestContext(user='fake_user',
+                                               tenant='fake_project')
             reportStateAPI.report_state(ctxt, expected_agent_state)
             self.assertEqual(mock_cast.call_args[0][0], ctxt)
             self.assertEqual(mock_cast.call_args[0][1], 'report_state')
@@ -116,8 +120,8 @@ class AgentPluginReportState(base.BaseTestCase):
                     mock.patch.object(reportStateAPI.client, 'prepare'
                                       ) as mock_prepare:
                 mock_prepare.return_value = reportStateAPI.client
-                ctxt = oslo_context.RequestContext('fake_user',
-                                                   'fake_project')
+                ctxt = oslo_context.RequestContext(user='fake_user',
+                                                   tenant='fake_project')
                 reportStateAPI.report_state(ctxt, expected_agent_state)
                 self.assertEqual(expected_time_str,
                                  mock_cast.call_args[1]['time'])
@@ -136,7 +140,7 @@ class AgentRPCMethods(base.BaseTestCase):
     def test_create_consumers_start_listening(self):
         endpoints = [mock.Mock()]
         expected = [
-            mock.call(new=True),
+            mock.call(),
             mock.call().create_consumer('foo-topic-op', endpoints,
                                         fanout=True),
             mock.call().consume_in_threads()
@@ -149,7 +153,7 @@ class AgentRPCMethods(base.BaseTestCase):
     def test_create_consumers_do_not_listen(self):
         endpoints = [mock.Mock()]
         expected = [
-            mock.call(new=True),
+            mock.call(),
             mock.call().create_consumer('foo-topic-op', endpoints,
                                         fanout=True),
         ]
@@ -161,7 +165,7 @@ class AgentRPCMethods(base.BaseTestCase):
     def test_create_consumers_with_node_name(self):
         endpoints = [mock.Mock()]
         expected = [
-            mock.call(new=True),
+            mock.call(),
             mock.call().create_consumer('foo-topic-op', endpoints,
                                         fanout=True),
             mock.call().create_consumer('foo-topic-op.node1', endpoints,

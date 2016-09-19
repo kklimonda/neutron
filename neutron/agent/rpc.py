@@ -16,14 +16,15 @@
 from datetime import datetime
 import itertools
 
+from neutron_lib import constants
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import uuidutils
 
-from neutron.common import constants
+from neutron._i18n import _LW
+from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
-from neutron.i18n import _LW
 
 
 LOG = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def create_consumers(endpoints, prefix, topic_details, start_listening=True):
     :returns: A common Connection.
     """
 
-    connection = n_rpc.create_connection(new=True)
+    connection = n_rpc.create_connection()
     for details in topic_details:
         topic, operation, node_name = itertools.islice(
             itertools.chain(details, [None]), 3)
@@ -68,11 +69,12 @@ class PluginReportStateAPI(object):
     """
     def __init__(self, topic):
         target = oslo_messaging.Target(topic=topic, version='1.0',
-                                       namespace=constants.RPC_NAMESPACE_STATE)
+                                       namespace=n_const.RPC_NAMESPACE_STATE)
         self.client = n_rpc.get_client(target)
 
     def report_state(self, context, agent_state, use_call=False):
-        cctxt = self.client.prepare()
+        cctxt = self.client.prepare(
+            timeout=n_rpc.TRANSPORT.conf.rpc_response_timeout)
         # add unique identifier to a report
         # that can be logged on server side.
         # This create visible correspondence between events on
@@ -118,7 +120,7 @@ class PluginApi(object):
             # may not work correctly, however it can function in 'degraded'
             # mode, in that DVR routers may not be in the system yet, and
             # it might be not necessary to retrieve info about the host.
-            LOG.warn(_LW('DVR functionality requires a server upgrade.'))
+            LOG.warning(_LW('DVR functionality requires a server upgrade.'))
             res = [
                 self.get_device_details(context, device, agent_id, host)
                 for device in devices
@@ -196,7 +198,8 @@ class PluginApi(object):
             res = cctxt.call(context, 'tunnel_sync', tunnel_ip=tunnel_ip,
                              tunnel_type=tunnel_type, host=host)
         except oslo_messaging.UnsupportedVersion:
-            LOG.warn(_LW('Tunnel synchronization requires a server upgrade.'))
+            LOG.warning(_LW('Tunnel synchronization requires a '
+                            'server upgrade.'))
             cctxt = self.client.prepare()
             res = cctxt.call(context, 'tunnel_sync', tunnel_ip=tunnel_ip,
                              tunnel_type=tunnel_type)

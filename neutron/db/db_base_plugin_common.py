@@ -15,16 +15,21 @@
 
 import functools
 
+from neutron_lib.api import validators
+from neutron_lib import constants
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 from sqlalchemy.orm import exc
 
 from neutron.api.v2 import attributes
-from neutron.common import constants
-from neutron.common import exceptions as n_exc
+from neutron.common import constants as n_const
+from neutron.common import exceptions
 from neutron.common import utils
 from neutron.db import common_db_mixin
 from neutron.db import models_v2
+from neutron.objects import subnet as subnet_obj
+from neutron.objects import subnetpool as subnetpool_obj
 
 LOG = logging.getLogger(__name__)
 
@@ -77,6 +82,12 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
     def _generate_mac():
         return utils.get_random_mac(cfg.CONF.base_mac.split(':'))
 
+    def _is_mac_in_use(self, context, network_id, mac_address):
+        return bool(context.session.query(models_v2.Port).
+                    filter(models_v2.Port.network_id == network_id).
+                    filter(models_v2.Port.mac_address == mac_address).
+                    count())
+
     @staticmethod
     def _delete_ip_allocation(context, network_id, subnet_id, ip_address):
 
@@ -86,10 +97,12 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                   {'ip_address': ip_address,
                    'network_id': network_id,
                    'subnet_id': subnet_id})
-        context.session.query(models_v2.IPAllocation).filter_by(
-            network_id=network_id,
-            ip_address=ip_address,
-            subnet_id=subnet_id).delete()
+        with context.session.begin(subtransactions=True):
+            for ipal in (context.session.query(models_v2.IPAllocation).
+                         filter_by(network_id=network_id,
+                                   ip_address=ip_address,
+                                   subnet_id=subnet_id)):
+                context.session.delete(ipal)
 
     @staticmethod
     def _store_ip_allocation(context, ip_address, network_id, subnet_id,
@@ -107,6 +120,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
             subnet_id=subnet_id
         )
         context.session.add(allocated)
+
         # NOTE(kevinbenton): We add this to the session info so the sqlalchemy
         # object isn't immediately garbage collected. Otherwise when the
         # fixed_ips relationship is referenced a new persistent object will be
@@ -151,12 +165,14 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                'default_prefixlen': default_prefixlen,
                'min_prefixlen': min_prefixlen,
                'max_prefixlen': max_prefixlen,
+               'is_default': subnetpool['is_default'],
                'shared': subnetpool['shared'],
-               'prefixes': [prefix['cidr']
-                            for prefix in subnetpool['prefixes']],
+               'prefixes': [prefix.cidr for prefix in subnetpool['prefixes']],
                'ip_version': subnetpool['ip_version'],
                'default_quota': subnetpool['default_quota'],
                'address_scope_id': subnetpool['address_scope_id']}
+        self._apply_dict_extend_functions(attributes.SUBNETPOOLS, res,
+                                          subnetpool)
         return self._fields(res, fields)
 
     def _make_port_dict(self, port, fields=None,
@@ -173,13 +189,6 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                              for ip in port["fixed_ips"]],
                "device_id": port["device_id"],
                "device_owner": port["device_owner"]}
-        if "dns_name" in port:
-            res["dns_name"] = port["dns_name"]
-        if "dns_assignment" in port:
-            res["dns_assignment"] = [{"ip_address": a["ip_address"],
-                                      "hostname": a["hostname"],
-                                      "fqdn": a["fqdn"]}
-                                     for a in port["dns_assignment"]]
         # Call auxiliary extend functions, if any
         if process_extensions:
             self._apply_dict_extend_functions(
@@ -201,20 +210,11 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         return subnet
 
     def _get_subnetpool(self, context, id):
-        try:
-            return self._get_by_id(context, models_v2.SubnetPool, id)
-        except exc.NoResultFound:
-            raise n_exc.SubnetPoolNotFound(subnetpool_id=id)
-
-    def _get_all_subnetpools(self, context):
-        # NOTE(tidwellr): see note in _get_all_subnets()
-        return context.session.query(models_v2.SubnetPool).all()
-
-    def _get_subnetpools_by_address_scope_id(self, context, address_scope_id):
-        # NOTE(vikram.choudhary): see note in _get_all_subnets()
-        subnetpool_qry = context.session.query(models_v2.SubnetPool)
-        return subnetpool_qry.filter_by(
-            address_scope_id=address_scope_id).all()
+        subnetpool = subnetpool_obj.SubnetPool.get_object(
+            context, id=id)
+        if not subnetpool:
+            raise exceptions.SubnetPoolNotFound(subnetpool_id=id)
+        return subnetpool
 
     def _get_port(self, context, id):
         try:
@@ -224,9 +224,8 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         return port
 
     def _get_dns_by_subnet(self, context, subnet_id):
-        dns_qry = context.session.query(models_v2.DNSNameServer)
-        return dns_qry.filter_by(subnet_id=subnet_id).order_by(
-            models_v2.DNSNameServer.order).all()
+        return subnet_obj.DNSNameServer.get_objects(context,
+                                                    subnet_id=subnet_id)
 
     def _get_route_by_subnet(self, context, subnet_id):
         route_qry = context.session.query(models_v2.SubnetRoute)
@@ -270,17 +269,11 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                'name': network['name'],
                'tenant_id': network['tenant_id'],
                'admin_state_up': network['admin_state_up'],
-               'mtu': network.get('mtu', constants.DEFAULT_NETWORK_MTU),
+               'mtu': network.get('mtu', n_const.DEFAULT_NETWORK_MTU),
                'status': network['status'],
                'subnets': [subnet['id']
                            for subnet in network['subnets']]}
         res['shared'] = self._is_network_shared(context, network)
-        # TODO(pritesh): Move vlan_transparent to the extension module.
-        # vlan_transparent here is only added if the vlantransparent
-        # extension is enabled.
-        if ('vlan_transparent' in network and network['vlan_transparent'] !=
-            attributes.ATTR_NOT_SPECIFIED):
-            res['vlan_transparent'] = network['vlan_transparent']
         # Call auxiliary extend functions, if any
         if process_extensions:
             self._apply_dict_extend_functions(
@@ -307,11 +300,12 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                 'cidr': str(detail.subnet_cidr),
                 'subnetpool_id': subnetpool_id,
                 'enable_dhcp': subnet['enable_dhcp'],
-                'gateway_ip': gateway_ip}
+                'gateway_ip': gateway_ip,
+                'description': subnet.get('description')}
         if subnet['ip_version'] == 6 and subnet['enable_dhcp']:
-            if attributes.is_attr_set(subnet['ipv6_ra_mode']):
+            if validators.is_attr_set(subnet['ipv6_ra_mode']):
                 args['ipv6_ra_mode'] = subnet['ipv6_ra_mode']
-            if attributes.is_attr_set(subnet['ipv6_address_mode']):
+            if validators.is_attr_set(subnet['ipv6_address_mode']):
                 args['ipv6_address_mode'] = subnet['ipv6_address_mode']
         return args
 

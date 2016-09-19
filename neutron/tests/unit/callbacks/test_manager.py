@@ -13,12 +13,26 @@
 #    under the License.
 
 import mock
+from oslo_db import exception as db_exc
 
 from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import manager
 from neutron.callbacks import resources
 from neutron.tests import base
+
+
+class ObjectWithCallback(object):
+
+    def __init__(self):
+        self.counter = 0
+
+    def callback(self, *args, **kwargs):
+        self.counter += 1
+
+
+class GloriousObjectWithCallback(ObjectWithCallback):
+    pass
 
 
 def callback_1(*args, **kwargs):
@@ -33,6 +47,10 @@ callback_id_2 = manager._get_id(callback_2)
 
 def callback_raise(*args, **kwargs):
     raise Exception()
+
+
+def callback_raise_retriable(*args, **kwargs):
+    raise db_exc.DBDeadlock()
 
 
 class CallBacksManagerTestCase(base.BaseTestCase):
@@ -77,6 +95,13 @@ class CallBacksManagerTestCase(base.BaseTestCase):
         self.assertEqual(
             2,
             len(self.manager._callbacks[resources.PORT][events.BEFORE_CREATE]))
+
+    def test_unsubscribe_during_iteration(self):
+        unsub = lambda r, e, *a, **k: self.manager.unsubscribe(unsub, r, e)
+        self.manager.subscribe(unsub, resources.PORT,
+                               events.BEFORE_CREATE)
+        self.manager.notify(resources.PORT, events.BEFORE_CREATE, mock.ANY)
+        self.assertNotIn(unsub, self.manager._index)
 
     def test_unsubscribe(self):
         self.manager.subscribe(
@@ -149,10 +174,13 @@ class CallBacksManagerTestCase(base.BaseTestCase):
             n.return_value = ['error']
             self.assertRaises(exceptions.CallbackFailure,
                               self.manager.notify,
-                              mock.ANY, events.BEFORE_CREATE, mock.ANY)
+                              mock.ANY, events.BEFORE_CREATE,
+                              'trigger', params={'a': 1})
             expected_calls = [
-                mock.call(mock.ANY, 'before_create', mock.ANY),
-                mock.call(mock.ANY, 'abort_create', mock.ANY)
+                mock.call(mock.ANY, 'before_create',
+                          'trigger', params={'a': 1}),
+                mock.call(mock.ANY, 'abort_create',
+                          'trigger', params={'a': 1})
             ]
             n.assert_has_calls(expected_calls)
 
@@ -162,6 +190,12 @@ class CallBacksManagerTestCase(base.BaseTestCase):
         e = self.assertRaises(exceptions.CallbackFailure, self.manager.notify,
                               resources.PORT, events.BEFORE_CREATE, self)
         self.assertIsInstance(e.errors[0], exceptions.NotificationError)
+
+    def test_notify_handle_retriable_exception(self):
+        self.manager.subscribe(
+            callback_raise_retriable, resources.PORT, events.BEFORE_CREATE)
+        self.assertRaises(db_exc.RetryRequest, self.manager.notify,
+                          resources.PORT, events.BEFORE_CREATE, self)
 
     def test_notify_called_once_with_no_failures(self):
         with mock.patch.object(self.manager, '_notify_loop') as n:
@@ -193,3 +227,32 @@ class CallBacksManagerTestCase(base.BaseTestCase):
             resources.ROUTER, events.BEFORE_DELETE, mock.ANY)
         self.assertEqual(2, callback_1.counter)
         self.assertEqual(1, callback_2.counter)
+
+    @mock.patch("neutron.callbacks.manager.LOG")
+    def test__notify_loop_skip_log_errors(self, _logger):
+        self.manager.subscribe(
+            callback_raise, resources.PORT, events.BEFORE_CREATE)
+        self.manager.subscribe(
+            callback_raise, resources.PORT, events.PRECOMMIT_CREATE)
+        self.manager._notify_loop(
+            resources.PORT, events.BEFORE_CREATE, mock.ANY)
+        self.manager._notify_loop(
+            resources.PORT, events.PRECOMMIT_CREATE, mock.ANY)
+        self.assertFalse(_logger.exception.call_count)
+        self.assertTrue(_logger.error.call_count)
+
+    def test_object_instances_as_subscribers(self):
+        """Ensures that the manager doesn't think these are equivalent."""
+        a = GloriousObjectWithCallback()
+        b = ObjectWithCallback()
+        c = ObjectWithCallback()
+        for o in (a, b, c):
+            self.manager.subscribe(
+                o.callback, resources.PORT, events.BEFORE_CREATE)
+            # ensure idempotency remains for a single object
+            self.manager.subscribe(
+                o.callback, resources.PORT, events.BEFORE_CREATE)
+        self.manager.notify(resources.PORT, events.BEFORE_CREATE, mock.ANY)
+        self.assertEqual(1, a.counter)
+        self.assertEqual(1, b.counter)
+        self.assertEqual(1, c.counter)

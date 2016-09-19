@@ -15,14 +15,33 @@
 
 """Exceptions used by ML2."""
 
-from neutron.common import exceptions
+from neutron_lib import exceptions
+
+from neutron._i18n import _
 
 
-class MechanismDriverError(exceptions.NeutronException):
+class MechanismDriverError(exceptions.MultipleExceptions):
     """Mechanism driver call failed."""
-    message = _("%(method)s failed.")
+
+    def __init__(self, method, errors=None):
+        # The message is not used by api, because api will unwrap
+        # MultipleExceptions and return inner exceptions. Keep it
+        # for backward-compatibility, in case other code use it.
+        self.message = _("%s failed.") % method
+        super(MechanismDriverError, self).__init__(errors or [])
 
 
 class ExtensionDriverError(exceptions.InvalidInput):
     """Extension driver call failed."""
     message = _("Extension %(driver)s failed.")
+
+
+class ExtensionDriverNotFound(exceptions.InvalidConfigurationOption):
+    """Required extension driver not found in ML2 config."""
+    message = _("Extension driver %(driver)s required for "
+                "service plugin %(service_plugin)s not found.")
+
+
+class UnknownNetworkType(exceptions.NeutronException):
+    """Network with unknown type."""
+    message = _("Unknown network type %(network_type)s.")

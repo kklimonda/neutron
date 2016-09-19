@@ -13,21 +13,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants
 from oslo_config import cfg
-from oslo_log import log as logging
 from oslo_utils import uuidutils
 from webob import exc
 
-from neutron.common import constants
 from neutron.common import utils
+from neutron import context
 from neutron.db import extraroute_db
 from neutron.extensions import extraroute
 from neutron.extensions import l3
 from neutron.tests.unit.api.v2 import test_base
 from neutron.tests.unit.extensions import test_l3 as test_l3
 
-
-LOG = logging.getLogger(__name__)
 
 _uuid = uuidutils.generate_uuid
 _get_path = test_base._get_path
@@ -61,11 +59,15 @@ class TestExtraRouteL3NatServicePlugin(test_l3.TestL3NatServicePlugin,
 
 
 class ExtraRouteDBTestCaseBase(object):
-    def _routes_update_prepare(self, router_id, subnet_id,
-                               port_id, routes, skip_add=False):
+    def _routes_update_prepare(
+            self, router_id, subnet_id,
+            port_id, routes, skip_add=False, tenant_id=None):
         if not skip_add:
-            self._router_interface_action('add', router_id, subnet_id, port_id)
-        self._update('routers', router_id, {'router': {'routes': routes}})
+            self._router_interface_action(
+                'add', router_id, subnet_id, port_id, tenant_id=None)
+        ctxt = context.Context('', tenant_id) if tenant_id else None
+        self._update('routers', router_id, {'router': {'routes': routes}},
+                     neutron_context=ctxt)
         return self._show('routers', router_id)
 
     def _routes_update_cleanup(self, port_id, subnet_id, router_id, routes):
@@ -76,13 +78,43 @@ class ExtraRouteDBTestCaseBase(object):
         routes = [{'destination': '135.207.0.0/16', 'nexthop': '10.0.1.3'}]
         with self.router() as r:
             with self.subnet(cidr='10.0.1.0/24') as s:
-                with self.port(subnet=s) as p:
+                fixed_ip_data = [{'ip_address': '10.0.1.2'}]
+                with self.port(subnet=s, fixed_ips=fixed_ip_data) as p:
                     body = self._routes_update_prepare(r['router']['id'],
                                                        None, p['port']['id'],
                                                        routes)
-                    self.assertEqual(body['router']['routes'], routes)
+                    self.assertEqual(routes, body['router']['routes'])
                     self._routes_update_cleanup(p['port']['id'],
                                                 None, r['router']['id'], [])
+
+    def test_route_update_with_external_route(self):
+        my_tenant = 'tenant1'
+        with self.subnet(cidr='10.0.1.0/24', tenant_id='notme') as ext_subnet,\
+            self.port(subnet=ext_subnet) as nexthop_port:
+            nexthop_ip = nexthop_port['port']['fixed_ips'][0]['ip_address']
+            routes = [{'destination': '135.207.0.0/16',
+                       'nexthop': nexthop_ip}]
+            self._set_net_external(ext_subnet['subnet']['network_id'])
+            ext_info = {'network_id': ext_subnet['subnet']['network_id']}
+            with self.router(
+                    external_gateway_info=ext_info, tenant_id=my_tenant) as r:
+                body = self._routes_update_prepare(
+                    r['router']['id'], None, None, routes, skip_add=True,
+                    tenant_id=my_tenant)
+                self.assertEqual(routes, body['router']['routes'])
+
+    def test_route_update_with_route_via_another_tenant_subnet(self):
+        my_tenant = 'tenant1'
+        with self.subnet(cidr='10.0.1.0/24', tenant_id='notme') as subnet,\
+            self.port(subnet=subnet) as nexthop_port:
+            nexthop_ip = nexthop_port['port']['fixed_ips'][0]['ip_address']
+            routes = [{'destination': '135.207.0.0/16',
+                       'nexthop': nexthop_ip}]
+            with self.router(tenant_id=my_tenant) as r:
+                body = self._routes_update_prepare(
+                    r['router']['id'], subnet['subnet']['id'], None, routes,
+                    tenant_id=my_tenant)
+                self.assertEqual(routes, body['router']['routes'])
 
     def test_route_clear_routes_with_None(self):
         routes = [{'destination': '135.207.0.0/16',
@@ -93,12 +125,13 @@ class ExtraRouteDBTestCaseBase(object):
                    'nexthop': '10.0.1.5'}]
         with self.router() as r:
             with self.subnet(cidr='10.0.1.0/24') as s:
-                with self.port(subnet=s) as p:
+                fixed_ip_data = [{'ip_address': '10.0.1.2'}]
+                with self.port(subnet=s, fixed_ips=fixed_ip_data) as p:
                     self._routes_update_prepare(r['router']['id'],
                                                 None, p['port']['id'], routes)
                     body = self._update('routers', r['router']['id'],
                                         {'router': {'routes': None}})
-                    self.assertEqual(body['router']['routes'], [])
+                    self.assertEqual([], body['router']['routes'])
                     self._routes_update_cleanup(p['port']['id'],
                                                 None, r['router']['id'], [])
 
@@ -107,11 +140,12 @@ class ExtraRouteDBTestCaseBase(object):
                    'nexthop': '10.0.1.3'}]
         with self.router() as r:
             with self.subnet(cidr='10.0.1.0/24') as s:
-                with self.port(subnet=s) as p:
+                fixed_ip_data = [{'ip_address': '10.0.1.2'}]
+                with self.port(subnet=s, fixed_ips=fixed_ip_data) as p:
                     body = self._routes_update_prepare(r['router']['id'],
                                                        None, p['port']['id'],
                                                        routes)
-                    self.assertEqual(body['router']['routes'], routes)
+                    self.assertEqual(routes, body['router']['routes'])
                     self._router_interface_action(
                         'remove',
                         r['router']['id'],
@@ -131,7 +165,8 @@ class ExtraRouteDBTestCaseBase(object):
                    'nexthop': '10.0.1.5'}]
         with self.router() as r:
             with self.subnet(cidr='10.0.1.0/24') as s:
-                with self.port(subnet=s) as p:
+                fixed_ip_data = [{'ip_address': '10.0.1.2'}]
+                with self.port(subnet=s, fixed_ips=fixed_ip_data) as p:
                     body = self._routes_update_prepare(r['router']['id'],
                                                        None, p['port']['id'],
                                                        routes)
@@ -143,23 +178,26 @@ class ExtraRouteDBTestCaseBase(object):
                                                 None, r['router']['id'], [])
 
     def test_routes_update_for_multiple_routers(self):
-        routes1 = [{'destination': '135.207.0.0/16',
-                   'nexthop': '10.0.0.3'}]
-        routes2 = [{'destination': '12.0.0.0/8',
-                   'nexthop': '10.0.0.4'}]
         with self.router() as r1,\
                 self.router() as r2,\
                 self.subnet(cidr='10.0.0.0/24') as s:
-            with self.port(subnet=s) as p1, self.port(subnet=s) as p2:
+            with self.port(subnet=s) as p1,\
+                    self.port(subnet=s) as p2:
+                p1_ip = p1['port']['fixed_ips'][0]['ip_address']
+                p2_ip = p2['port']['fixed_ips'][0]['ip_address']
+                routes1 = [{'destination': '135.207.0.0/16',
+                            'nexthop': p2_ip}]
+                routes2 = [{'destination': '12.0.0.0/8',
+                            'nexthop': p1_ip}]
                 body = self._routes_update_prepare(r1['router']['id'],
                                                    None, p1['port']['id'],
                                                    routes1)
-                self.assertEqual(body['router']['routes'], routes1)
+                self.assertEqual(routes1, body['router']['routes'])
 
                 body = self._routes_update_prepare(r2['router']['id'],
                                                    None, p2['port']['id'],
                                                    routes2)
-                self.assertEqual(body['router']['routes'], routes2)
+                self.assertEqual(routes2, body['router']['routes'])
 
                 self._routes_update_cleanup(p1['port']['id'],
                                             None, r1['router']['id'], [])
@@ -179,7 +217,8 @@ class ExtraRouteDBTestCaseBase(object):
                         'nexthop': '10.0.1.5'}]
         with self.router() as r:
             with self.subnet(cidr='10.0.1.0/24') as s:
-                with self.port(subnet=s) as p:
+                fixed_ip_data = [{'ip_address': '10.0.1.2'}]
+                with self.port(subnet=s, fixed_ips=fixed_ip_data) as p:
                     body = self._routes_update_prepare(r['router']['id'],
                                                        None, p['port']['id'],
                                                        routes_orig)
@@ -408,25 +447,25 @@ class ExtraRouteDBTestCaseBase(object):
                     tenant_id=r['router']['tenant_id'],
                     device_owner=constants.DEVICE_OWNER_ROUTER_GW)
                 port_list = self.deserialize('json', port_res)
-                self.assertEqual(len(port_list['ports']), 1)
+                self.assertEqual(1, len(port_list['ports']))
 
-                routes = [{'destination': '135.207.0.0/16',
-                           'nexthop': '10.0.1.3'}]
+                with self.port(subnet=s) as p:
+                    next_hop = p['port']['fixed_ips'][0]['ip_address']
+                    routes = [{'destination': '135.207.0.0/16',
+                               'nexthop': next_hop}]
+                    body = self._update('routers', r['router']['id'],
+                                        {'router': {'routes':
+                                                    routes}})
 
-                body = self._update('routers', r['router']['id'],
-                                    {'router': {'routes':
-                                                routes}})
+                    body = self._show('routers', r['router']['id'])
+                    self.assertEqual(routes, body['router']['routes'])
 
-                body = self._show('routers', r['router']['id'])
-                self.assertEqual(body['router']['routes'],
-                                 routes)
-
-                self._remove_external_gateway_from_router(
-                    r['router']['id'],
-                    s['subnet']['network_id'])
-                body = self._show('routers', r['router']['id'])
-                gw_info = body['router']['external_gateway_info']
-                self.assertIsNone(gw_info)
+                    self._remove_external_gateway_from_router(
+                        r['router']['id'],
+                        s['subnet']['network_id'])
+                    body = self._show('routers', r['router']['id'])
+                    gw_info = body['router']['external_gateway_info']
+                    self.assertIsNone(gw_info)
 
     def test_router_list_with_sort(self):
         with self.router(name='router1') as router1,\

@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_utils import uuidutils
 
 from neutron.agent.linux import bridge_lib
 from neutron.tests.common import net_helpers
@@ -28,15 +29,59 @@ class BridgeLibTestCase(base.BaseSudoTestCase):
         bridge = self.useFixture(
             net_helpers.LinuxBridgeFixture(namespace=None)).bridge
         port_fixture = self.useFixture(
-            net_helpers.LinuxBridgePortFixture(bridge))
+            net_helpers.LinuxBridgePortFixture(
+                bridge, port_id=uuidutils.generate_uuid()))
         return bridge, port_fixture
 
-    def test_get_interface_bridged_time(self):
+    def test_is_bridged_interface(self):
+        self.assertTrue(
+            bridge_lib.is_bridged_interface(self.port_fixture.br_port.name))
+
+    def test_is_not_bridged_interface(self):
+        self.assertFalse(
+            bridge_lib.is_bridged_interface(self.port_fixture.port.name))
+
+    def test_get_bridge_names(self):
+        self.assertIn(self.bridge.name, bridge_lib.get_bridge_names())
+
+    def test_get_interface_ifindex(self):
         port = self.port_fixture.br_port
-        t1 = bridge_lib.get_interface_bridged_time(port)
-        self.bridge.delif(port)
-        self.bridge.addif(port)
-        t2 = bridge_lib.get_interface_bridged_time(port)
+        t1 = bridge_lib.get_interface_ifindex(str(port))
+        self.port_fixture.veth_fixture.destroy()
+        self.port_fixture.veth_fixture._setUp()
+        t2 = bridge_lib.get_interface_ifindex(str(port))
         self.assertIsNotNone(t1)
         self.assertIsNotNone(t2)
-        self.assertGreater(t2, t1)
+        self.assertGreaterEqual(t2, t1)
+
+    def test_get_interface_bridge(self):
+        bridge = bridge_lib.BridgeDevice.get_interface_bridge(
+            self.port_fixture.br_port.name)
+        self.assertEqual(self.bridge.name, bridge.name)
+
+    def test_get_interface_no_bridge(self):
+        bridge = bridge_lib.BridgeDevice.get_interface_bridge(
+            self.port_fixture.port.name)
+        self.assertIsNone(bridge)
+
+    def test_get_interfaces(self):
+        self.assertEqual(
+            [self.port_fixture.br_port.name], self.bridge.get_interfaces())
+
+    def test_get_interfaces_no_bridge(self):
+        bridge = bridge_lib.BridgeDevice('--fake--')
+        self.assertEqual([], bridge.get_interfaces())
+
+    def test_disable_ipv6(self):
+        sysfs_path = ("/proc/sys/net/ipv6/conf/%s/disable_ipv6" %
+                      self.bridge.name)
+
+        # first, make sure it's enabled
+        with open(sysfs_path, 'r') as sysfs_disable_ipv6_file:
+            sysfs_disable_ipv6 = sysfs_disable_ipv6_file.read()
+            self.assertEqual("0\n", sysfs_disable_ipv6)
+
+        self.assertEqual(0, self.bridge.disable_ipv6())
+        with open(sysfs_path, 'r') as sysfs_disable_ipv6_file:
+            sysfs_disable_ipv6 = sysfs_disable_ipv6_file.read()
+            self.assertEqual("1\n", sysfs_disable_ipv6)

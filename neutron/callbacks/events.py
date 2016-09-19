@@ -10,17 +10,31 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-# String literals representing core events.
+# String literals representing events associated to data store operations
 BEFORE_CREATE = 'before_create'
 BEFORE_READ = 'before_read'
 BEFORE_UPDATE = 'before_update'
 BEFORE_DELETE = 'before_delete'
+
+PRECOMMIT_CREATE = 'precommit_create'
+PRECOMMIT_UPDATE = 'precommit_update'
+PRECOMMIT_DELETE = 'precommit_delete'
 
 AFTER_CREATE = 'after_create'
 AFTER_READ = 'after_read'
 AFTER_UPDATE = 'after_update'
 AFTER_DELETE = 'after_delete'
 
+# String literals representing events associated to API operations
+BEFORE_RESPONSE = 'before_response'
+AFTER_REQUEST = 'after_request'
+
+# String literals representing events associated to process operations
+BEFORE_INIT = 'before_init'
+BEFORE_SPAWN = 'before_spawn'  # sent per process
+AFTER_INIT = 'after_init'  # sent per worker
+
+# String literals representing events associated to error conditions
 ABORT_CREATE = 'abort_create'
 ABORT_READ = 'abort_read'
 ABORT_UPDATE = 'abort_update'
@@ -28,3 +42,4 @@ ABORT_DELETE = 'abort_delete'
 
 ABORT = 'abort_'
 BEFORE = 'before_'
+PRECOMMIT = 'precommit_'

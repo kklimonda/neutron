@@ -37,9 +37,9 @@ class TestItemAllocator(base.BaseTestCase):
             a = ia.ItemAllocator('/file', TestObject, test_pool)
             test_object = a.allocate('test')
 
-        self.assertTrue('test' in a.allocations)
-        self.assertTrue(test_object in a.allocations.values())
-        self.assertTrue(test_object not in a.pool)
+        self.assertIn('test', a.allocations)
+        self.assertIn(test_object, a.allocations.values())
+        self.assertNotIn(test_object, a.pool)
         self.assertTrue(write.called)
 
     def test__init__readfile(self):
@@ -48,8 +48,23 @@ class TestItemAllocator(base.BaseTestCase):
             read.return_value = ["da873ca2,10\n"]
             a = ia.ItemAllocator('/file', TestObject, test_pool)
 
-        self.assertTrue('da873ca2' in a.remembered)
+        self.assertIn('da873ca2', a.remembered)
         self.assertEqual({}, a.allocations)
+
+    def test__init__readfile_error(self):
+        test_pool = set(TestObject(s) for s in range(32768, 40000))
+        with mock.patch.object(ia.ItemAllocator, '_read') as read,\
+                mock.patch.object(ia.ItemAllocator, '_write') as write:
+            read.return_value = ["da873ca2,10\n",
+                                 "corrupt_entry_no_delimiter\n",
+                                 "42c9daf7,11\n"]
+            a = ia.ItemAllocator('/file', TestObject, test_pool)
+
+        self.assertIn('da873ca2', a.remembered)
+        self.assertIn('42c9daf7', a.remembered)
+        self.assertNotIn('corrupt_entry_no_delimiter', a.remembered)
+        self.assertEqual({}, a.allocations)
+        self.assertTrue(write.called)
 
     def test_allocate(self):
         test_pool = set([TestObject(33000), TestObject(33001)])
@@ -57,9 +72,9 @@ class TestItemAllocator(base.BaseTestCase):
         with mock.patch.object(ia.ItemAllocator, '_write') as write:
             test_object = a.allocate('test')
 
-        self.assertTrue('test' in a.allocations)
-        self.assertTrue(test_object in a.allocations.values())
-        self.assertTrue(test_object not in a.pool)
+        self.assertIn('test', a.allocations)
+        self.assertIn(test_object, a.allocations.values())
+        self.assertNotIn(test_object, a.pool)
         self.assertTrue(write.called)
 
     def test_allocate_repeated_call_with_same_key(self):
@@ -89,9 +104,9 @@ class TestItemAllocator(base.BaseTestCase):
             t_obj = a.allocate('deadbeef')
 
         self.assertEqual('33000', t_obj._value)
-        self.assertTrue('deadbeef' in a.allocations)
-        self.assertTrue(t_obj in a.allocations.values())
-        self.assertTrue(33000 not in a.pool)
+        self.assertIn('deadbeef', a.allocations)
+        self.assertIn(t_obj, a.allocations.values())
+        self.assertNotIn(33000, a.pool)
         self.assertFalse(write.called)
 
     def test_allocate_exhausted_pool(self):
@@ -103,8 +118,8 @@ class TestItemAllocator(base.BaseTestCase):
         with mock.patch.object(ia.ItemAllocator, '_write') as write:
             allocation = a.allocate('abcdef12')
 
-        self.assertFalse('deadbeef' in a.allocations)
-        self.assertTrue(allocation not in a.pool)
+        self.assertNotIn('deadbeef', a.allocations)
+        self.assertNotIn(allocation, a.pool)
         self.assertTrue(write.called)
 
     def test_release(self):
@@ -115,7 +130,7 @@ class TestItemAllocator(base.BaseTestCase):
             write.reset_mock()
             a.release('deadbeef')
 
-        self.assertTrue('deadbeef' not in a.allocations)
-        self.assertTrue(allocation in a.pool)
+        self.assertNotIn('deadbeef', a.allocations)
+        self.assertIn(allocation, a.pool)
         self.assertEqual({}, a.allocations)
         write.assert_called_once_with([])

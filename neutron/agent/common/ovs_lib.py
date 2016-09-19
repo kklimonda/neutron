@@ -17,25 +17,25 @@ import collections
 import itertools
 import operator
 import time
+import uuid
 
+from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
 import retrying
 import six
-import uuid
 
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.common import utils
 from neutron.agent.linux import ip_lib
 from neutron.agent.ovsdb import api as ovsdb
-from neutron.common import exceptions
-from neutron.i18n import _LE, _LI, _LW
+from neutron.conf.agent import ovs_conf
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants
 
-# Default timeout for ovs-vsctl command
-DEFAULT_OVS_VSCTL_TIMEOUT = 10
+UINT64_BITMASK = (1 << 64) - 1
 
 # Special return value for an invalid OVS ofport
 INVALID_OFPORT = -1
@@ -45,14 +45,14 @@ UNASSIGNED_OFPORT = []
 FAILMODE_SECURE = 'secure'
 FAILMODE_STANDALONE = 'standalone'
 
-OPTS = [
-    cfg.IntOpt('ovs_vsctl_timeout',
-               default=DEFAULT_OVS_VSCTL_TIMEOUT,
-               help=_('Timeout in seconds for ovs-vsctl commands')),
-]
-cfg.CONF.register_opts(OPTS)
+ovs_conf.register_ovs_agent_opts()
 
 LOG = logging.getLogger(__name__)
+
+OVS_DEFAULT_CAPS = {
+    'datapath_types': [],
+    'iface_types': [],
+}
 
 
 def _ofport_result_pending(result):
@@ -93,10 +93,11 @@ class VifPort(object):
         self.switch = switch
 
     def __str__(self):
-        return ("iface-id=" + self.vif_id + ", vif_mac=" +
-                self.vif_mac + ", port_name=" + self.port_name +
-                ", ofport=" + str(self.ofport) + ", bridge_name=" +
-                self.switch.br_name)
+        return ("iface-id=%s, vif_mac=%s, port_name=%s, ofport=%s, "
+                "bridge_name=%s") % (
+                    self.vif_id, self.vif_mac,
+                    self.port_name, self.ofport,
+                    self.switch.br_name)
 
 
 class BaseOVS(object):
@@ -110,10 +111,7 @@ class BaseOVS(object):
 
         self.ovsdb.add_br(bridge_name,
                           datapath_type).execute()
-        br = OVSBridge(bridge_name)
-        # Don't return until vswitchd sets up the internal port
-        br.get_port_ofport(bridge_name)
-        return br
+        return OVSBridge(bridge_name)
 
     def delete_bridge(self, bridge_name):
         self.ovsdb.del_br(bridge_name).execute()
@@ -147,16 +145,37 @@ class BaseOVS(object):
         return self.ovsdb.db_get(table, record, column).execute(
             check_error=check_error, log_errors=log_errors)
 
+    @property
+    def config(self):
+        """A dict containing the only row from the root Open_vSwitch table
+
+        This row contains several columns describing the Open vSwitch install
+        and the system on which it is installed. Useful keys include:
+            datapath_types: a list of supported datapath types
+            iface_types: a list of supported interface types
+            ovs_version: the OVS version
+        """
+        return self.ovsdb.db_list("Open_vSwitch").execute()[0]
+
+    @property
+    def capabilities(self):
+        _cfg = self.config
+        return {k: _cfg.get(k, OVS_DEFAULT_CAPS[k]) for k in OVS_DEFAULT_CAPS}
+
 
 class OVSBridge(BaseOVS):
     def __init__(self, br_name, datapath_type=constants.OVS_DATAPATH_SYSTEM):
         super(OVSBridge, self).__init__()
         self.br_name = br_name
         self.datapath_type = datapath_type
-        self.agent_uuid_stamp = 0
+        self._default_cookie = generate_random_cookie()
+
+    @property
+    def default_cookie(self):
+        return self._default_cookie
 
     def set_agent_uuid_stamp(self, val):
-        self.agent_uuid_stamp = val
+        self._default_cookie = val
 
     def set_controller(self, controllers):
         self.ovsdb.set_controller(self.br_name,
@@ -190,8 +209,6 @@ class OVSBridge(BaseOVS):
             if secure_mode:
                 txn.add(self.ovsdb.set_fail_mode(self.br_name,
                                                  FAILMODE_SECURE))
-        # Don't return until vswitchd sets up the internal port
-        self.get_port_ofport(self.br_name)
 
     def destroy(self):
         self.delete_bridge(self.br_name)
@@ -217,8 +234,6 @@ class OVSBridge(BaseOVS):
             if interface_attr_tuples:
                 txn.add(self.ovsdb.db_set('Interface', port_name,
                                           *interface_attr_tuples))
-        # Don't return until the port has been assigned by vswitchd
-        self.get_port_ofport(port_name)
 
     def delete_port(self, port_name):
         self.ovsdb.del_port(port_name, self.br_name).execute()
@@ -260,10 +275,9 @@ class OVSBridge(BaseOVS):
         ofport = INVALID_OFPORT
         try:
             ofport = self._get_port_ofport(port_name)
-        except retrying.RetryError as e:
-            LOG.exception(_LE("Timed out retrieving ofport on port %(pname)s. "
-                              "Exception: %(exception)s"),
-                          {'pname': port_name, 'exception': e})
+        except retrying.RetryError:
+            LOG.exception(_LE("Timed out retrieving ofport on port %s."),
+                          port_name)
         return ofport
 
     def get_datapath_id(self):
@@ -274,7 +288,7 @@ class OVSBridge(BaseOVS):
         if action != 'del':
             for kw in kwargs_list:
                 if 'cookie' not in kw:
-                    kw['cookie'] = self.agent_uuid_stamp
+                    kw['cookie'] = self._default_cookie
         flow_strs = [_build_flow_expr_str(kw, action) for kw in kwargs_list]
         self.run_ofctl('%s-flows' % action, ['-'], '\n'.join(flow_strs))
 
@@ -288,8 +302,15 @@ class OVSBridge(BaseOVS):
         self.do_action_flows('del', [kwargs])
 
     def dump_flows_for_table(self, table):
+        return self.dump_flows_for(table=table)
+
+    def dump_flows_for(self, **kwargs):
         retval = None
-        flow_str = "table=%s" % table
+        if "cookie" in kwargs:
+            kwargs["cookie"] = check_cookie_mask(str(kwargs["cookie"]))
+        flow_str = ",".join("=".join([key, str(val)])
+            for key, val in kwargs.items())
+
         flows = self.run_ofctl("dump-flows", [flow_str])
         if flows:
             retval = '\n'.join(item for item in flows.splitlines()
@@ -414,11 +435,11 @@ class OVSBridge(BaseOVS):
             if_exists=True)
         for result in results:
             if result['ofport'] == UNASSIGNED_OFPORT:
-                LOG.warn(_LW("Found not yet ready openvswitch port: %s"),
-                         result['name'])
+                LOG.warning(_LW("Found not yet ready openvswitch port: %s"),
+                            result['name'])
             elif result['ofport'] == INVALID_OFPORT:
-                LOG.warn(_LW("Found failed openvswitch port: %s"),
-                         result['name'])
+                LOG.warning(_LW("Found failed openvswitch port: %s"),
+                            result['name'])
             elif 'attached-mac' in result['external_ids']:
                 port_id = self.portid_from_external_ids(result['external_ids'])
                 if port_id:
@@ -476,9 +497,9 @@ class OVSBridge(BaseOVS):
     @staticmethod
     def _check_ofport(port_id, port_info):
         if port_info['ofport'] in [UNASSIGNED_OFPORT, INVALID_OFPORT]:
-            LOG.warn(_LW("ofport: %(ofport)s for VIF: %(vif)s is not a"
-                         " positive integer"),
-                     {'ofport': port_info['ofport'], 'vif': port_id})
+            LOG.warning(_LW("ofport: %(ofport)s for VIF: %(vif)s "
+                            "is not a positive integer"),
+                        {'ofport': port_info['ofport'], 'vif': port_id})
             return False
         return True
 
@@ -670,3 +691,14 @@ def _build_flow_expr_str(flow_dict, cmd):
         flow_expr_arr.append(actions)
 
     return ','.join(flow_expr_arr)
+
+
+def generate_random_cookie():
+    return uuid.uuid4().int & UINT64_BITMASK
+
+
+def check_cookie_mask(cookie):
+    if '/' not in cookie:
+        return cookie + '/-1'
+    else:
+        return cookie

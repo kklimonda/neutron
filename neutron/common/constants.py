@@ -13,58 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# TODO(salv-orlando): Verify if a single set of operational
-# status constants is achievable
-NET_STATUS_ACTIVE = 'ACTIVE'
-NET_STATUS_BUILD = 'BUILD'
-NET_STATUS_DOWN = 'DOWN'
-NET_STATUS_ERROR = 'ERROR'
+from neutron_lib import constants as lib_constants
 
-PORT_STATUS_ACTIVE = 'ACTIVE'
-PORT_STATUS_BUILD = 'BUILD'
-PORT_STATUS_DOWN = 'DOWN'
-PORT_STATUS_ERROR = 'ERROR'
-PORT_STATUS_NOTAPPLICABLE = 'N/A'
+from neutron.common import _deprecate
 
-FLOATINGIP_STATUS_ACTIVE = 'ACTIVE'
-FLOATINGIP_STATUS_DOWN = 'DOWN'
-FLOATINGIP_STATUS_ERROR = 'ERROR'
 
-DEVICE_OWNER_COMPUTE_PREFIX = "compute:"
-DEVICE_OWNER_NETWORK_PREFIX = "network:"
-DEVICE_OWNER_NEUTRON_PREFIX = "neutron:"
+ROUTER_PORT_OWNERS = lib_constants.ROUTER_INTERFACE_OWNERS_SNAT + \
+    (lib_constants.DEVICE_OWNER_ROUTER_GW,)
 
-DEVICE_OWNER_ROUTER_HA_INTF = "network:router_ha_interface"
-DEVICE_OWNER_ROUTER_INTF = "network:router_interface"
-DEVICE_OWNER_ROUTER_GW = "network:router_gateway"
-DEVICE_OWNER_FLOATINGIP = "network:floatingip"
-DEVICE_OWNER_DHCP = "network:dhcp"
-DEVICE_OWNER_DVR_INTERFACE = "network:router_interface_distributed"
-DEVICE_OWNER_AGENT_GW = "network:floatingip_agent_gateway"
-DEVICE_OWNER_ROUTER_SNAT = "network:router_centralized_snat"
-DEVICE_OWNER_LOADBALANCER = DEVICE_OWNER_NEUTRON_PREFIX + "LOADBALANCER"
-DEVICE_OWNER_LOADBALANCERV2 = DEVICE_OWNER_NEUTRON_PREFIX + "LOADBALANCERV2"
-
-DEVICE_OWNER_PREFIXES = (DEVICE_OWNER_NETWORK_PREFIX,
-                         DEVICE_OWNER_NEUTRON_PREFIX)
-
-# Collection used to identify devices owned by router interfaces.
-# DEVICE_OWNER_ROUTER_HA_INTF is a special case and so is not included.
-ROUTER_INTERFACE_OWNERS = (DEVICE_OWNER_ROUTER_INTF,
-                           DEVICE_OWNER_DVR_INTERFACE)
-ROUTER_INTERFACE_OWNERS_SNAT = (DEVICE_OWNER_ROUTER_INTF,
-                                DEVICE_OWNER_DVR_INTERFACE,
-                                DEVICE_OWNER_ROUTER_SNAT)
-L3_AGENT_MODE_DVR = 'dvr'
-L3_AGENT_MODE_DVR_SNAT = 'dvr_snat'
-L3_AGENT_MODE_LEGACY = 'legacy'
-L3_AGENT_MODE = 'agent_mode'
+ROUTER_STATUS_ACTIVE = 'ACTIVE'
+# NOTE(kevinbenton): a BUILD status for routers could be added in the future
+# for agents to indicate when they are wiring up the ports. The following is
+# to indicate when the server is busy building sub-components of a router
+ROUTER_STATUS_ALLOCATING = 'ALLOCATING'
 
 DEVICE_ID_RESERVED_DHCP_PORT = "reserved_dhcp_port"
 
-FLOATINGIP_KEY = '_floatingips'
-INTERFACE_KEY = '_interfaces'
-HA_INTERFACE_KEY = '_ha_interface'
 HA_ROUTER_STATE_KEY = '_ha_state'
 METERING_LABEL_KEY = '_metering_labels'
 FLOATINGIP_AGENT_INTF_KEY = '_floatingip_agent_interfaces'
@@ -73,90 +37,29 @@ SNAT_ROUTER_INTF_KEY = '_snat_router_interfaces'
 HA_NETWORK_NAME = 'HA network tenant %s'
 HA_SUBNET_NAME = 'HA subnet tenant %s'
 HA_PORT_NAME = 'HA port tenant %s'
-MINIMUM_AGENTS_FOR_HA = 2
+MINIMUM_MINIMUM_AGENTS_FOR_HA = 1
+DEFAULT_MINIMUM_AGENTS_FOR_HA = 2
 HA_ROUTER_STATE_ACTIVE = 'active'
 HA_ROUTER_STATE_STANDBY = 'standby'
-
-IPv4 = 'IPv4'
-IPv6 = 'IPv6'
-IP_VERSION_4 = 4
-IP_VERSION_6 = 6
-IPv4_BITS = 32
-IPv6_BITS = 128
-
-INVALID_MAC_ADDRESSES = ['00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF']
-
-IPv4_ANY = '0.0.0.0/0'
-IPv6_ANY = '::/0'
-IP_ANY = {IP_VERSION_4: IPv4_ANY, IP_VERSION_6: IPv6_ANY}
-
-DHCP_RESPONSE_PORT = 68
-
-FLOODING_ENTRY = ('00:00:00:00:00:00', '0.0.0.0')
-
-AGENT_TYPE_DHCP = 'DHCP agent'
-AGENT_TYPE_OVS = 'Open vSwitch agent'
-AGENT_TYPE_LINUXBRIDGE = 'Linux bridge agent'
-AGENT_TYPE_OFA = 'OFA driver agent'
-AGENT_TYPE_L3 = 'L3 agent'
-AGENT_TYPE_LOADBALANCER = 'Loadbalancer agent'
-AGENT_TYPE_METERING = 'Metering agent'
-AGENT_TYPE_METADATA = 'Metadata agent'
-AGENT_TYPE_NIC_SWITCH = 'NIC Switch agent'
-L2_AGENT_TOPIC = 'N/A'
 
 PAGINATION_INFINITE = 'infinite'
 
 SORT_DIRECTION_ASC = 'asc'
 SORT_DIRECTION_DESC = 'desc'
 
-PORT_BINDING_EXT_ALIAS = 'binding'
-L3_AGENT_SCHEDULER_EXT_ALIAS = 'l3_agent_scheduler'
-DHCP_AGENT_SCHEDULER_EXT_ALIAS = 'dhcp_agent_scheduler'
-LBAAS_AGENT_SCHEDULER_EXT_ALIAS = 'lbaas_agent_scheduler'
-L3_DISTRIBUTED_EXT_ALIAS = 'dvr'
-L3_HA_MODE_EXT_ALIAS = 'l3-ha'
-SUBNET_ALLOCATION_EXT_ALIAS = 'subnet_allocation'
-
+ETHERTYPE_NAME_ARP = 'arp'
+ETHERTYPE_ARP = 0x0806
+ETHERTYPE_IP = 0x0800
 ETHERTYPE_IPV6 = 0x86DD
 
-# Protocol names and numbers for Security Groups/Firewalls
-PROTO_NAME_TCP = 'tcp'
-PROTO_NAME_ICMP = 'icmp'
-PROTO_NAME_ICMP_V6 = 'icmpv6'
-PROTO_NAME_UDP = 'udp'
-PROTO_NUM_TCP = 6
-PROTO_NUM_ICMP = 1
-PROTO_NUM_ICMP_V6 = 58
-PROTO_NUM_UDP = 17
+IP_PROTOCOL_NAME_ALIASES = {lib_constants.PROTO_NAME_IPV6_ICMP_LEGACY:
+                            lib_constants.PROTO_NAME_IPV6_ICMP}
 
-IP_PROTOCOL_MAP = {PROTO_NAME_TCP: PROTO_NUM_TCP,
-                   PROTO_NAME_UDP: PROTO_NUM_UDP,
-                   PROTO_NAME_ICMP: PROTO_NUM_ICMP,
-                   PROTO_NAME_ICMP_V6: PROTO_NUM_ICMP_V6}
+VALID_DSCP_MARKS = [0, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34,
+                    36, 38, 40, 46, 48, 56]
 
-IP_PROTOCOL_NUM_TO_NAME_MAP = {str(v): k for k, v in IP_PROTOCOL_MAP.items()}
-
-# List of ICMPv6 types that should be allowed by default:
-# Multicast Listener Query (130),
-# Multicast Listener Report (131),
-# Multicast Listener Done (132),
-# Neighbor Solicitation (135),
-# Neighbor Advertisement (136)
-ICMPV6_ALLOWED_TYPES = [130, 131, 132, 135, 136]
-ICMPV6_TYPE_RA = 134
-ICMPV6_TYPE_NA = 136
-
-DHCPV6_STATEFUL = 'dhcpv6-stateful'
-DHCPV6_STATELESS = 'dhcpv6-stateless'
-IPV6_SLAAC = 'slaac'
-IPV6_MODES = [DHCPV6_STATEFUL, DHCPV6_STATELESS, IPV6_SLAAC]
-
-IPV6_LLA_PREFIX = 'fe80::/64'
-
-# Human-readable ID to which default_ipv6_subnet_pool should be set to
-# indicate that IPv6 Prefix Delegation should be used to allocate subnet CIDRs
-IPV6_PD_POOL_ID = 'prefix_delegation'
+IP_PROTOCOL_NUM_TO_NAME_MAP = {
+    str(v): k for k, v in lib_constants.IP_PROTOCOL_MAP.items()}
 
 # Special provisional prefix for IPv6 Prefix Delegation
 PROVISIONAL_IPV6_PD_PREFIX = '::/64'
@@ -164,21 +67,12 @@ PROVISIONAL_IPV6_PD_PREFIX = '::/64'
 # Timeout in seconds for getting an IPv6 LLA
 LLA_TASK_TIMEOUT = 40
 
-# Linux interface max length
-DEVICE_NAME_MAX_LEN = 15
-
-# Device names start with "tap"
-TAP_DEVICE_PREFIX = 'tap'
-# The vswitch side of a veth pair for a nova iptables filter setup
-VETH_DEVICE_PREFIX = 'qvo'
-# prefix for SNAT interface in DVR
-SNAT_INT_DEV_PREFIX = 'sg-'
-
 # Possible prefixes to partial port IDs in interface names used by the OVS,
 # Linux Bridge, and IVS VIF drivers in Nova and the neutron agents. See the
 # 'get_ovs_interfaceid' method in Nova (nova/virt/libvirt/vif.py) for details.
-INTERFACE_PREFIXES = (TAP_DEVICE_PREFIX, VETH_DEVICE_PREFIX,
-                      SNAT_INT_DEV_PREFIX)
+INTERFACE_PREFIXES = (lib_constants.TAP_DEVICE_PREFIX,
+                      lib_constants.VETH_DEVICE_PREFIX,
+                      lib_constants.SNAT_INT_DEV_PREFIX)
 
 ATTRIBUTES_TO_UPDATE = 'attributes_to_update'
 
@@ -205,13 +99,10 @@ RPC_NAMESPACE_STATE = None
 RPC_NAMESPACE_RESOURCES = None
 
 # Default network MTU value when not configured
-DEFAULT_NETWORK_MTU = 0
+DEFAULT_NETWORK_MTU = 1500
 IPV6_MIN_MTU = 1280
 
 ROUTER_MARK_MASK = "0xffff"
-
-# Time format
-ISO8601_TIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%f'
 
 # Agent states as detected by server, used to reply on agent's state report
 # agent has just been registered
@@ -220,3 +111,30 @@ AGENT_NEW = 'new'
 AGENT_ALIVE = 'alive'
 # agent has just returned to alive after being dead
 AGENT_REVIVED = 'revived'
+
+INGRESS_DIRECTION = 'ingress'
+EGRESS_DIRECTION = 'egress'
+
+VALID_DIRECTIONS = (INGRESS_DIRECTION, EGRESS_DIRECTION)
+VALID_ETHERTYPES = (lib_constants.IPv4, lib_constants.IPv6)
+
+IP_ALLOWED_VERSIONS = [lib_constants.IP_VERSION_4, lib_constants.IP_VERSION_6]
+
+PORT_RANGE_MIN = 1
+PORT_RANGE_MAX = 65535
+
+# Some components communicate using private address ranges, define
+# them all here. These address ranges should not cause any issues
+# even if they overlap since they are used in disjoint namespaces,
+# but for now they are unique.
+# We define the metadata cidr since it falls in the range.
+PRIVATE_CIDR_RANGE = '169.254.0.0/16'
+DVR_FIP_LL_CIDR = '169.254.64.0/18'
+L3_HA_NET_CIDR = '169.254.192.0/18'
+METADATA_CIDR = '169.254.169.254/32'
+
+
+# Neutron-lib migration shim. This will emit a deprecation warning on any
+# reference to constants that have been moved out of this module and into
+# the neutron_lib.constants module.
+_deprecate._MovedGlobals(lib_constants)
