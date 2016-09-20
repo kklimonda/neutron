@@ -147,8 +147,8 @@ Description: Neutron is a virtual network service for Openstack - l3 agent
 
 Package: neutron-dhcp-agent
 Architecture: all
-Depends: dnsmasq-base,
-         dnsmasq-utils,
+Depends: dnsmasq-base (>= 2.76),
+         dnsmasq-utils (>= 2.76),
          neutron-common (= ${source:Version}),
          neutron-metadata-agent (= ${source:Version}),
          ${misc:Depends},
