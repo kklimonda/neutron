@@ -1195,6 +1195,7 @@ neutron/tests/unit/plugins/ml2/drivers/openvswitch/agent/openflow/native/ovs_bri
 neutron/tests/unit/plugins/ml2/drivers/openvswitch/agent/openflow/native/test_br_int.py
 neutron/tests/unit/plugins/ml2/drivers/openvswitch/agent/openflow/native/test_br_phys.py
 neutron/tests/unit/plugins/ml2/drivers/openvswitch/agent/openflow/native/test_br_tun.py
+neutron/tests/unit/plugins/ml2/drivers/openvswitch/agent/openflow/native/test_ovs_bridge.py
 neutron/tests/unit/plugins/ml2/drivers/openvswitch/agent/openflow/ovs_ofctl/__init__.py
 neutron/tests/unit/plugins/ml2/drivers/openvswitch/agent/openflow/ovs_ofctl/ovs_bridge_test_base.py
 neutron/tests/unit/plugins/ml2/drivers/openvswitch/agent/openflow/ovs_ofctl/test_br_int.py
@@ -1304,6 +1305,7 @@ releasenotes/notes/new-vif-type-for-pf-passthrough-33ec560b9b5d246f.yaml
 releasenotes/notes/oslo-messaging-notifier-queue-d94677076a1db261.yaml
 releasenotes/notes/oslo-reports-166a169037bf64f2.yaml
 releasenotes/notes/ovs-ct-firewall-driver-52a70a6a16d06f59.yaml
+releasenotes/notes/ovs-ipv6-tunnel-endpoints-f41b4954a04c43f6.yaml
 releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml
 releasenotes/notes/segment_mtu_to_global_physnet_mtu-9cee5ff09557edeb.yaml
 releasenotes/notes/sriov_allow_use_many_nics_for_one_physnet-3570aa67a60ce6c4.yaml
