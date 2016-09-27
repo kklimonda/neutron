@@ -15,6 +15,7 @@ neutron (2:8.2.0-0ubuntu1) UNRELEASED; urgency=medium
 
   [ David Della Vecchia ]
   * New upstream stable point release for OpenStack Mitaka (LP: #1619318).
+  * d/control: Align (build-)depends with upstream.
 
  -- David Della Vecchia <ddv@canonical.com>  Tue, 27 Sep 2016 08:19:10 -0400
 
