@@ -182,8 +182,8 @@ class TimeStampChangedsinceTestCase(test_db_base_plugin_v2.
                     self._list_resources_with_changed_since(port)
 
     def test_list_subnetpools_with_changed_since(self):
-        prefixes = ['3.3.3.3/24', '4.4.4.4/24']
-        with self.subnetpool(prefixes, tenant_id=self._tenant_id,
+        prefixs = ['3.3.3.3/24', '4.4.4.4/24']
+        with self.subnetpool(prefixs, tenant_id='tenant_one',
                              name='sp_test02') as subnetpool:
             self._list_resources_with_changed_since(subnetpool)
 
@@ -199,13 +199,13 @@ class TimeStampChangedsinceTestCase(test_db_base_plugin_v2.
                                                                      subnet2)
 
     def test_list_mutiple_subnetpools_with_changed_since(self):
-        prefixes1 = ['3.3.3.3/24', '4.4.4.4/24']
-        prefixes2 = ['5.5.5.5/24', '6.6.6.6/24']
-        with self.subnetpool(prefixes1,
-                             tenant_id=self._tenant_id,
+        prefixs1 = ['3.3.3.3/24', '4.4.4.4/24']
+        prefixs2 = ['5.5.5.5/24', '6.6.6.6/24']
+        with self.subnetpool(prefixs1,
+                             tenant_id='tenant_one',
                              name='sp01') as sp1:
-            with self.subnetpool(prefixes2,
-                                 tenant_id=self._tenant_id,
+            with self.subnetpool(prefixs2,
+                                 tenant_id='tenant_one',
                                  name='sp02') as sp2:
                 self._test_list_mutiple_resources_with_changed_since(sp1, sp2)
 
@@ -228,19 +228,6 @@ class TimeStampChangedsinceTestCase(test_db_base_plugin_v2.
                                             'changed_since=%s' % changed_since)
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 self.assertEqual(list(res.values())[0]['type'], 'InvalidInput')
-
-    def test_timestamp_fields_ignored_in_update(self):
-        ctx = context.get_admin_context()
-        with self.port() as port:
-            plugin = manager.NeutronManager.get_plugin()
-            port = plugin.get_port(ctx, port['port']['id'])
-            port['name'] = 'updated'
-            port['created_at'] = '2011-04-06T14:34:23'
-            port['updated_at'] = '2012-04-06T15:34:23'
-            updated = plugin.update_port(ctx, port['id'], {'port': port})
-        self.assertEqual('updated', updated['name'])
-        self.assertNotEqual(port['updated_at'], updated['updated_at'])
-        self.assertNotEqual(port['created_at'], updated['created_at'])
 
 
 class TimeStampDBMixinTestCase(TimeStampChangedsinceTestCase):

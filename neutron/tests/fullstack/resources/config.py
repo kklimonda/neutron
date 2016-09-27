@@ -15,13 +15,23 @@
 import tempfile
 
 import fixtures
-from neutron_lib import constants
 
+from neutron.common import constants
 from neutron.plugins.ml2.extensions import qos as qos_ext
 from neutron.tests import base
 from neutron.tests.common import config_fixtures
-from neutron.tests.common.exclusive_resources import port
 from neutron.tests.common import helpers as c_helpers
+from neutron.tests.common import net_helpers
+
+
+def _generate_port():
+    """Get a free TCP port from the Operating System and return it.
+
+    This might fail if some other process occupies this port after this
+    function finished but before the neutron-server process started.
+    """
+    return str(net_helpers.get_free_namespace_port(
+        constants.PROTO_NAME_TCP))
 
 
 class ConfigFixture(fixtures.Fixture):
@@ -62,35 +72,26 @@ class NeutronConfigFixture(ConfigFixture):
             'DEFAULT': {
                 'host': self._generate_host(),
                 'state_path': self._generate_state_path(self.temp_dir),
+                'lock_path': '$state_path/lock',
+                'bind_port': _generate_port(),
                 'api_paste_config': self._generate_api_paste(),
-                'core_plugin': 'ml2',
+                'policy_file': self._generate_policy_json(),
+                'core_plugin': 'neutron.plugins.ml2.plugin.Ml2Plugin',
                 'service_plugins': ','.join(service_plugins),
                 'auth_strategy': 'noauth',
+                'verbose': 'True',
                 'debug': 'True',
-                'transport_url':
-                    'rabbit://%(user)s:%(password)s@%(host)s:5672/%(vhost)s' %
-                    {'user': rabbitmq_environment.user,
-                     'password': rabbitmq_environment.password,
-                     'host': rabbitmq_environment.host,
-                     'vhost': rabbitmq_environment.vhost},
             },
             'database': {
                 'connection': connection,
             },
-            'oslo_concurrency': {
-                'lock_path': '$state_path/lock',
-            },
-            'oslo_policy': {
-                'policy_file': self._generate_policy_json(),
-            },
+            'oslo_messaging_rabbit': {
+                'rabbit_userid': rabbitmq_environment.user,
+                'rabbit_password': rabbitmq_environment.password,
+                'rabbit_hosts': rabbitmq_environment.host,
+                'rabbit_virtual_host': rabbitmq_environment.vhost,
+            }
         })
-
-    def _setUp(self):
-        self.config['DEFAULT'].update({
-            'bind_port': self.useFixture(
-                port.ExclusivePort(constants.PROTO_NAME_TCP)).port
-        })
-        super(NeutronConfigFixture, self)._setUp()
 
     def _generate_host(self):
         return base.get_rand_name(prefix='host-')
@@ -113,7 +114,7 @@ class ML2ConfigFixture(ConfigFixture):
         super(ML2ConfigFixture, self).__init__(
             env_desc, host_desc, temp_dir, base_filename='ml2_conf.ini')
 
-        mechanism_drivers = self.env_desc.mech_drivers
+        mechanism_drivers = 'openvswitch,linuxbridge'
         if self.env_desc.l2_pop:
             mechanism_drivers += ',l2population'
 
@@ -151,7 +152,6 @@ class OVSConfigFixture(ConfigFixture):
                 'local_ip': local_ip,
                 'integration_bridge': self._generate_integration_bridge(),
                 'of_interface': host_desc.of_interface,
-                'ovsdb_interface': host_desc.ovsdb_interface,
             },
             'securitygroup': {
                 'firewall_driver': 'noop',
@@ -160,6 +160,10 @@ class OVSConfigFixture(ConfigFixture):
                 'l2_population': str(self.env_desc.l2_pop),
             }
         })
+
+        if self.config['ovs']['of_interface'] == 'native':
+            self.config['ovs'].update({
+                'of_listen_port': _generate_port()})
 
         if self.tunneling_enabled:
             self.config['agent'].update({
@@ -174,14 +178,6 @@ class OVSConfigFixture(ConfigFixture):
 
         if env_desc.qos:
             self.config['agent']['extensions'] = 'qos'
-
-    def _setUp(self):
-        if self.config['ovs']['of_interface'] == 'native':
-            self.config['ovs'].update({
-                'of_listen_port': self.useFixture(
-                    port.ExclusivePort(constants.PROTO_NAME_TCP)).port
-            })
-        super(OVSConfigFixture, self)._setUp()
 
     def _generate_bridge_mappings(self):
         return 'physnet1:%s' % base.get_rand_device_name(prefix='br-eth')
@@ -262,12 +258,15 @@ class L3ConfigFixture(ConfigFixture):
             self._prepare_config_with_linuxbridge_agent()
         self.config['DEFAULT'].update({
             'debug': 'True',
+            'verbose': 'True',
             'test_namespace_suffix': self._generate_namespace_suffix(),
         })
 
     def _prepare_config_with_ovs_agent(self, integration_bridge):
         self.config.update({
             'DEFAULT': {
+                'l3_agent_manager': ('neutron.agent.l3_agent.'
+                                     'L3NATAgentWithStateReport'),
                 'interface_driver': ('neutron.agent.linux.interface.'
                                      'OVSInterfaceDriver'),
                 'ovs_integration_bridge': integration_bridge,

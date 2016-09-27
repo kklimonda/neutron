@@ -15,20 +15,13 @@
 
 """Exceptions used by ML2."""
 
-from neutron_lib import exceptions
-
 from neutron._i18n import _
+from neutron.common import exceptions
 
 
-class MechanismDriverError(exceptions.MultipleExceptions):
+class MechanismDriverError(exceptions.NeutronException):
     """Mechanism driver call failed."""
-
-    def __init__(self, method, errors=None):
-        # The message is not used by api, because api will unwrap
-        # MultipleExceptions and return inner exceptions. Keep it
-        # for backward-compatibility, in case other code use it.
-        self.message = _("%s failed.") % method
-        super(MechanismDriverError, self).__init__(errors or [])
+    message = _("%(method)s failed.")
 
 
 class ExtensionDriverError(exceptions.InvalidInput):

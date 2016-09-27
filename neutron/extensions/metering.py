@@ -14,14 +14,13 @@
 
 import abc
 
-from neutron_lib.api import converters
-from neutron_lib import exceptions as nexception
 import six
 
 from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import resource_helper
+from neutron.common import exceptions as nexception
 from neutron.plugins.common import constants
 from neutron.services import service_base
 
@@ -58,7 +57,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                       'is_visible': True},
         'shared': {'allow_post': True, 'allow_put': False,
                    'is_visible': True, 'default': False,
-                   'convert_to': converters.convert_to_boolean}
+                   'convert_to': attr.convert_to_boolean}
     },
     'metering_label_rules': {
         'id': {'allow_post': False, 'allow_put': False,
@@ -72,7 +71,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                       'validate': {'type:values': ['ingress', 'egress']}},
         'excluded': {'allow_post': True, 'allow_put': False,
                      'is_visible': True, 'default': False,
-                     'convert_to': converters.convert_to_boolean},
+                     'convert_to': attr.convert_to_boolean},
         'remote_ip_prefix': {'allow_post': True, 'allow_put': False,
                              'is_visible': True, 'required_by_policy': True,
                              'validate': {'type:subnet': None}},
@@ -137,18 +136,13 @@ class MeteringPluginBase(service_base.ServicePluginBase):
     def get_plugin_description(self):
         return constants.METERING
 
-    @classmethod
-    def get_plugin_type(cls):
+    def get_plugin_type(self):
         return constants.METERING
 
     @abc.abstractmethod
     def create_metering_label(self, context, metering_label):
         """Create a metering label."""
         pass
-
-    def update_metering_label(self, context, id, metering_label):
-        """Update a metering label."""
-        raise NotImplementedError()
 
     @abc.abstractmethod
     def delete_metering_label(self, context, label_id):
@@ -171,10 +165,6 @@ class MeteringPluginBase(service_base.ServicePluginBase):
     def create_metering_label_rule(self, context, metering_label_rule):
         """Create a metering label rule."""
         pass
-
-    def update_metering_label_rule(self, context, id, metering_label_rule):
-        """Update a metering label rule."""
-        raise NotImplementedError()
 
     @abc.abstractmethod
     def get_metering_label_rule(self, context, rule_id, fields=None):

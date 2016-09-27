@@ -12,15 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.db import model_base
 import sqlalchemy as sa
+
+from neutron.db import model_base
 
 # Model classes for test resources
 
 
-class MehModel(model_base.BASEV2, model_base.HasProject):
+class MehModel(model_base.BASEV2, model_base.HasTenant):
     meh = sa.Column(sa.String(8), primary_key=True)
 
 
-class OtherMehModel(model_base.BASEV2, model_base.HasProject):
+class OtherMehModel(model_base.BASEV2, model_base.HasTenant):
     othermeh = sa.Column(sa.String(8), primary_key=True)

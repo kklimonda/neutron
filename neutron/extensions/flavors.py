@@ -12,15 +12,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import converters
-from neutron_lib.api import validators
-from neutron_lib import exceptions as nexception
-
 from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
 from neutron.api.v2 import resource_helper
+from neutron.common import exceptions as nexception
 from neutron import manager
 from neutron.plugins.common import constants
 
@@ -78,8 +75,8 @@ def _validate_flavor_service_type(validate_type, valid_values=None):
     if validate_type not in plugins:
         raise InvalidFlavorServiceType(service_type=validate_type)
 
-validators.add_validator('validate_flavor_service_type',
-                         _validate_flavor_service_type)
+attr.validators['type:validate_flavor_service_type'] = (
+    _validate_flavor_service_type)
 
 FLAVORS = 'flavors'
 SERVICE_PROFILES = 'service_profiles'
@@ -110,7 +107,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                              'validate': {'type:uuid_list': None},
                              'is_visible': True, 'default': []},
         'enabled': {'allow_post': True, 'allow_put': True,
-                    'convert_to': converters.convert_to_boolean_if_not_none,
+                    'convert_to': attr.convert_to_boolean_if_not_none,
                     'default': True,
                     'is_visible': True},
     },
@@ -136,7 +133,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                       'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
         'enabled': {'allow_post': True, 'allow_put': True,
-                    'convert_to': converters.convert_to_boolean_if_not_none,
+                    'convert_to': attr.convert_to_boolean_if_not_none,
                     'is_visible': True, 'default': True},
     },
 }

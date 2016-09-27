@@ -12,7 +12,6 @@
 # limitations under the License.
 
 import mock
-from neutron_lib import constants
 import sqlalchemy
 import testtools
 
@@ -20,6 +19,7 @@ from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import registry
 from neutron.callbacks import resources
+from neutron.common import constants
 from neutron import context
 from neutron.db import common_db_mixin
 from neutron.db import securitygroups_db
@@ -104,35 +104,6 @@ class SecurityGroupDbMixinTestCase(testlib_api.SqlTestCase):
             self.mixin._check_for_duplicate_rules_in_db(context, rule_dict)
         self.assertIn('protocol', rule_dict['security_group_rule'])
 
-    def test__check_for_duplicate_rules_ignores_rule_id(self):
-        rules = [{'security_group_rule': {'protocol': 'tcp', 'id': 'fake1'}},
-                 {'security_group_rule': {'protocol': 'tcp', 'id': 'fake2'}}]
-
-        # NOTE(arosen): the name of this exception is a little misleading
-        # in this case as this test, tests that the id fields are dropped
-        # while being compared. This is in the case if a plugin specifies
-        # the rule ids themselves.
-        self.assertRaises(securitygroup.DuplicateSecurityGroupRuleInPost,
-            self.mixin._check_for_duplicate_rules,
-            context, rules)
-
-    def test__check_for_duplicate_rules_in_db_ignores_rule_id(self):
-        db_rules = {'protocol': 'tcp', 'id': 'fake', 'tenant_id': 'fake',
-                    'direction': 'ingress', 'security_group_id': 'fake'}
-        with mock.patch.object(self.mixin, 'get_security_group_rules',
-                               return_value=[db_rules]):
-            context = mock.Mock()
-            rule_dict = {
-                'security_group_rule': {'protocol': 'tcp',
-                                        'id': 'fake2',
-                                        'tenant_id': 'fake',
-                                        'security_group_id': 'fake',
-                                        'direction': 'ingress'}
-            }
-            self.assertRaises(securitygroup.SecurityGroupRuleExists,
-                self.mixin._check_for_duplicate_rules_in_db,
-                context, rule_dict)
-
     def test_delete_security_group_rule_in_use(self):
         with mock.patch.object(registry, "notify") as mock_notify:
             mock_notify.side_effect = exceptions.CallbackFailure(Exception())
@@ -214,19 +185,13 @@ class SecurityGroupDbMixinTestCase(testlib_api.SqlTestCase):
                 'precommit_update', mock.ANY, context=mock.ANY,
                 security_group=mock.ANY, security_group_id=sg_dict['id'])])
 
-    def test_security_group_precommit_and_after_delete_event(self):
+    def test_security_group_precommit_delete_event(self):
         sg_dict = self.mixin.create_security_group(self.ctx, FAKE_SECGROUP)
         with mock.patch.object(registry, "notify") as mock_notify:
             self.mixin.delete_security_group(self.ctx, sg_dict['id'])
-            mock_notify.assert_has_calls(
-                [mock.call('security_group', 'precommit_delete',
-                           mock.ANY, context=mock.ANY, security_group=mock.ANY,
-                           security_group_id=sg_dict['id'],
-                           security_group_rule_ids=[mock.ANY, mock.ANY]),
-                 mock.call('security_group', 'after_delete',
-                           mock.ANY, context=mock.ANY,
-                           security_group_id=sg_dict['id'],
-                           security_group_rule_ids=[mock.ANY, mock.ANY])])
+            mock_notify.assert_has_calls([mock.call('security_group',
+                'precommit_delete', mock.ANY, context=mock.ANY,
+                security_group=mock.ANY, security_group_id=sg_dict['id'])])
 
     def test_security_group_rule_precommit_create_event_fail(self):
         registry.subscribe(fake_callback, resources.SECURITY_GROUP_RULE,

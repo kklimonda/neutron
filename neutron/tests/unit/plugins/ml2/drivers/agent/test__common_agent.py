@@ -15,15 +15,10 @@
 #    under the License.
 
 import mock
-from neutron_lib import constants
 from oslo_config import cfg
-import testtools
 
 from neutron.agent.linux import bridge_lib
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
-from neutron.common import constants as n_const
+from neutron.common import constants
 from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
 from neutron.plugins.ml2.drivers.agent import _common_agent as ca
 from neutron.tests import base
@@ -70,36 +65,6 @@ class TestCommonAgentLoop(base.BaseTestCase):
                                             'foo-binary')
             with mock.patch.object(self.agent, "daemon_loop"):
                 self.agent.start()
-
-    def test_treat_devices_removed_notify(self):
-        handler = mock.Mock()
-        registry.subscribe(handler, resources.PORT_DEVICE, events.AFTER_DELETE)
-        devices = [DEVICE_1]
-        self.agent.treat_devices_removed(devices)
-        handler.assert_called_once_with(mock.ANY, mock.ANY, self.agent,
-                                        context=mock.ANY, device=DEVICE_1,
-                                        port_id=mock.ANY)
-
-    def test_treat_devices_added_updated_notify(self):
-        handler = mock.Mock()
-        registry.subscribe(handler, resources.PORT_DEVICE, events.AFTER_UPDATE)
-        agent = self.agent
-        mock_details = {'device': 'dev123',
-                        'port_id': 'port123',
-                        'network_id': 'net123',
-                        'admin_state_up': True,
-                        'network_type': 'vlan',
-                        'segmentation_id': 100,
-                        'physical_network': 'physnet1',
-                        'device_owner': 'horse'}
-        agent.plugin_rpc = mock.Mock()
-        agent.plugin_rpc.get_devices_details_list.return_value = [mock_details]
-        agent.mgr = mock.Mock()
-        agent.mgr.plug_interface.return_value = True
-        agent.treat_devices_added_updated(set(['dev123']))
-        handler.assert_called_once_with(mock.ANY, mock.ANY, self.agent,
-                                        context=mock.ANY,
-                                        device_details=mock_details)
 
     def test_treat_devices_removed_with_existed_device(self):
         agent = self.agent
@@ -482,36 +447,6 @@ class TestCommonAgentLoop(base.BaseTestCase):
             agent.treat_devices_added_updated(set(['tap1']))
             set_arp.assert_called_with(mock_details['device'], mock_details)
 
-    def test__process_device_if_exists_missing_intf(self):
-        mock_details = {'device': 'dev123',
-                        'port_id': 'port123',
-                        'network_id': 'net123',
-                        'admin_state_up': True,
-                        'network_type': 'vlan',
-                        'segmentation_id': 100,
-                        'physical_network': 'physnet1',
-                        'device_owner': constants.DEVICE_OWNER_NETWORK_PREFIX}
-        self.agent.mgr = mock.Mock()
-        self.agent.mgr.get_all_devices.return_value = []
-        self.agent.mgr.plug_interface.side_effect = RuntimeError()
-        self.agent._process_device_if_exists(mock_details)
-
-    def test__process_device_if_exists_error(self):
-        mock_details = {'device': 'dev123',
-                        'port_id': 'port123',
-                        'network_id': 'net123',
-                        'admin_state_up': True,
-                        'network_type': 'vlan',
-                        'segmentation_id': 100,
-                        'physical_network': 'physnet1',
-                        'device_owner': constants.DEVICE_OWNER_NETWORK_PREFIX}
-        self.agent.mgr = mock.Mock()
-        self.agent.mgr.get_all_devices.return_value = ['dev123']
-        self.agent.mgr.plug_interface.side_effect = RuntimeError()
-        with testtools.ExpectedException(RuntimeError):
-            # device exists so it should raise
-            self.agent._process_device_if_exists(mock_details)
-
     def test_set_rpc_timeout(self):
         self.agent.stop()
         for rpc_client in (self.agent.plugin_rpc.client,
@@ -529,7 +464,7 @@ class TestCommonAgentLoop(base.BaseTestCase):
     def test_report_state_revived(self):
         with mock.patch.object(self.agent.state_rpc,
                                "report_state") as report_st:
-            report_st.return_value = n_const.AGENT_REVIVED
+            report_st.return_value = constants.AGENT_REVIVED
             self.agent._report_state()
             self.assertTrue(self.agent.fullsync)
 

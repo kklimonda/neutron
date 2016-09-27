@@ -14,13 +14,12 @@
 # limitations under the License.
 
 import mock
-from neutron_lib import constants as n_const
-from neutron_lib import exceptions as n_exc
 import testtools
 
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
+from neutron.common import exceptions as n_exc
 from neutron.db import l3_db
 from neutron.extensions import l3
 from neutron import manager
@@ -162,7 +161,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
     def test_prevent_l3_port_no_fixed_ips(self, gp):
         # without fixed IPs is allowed
         gp.return_value.get_port.return_value = {
-            'device_owner': n_const.DEVICE_OWNER_ROUTER_INTF, 'fixed_ips': [],
+            'device_owner': 'network:router_interface', 'fixed_ips': [],
             'id': 'f'
         }
         self.db.prevent_l3_port_deletion(None, None)
@@ -171,7 +170,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
     def test_prevent_l3_port_no_router(self, gp):
         # without router is allowed
         gp.return_value.get_port.return_value = {
-            'device_owner': n_const.DEVICE_OWNER_ROUTER_INTF,
+            'device_owner': 'network:router_interface',
             'device_id': '44', 'id': 'f',
             'fixed_ips': [{'ip_address': '1.1.1.1', 'subnet_id': '4'}]}
         self.db.get_router = mock.Mock()
@@ -181,7 +180,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
     @mock.patch.object(manager.NeutronManager, 'get_plugin')
     def test_prevent_l3_port_existing_router(self, gp):
         gp.return_value.get_port.return_value = {
-            'device_owner': n_const.DEVICE_OWNER_ROUTER_INTF,
+            'device_owner': 'network:router_interface',
             'device_id': 'some_router', 'id': 'f',
             'fixed_ips': [{'ip_address': '1.1.1.1', 'subnet_id': '4'}]}
         self.db.get_router = mock.Mock()
@@ -191,7 +190,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
     @mock.patch.object(manager.NeutronManager, 'get_plugin')
     def test_prevent_l3_port_existing_floating_ip(self, gp):
         gp.return_value.get_port.return_value = {
-            'device_owner': n_const.DEVICE_OWNER_FLOATINGIP,
+            'device_owner': 'network:floatingip',
             'device_id': 'some_flip', 'id': 'f',
             'fixed_ips': [{'ip_address': '1.1.1.1', 'subnet_id': '4'}]}
         self.db.get_floatingip = mock.Mock()
@@ -200,7 +199,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
 
     @mock.patch.object(l3_db, '_notify_subnetpool_address_scope_update')
     def test_subscribe_address_scope_of_subnetpool(self, notify):
-        l3_db.L3RpcNotifierMixin._subscribe_callbacks()
+        l3_db.subscribe()
         registry.notify(resources.SUBNETPOOL_ADDRESS_SCOPE,
                         events.AFTER_UPDATE, mock.ANY, context=mock.ANY,
                         subnetpool_id='fake_id')
@@ -208,24 +207,6 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
                                        events.AFTER_UPDATE, mock.ANY,
                                        context=mock.ANY,
                                        subnetpool_id='fake_id')
-
-    def test__check_and_get_fip_assoc_with_extra_association_no_change(self):
-        fip = {'extra_key': 'value'}
-        context = mock.MagicMock()
-        floatingip_db = l3_db.FloatingIP(
-            id='fake_fip_id',
-            floating_network_id='fake_floating_network_id',
-            floating_ip_address='8.8.8.8',
-            fixed_port_id='fake_fixed_port_id',
-            floating_port_id='fake_floating_port_id')
-        with mock.patch.object(
-                l3_db.L3_NAT_dbonly_mixin,
-                '_get_assoc_data',
-                return_value=('1', '2', '3')) as mock_get_assoc_data:
-            self.db._check_and_get_fip_assoc(context, fip, floatingip_db)
-            context.session.query.assert_not_called()
-            mock_get_assoc_data.assert_called_once_with(
-                mock.ANY, fip, floatingip_db)
 
 
 class L3_NAT_db_mixin(base.BaseTestCase):
@@ -247,12 +228,10 @@ class L3_NAT_db_mixin(base.BaseTestCase):
                               return_value=router_dict),\
             mock.patch.object(l3_db.L3_NAT_dbonly_mixin,
                               '_update_router_gw_info') as urgi,\
-            mock.patch.object(l3_db.L3_NAT_dbonly_mixin, '_get_router',
-                              return_value=router_db),\
             mock.patch.object(l3_db.L3_NAT_db_mixin, 'notify_router_updated')\
             as nru:
 
-            self.db.create_router(mock.Mock(), router_input)
+            self.db.create_router(mock.ANY, router_input)
             self.assertTrue(crd.called)
             if external_gateway_info:
                 self.assertTrue(urgi.called)

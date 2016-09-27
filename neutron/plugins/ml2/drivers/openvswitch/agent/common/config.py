@@ -12,17 +12,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants as n_const
 from oslo_config import cfg
 
 from neutron._i18n import _
 from neutron.agent.common import config
+from neutron.common import constants as n_const
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants
 
 
 DEFAULT_BRIDGE_MAPPINGS = []
+DEFAULT_VLAN_RANGES = []
+DEFAULT_TUNNEL_RANGES = []
 DEFAULT_TUNNEL_TYPES = []
 
 ovs_opts = [
@@ -43,12 +45,8 @@ ovs_opts = [
                help=_("Peer patch port in tunnel bridge for integration "
                       "bridge.")),
     cfg.IPOpt('local_ip',
-              help=_("IP address of local overlay (tunnel) network endpoint. "
-                     "Use either an IPv4 or IPv6 address that resides on one "
-                     "of the host network interfaces. The IP version of this "
-                     "value must match the value of the 'overlay_ip_version' "
-                     "option in the ML2 plug-in configuration file on the "
-                     "neutron server node(s).")),
+              help=_("Local IP address of tunnel endpoint. Can be either "
+                     "an IPv4 or IPv6 address.")),
     cfg.ListOpt('bridge_mappings',
                 default=DEFAULT_BRIDGE_MAPPINGS,
                 help=_("Comma-separated list of <physical_network>:<bridge> "
@@ -63,13 +61,13 @@ ovs_opts = [
                        "Note: If you remove a bridge from this "
                        "mapping, make sure to disconnect it from the "
                        "integration bridge as it won't be managed by the "
-                       "agent anymore.")),
+                       "agent anymore. Deprecated for ofagent.")),
     cfg.BoolOpt('use_veth_interconnection', default=False,
                 help=_("Use veths instead of patch ports to interconnect the "
                        "integration bridge to physical networks. "
                        "Support kernel without Open vSwitch patch port "
                        "support so long as it is set to True.")),
-    cfg.StrOpt('of_interface', default='native',
+    cfg.StrOpt('of_interface', default='ovs-ofctl',
                choices=['ovs-ofctl', 'native'],
                help=_("OpenFlow interface to use.")),
     cfg.StrOpt('datapath_type', default=constants.OVS_DATAPATH_SYSTEM,
@@ -136,7 +134,7 @@ agent_opts = [
                        "added to any ports that have port security disabled. "
                        "For LinuxBridge, this requires ebtables. For OVS, it "
                        "requires a version that supports matching ARP "
-                       "headers. This option will be removed in Ocata so "
+                       "headers. This option will be removed in Newton so "
                        "the only way to disable protection will be via the "
                        "port security extension.")),
     cfg.BoolOpt('dont_fragment', default=True,

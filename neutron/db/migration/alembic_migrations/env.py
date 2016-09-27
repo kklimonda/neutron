@@ -12,8 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from logging import config as logging_config
+
 from alembic import context
-from neutron_lib.db import model_base
 from oslo_config import cfg
 import sqlalchemy as sa
 from sqlalchemy import event
@@ -22,6 +23,7 @@ from neutron.db.migration.alembic_migrations import external
 from neutron.db.migration import autogen
 from neutron.db.migration.connection import DBConnection
 from neutron.db.migration.models import head  # noqa
+from neutron.db import model_base
 
 try:
     # NOTE(mriedem): This is to register the DB2 alembic code which
@@ -37,6 +39,10 @@ MYSQL_ENGINE = None
 # access to the values within the .ini file in use.
 config = context.config
 neutron_config = config.neutron_config
+
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
+logging_config.fileConfig(config.config_file_name)
 
 # set the target for 'autogenerate' support
 target_metadata = model_base.BASEV2.metadata

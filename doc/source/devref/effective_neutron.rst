@@ -75,7 +75,7 @@ Document common pitfalls as well as good practices done during plugin developmen
   there is an agent on the other side of the message broker that interacts
   with the server. Plugins may not rely on `agents <https://review.openstack.org/#/c/174020/>`_ at all.
 * Be mindful of required capabilities when you develop plugin extensions. The
-  `Extension description <https://github.com/openstack/neutron/blob/b14c06b5/neutron/api/extensions.py#L122>`_ provides the ability to specify the list of required capabilities
+  `Extension description <https://github.com/openstack/neutron/blob/master/neutron/api/extensions.py#L122>`_ provides the ability to specify the list of required capabilities
   for the extension you are developing. By declaring this list, the server will
   not start up if the requirements are not met, thus avoiding leading the system
   to experience undetermined behavior at runtime.
@@ -105,7 +105,7 @@ Document common pitfalls as well as good practices done during database developm
 
      q = query(Object.id, Object.name,
                func.count(Object.number)).group_by(Object.id, Object.name)
-* Beware of the `InvalidRequestError <http://docs.sqlalchemy.org/en/latest/faq/sessions.html#this-session-s-transaction-has-been-rolled-back-due-to-a-previous-exception-during-flush-or-similar>`_ exception.
+* Beware of the `InvalidRequestError <http://docs.sqlalchemy.org/en/rel_0_8/faq.html#this-session-s-transaction-has-been-rolled-back-due-to-a-previous-exception-during-flush-or-similar>`_ exception.
   There is even a `Neutron bug <https://bugs.launchpad.net/neutron/+bug/1409774>`_
   registered for it. Bear in mind that this error may also occur when nesting
   transaction blocks, and the innermost block raises an error without proper
@@ -164,7 +164,7 @@ Document common pitfalls as well as good practices done during database developm
 
   .. code:: python
 
-     _safe_creation(context, create_something, delete_something,
+     _safe_creation(context, create_something, delete_someting,
                     _do_other_thing_with_created_object)
 
   Where nested transaction is used in _do_other_thing_with_created_object
@@ -279,28 +279,6 @@ Backward compatibility
 Document common pitfalls as well as good practices done when extending the RPC Interfaces.
 
 * Make yourself familiar with :ref:`Upgrade review guidelines <upgrade_review_guidelines>`.
-
-Deprecation
-+++++++++++
-
-Sometimes we want to refactor things in a non-backward compatible way. In most
-cases you can use `debtcollector
-<http://docs.openstack.org/developer/debtcollector>`_ to mark things for
-deprecation. Config items have `deprecation options supported by oslo.config
-<http://docs.openstack.org/developer/oslo.config/opts.html>`_.
-
-The deprecation process must follow the `standard deprecation requirements
-<http://governance.openstack.org/reference/tags/assert_follows-standard-deprecation.html#requirements>`_.
-In terms of neutron development, this means:
-
-* A launchpad bug to track the deprecation.
-* A patch to mark the deprecated items. If the deprecation affects
-  users (config items, API changes) then a `release note
-  <http://docs.openstack.org/developer/reno/usage.html>`_ must be
-  included.
-* Wait at least one cycle and at least three months linear time.
-* A patch that removes the deprecated items. Make sure to refer to the
-  original launchpad bug in the commit message of this patch.
 
 
 Scalability issues
@@ -431,7 +409,7 @@ IRC
   and send public questions to the channel rather then to a specific person if possible.
   (This increase the chances of getting faster answers to your questions).
   A list of the areas and lieutenants nicknames can be found at
-  `Core Reviewers <http://docs.openstack.org/developer/neutron/policies/neutron-teams.html>`_.
+  `Core Reviewers <http://docs.openstack.org/developer/neutron/policies/core-reviewers.html>`_.
 
 Commit messages
 ~~~~~~~~~~~~~~~

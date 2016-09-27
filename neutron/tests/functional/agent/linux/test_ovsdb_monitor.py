@@ -22,12 +22,11 @@ Tests in this module will be skipped unless:
  - sudo testing is enabled (see neutron.tests.functional.base for details)
 """
 
-import eventlet
 from oslo_config import cfg
 
 from neutron.agent.common import ovs_lib
 from neutron.agent.linux import ovsdb_monitor
-from neutron.common import utils
+from neutron.agent.linux import utils
 from neutron.tests.common import net_helpers
 from neutron.tests.functional.agent.linux import base as linux_base
 from neutron.tests.functional import base as functional_base
@@ -132,11 +131,9 @@ class TestSimpleInterfaceMonitor(BaseMonitorTest):
         # restart
         self.monitor.stop(block=True)
         self.monitor.start(block=True, timeout=60)
-        try:
-            utils.wait_until_true(
-                lambda: self.monitor.get_events().get('added'))
-        except eventlet.timeout.Timeout:
-            raise AssertionError('Initial call should always be true')
+        devices = self.monitor.get_events()
+        self.assertTrue(devices.get('added'),
+                        'Initial call should always be true')
 
     def test_get_events_includes_ofport(self):
         utils.wait_until_true(lambda: self.monitor.has_updates)

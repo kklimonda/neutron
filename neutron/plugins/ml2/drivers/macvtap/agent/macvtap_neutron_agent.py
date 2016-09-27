@@ -17,7 +17,6 @@
 import os
 import sys
 
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -28,6 +27,7 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
 from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.common import config as common_config
+from neutron.common import constants
 from neutron.common import topics
 from neutron.common import utils as n_utils
 from neutron.plugins.common import constants as p_constants

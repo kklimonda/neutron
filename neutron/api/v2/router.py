@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_service import wsgi as base_wsgi
 import routes as routes_mapper
@@ -39,7 +38,7 @@ RESOURCES = {'network': 'networks',
 SUB_RESOURCES = {}
 COLLECTION_ACTIONS = ['index', 'create']
 MEMBER_ACTIONS = ['show', 'update', 'delete']
-REQUIREMENTS = {'id': constants.UUID_PATTERN, 'format': 'json'}
+REQUIREMENTS = {'id': attributes.UUID_PATTERN, 'format': 'json'}
 
 
 class Index(wsgi.Application):

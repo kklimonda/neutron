@@ -13,16 +13,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import itertools
-import random
-
 import netaddr
-from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
 from oslo_log import log
 from oslo_utils import uuidutils
 
 from neutron._i18n import _, _LE
+from neutron.common import exceptions as n_exc
+from neutron.common import ipv6_utils
+from neutron.db import api as db_api
 from neutron.ipam import driver as ipam_base
 from neutron.ipam.drivers.neutrondb_ipam import db_api as ipam_db_api
 from neutron.ipam import exceptions as ipam_exc
@@ -40,6 +39,9 @@ class NeutronDbSubnet(ipam_base.Subnet):
 
     This class implements the strategy for IP address allocation and
     deallocation for the Neutron DB IPAM driver.
+    Allocation for IP addresses is based on the concept of availability
+    ranges, which were already used in Neutron's DB base class for handling
+    IPAM operations.
     """
 
     @classmethod
@@ -70,7 +72,7 @@ class NeutronDbSubnet(ipam_base.Subnet):
                                               subnet_request.gateway_ip)
         else:
             pools = subnet_request.allocation_pools
-        # Create IPAM allocation pools
+        # Create IPAM allocation pools and availability ranges
         cls.create_allocation_pools(subnet_manager, session, pools,
                                     subnet_request.subnet_cidr)
 
@@ -152,71 +154,212 @@ class NeutronDbSubnet(ipam_base.Subnet):
                 subnet_id=self.subnet_manager.neutron_id,
                 ip=ip_address)
 
-    def _generate_ip(self, session, prefer_next=False):
-        """Generate an IP address from the set of available addresses."""
-        ip_allocations = netaddr.IPSet()
-        for ipallocation in self.subnet_manager.list_allocations(session):
-            ip_allocations.add(netaddr.IPAddress(ipallocation.ip_address))
+    def _allocate_specific_ip(self, session, ip_address,
+                              allocation_pool_id=None,
+                              auto_generated=False):
+        """Remove an IP address from subnet's availability ranges.
 
-        for ip_pool in self.subnet_manager.list_pools(session):
-            ip_set = netaddr.IPSet()
-            ip_set.add(netaddr.IPRange(ip_pool.first_ip, ip_pool.last_ip))
-            av_set = ip_set.difference(ip_allocations)
-            if av_set.size == 0:
+        This method is supposed to be called from within a database
+        transaction, otherwise atomicity and integrity might not be
+        enforced and the operation might result in incosistent availability
+        ranges for the subnet.
+
+        :param session: database session
+        :param ip_address: ip address to mark as allocated
+        :param allocation_pool_id: identifier of the allocation pool from
+             which the ip address has been extracted. If not specified this
+             routine will scan all allocation pools.
+        :param auto_generated: indicates whether ip was auto generated
+        :returns: list of IP ranges as instances of IPAvailabilityRange
+        """
+        # Return immediately for EUI-64 addresses. For this
+        # class of subnets availability ranges do not apply
+        if ipv6_utils.is_eui64_address(ip_address):
+            return
+
+        LOG.debug("Removing %(ip_address)s from availability ranges for "
+                  "subnet id:%(subnet_id)s",
+                  {'ip_address': ip_address,
+                   'subnet_id': self.subnet_manager.neutron_id})
+        # Netaddr's IPRange and IPSet objects work very well even with very
+        # large subnets, including IPv6 ones.
+        final_ranges = []
+        ip_in_pools = False
+        if allocation_pool_id:
+            av_ranges = self.subnet_manager.list_ranges_by_allocation_pool(
+                session, allocation_pool_id)
+        else:
+            av_ranges = self.subnet_manager.list_ranges_by_subnet_id(session)
+        for db_range in av_ranges:
+            initial_ip_set = netaddr.IPSet(netaddr.IPRange(
+                db_range['first_ip'], db_range['last_ip']))
+            final_ip_set = initial_ip_set - netaddr.IPSet([ip_address])
+            if not final_ip_set:
+                ip_in_pools = True
+                # Range exhausted - bye bye
+                if not self.subnet_manager.delete_range(session, db_range):
+                    raise db_exc.RetryRequest(ipam_exc.IPAllocationFailed())
                 continue
+            if initial_ip_set == final_ip_set:
+                # IP address does not fall within the current range, move
+                # to the next one
+                final_ranges.append(db_range)
+                continue
+            ip_in_pools = True
+            for new_range in final_ip_set.iter_ipranges():
+                # store new range in database
+                # use netaddr.IPAddress format() method which is equivalent
+                # to str(...) but also enables us to use different
+                # representation formats (if needed) for IPv6.
+                first_ip = netaddr.IPAddress(new_range.first)
+                last_ip = netaddr.IPAddress(new_range.last)
+                if (db_range['first_ip'] == first_ip.format() or
+                        db_range['last_ip'] == last_ip.format()):
+                    rows = self.subnet_manager.update_range(
+                        session, db_range, first_ip=first_ip, last_ip=last_ip)
+                    if not rows:
+                        raise db_exc.RetryRequest(
+                            ipam_exc.IPAllocationFailed())
+                    LOG.debug("Adjusted availability range for pool %s",
+                              db_range['allocation_pool_id'])
+                    final_ranges.append(db_range)
+                else:
+                    new_ip_range = self.subnet_manager.create_range(
+                        session,
+                        db_range['allocation_pool_id'],
+                        first_ip.format(),
+                        last_ip.format())
+                    LOG.debug("Created availability range for pool %s",
+                              new_ip_range['allocation_pool_id'])
+                    final_ranges.append(new_ip_range)
 
-            if prefer_next:
-                window = 1
-            else:
-                # Compute a value for the selection window
-                window = min(av_set.size, 10)
-            ip_index = random.randint(1, window)
-            candidate_ips = list(itertools.islice(av_set, ip_index))
-            allocated_ip = candidate_ips[-1]
-            return str(allocated_ip), ip_pool.id
+        # If ip is autogenerated it should be present in allocation pools,
+        # so retry if it is not there
+        if auto_generated and not ip_in_pools:
+            raise db_exc.RetryRequest(ipam_exc.IPAllocationFailed())
+        # Most callers might ignore this return value, which is however
+        # useful for testing purposes
+        LOG.debug("Availability ranges for subnet id %(subnet_id)s "
+                  "modified: %(new_ranges)s",
+                  {'subnet_id': self.subnet_manager.neutron_id,
+                   'new_ranges': ", ".join(["[%s; %s]" %
+                                            (r['first_ip'], r['last_ip']) for
+                                            r in final_ranges])})
+        return final_ranges
 
-        raise ipam_exc.IpAddressGenerationFailure(
-                  subnet_id=self.subnet_manager.neutron_id)
+    def _rebuild_availability_ranges(self, session):
+        """Rebuild availability ranges.
+
+        This method should be called only when the availability ranges are
+        exhausted or when the subnet's allocation pools are updated,
+        which may trigger a deletion of the availability ranges.
+
+        For this operation to complete successfully, this method uses a
+        locking query to ensure that no IP is allocated while the regeneration
+        of availability ranges is in progress.
+
+        :param session: database session
+        """
+        # List all currently allocated addresses, and prevent further
+        # allocations with a write-intent lock.
+        # NOTE: because of this driver's logic the write intent lock is
+        # probably unnecessary as this routine is called when the availability
+        # ranges for a subnet are exhausted and no further address can be
+        # allocated.
+        # TODO(salv-orlando): devise, if possible, a more efficient solution
+        # for building the IPSet to ensure decent performances even with very
+        # large subnets.
+        allocations = netaddr.IPSet(
+            [netaddr.IPAddress(allocation['ip_address']) for
+             allocation in self.subnet_manager.list_allocations(
+                 session)])
+
+        # MEH MEH
+        # There should be no need to set a write intent lock on the allocation
+        # pool table. Indeed it is not important for the correctness of this
+        # operation if the allocation pools are updated by another operation,
+        # which will result in the generation of new availability ranges.
+        # NOTE: it might be argued that an allocation pool update should in
+        # theory preempt rebuilding the availability range. This is an option
+        # to consider for future developments.
+        LOG.debug("Rebuilding availability ranges for subnet %s",
+                  self.subnet_manager.neutron_id)
+
+        for pool in self.subnet_manager.list_pools(session):
+            # Create a set of all addresses in the pool
+            poolset = netaddr.IPSet(netaddr.IPRange(pool['first_ip'],
+                                                    pool['last_ip']))
+            # Use set difference to find free addresses in the pool
+            available = poolset - allocations
+            # Write the ranges to the db
+            for ip_range in available.iter_ipranges():
+                av_range = self.subnet_manager.create_range(
+                    session,
+                    pool['id'],
+                    netaddr.IPAddress(ip_range.first).format(),
+                    netaddr.IPAddress(ip_range.last).format())
+                session.add(av_range)
+
+    def _generate_ip(self, session):
+        try:
+            return self._try_generate_ip(session)
+        except ipam_exc.IpAddressGenerationFailure:
+            self._rebuild_availability_ranges(session)
+
+        return self._try_generate_ip(session)
+
+    def _try_generate_ip(self, session):
+        """Generate an IP address from availability ranges."""
+        ip_range = self.subnet_manager.get_first_range(session)
+        if not ip_range:
+            LOG.debug("All IPs from subnet %(subnet_id)s allocated",
+                      {'subnet_id': self.subnet_manager.neutron_id})
+            raise ipam_exc.IpAddressGenerationFailure(
+                subnet_id=self.subnet_manager.neutron_id)
+        # A suitable range was found. Return IP address.
+        ip_address = ip_range['first_ip']
+        LOG.debug("Allocated IP - %(ip_address)s from range "
+                  "[%(first_ip)s; %(last_ip)s]",
+                  {'ip_address': ip_address,
+                   'first_ip': ip_address,
+                   'last_ip': ip_range['last_ip']})
+        return ip_address, ip_range['allocation_pool_id']
 
     def allocate(self, address_request):
-        # NOTE(pbondar): Ipam driver is always called in context of already
-        # running transaction, which is started on create_port or upper level.
-        # To be able to do rollback/retry actions correctly ipam driver
-        # should not create new nested transaction blocks.
+        # NOTE(salv-orlando): Creating a new db session might be a rather
+        # dangerous thing to do, if executed from within another database
+        # transaction. Therefore  the IPAM driver should never be
+        # called from within a database transaction, which is also good
+        # practice since in the general case these drivers may interact
+        # with remote backends
         session = self._context.session
         all_pool_id = None
-        # NOTE(salv-orlando): It would probably better to have a simpler
-        # model for address requests and just check whether there is a
-        # specific IP address specified in address_request
-        if isinstance(address_request, ipam_req.SpecificAddressRequest):
-            # This handles both specific and automatic address requests
-            # Check availability of requested IP
-            ip_address = str(address_request.address)
-            self._verify_ip(session, ip_address)
-        else:
-            prefer_next = isinstance(address_request,
-                                     ipam_req.PreferNextAddressRequest)
-            ip_address, all_pool_id = self._generate_ip(session, prefer_next)
-
-        # Create IP allocation request object
-        # The only defined status at this stage is 'ALLOCATED'.
-        # More states will be available in the future - e.g.: RECYCLABLE
-        try:
-            with session.begin(subtransactions=True):
-                # NOTE(kevinbenton): we use a subtransaction to force
-                # a flush here so we can capture DBReferenceErrors due
-                # to concurrent subnet deletions. (galera would deadlock
-                # later on final commit)
-                self.subnet_manager.create_allocation(session, ip_address)
-        except db_exc.DBReferenceError:
-            raise n_exc.SubnetNotFound(
-                subnet_id=self.subnet_manager.neutron_id)
-        return ip_address
+        auto_generated = False
+        with db_api.autonested_transaction(session):
+            # NOTE(salv-orlando): It would probably better to have a simpler
+            # model for address requests and just check whether there is a
+            # specific IP address specified in address_request
+            if isinstance(address_request, ipam_req.SpecificAddressRequest):
+                # This handles both specific and automatic address requests
+                # Check availability of requested IP
+                ip_address = str(address_request.address)
+                self._verify_ip(session, ip_address)
+            else:
+                ip_address, all_pool_id = self._generate_ip(session)
+                auto_generated = True
+            self._allocate_specific_ip(session, ip_address, all_pool_id,
+                                       auto_generated)
+            # Create IP allocation request object
+            # The only defined status at this stage is 'ALLOCATED'.
+            # More states will be available in the future - e.g.: RECYCLABLE
+            self.subnet_manager.create_allocation(session, ip_address)
+            return ip_address
 
     def deallocate(self, address):
         # This is almost a no-op because the Neutron DB IPAM driver does not
-        # delete IPAllocation objects at every deallocation. The only operation
-        # it performs is to delete an IPRequest entry.
+        # delete IPAllocation objects, neither rebuilds availability ranges
+        # at every deallocation. The only operation it performs is to delete
+        # an IPRequest entry.
         session = self._context.session
 
         count = self.subnet_manager.delete_allocation(
@@ -297,7 +440,7 @@ class NeutronDbPool(subnet_alloc.SubnetAllocator):
             raise ipam_exc.InvalidSubnetRequest(
                 reason=_("An identifier must be specified when updating "
                          "a subnet"))
-        if subnet_request.allocation_pools is None:
+        if not subnet_request.allocation_pools:
             LOG.debug("Update subnet request for subnet %s did not specify "
                       "new allocation pools, there is nothing to do",
                       subnet_request.subnet_id)
@@ -320,6 +463,3 @@ class NeutronDbPool(subnet_alloc.SubnetAllocator):
                           "Neutron subnet %s does not exist"),
                       subnet_id)
             raise n_exc.SubnetNotFound(subnet_id=subnet_id)
-
-    def needs_rollback(self):
-        return False

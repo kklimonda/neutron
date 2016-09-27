@@ -16,8 +16,6 @@
 """Test of Policy Engine For Neutron"""
 
 import mock
-from neutron_lib import constants
-from neutron_lib import exceptions
 from oslo_db import exception as db_exc
 from oslo_policy import fixture as op_fixture
 from oslo_policy import policy as oslo_policy
@@ -26,7 +24,8 @@ from oslo_utils import importutils
 
 import neutron
 from neutron.api.v2 import attributes
-from neutron.common import constants as n_const
+from neutron.common import constants as const
+from neutron.common import exceptions
 from neutron import context
 from neutron import manager
 from neutron import policy
@@ -329,10 +328,10 @@ class NeutronPolicyTestCase(base.BaseTestCase):
                                            oslo_policy.PolicyNotAuthorized)
 
     def test_create_port_device_owner_regex(self):
-        blocked_values = (constants.DEVICE_OWNER_NETWORK_PREFIX,
+        blocked_values = (const.DEVICE_OWNER_NETWORK_PREFIX,
                           'network:abdef',
-                          constants.DEVICE_OWNER_DHCP,
-                          constants.DEVICE_OWNER_ROUTER_INTF)
+                          const.DEVICE_OWNER_DHCP,
+                          const.DEVICE_OWNER_ROUTER_INTF)
         for val in blocked_values:
             self._test_advsvc_action_on_attr(
                 'create', 'port', 'device_owner', val,
@@ -358,7 +357,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
         self._test_advsvc_action_on_attr('get', 'port', 'shared', False)
 
     def test_advsvc_update_port_works(self):
-        kwargs = {n_const.ATTRIBUTES_TO_UPDATE: ['shared']}
+        kwargs = {const.ATTRIBUTES_TO_UPDATE: ['shared']}
         self._test_advsvc_action_on_attr('update', 'port', 'shared', True,
                                          **kwargs)
 
@@ -415,11 +414,11 @@ class NeutronPolicyTestCase(base.BaseTestCase):
         self._test_enforce_adminonly_attribute('create_network')
 
     def test_enforce_adminonly_attribute_update(self):
-        kwargs = {n_const.ATTRIBUTES_TO_UPDATE: ['shared']}
+        kwargs = {const.ATTRIBUTES_TO_UPDATE: ['shared']}
         self._test_enforce_adminonly_attribute('update_network', **kwargs)
 
     def test_reset_adminonly_attr_to_default_fails(self):
-        kwargs = {n_const.ATTRIBUTES_TO_UPDATE: ['shared']}
+        kwargs = {const.ATTRIBUTES_TO_UPDATE: ['shared']}
         self._test_nonadmin_action_on_attr('update', 'shared', False,
                                            oslo_policy.PolicyNotAuthorized,
                                            **kwargs)
@@ -616,43 +615,3 @@ class NeutronPolicyTestCase(base.BaseTestCase):
         policy.log_rule_list(oslo_policy.RuleCheck('rule', 'create_'))
         self.assertTrue(mock_is_e.called)
         self.assertTrue(mock_debug.called)
-
-    def test__is_attribute_explicitly_set(self):
-        action = 'create'
-        attr = 'attr'
-
-        target = {attr: 'valueA', 'tgt-tenant': 'tenantA'}
-        resource = {attr: {'allow_post': True,
-                           'allow_put': True,
-                           'is_visible': True,
-                           'enforce_policy': True,
-                           'validate': {'type:string': 10}}}
-
-        result = policy._is_attribute_explicitly_set(
-            attr, resource, target, action)
-        self.assertTrue(result)
-
-        target = {'tgt-tenant': 'tenantA'}
-        result = policy._is_attribute_explicitly_set(
-            attr, resource, target, action)
-        self.assertFalse(result)
-
-        resource = {attr: {'allow_post': True,
-                           'allow_put': True,
-                           'is_visible': True,
-                           'default': 'DfltValue',
-                           'enforce_policy': True,
-                           'validate': {'type:string': 10}}}
-        result = policy._is_attribute_explicitly_set(
-            attr, resource, target, action)
-        self.assertFalse(result)
-
-        target = {attr: 'DfltValue', 'tgt-tenant': 'tenantA'}
-        result = policy._is_attribute_explicitly_set(
-            attr, resource, target, action)
-        self.assertFalse(result)
-
-        target = {attr: constants.ATTR_NOT_SPECIFIED, 'tgt-tenant': 'tenantA'}
-        result = policy._is_attribute_explicitly_set(
-            attr, resource, target, action)
-        self.assertFalse(result)

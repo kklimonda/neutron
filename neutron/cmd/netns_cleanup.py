@@ -17,14 +17,14 @@ import itertools
 import re
 import time
 
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
 
-from neutron._i18n import _LE
+from neutron._i18n import _, _LE
 from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
+from neutron.agent.dhcp import config as dhcp_config
 from neutron.agent.l3 import agent as l3_agent
 from neutron.agent.l3 import dvr
 from neutron.agent.l3 import dvr_fip_ns
@@ -32,9 +32,8 @@ from neutron.agent.linux import dhcp
 from neutron.agent.linux import external_process
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
+from neutron.api.v2 import attributes
 from neutron.common import config
-from neutron.conf.agent import cmd
-from neutron.conf.agent import dhcp as dhcp_config
 
 
 LOG = logging.getLogger(__name__)
@@ -61,10 +60,21 @@ def setup_conf():
     from the main config that do not apply during clean-up.
     """
 
+    cli_opts = [
+        cfg.BoolOpt('force',
+                    default=False,
+                    help=_('Delete the namespace by removing all devices.')),
+        cfg.StrOpt('agent-type',
+                   choices=['dhcp', 'l3', 'lbaas'],
+                   help=_('Cleanup resources of a specific agent type only.')),
+    ]
+
     conf = cfg.CONF
-    cmd.register_cmd_opts(cmd.netns_opts, conf)
+    conf.register_cli_opts(cli_opts)
     agent_config.register_interface_driver_opts_helper(conf)
-    dhcp_config.register_agent_dhcp_opts(conf)
+    conf.register_opts(dhcp_config.DHCP_AGENT_OPTS)
+    conf.register_opts(dhcp_config.DHCP_OPTS)
+    conf.register_opts(dhcp_config.DNSMASQ_OPTS)
     conf.register_opts(interface.OPTS)
     return conf
 
@@ -101,7 +111,7 @@ def eligible_for_deletion(conf, namespace, force=False):
     else:
         prefixes = itertools.chain(*NS_PREFIXES.values())
     ns_mangling_pattern = '(%s%s)' % ('|'.join(prefixes),
-                                      constants.UUID_PATTERN)
+                                      attributes.UUID_PATTERN)
 
     # filter out namespaces without UUID as the name
     if not re.match(ns_mangling_pattern, namespace):

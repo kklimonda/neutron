@@ -19,14 +19,14 @@
 """Utilities and helper functions."""
 
 import collections
+import datetime
 import decimal
 import errno
 import functools
-import importlib
+import hashlib
 import math
 import multiprocessing
 import os
-import os.path
 import random
 import signal
 import socket
@@ -35,21 +35,21 @@ import tempfile
 import time
 import uuid
 
-import eventlet
+import debtcollector
 from eventlet.green import subprocess
 import netaddr
-from neutron_lib import constants as n_const
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import importutils
+from oslo_utils import reflection
 import six
 from stevedore import driver
 
-import neutron
 from neutron._i18n import _, _LE
+from neutron.common import constants as n_const
 from neutron.db import api as db_api
 
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -59,6 +59,138 @@ SYNCHRONIZED_PREFIX = 'neutron-'
 MAX_UINT16 = 0xffff
 
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
+
+
+class cache_method_results(object):
+    """This decorator is intended for object methods only."""
+
+    def __init__(self, func):
+        self.func = func
+        functools.update_wrapper(self, func)
+        self._first_call = True
+        self._not_cached = object()
+
+    def _get_from_cache(self, target_self, *args, **kwargs):
+        target_self_cls_name = reflection.get_class_name(target_self,
+                                                         fully_qualified=False)
+        func_name = "%(module)s.%(class)s.%(func_name)s" % {
+            'module': target_self.__module__,
+            'class': target_self_cls_name,
+            'func_name': self.func.__name__,
+        }
+        key = (func_name,) + args
+        if kwargs:
+            key += dict2tuple(kwargs)
+        try:
+            item = target_self._cache.get(key, self._not_cached)
+        except TypeError:
+            LOG.debug("Method %(func_name)s cannot be cached due to "
+                      "unhashable parameters: args: %(args)s, kwargs: "
+                      "%(kwargs)s",
+                      {'func_name': func_name,
+                       'args': args,
+                       'kwargs': kwargs})
+            return self.func(target_self, *args, **kwargs)
+
+        if item is self._not_cached:
+            item = self.func(target_self, *args, **kwargs)
+            target_self._cache.set(key, item, None)
+
+        return item
+
+    def __call__(self, target_self, *args, **kwargs):
+        target_self_cls_name = reflection.get_class_name(target_self,
+                                                         fully_qualified=False)
+        if not hasattr(target_self, '_cache'):
+            raise NotImplementedError(
+                _("Instance of class %(module)s.%(class)s must contain _cache "
+                  "attribute") % {
+                    'module': target_self.__module__,
+                    'class': target_self_cls_name})
+        if not target_self._cache:
+            if self._first_call:
+                LOG.debug("Instance of class %(module)s.%(class)s doesn't "
+                          "contain attribute _cache therefore results "
+                          "cannot be cached for %(func_name)s.",
+                          {'module': target_self.__module__,
+                           'class': target_self_cls_name,
+                           'func_name': self.func.__name__})
+                self._first_call = False
+            return self.func(target_self, *args, **kwargs)
+        return self._get_from_cache(target_self, *args, **kwargs)
+
+    def __get__(self, obj, objtype):
+        return functools.partial(self.__call__, obj)
+
+
+@debtcollector.removals.remove(message="This will removed in the N cycle.")
+def read_cached_file(filename, cache_info, reload_func=None):
+    """Read from a file if it has been modified.
+
+    :param cache_info: dictionary to hold opaque cache.
+    :param reload_func: optional function to be called with data when
+                        file is reloaded due to a modification.
+
+    :returns: data from file
+
+    """
+    mtime = os.path.getmtime(filename)
+    if not cache_info or mtime != cache_info.get('mtime'):
+        LOG.debug("Reloading cached file %s", filename)
+        with open(filename) as fap:
+            cache_info['data'] = fap.read()
+        cache_info['mtime'] = mtime
+        if reload_func:
+            reload_func(cache_info['data'])
+    return cache_info['data']
+
+
+@debtcollector.removals.remove(message="This will removed in the N cycle.")
+def find_config_file(options, config_file):
+    """Return the first config file found.
+
+    We search for the paste config file in the following order:
+    * If --config-file option is used, use that
+    * Search for the configuration files via common cfg directories
+    :retval Full path to config file, or None if no config file found
+    """
+    fix_path = lambda p: os.path.abspath(os.path.expanduser(p))
+    if options.get('config_file'):
+        if os.path.exists(options['config_file']):
+            return fix_path(options['config_file'])
+
+    dir_to_common = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.join(dir_to_common, '..', '..', '..', '..')
+    # Handle standard directory search for the config file
+    config_file_dirs = [fix_path(os.path.join(os.getcwd(), 'etc')),
+                        fix_path(os.path.join('~', '.neutron-venv', 'etc',
+                                              'neutron')),
+                        fix_path('~'),
+                        os.path.join(cfg.CONF.state_path, 'etc'),
+                        os.path.join(cfg.CONF.state_path, 'etc', 'neutron'),
+                        fix_path(os.path.join('~', '.local',
+                                              'etc', 'neutron')),
+                        '/usr/etc/neutron',
+                        '/usr/local/etc/neutron',
+                        '/etc/neutron/',
+                        '/etc']
+
+    if 'plugin' in options:
+        config_file_dirs = [
+            os.path.join(x, 'neutron', 'plugins', options['plugin'])
+            for x in config_file_dirs
+        ]
+
+    if os.path.exists(os.path.join(root, 'plugins')):
+        plugins = [fix_path(os.path.join(root, 'plugins', p, 'etc'))
+                   for p in os.listdir(os.path.join(root, 'plugins'))]
+        plugins = [p for p in plugins if os.path.isdir(p)]
+        config_file_dirs.extend(plugins)
+
+    for cfg_dir in config_file_dirs:
+        cfg_file = os.path.join(cfg_dir, config_file)
+        if os.path.exists(cfg_file):
+            return cfg_file
 
 
 def ensure_dir(dir_path):
@@ -199,9 +331,17 @@ def get_random_mac(base_mac):
 
 def get_random_string(length):
     """Get a random hex string of the specified length.
-    """
 
-    return "{0:0{1}x}".format(random.getrandbits(length * 4), length)
+    based on Cinder library
+      cinder/transfer/api.py
+    """
+    rndstr = ""
+    random.seed(datetime.datetime.now().microsecond)
+    while len(rndstr) < length:
+        base_str = str(random.random()).encode('utf-8')
+        rndstr += hashlib.sha224(base_str).hexdigest()
+
+    return rndstr[0:length]
 
 
 def get_dhcp_agent_device_id(network_id, host):
@@ -285,6 +425,19 @@ def is_dvr_serviced(device_owner):
             device_owner in get_other_dvr_serviced_device_owners())
 
 
+@debtcollector.removals.remove(message="This will removed in the N cycle.")
+def get_keystone_url(conf):
+    if conf.auth_uri:
+        auth_uri = conf.auth_uri.rstrip('/')
+    else:
+        auth_uri = ('%(protocol)s://%(host)s:%(port)s' %
+            {'protocol': conf.auth_protocol,
+             'host': conf.auth_host,
+             'port': conf.auth_port})
+    # NOTE(ihrachys): all existing consumers assume version 2.0
+    return '%s/v2.0/' % auth_uri
+
+
 def ip_to_cidr(ip, prefix=None):
     """Convert an ip with no prefix to cidr notation
 
@@ -317,7 +470,7 @@ def is_cidr_host(cidr):
         plain IP addresses specifically to avoid ambiguity.
     """
     if '/' not in str(cidr):
-        raise ValueError(_("cidr doesn't contain a '/'"))
+        raise ValueError("cidr doesn't contain a '/'")
     net = netaddr.IPNetwork(cidr)
     if net.version == 4:
         return net.prefixlen == n_const.IPv4_BITS
@@ -521,7 +674,7 @@ def port_rule_masking(port_min, port_max):
 
 
 def create_object_with_dependency(creator, dep_getter, dep_creator,
-                                  dep_id_attr, dep_deleter):
+                                  dep_id_attr):
     """Creates an object that binds to a dependency while handling races.
 
     creator is a function that expected to take the result of either
@@ -531,14 +684,11 @@ def create_object_with_dependency(creator, dep_getter, dep_creator,
     dep_id_attr be used to determine if the dependency changed during object
     creation.
 
-    dep_deleter will be called with a the result of dep_creator if the creator
-    function fails due to a non-dependency reason or the retries are exceeded.
-
-    dep_getter should return None if the dependency does not exist.
+    dep_getter should return None if the dependency does not exist
 
     dep_creator can raise a DBDuplicateEntry to indicate that a concurrent
-    create of the dependency occurred and the process will restart to get the
-    concurrently created one.
+    create of the dependency occured and the process will restart to get the
+    concurrently created one
 
     This function will return both the created object and the dependency it
     used/created.
@@ -548,16 +698,17 @@ def create_object_with_dependency(creator, dep_getter, dep_creator,
     process of creating the dependency if one no longer exists. It will
     give up after neutron.db.api.MAX_RETRIES and raise the exception it
     encounters after that.
+
+    TODO(kevinbenton): currently this does not try to delete the dependency
+    it created. This matches the semantics of the HA network logic it is used
+    for but it should be modified to cleanup in the future.
     """
-    result, dependency, dep_id, made_locally = None, None, None, False
+    result, dependency, dep_id = None, None, None
     for attempts in range(1, db_api.MAX_RETRIES + 1):
         # we go to max + 1 here so the exception handlers can raise their
         # errors at the end
         try:
-            dependency = dep_getter()
-            if not dependency:
-                dependency = dep_creator()
-                made_locally = True
+            dependency = dep_getter() or dep_creator()
             dep_id = getattr(dependency, dep_id_attr)
         except db_exc.DBDuplicateEntry:
             # dependency was concurrently created.
@@ -581,16 +732,6 @@ def create_object_with_dependency(creator, dep_getter, dep_creator,
                     if not dependency or dep_id != getattr(dependency,
                                                            dep_id_attr):
                         ctx.reraise = False
-                        continue
-                # we have exceeded retries or have encountered a non-dependency
-                # related failure so we try to clean up the dependency if we
-                # created it before re-raising
-                if made_locally and dependency:
-                    try:
-                        dep_deleter(dependency)
-                    except Exception:
-                        LOG.exception(_LE("Failed cleaning up dependency %s"),
-                                      dep_id)
     return result, dependency
 
 
@@ -610,119 +751,8 @@ def transaction_guard(f):
     """
     @functools.wraps(f)
     def inner(self, context, *args, **kwargs):
-        # FIXME(kevinbenton): get rid of all uses of this flag
-        if (context.session.is_active and
-                getattr(context, 'GUARD_TRANSACTION', True)):
-            raise RuntimeError(_("Method %s cannot be called within a "
-                                 "transaction.") % f)
+        if context.session.is_active:
+            raise RuntimeError(_("Method cannot be called within a "
+                                 "transaction."))
         return f(self, context, *args, **kwargs)
     return inner
-
-
-def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
-    """
-    Wait until callable predicate is evaluated as True
-
-    :param predicate: Callable deciding whether waiting should continue.
-    Best practice is to instantiate predicate with functools.partial()
-    :param timeout: Timeout in seconds how long should function wait.
-    :param sleep: Polling interval for results in seconds.
-    :param exception: Exception class for eventlet.Timeout.
-    (see doc for eventlet.Timeout for more information)
-    """
-    with eventlet.timeout.Timeout(timeout, exception):
-        while not predicate():
-            eventlet.sleep(sleep)
-
-
-class _AuthenticBase(object):
-    def __init__(self, addr, **kwargs):
-        super(_AuthenticBase, self).__init__(addr, **kwargs)
-        self._initial_value = addr
-
-    def __str__(self):
-        if isinstance(self._initial_value, six.string_types):
-            return self._initial_value
-        return super(_AuthenticBase, self).__str__()
-
-    # NOTE(ihrachys): override deepcopy because netaddr.* classes are
-    # slot-based and hence would not copy _initial_value
-    def __deepcopy__(self, memo):
-        return self.__class__(self._initial_value)
-
-
-class AuthenticEUI(_AuthenticBase, netaddr.EUI):
-    '''
-    This class retains the format of the MAC address string passed during
-    initialization.
-
-    This is useful when we want to make sure that we retain the format passed
-    by a user through API.
-    '''
-
-
-class AuthenticIPNetwork(_AuthenticBase, netaddr.IPNetwork):
-    '''
-    This class retains the format of the IP network string passed during
-    initialization.
-
-    This is useful when we want to make sure that we retain the format passed
-    by a user through API.
-    '''
-
-
-class classproperty(object):
-    def __init__(self, f):
-        self.func = f
-
-    def __get__(self, obj, owner):
-        return self.func(owner)
-
-
-_NO_ARGS_MARKER = object()
-
-
-def attach_exc_details(e, msg, args=_NO_ARGS_MARKER):
-    e._error_context_msg = msg
-    e._error_context_args = args
-
-
-def extract_exc_details(e):
-    for attr in ('_error_context_msg', '_error_context_args'):
-        if not hasattr(e, attr):
-            return _LE('No details.')
-    details = e._error_context_msg
-    args = e._error_context_args
-    if args is _NO_ARGS_MARKER:
-        return details
-    return details % args
-
-
-def import_modules_recursively(topdir):
-    '''Import and return all modules below the topdir directory.'''
-    modules = []
-    for root, dirs, files in os.walk(topdir):
-        for file_ in files:
-            if file_[-3:] != '.py':
-                continue
-
-            module = file_[:-3]
-            if module == '__init__':
-                continue
-
-            import_base = root.replace('/', '.')
-
-            # NOTE(ihrachys): in Python3, or when we are not located in the
-            # directory containing neutron code, __file__ is absolute, so we
-            # should truncate it to exclude PYTHONPATH prefix
-            prefixlen = len(os.path.dirname(neutron.__file__))
-            import_base = 'neutron' + import_base[prefixlen:]
-
-            module = '.'.join([import_base, module])
-            if module not in sys.modules:
-                importlib.import_module(module)
-            modules.append(module)
-
-        for dir_ in dirs:
-            modules.extend(import_modules_recursively(dir_))
-    return modules

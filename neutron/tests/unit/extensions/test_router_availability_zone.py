@@ -38,8 +38,7 @@ class AZRouterTestPlugin(common_db_mixin.CommonDbMixin,
     supported_extension_aliases = ["router", "l3_agent_scheduler",
                                    "router_availability_zone"]
 
-    @classmethod
-    def get_plugin_type(cls):
+    def get_plugin_type(self):
         return service_constants.L3_ROUTER_NAT
 
     def get_plugin_description(self):

@@ -17,8 +17,8 @@ from neutron.common import exceptions as n_exc
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_common
 from neutron.extensions import qos
-from neutron.objects import base as base_obj
 from neutron.objects.qos import policy as policy_object
+from neutron.objects.qos import rule as rule_object
 from neutron.objects.qos import rule_type as rule_type_object
 from neutron.services.qos.notification_drivers import manager as driver_mgr
 from neutron.services.qos import qos_consts
@@ -27,14 +27,12 @@ from neutron.services.qos import qos_consts
 class QoSPlugin(qos.QoSPluginBase):
     """Implementation of the Neutron QoS Service Plugin.
 
-    This class implements a Quality of Service plugin that provides quality of
-    service parameters over ports and networks.
+    This class implements a Quality of Service plugin that
+    provides quality of service parameters over ports and
+    networks.
 
     """
     supported_extension_aliases = ['qos']
-
-    __native_pagination_support = True
-    __native_sorting_support = True
 
     def __init__(self):
         super(QoSPlugin, self).__init__()
@@ -43,66 +41,29 @@ class QoSPlugin(qos.QoSPluginBase):
 
     @db_base_plugin_common.convert_result_to_dict
     def create_policy(self, context, policy):
-        """Create a QoS policy.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param policy: policy data to be applied
-        :type policy: dict
-
-        :returns: a QosPolicy object
-        """
-        policy_obj = policy_object.QosPolicy(context, **policy['policy'])
-        policy_obj.create()
-        self.notification_driver_manager.create_policy(context, policy_obj)
-        return policy_obj
+        policy = policy_object.QosPolicy(context, **policy['policy'])
+        policy.create()
+        self.notification_driver_manager.create_policy(context, policy)
+        return policy
 
     @db_base_plugin_common.convert_result_to_dict
     def update_policy(self, context, policy_id, policy):
-        """Update a QoS policy.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param policy_id: the id of the QosPolicy to update
-        :param policy_id: str uuid
-        :param policy: new policy data to be applied
-        :type policy: dict
-
-        :returns: a QosPolicy object
-        """
-        policy_data = policy['policy']
-        policy_obj = policy_object.QosPolicy(context, id=policy_id)
-        policy_obj.update_fields(policy_data, reset_changes=True)
-        policy_obj.update()
-        self.notification_driver_manager.update_policy(context, policy_obj)
-        return policy_obj
+        obj = policy_object.QosPolicy(context, id=policy_id)
+        obj.obj_reset_changes()
+        for k, v in policy['policy'].items():
+            if k != 'id':
+                setattr(obj, k, v)
+        obj.update()
+        self.notification_driver_manager.update_policy(context, obj)
+        return obj
 
     def delete_policy(self, context, policy_id):
-        """Delete a QoS policy.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param policy_id: the id of the QosPolicy to delete
-        :type policy_id: str uuid
-
-        :returns: None
-        """
         policy = policy_object.QosPolicy(context)
         policy.id = policy_id
         self.notification_driver_manager.delete_policy(context, policy)
         policy.delete()
 
     def _get_policy_obj(self, context, policy_id):
-        """Fetch a QoS policy.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param policy_id: the id of the QosPolicy to fetch
-        :type policy_id: str uuid
-
-        :returns: a QosPolicy object
-        :raises: n_exc.QosPolicyNotFound
-        """
         obj = policy_object.QosPolicy.get_object(context, id=policy_id)
         if obj is None:
             raise n_exc.QosPolicyNotFound(policy_id=policy_id)
@@ -111,119 +72,58 @@ class QoSPlugin(qos.QoSPluginBase):
     @db_base_plugin_common.filter_fields
     @db_base_plugin_common.convert_result_to_dict
     def get_policy(self, context, policy_id, fields=None):
-        """Get a QoS policy.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param policy_id: the id of the QosPolicy to update
-        :type policy_id: str uuid
-
-        :returns: a QosPolicy object
-        """
         return self._get_policy_obj(context, policy_id)
 
     @db_base_plugin_common.filter_fields
     @db_base_plugin_common.convert_result_to_dict
-    def get_policies(self, context, filters=None, fields=None, sorts=None,
-                     limit=None, marker=None, page_reverse=False):
-        """Get QoS policies.
+    def get_policies(self, context, filters=None, fields=None,
+                     sorts=None, limit=None, marker=None,
+                     page_reverse=False):
+        return policy_object.QosPolicy.get_objects(context, **filters)
 
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param filters: search criteria
-        :type filters: dict
-
-        :returns: QosPolicy objects meeting the search criteria
-        """
-        pager = base_obj.Pager(sorts, limit, page_reverse, marker)
-        return policy_object.QosPolicy.get_objects(context, _pager=pager,
-                                                   **filters)
-
-    @db_base_plugin_common.filter_fields
+    #TODO(QoS): Consider adding a proxy catch-all for rules, so
+    #           we capture the API function call, and just pass
+    #           the rule type as a parameter removing lots of
+    #           future code duplication when we have more rules.
     @db_base_plugin_common.convert_result_to_dict
-    def get_rule_types(self, context, filters=None, fields=None,
-                       sorts=None, limit=None,
-                       marker=None, page_reverse=False):
-        if not filters:
-            filters = {}
-        return rule_type_object.QosRuleType.get_objects(**filters)
-
-    @db_base_plugin_common.convert_result_to_dict
-    def create_policy_rule(self, context, rule_cls, policy_id, rule_data):
-        """Create a QoS policy rule.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param rule_cls: the rule object class
-        :type rule_cls: a class from the rule_object (qos.objects.rule) module
-        :param policy_id: the id of the QosPolicy for which to create the rule
-        :type policy_id: str uuid
-        :param rule_data: the rule data to be applied
-        :type rule_data: dict
-
-        :returns: a QoS policy rule object
-        """
-        rule_type = rule_cls.rule_type
-        rule_data = rule_data[rule_type + '_rule']
-
+    def create_policy_bandwidth_limit_rule(self, context, policy_id,
+                                           bandwidth_limit_rule):
+        # make sure we will have a policy object to push resource update
         with db_api.autonested_transaction(context.session):
-            # Ensure that we have access to the policy.
+            # first, validate that we have access to the policy
             policy = self._get_policy_obj(context, policy_id)
-            rule = rule_cls(context, qos_policy_id=policy_id, **rule_data)
+            rule = rule_object.QosBandwidthLimitRule(
+                context, qos_policy_id=policy_id,
+                **bandwidth_limit_rule['bandwidth_limit_rule'])
             rule.create()
             policy.reload_rules()
         self.notification_driver_manager.update_policy(context, policy)
         return rule
 
     @db_base_plugin_common.convert_result_to_dict
-    def update_policy_rule(self, context, rule_cls, rule_id, policy_id,
-            rule_data):
-        """Update a QoS policy rule.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param rule_cls: the rule object class
-        :type rule_cls: a class from the rule_object (qos.objects.rule) module
-        :param rule_id: the id of the QoS policy rule to update
-        :type rule_id: str uuid
-        :param policy_id: the id of the rule's policy
-        :type policy_id: str uuid
-        :param rule_data: the new rule data to update
-        :type rule_data: dict
-
-        :returns: a QoS policy rule object
-        """
-        rule_type = rule_cls.rule_type
-        rule_data = rule_data[rule_type + '_rule']
-
+    def update_policy_bandwidth_limit_rule(self, context, rule_id, policy_id,
+                                           bandwidth_limit_rule):
+        # make sure we will have a policy object to push resource update
         with db_api.autonested_transaction(context.session):
-            # Ensure we have access to the policy.
+            # first, validate that we have access to the policy
             policy = self._get_policy_obj(context, policy_id)
-            # Ensure the rule belongs to the policy.
+            # check if the rule belong to the policy
             policy.get_rule_by_id(rule_id)
-            rule = rule_cls(context, id=rule_id)
-            rule.update_fields(rule_data, reset_changes=True)
+            rule = rule_object.QosBandwidthLimitRule(
+                context, id=rule_id)
+            rule.obj_reset_changes()
+            for k, v in bandwidth_limit_rule['bandwidth_limit_rule'].items():
+                if k != 'id':
+                    setattr(rule, k, v)
             rule.update()
             policy.reload_rules()
         self.notification_driver_manager.update_policy(context, policy)
         return rule
 
-    def delete_policy_rule(self, context, rule_cls, rule_id, policy_id):
-        """Delete a QoS policy rule.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param rule_cls: the rule object class
-        :type rule_cls: a class from the rule_object (qos.objects.rule) module
-        :param rule_id: the id of the QosPolicy Rule to delete
-        :type rule_id: str uuid
-        :param policy_id: the id of the rule's policy
-        :type policy_id: str uuid
-
-        :returns: None
-        """
+    def delete_policy_bandwidth_limit_rule(self, context, rule_id, policy_id):
+        # make sure we will have a policy object to push resource update
         with db_api.autonested_transaction(context.session):
-            # Ensure we have access to the policy.
+            # first, validate that we have access to the policy
             policy = self._get_policy_obj(context, policy_id)
             rule = policy.get_rule_by_id(rule_id)
             rule.delete()
@@ -232,51 +132,37 @@ class QoSPlugin(qos.QoSPluginBase):
 
     @db_base_plugin_common.filter_fields
     @db_base_plugin_common.convert_result_to_dict
-    def get_policy_rule(self, context, rule_cls, rule_id, policy_id,
-                        fields=None):
-        """Get a QoS policy rule.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param rule_cls: the rule object class
-        :type rule_cls: a class from the rule_object (qos.objects.rule) module
-        :param rule_id: the id of the QoS policy rule to get
-        :type rule_id: str uuid
-        :param policy_id: the id of the rule's policy
-        :type policy_id: str uuid
-
-        :returns: a QoS policy rule object
-        :raises: n_exc.QosRuleNotFound
-        """
+    def get_policy_bandwidth_limit_rule(self, context, rule_id,
+                                        policy_id, fields=None):
+        # make sure we have access to the policy when fetching the rule
         with db_api.autonested_transaction(context.session):
-            # Ensure we have access to the policy.
+            # first, validate that we have access to the policy
             self._get_policy_obj(context, policy_id)
-            rule = rule_cls.get_object(context, id=rule_id)
+            rule = rule_object.QosBandwidthLimitRule.get_object(
+                context, id=rule_id)
         if not rule:
             raise n_exc.QosRuleNotFound(policy_id=policy_id, rule_id=rule_id)
         return rule
 
-    # TODO(QoS): enforce rule types when accessing rule objects
     @db_base_plugin_common.filter_fields
     @db_base_plugin_common.convert_result_to_dict
-    def get_policy_rules(self, context, rule_cls, policy_id, filters=None,
-                         fields=None, sorts=None, limit=None, marker=None,
-                         page_reverse=False):
-        """Get QoS policy rules.
-
-        :param context: neutron api request context
-        :type context: neutron.context.Context
-        :param rule_cls: the rule object class
-        :type rule_cls: a class from the rule_object (qos.objects.rule) module
-        :param policy_id: the id of the QosPolicy for which to get rules
-        :type policy_id: str uuid
-
-        :returns: QoS policy rule objects meeting the search criteria
-        """
+    def get_policy_bandwidth_limit_rules(self, context, policy_id,
+                                         filters=None, fields=None,
+                                         sorts=None, limit=None,
+                                         marker=None, page_reverse=False):
+        # make sure we have access to the policy when fetching rules
         with db_api.autonested_transaction(context.session):
-            # Ensure we have access to the policy.
+            # first, validate that we have access to the policy
             self._get_policy_obj(context, policy_id)
             filters = filters or dict()
             filters[qos_consts.QOS_POLICY_ID] = policy_id
-            pager = base_obj.Pager(sorts, limit, page_reverse, marker)
-            return rule_cls.get_objects(context, _pager=pager, **filters)
+            return rule_object.QosBandwidthLimitRule.get_objects(context,
+                                                                 **filters)
+
+    # TODO(QoS): enforce rule types when accessing rule objects
+    @db_base_plugin_common.filter_fields
+    @db_base_plugin_common.convert_result_to_dict
+    def get_rule_types(self, context, filters=None, fields=None,
+                       sorts=None, limit=None,
+                       marker=None, page_reverse=False):
+        return rule_type_object.QosRuleType.get_objects(**filters)

@@ -1,20 +1,26 @@
+# Translations template for neutron.
+# Copyright (C) 2015 ORGANIZATION
+# This file is distributed under the same license as the neutron project.
+#
+# Translators:
+# ADİL REŞİT DURSUN <ardursun@deltanoc.com>, 2015
+# Alper Çiftçi <alprciftci@gmail.com>, 2015
 # OpenStack Infra <zanata@openstack.org>, 2015. #zanata
-# Alex Eng <loones1595@gmail.com>, 2016. #zanata
-# KATO Tomoyuki <kato.tomoyuki@jp.fujitsu.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: neutron 9.0.0.0b3.dev409\n"
+"Project-Id-Version: neutron 8.0.1.dev68\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
-"POT-Creation-Date: 2016-08-18 18:59+0000\n"
+"POT-Creation-Date: 2016-04-18 20:06+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2016-07-02 08:18+0000\n"
-"Last-Translator: KATO Tomoyuki <kato.tomoyuki@jp.fujitsu.com>\n"
-"Language-Team: Turkish (Turkey)\n"
+"PO-Revision-Date: 2015-08-21 01:06+0000\n"
+"Last-Translator: openstackjenkins <jenkins@openstack.org>\n"
 "Language: tr-TR\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"Generated-By: Babel 2.0\n"
 "X-Generator: Zanata 3.7.3\n"
-"Plural-Forms: nplurals=2; plural=(n>1)\n"
+"Language-Team: Turkish (Turkey)\n"
 
 #, python-format
 msgid "%(action)s failed (client error): %(exc)s"
@@ -76,9 +82,6 @@ msgstr "Ajan başarıyla ilklendirildi, şimdi çalıştırılıyor... "
 
 msgid "Agent out of sync with plugin!"
 msgstr "Ajan ve eklenti uyumsuz!"
-
-msgid "All active networks have been fetched through RPC."
-msgstr "All active networks have been fetched through RPC."
 
 msgid ""
 "Allow sorting is enabled because native pagination requires native sorting"
@@ -192,7 +195,7 @@ msgstr "Aygıt %s zaten mevcut"
 
 #, python-format
 msgid "Device %s not defined on plugin"
-msgstr "Aygıt %s eklenti üzerinde tanımlanmamış"
+msgstr "Aygıt %s eklentide tanımlanmamış"
 
 #, python-format
 msgid "Device with MAC %s not defined on plugin"
@@ -210,10 +213,6 @@ msgstr "vlantransparent eklentisi kapalı."
 #, python-format
 msgid "Exclude Devices: %s"
 msgstr "Aygıtları Hariç Tut: %s"
-
-#, python-format
-msgid "Extension driver '%(name)s' failed in %(method)s"
-msgstr "Eklenti sürücüsü '%(name)s' %(method)s içerisinde başarısız"
 
 #, python-format
 msgid ""
@@ -290,10 +289,6 @@ msgstr "L2 Ajanı %s MAC'i ile DVR Kipinde çalışıyor"
 
 msgid "L3 agent started"
 msgstr "L3 ajanı başlatıldı"
-
-#, python-format
-msgid "Loaded agent extensions: %s"
-msgstr "Yüklü ajan eklentiler: %s"
 
 #, python-format
 msgid "Loaded extension driver names: %s"
@@ -562,3 +557,7 @@ msgstr "VlanTypeDriver ilklendirme tamamlandı"
 #, python-format
 msgid "agent_updated by server side %s!"
 msgstr "ajan sunucu tarafında güncellendi %s!"
+
+#, python-format
+msgid "port_unbound(): net_uuid %s not in local_vlan_map"
+msgstr "port_unbound(): net_uuid %s local_vlan_map içinde değil"

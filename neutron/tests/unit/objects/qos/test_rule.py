@@ -10,10 +10,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-
-from oslo_versionedobjects import exception
-
+from neutron.common import constants
 from neutron.objects.qos import policy
 from neutron.objects.qos import rule
 from neutron.services.qos import qos_consts
@@ -69,7 +66,7 @@ class QosBandwidthLimitRuleObjectTestCase(test_base.BaseObjectIfaceTestCase):
     _test_class = rule.QosBandwidthLimitRule
 
     def test_to_dict_returns_type(self):
-        obj = rule.QosBandwidthLimitRule(self.context, **self.db_objs[0])
+        obj = rule.QosBandwidthLimitRule(self.context, **self.db_obj)
         dict_ = obj.to_dict()
         self.assertEqual(qos_consts.RULE_TYPE_BANDWIDTH_LIMIT, dict_['type'])
 
@@ -83,75 +80,7 @@ class QosBandwidthLimitRuleDbObjectTestCase(test_base.BaseDbObjectTestCase,
         super(QosBandwidthLimitRuleDbObjectTestCase, self).setUp()
 
         # Prepare policy to be able to insert a rule
-        for obj in self.db_objs:
-            generated_qos_policy_id = obj['qos_policy_id']
-            policy_obj = policy.QosPolicy(self.context,
-                                          id=generated_qos_policy_id)
-            policy_obj.create()
-
-
-class QosDscpMarkingRuleObjectTestCase(test_base.BaseObjectIfaceTestCase):
-
-    _test_class = rule.QosDscpMarkingRule
-
-    def test_dscp_object_version_degradation(self):
-        dscp_rule = rule.QosDscpMarkingRule()
-
-        self.assertRaises(exception.IncompatibleObjectVersion,
-                     dscp_rule.obj_to_primitive, '1.0')
-
-    def test_dscp_object_version(self):
-        dscp_rule = rule.QosDscpMarkingRule()
-
-        prim = dscp_rule.obj_to_primitive('1.1')
-
-        self.assertTrue(prim)
-
-
-class QosDscpMarkingRuleDbObjectTestCase(test_base.BaseDbObjectTestCase,
-                                         testlib_api.SqlTestCase):
-
-    _test_class = rule.QosDscpMarkingRule
-
-    def setUp(self):
-        super(QosDscpMarkingRuleDbObjectTestCase, self).setUp()
-        # Prepare policy to be able to insert a rule
-        for obj in self.db_objs:
-            generated_qos_policy_id = obj['qos_policy_id']
-            policy_obj = policy.QosPolicy(self.context,
-                                          id=generated_qos_policy_id)
-            policy_obj.create()
-
-
-class QosMinimumBandwidthRuleObjectTestCase(test_base.BaseObjectIfaceTestCase):
-
-    _test_class = rule.QosMinimumBandwidthRule
-
-    def test_min_bw_object_version_degradation(self):
-        min_bw_rule = rule.QosMinimumBandwidthRule()
-
-        for version in ['1.0', '1.1']:
-            self.assertRaises(exception.IncompatibleObjectVersion,
-                              min_bw_rule.obj_to_primitive, version)
-
-    def test_min_bw_object_version(self):
-        min_bw_rule = rule.QosMinimumBandwidthRule()
-
-        prim = min_bw_rule.obj_to_primitive('1.2')
-
-        self.assertTrue(prim)
-
-
-class QosMinimumBandwidthRuleDbObjectTestCase(test_base.BaseDbObjectTestCase,
-                                              testlib_api.SqlTestCase):
-
-    _test_class = rule.QosMinimumBandwidthRule
-
-    def setUp(self):
-        super(QosMinimumBandwidthRuleDbObjectTestCase, self).setUp()
-        # Prepare policy to be able to insert a rule
-        for obj in self.db_objs:
-            generated_qos_policy_id = obj['qos_policy_id']
-            policy_obj = policy.QosPolicy(self.context,
-                                          id=generated_qos_policy_id)
-            policy_obj.create()
+        generated_qos_policy_id = self.db_obj['qos_policy_id']
+        policy_obj = policy.QosPolicy(self.context,
+                                      id=generated_qos_policy_id)
+        policy_obj.create()

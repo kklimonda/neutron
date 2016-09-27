@@ -13,15 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log
 
 from neutron._i18n import _, _LE, _LW
+from neutron.common import constants
 from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import driver_api as api
-from neutron.plugins.ml2.drivers import mech_agent
 from neutron.plugins.ml2.drivers.mech_sriov.mech_driver \
     import exceptions as exc
 from neutron.services.qos import qos_consts
@@ -34,22 +33,17 @@ FLAT_VLAN = 0
 
 sriov_opts = [
     cfg.ListOpt('supported_pci_vendor_devs',
+               default=['15b3:1004', '8086:10ca'],
                help=_("Comma-separated list of supported PCI vendor devices, "
                       "as defined by vendor_id:product_id according to the "
-                      "PCI ID Repository. Default None accept all PCI vendor "
-                      "devices"
-                      "DEPRECATED: This option is deprecated in the Newton "
-                      "release and will be removed in the Ocata release. "
-                      "Starting from Ocata the mechanism driver will accept "
-                      "all PCI vendor devices."),
-                deprecated_for_removal=True),
-
+                      "PCI ID Repository. Default enables support for Intel "
+                      "and Mellanox SR-IOV capable NICs.")),
 ]
 
 cfg.CONF.register_opts(sriov_opts, "ml2_sriov")
 
 
-class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
+class SriovNicSwitchMechanismDriver(api.MechanismDriver):
     """Mechanism Driver for SR-IOV capable NIC based switching.
 
     The SriovNicSwitchMechanismDriver integrates the ml2 plugin with the
@@ -62,22 +56,21 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
     L2 Agent presents in  order to manage port update events.
     """
 
-    supported_qos_rule_types = [
-        qos_consts.RULE_TYPE_BANDWIDTH_LIMIT,
-        qos_consts.RULE_TYPE_MINIMUM_BANDWIDTH,
-    ]
+    supported_qos_rule_types = [qos_consts.RULE_TYPE_BANDWIDTH_LIMIT]
 
     def __init__(self,
                  agent_type=constants.AGENT_TYPE_NIC_SWITCH,
                  vif_details={portbindings.CAP_PORT_FILTER: False},
                  supported_vnic_types=[portbindings.VNIC_DIRECT,
                                        portbindings.VNIC_MACVTAP,
-                                       portbindings.VNIC_DIRECT_PHYSICAL]):
+                                       portbindings.VNIC_DIRECT_PHYSICAL],
+                 supported_pci_vendor_info=None):
         """Initialize base class for SriovNicSwitch L2 agent type.
 
         :param agent_type: Constant identifying agent type in agents_db
         :param vif_details: Dictionary with details for VIF driver when bound
         :param supported_vnic_types: The binding:vnic_type values we can bind
+        :param supported_pci_vendor_info: The pci_vendor_info values to bind
         """
         self.agent_type = agent_type
         self.supported_vnic_types = supported_vnic_types
@@ -88,18 +81,12 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 else VIF_TYPE_HW_VEB
              for vtype in self.supported_vnic_types})
         self.vif_details = vif_details
-
-    def get_allowed_network_types(self, agent):
-        return (p_const.TYPE_FLAT, p_const.TYPE_VLAN)
-
-    def get_mappings(self, agent):
-        return agent['configurations'].get('device_mappings', {})
+        self.supported_network_types = (p_const.TYPE_VLAN, p_const.TYPE_FLAT)
 
     def initialize(self):
         try:
             self.pci_vendor_info = cfg.CONF.ml2_sriov.supported_pci_vendor_devs
-            if self.pci_vendor_info is not None:
-                self._check_pci_vendor_config(self.pci_vendor_info)
+            self._check_pci_vendor_config(self.pci_vendor_info)
         except ValueError:
             LOG.exception(_LE("Failed to parse supported PCI vendor devices"))
             raise cfg.Error(_("Parsing supported pci_vendor_devs failed"))
@@ -116,6 +103,9 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                       vnic_type)
             return
 
+        vif_type = self.vnic_type_for_vif_type.get(vnic_type,
+                                                   VIF_TYPE_HW_VEB)
+
         if not self._check_supported_pci_vendor_device(context):
             LOG.debug("Refusing to bind due to unsupported pci_vendor device")
             return
@@ -128,40 +118,32 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             # either. This should be changed in the future so physical
             # functions can use device mapping checks and the plugin can
             # get port status updates.
-            for segment in context.segments_to_bind:
-                if self.try_to_bind_segment_for_agent(context, segment,
-                                                      agent=None):
-                    break
+            self.try_to_bind(context, None, vif_type)
             return
 
         for agent in context.host_agents(self.agent_type):
             LOG.debug("Checking agent: %s", agent)
             if agent['alive']:
-                for segment in context.segments_to_bind:
-                    if self.try_to_bind_segment_for_agent(context, segment,
-                                                          agent):
-                        return
+                if self.try_to_bind(context, agent, vif_type):
+                    return
             else:
                 LOG.warning(_LW("Attempting to bind with dead agent: %s"),
                             agent)
 
-    def try_to_bind_segment_for_agent(self, context, segment, agent):
-        vnic_type = context.current.get(portbindings.VNIC_TYPE,
-                                        portbindings.VNIC_DIRECT)
-        vif_type = self.vnic_type_for_vif_type.get(vnic_type,
-                                                   VIF_TYPE_HW_VEB)
-        if not self.check_segment_for_agent(segment, agent):
-            return False
-        port_status = (constants.PORT_STATUS_ACTIVE if agent is None
-                       else constants.PORT_STATUS_DOWN)
-        context.set_binding(segment[api.ID],
-                            vif_type,
-                            self._get_vif_details(segment),
-                            port_status)
-        LOG.debug("Bound using segment: %s", segment)
-        return True
+    def try_to_bind(self, context, agent, vif_type):
+        for segment in context.segments_to_bind:
+            if self.check_segment(segment, agent):
+                port_status = (constants.PORT_STATUS_ACTIVE if agent is None
+                               else constants.PORT_STATUS_DOWN)
+                context.set_binding(segment[api.ID],
+                                    vif_type,
+                                    self._get_vif_details(segment),
+                                    port_status)
+                LOG.debug("Bound using segment: %s", segment)
+                return True
+        return False
 
-    def check_segment_for_agent(self, segment, agent=None):
+    def check_segment(self, segment, agent=None):
         """Check if segment can be bound.
 
         :param segment: segment dictionary describing segment to bind
@@ -169,9 +151,9 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         :returns: True if segment can be bound for agent
         """
         network_type = segment[api.NETWORK_TYPE]
-        if network_type in self.get_allowed_network_types(agent):
+        if network_type in self.supported_network_types:
             if agent:
-                mappings = self.get_mappings(agent)
+                mappings = agent['configurations'].get('device_mappings', {})
                 LOG.debug("Checking segment: %(segment)s "
                           "for mappings: %(mappings)s ",
                           {'segment': segment, 'mappings': mappings})
@@ -179,13 +161,7 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             return True
         return False
 
-    def check_vlan_transparency(self, context):
-        """SR-IOV driver vlan transparency support."""
-        return True
-
     def _check_supported_pci_vendor_device(self, context):
-        if self.pci_vendor_info is None:
-            return True
         if self.pci_vendor_info:
             profile = context.current.get(portbindings.PROFILE, {})
             if not profile:

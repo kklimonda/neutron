@@ -21,8 +21,6 @@ import shutil
 import time
 
 import netaddr
-from neutron_lib import constants
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -35,8 +33,8 @@ from neutron.agent.common import utils as agent_common_utils
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
-from neutron.common import constants as n_const
-from neutron.common import exceptions as n_exc
+from neutron.common import constants
+from neutron.common import exceptions
 from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
 from neutron.extensions import extra_dhcp_opt as edo_ext
@@ -172,7 +170,6 @@ class DhcpBase(object):
         raise NotImplementedError()
 
 
-@six.add_metaclass(abc.ABCMeta)
 class DhcpLocalProcess(DhcpBase):
     PORTS = []
 
@@ -390,8 +387,10 @@ class Dnsmasq(DhcpLocalProcess):
                    min(possible_leases, self.conf.dnsmasq_lease_max))
 
         cmd.append('--conf-file=%s' % self.conf.dnsmasq_config_file)
-        for server in self.conf.dnsmasq_dns_servers:
-            cmd.append('--server=%s' % server)
+        if self.conf.dnsmasq_dns_servers:
+            cmd.extend(
+                '--server=%s' % server
+                for server in self.conf.dnsmasq_dns_servers)
 
         if self.conf.dhcp_domain:
             cmd.append('--domain=%s' % self.conf.dhcp_domain)
@@ -442,24 +441,18 @@ class Dnsmasq(DhcpLocalProcess):
                                       service_name=DNSMASQ_SERVICE_NAME,
                                       monitored_process=pm)
 
-    def _release_lease(self, mac_address, ip, client_id=None,
-                       server_id=None, iaid=None):
+    def _release_lease(self, mac_address, ip, client_id):
         """Release a DHCP lease."""
         if netaddr.IPAddress(ip).version == constants.IP_VERSION_6:
-            cmd = ['dhcp_release6', '--iface', self.interface_name,
-                   '--ip', ip, '--client-id', client_id,
-                   '--server-id', server_id, '--iaid', iaid]
-        else:
-            cmd = ['dhcp_release', self.interface_name, ip, mac_address]
-            if client_id:
-                cmd.append(client_id)
+            # Note(SridharG) dhcp_release is only supported for IPv4
+            # addresses. For more details, please refer to man page.
+            return
+
+        cmd = ['dhcp_release', self.interface_name, ip, mac_address]
+        if client_id:
+            cmd.append(client_id)
         ip_wrapper = ip_lib.IPWrapper(namespace=self.network.namespace)
-        try:
-            ip_wrapper.netns.execute(cmd, run_as_root=True)
-        except RuntimeError as e:
-            # when failed to release single lease there's
-            # no need to propagate error further
-            LOG.warning(e)
+        ip_wrapper.netns.execute(cmd, run_as_root=True)
 
     def _output_config_files(self):
         self._output_hosts_file()
@@ -474,12 +467,6 @@ class Dnsmasq(DhcpLocalProcess):
             self.disable()
             LOG.debug('Killing dnsmasq for network since all subnets have '
                       'turned off DHCP: %s', self.network.id)
-            return
-        if not self.interface_name:
-            # we land here if above has been called and we receive port
-            # delete notifications for the network
-            LOG.debug('Agent does not have an interface on this network '
-                      'anymore, skipping reload: %s', self.network.id)
             return
 
         self._release_unused_leases()
@@ -505,7 +492,7 @@ class Dnsmasq(DhcpLocalProcess):
            fa:16:3e:8f:9d:65,set:aabc7d33-4874-429e-9637-436e4232d2cd
         3) But dnsmasq doesn't have sufficient checks to skip this entry and
            pick next entry, to process dhcp IPv4 request.
-        4) So dnsmasq uses this entry to process dhcp IPv4 request.
+        4) So dnsmasq uses this this entry to process dhcp IPv4 request.
         5) As there is no ip in this entry, dnsmasq logs "no address available"
            and fails to send DHCPOFFER message.
 
@@ -514,7 +501,7 @@ class Dnsmasq(DhcpLocalProcess):
         http://lists.thekelleys.org.uk/pipermail/dnsmasq-discuss/2015q2/
         009650.html
 
-        So if we reverse the order of writing entries in host file,
+        So If we reverse the order of writing entries in host file,
         so that entry for stateless IPv6 comes first,
         then dnsmasq can correctly fetch the IPv4 address.
         """
@@ -720,78 +707,10 @@ class Dnsmasq(DhcpLocalProcess):
             LOG.debug('Error while reading hosts file %s', filename)
         return leases
 
-    def _read_v6_leases_file_leases(self, filename):
-        """
-        reading information from leases file which is needed to pass to
-        dhcp_release6 command line utility if some of these leases are not
-        needed anymore
-
-        in this method  ipv4 entries in leases file are ignored, as info in
-        hosts file is enough
-
-        each line in dnsmasq leases file is one of the following
-          * duid entry: duid server_duid
-          There MUST be single duid entry per file
-          * ipv4 entry: space separated list
-            - The expiration time (seconds since unix epoch) or duration
-              (if dnsmasq is compiled with HAVE_BROKEN_RTC) of the lease.
-              0 means infinite.
-            - The link address, in format XX-YY:YY:YY[...], where XX is the ARP
-              hardware type.  "XX-" may be omitted for Ethernet.
-            - The IPv4 address
-            - The hostname (sent by the client or assigned by dnsmasq)
-              or '*' for none.
-            - The client identifier (colon-separated hex bytes)
-              or '*' for none.
-
-          *  ipv6 entry: space separated list
-            - The expiration time or duration
-            - The IAID as a Big Endian decimal number, prefixed by T for
-              IA_TAs (temporary addresses).
-            - The IPv6 address
-            - The hostname or '*'
-            - The client DUID (colon-separated hex bytes) or '*' if unknown
-
-        original discussion is in dnsmasq mailing list
-        http://lists.thekelleys.org.uk/pipermail/\
-        dnsmasq-discuss/2016q2/010595.html
-
-        :param filename: leases file
-        :return: dict, keys are IPv6 addresses, values are dicts containing
-                iaid, client_id and server_id
-        """
-        leases = {}
-        server_id = None
-        if os.path.exists(filename):
-            with open(filename) as f:
-                for l in f.readlines():
-                    if l.startswith('duid'):
-                        if not server_id:
-                            server_id = l.strip().split()[1]
-                            continue
-                        else:
-                            LOG.warning(_LW('Multiple DUID entries in %s '
-                                            'lease file, dnsmasq is possibly '
-                                            'not functioning properly'),
-                                        filename)
-                            continue
-                    parts = l.strip().split()
-                    (iaid, ip, client_id) = parts[1], parts[2], parts[4]
-                    ip = ip.strip('[]')
-                    if netaddr.IPAddress(ip).version == constants.IP_VERSION_4:
-                        continue
-                    leases[ip] = {'iaid': iaid,
-                                  'client_id': client_id,
-                                  'server_id': server_id
-                                  }
-        return leases
-
     def _release_unused_leases(self):
         filename = self.get_conf_file_name('host')
         old_leases = self._read_hosts_file_leases(filename)
-        leases_filename = self.get_conf_file_name('leases')
-        # here is dhcpv6 stuff needed to craft dhcpv6 packet
-        v6_leases = self._read_v6_leases_file_leases(leases_filename)
+
         new_leases = set()
         dhcp_port_exists = False
         dhcp_port_on_this_host = self.device_manager.get_device_id(
@@ -804,20 +723,11 @@ class Dnsmasq(DhcpLocalProcess):
                 dhcp_port_exists = True
 
         for ip, mac, client_id in old_leases - new_leases:
-            entry = v6_leases.get(ip, None)
-            version = netaddr.IPAddress(ip).version
-            if entry:
-                # must release IPv6 lease
-                self._release_lease(mac, ip, entry['client_id'],
-                                    entry['server_id'], entry['iaid'])
-            # must release only if v4 lease. If we have ipv6 address missing
-            # in old_leases, that means it's released already and nothing to do
-            # here
-            elif version == constants.IP_VERSION_4:
-                self._release_lease(mac, ip, client_id)
+            self._release_lease(mac, ip, client_id)
 
         if not dhcp_port_exists:
-            self.device_manager.unplug(self.interface_name, self.network)
+            self.device_manager.driver.unplug(
+                self.interface_name, namespace=self.network.namespace)
 
     def _output_addn_hosts_file(self):
         """Writes a dnsmasq compatible additional hosts file.
@@ -1213,13 +1123,13 @@ class DeviceManager(object):
                   {'device_id': device_id, 'network_id': network.id})
         for port in network.ports:
             port_device_id = getattr(port, 'device_id', None)
-            if port_device_id == n_const.DEVICE_ID_RESERVED_DHCP_PORT:
+            if port_device_id == constants.DEVICE_ID_RESERVED_DHCP_PORT:
                 try:
                     port = self.plugin.update_dhcp_port(
                         port.id, {'port': {'network_id': network.id,
                                            'device_id': device_id}})
                 except oslo_messaging.RemoteError as e:
-                    if e.exc_type == n_exc.DhcpPortInUse:
+                    if e.exc_type == exceptions.DhcpPortInUse:
                         LOG.info(_LI("Skipping DHCP port %s as it is "
                                      "already in use"), port.id)
                         continue
@@ -1278,10 +1188,7 @@ class DeviceManager(object):
         fixed_ips = [dict(subnet_id=fixed_ip.subnet_id,
                           ip_address=fixed_ip.ip_address,
                           subnet=dhcp_subnets[fixed_ip.subnet_id])
-                     for fixed_ip in dhcp_port.fixed_ips
-                     # we don't care about any ips on subnets irrelevant
-                     # to us (e.g. auto ipv6 addresses)
-                     if fixed_ip.subnet_id in dhcp_subnets]
+                     for fixed_ip in dhcp_port.fixed_ips]
 
         ips = [DictModel(item) if isinstance(item, dict) else item
                for item in fixed_ips]
@@ -1305,16 +1212,7 @@ class DeviceManager(object):
             # delete all devices except current active DHCP port device
             if d.name != dev_name:
                 LOG.debug("Found stale device %s, deleting", d.name)
-                self.unplug(d.name, network)
-
-    def plug(self, network, port, interface_name):
-        """Plug device settings for the network's DHCP on this host."""
-        self.driver.plug(network.id,
-                         port.id,
-                         interface_name,
-                         port.mac_address,
-                         namespace=network.namespace,
-                         mtu=network.get('mtu'))
+                self.driver.unplug(d.name, namespace=network.namespace)
 
     def setup(self, network):
         """Create and initialize a device for network's DHCP on this host."""
@@ -1327,7 +1225,12 @@ class DeviceManager(object):
             LOG.debug('Reusing existing device: %s.', interface_name)
         else:
             try:
-                self.plug(network, port, interface_name)
+                self.driver.plug(network.id,
+                                 port.id,
+                                 interface_name,
+                                 port.mac_address,
+                                 namespace=network.namespace,
+                                 mtu=network.get('mtu'))
             except Exception:
                 with excutils.save_and_reraise_exception():
                     LOG.exception(_LE('Unable to plug DHCP port for '
@@ -1355,7 +1258,7 @@ class DeviceManager(object):
                     net = netaddr.IPNetwork(subnet.cidr)
                     ip_cidrs.append('%s/%s' % (gateway, net.prefixlen))
 
-        if self.conf.force_metadata or self.conf.enable_isolated_metadata:
+        if self.conf.enable_isolated_metadata:
             ip_cidrs.append(METADATA_DEFAULT_CIDR)
 
         self.driver.init_l3(interface_name, ip_cidrs,
@@ -1375,14 +1278,10 @@ class DeviceManager(object):
         """Update device settings for the network's DHCP on this host."""
         self._set_default_route(network, device_name)
 
-    def unplug(self, device_name, network):
-        """Unplug device settings for the network's DHCP on this host."""
-        self.driver.unplug(device_name, namespace=network.namespace)
-
     def destroy(self, network, device_name):
         """Destroy the device used for the network's DHCP on this host."""
         if device_name:
-            self.unplug(device_name, network)
+            self.driver.unplug(device_name, namespace=network.namespace)
         else:
             LOG.debug('No interface exists for network %s', network.id)
 

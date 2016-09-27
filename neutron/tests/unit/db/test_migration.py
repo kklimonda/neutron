@@ -150,19 +150,13 @@ class TestCli(base.BaseTestCase):
 
     def _main_test_helper(self, argv, func_name, exp_kwargs=[{}]):
         with mock.patch.object(sys, 'argv', argv),\
-                mock.patch.object(cli, 'run_sanity_checks'),\
-                mock.patch.object(cli, 'validate_revisions'):
+            mock.patch.object(cli, 'run_sanity_checks'),\
+            mock.patch.object(cli, 'validate_revisions'),\
+            mock.patch.object(cli, '_use_separate_migration_branches'):
 
             cli.main()
-
-            def _append_version_path(args):
-                args = copy.copy(args)
-                if 'autogenerate' in args and not args['autogenerate']:
-                    args['version_path'] = mock.ANY
-                return args
-
             self.do_alembic_cmd.assert_has_calls(
-                [mock.call(mock.ANY, func_name, **_append_version_path(kwargs))
+                [mock.call(mock.ANY, func_name, **kwargs)
                  for kwargs in exp_kwargs]
             )
 
@@ -203,12 +197,14 @@ class TestCli(base.BaseTestCase):
         self._validate_cmd('heads')
 
     def test_check_migration(self):
-        with mock.patch.object(cli, 'validate_head_files') as validate:
+        with mock.patch.object(cli, 'validate_head_file') as validate:
             self._main_test_helper(['prog', 'check_migration'], 'branches')
             self.assertEqual(len(self.projects), validate.call_count)
 
     def _test_database_sync_revision(self, separate_branches=True):
-        with mock.patch.object(cli, 'update_head_files') as update:
+        with mock.patch.object(cli, 'update_head_files') as update,\
+                mock.patch.object(cli, '_use_separate_migration_branches',
+                                  return_value=separate_branches):
             if separate_branches:
                 mock.patch('os.path.exists').start()
             expected_kwargs = [{
@@ -222,12 +218,6 @@ class TestCli(base.BaseTestCase):
             self.assertEqual(len(self.projects), update.call_count)
             update.reset_mock()
 
-            expected_kwargs = [{
-                'message': 'message',
-                'sql': True,
-                'autogenerate': False,
-                'head': cli._get_branch_head(branch)
-            } for branch in cli.MIGRATION_BRANCHES]
             for kwarg in expected_kwargs:
                 kwarg['autogenerate'] = False
                 kwarg['sql'] = True
@@ -240,12 +230,10 @@ class TestCli(base.BaseTestCase):
             self.assertEqual(len(self.projects), update.call_count)
             update.reset_mock()
 
-            expected_kwargs = [{
-                'message': 'message',
-                'sql': False,
-                'autogenerate': False,
-                'head': 'expand@head'
-            }]
+            for kwarg in expected_kwargs:
+                kwarg['sql'] = False
+                kwarg['head'] = 'expand@head'
+
             self._main_test_helper(
                 ['prog', 'revision', '-m', 'message', '--expand'],
                 'revision',
@@ -379,21 +367,51 @@ class TestCli(base.BaseTestCase):
     def test_downgrade_fails(self):
         self.assert_command_fails(['prog', 'downgrade', '--sql', 'juno'])
 
-    def test_upgrade_negative_relative_revision_fails(self):
+    @mock.patch.object(cli, '_use_separate_migration_branches')
+    def test_upgrade_negative_relative_revision_fails(self, use_mock):
         self.assert_command_fails(['prog', 'upgrade', '-2'])
 
-    def test_upgrade_negative_delta_fails(self):
+    @mock.patch.object(cli, '_use_separate_migration_branches')
+    def test_upgrade_negative_delta_fails(self, use_mock):
         self.assert_command_fails(['prog', 'upgrade', '--delta', '-2'])
 
-    def test_upgrade_rejects_delta_with_relative_revision(self):
+    @mock.patch.object(cli, '_use_separate_migration_branches')
+    def test_upgrade_rejects_delta_with_relative_revision(self, use_mock):
         self.assert_command_fails(['prog', 'upgrade', '+2', '--delta', '3'])
+
+    def _test_validate_head_file_helper(self, heads, file_heads=None):
+        if file_heads is None:
+            file_heads = []
+        fake_config = self.configs[0]
+        mock_open = self.useFixture(
+                    tools.OpenFixture(cli._get_head_file_path(fake_config),
+                                      '\n'.join(file_heads))).mock_open
+        with mock.patch('alembic.script.ScriptDirectory.from_config') as fc,\
+                mock.patch.object(cli, '_use_separate_migration_branches',
+                                  return_value=False):
+            fc.return_value.get_heads.return_value = heads
+            if all(head in file_heads for head in heads):
+                cli.validate_head_file(fake_config)
+            else:
+                self.assertRaises(
+                    SystemExit,
+                    cli.validate_head_file,
+                    fake_config
+                )
+                self.assertTrue(self.mock_alembic_err.called)
+            mock_open.assert_called_with(
+                    cli._get_head_file_path(fake_config))
+
+            fc.assert_called_once_with(fake_config)
 
     def _test_validate_head_files_helper(self, heads, contract_head='',
                                          expand_head=''):
         fake_config = self.configs[0]
         head_files_not_exist = (contract_head == expand_head == '')
         with mock.patch('alembic.script.ScriptDirectory.from_config') as fc,\
-                mock.patch('os.path.exists') as os_mock:
+                mock.patch('os.path.exists') as os_mock,\
+                mock.patch.object(cli, '_use_separate_migration_branches',
+                                  return_value=True):
             if head_files_not_exist:
                 os_mock.return_value = False
             else:
@@ -412,14 +430,14 @@ class TestCli(base.BaseTestCase):
                     fake_config), expand_head + '\n')).mock_open
 
             if contract_head in heads and expand_head in heads:
-                cli.validate_head_files(fake_config)
+                cli.validate_head_file(fake_config)
             elif head_files_not_exist:
-                cli.validate_head_files(fake_config)
+                cli.validate_head_file(fake_config)
                 self.assertTrue(self.mock_alembic_warn.called)
             else:
                 self.assertRaises(
                     SystemExit,
-                    cli.validate_head_files,
+                    cli.validate_head_file,
                     fake_config
                 )
                 self.assertTrue(self.mock_alembic_err.called)
@@ -444,6 +462,28 @@ class TestCli(base.BaseTestCase):
         self._test_validate_head_files_helper(['a', 'b'], contract_head='c',
                                               expand_head='d')
 
+    def test_validate_head_file_branchless_wrong_contents(self):
+        self._test_validate_head_file_helper(['a'], ['b'])
+
+    def test_validate_head_file_branchless_success(self):
+        self._test_validate_head_file_helper(['a'], ['a'])
+
+    def test_validate_head_file_branchless_missing_file(self):
+        self._test_validate_head_file_helper(['a'])
+
+    def test_update_head_file_success(self):
+        head = ['b']
+        mock_open = self.useFixture(
+                    tools.OpenFixture(cli._get_head_file_path(
+                        self.configs[0]))).mock_open
+        with mock.patch('alembic.script.ScriptDirectory.from_config') as fc:
+            fc.return_value.get_heads.return_value = head
+            cli.update_head_file(self.configs[0])
+            mock_open.return_value.write.assert_called_with(
+                '\n'.join(head))
+
+    @mock.patch.object(cli, '_use_separate_migration_branches',
+                       return_value=True)
     @mock.patch.object(fileutils, 'delete_if_exists')
     def test_update_head_files_success(self, *mocks):
         heads = ['a', 'b']
@@ -493,6 +533,15 @@ class TestCli(base.BaseTestCase):
     def test_get_subproject_script_location_not_installed(self):
         self.assertRaises(
             SystemExit, cli._get_subproject_script_location, 'not-installed')
+
+    def test_get_service_script_location(self):
+        fwaas_ep = cli._get_service_script_location('fwaas')
+        expected = 'neutron_fwaas.db.migration:alembic_migrations'
+        self.assertEqual(expected, fwaas_ep)
+
+    def test_get_service_script_location_not_installed(self):
+        self.assertRaises(
+            SystemExit, cli._get_service_script_location, 'myaas')
 
     def test_get_subproject_base_not_installed(self):
         self.assertRaises(
@@ -597,9 +646,14 @@ class TestCli(base.BaseTestCase):
         self.assertEqual(set(rev for rev in revisions if rev.is_branch_point),
                          set(cli._get_branch_points(script_dir)))
 
+    @mock.patch.object(cli, '_use_separate_migration_branches')
     @mock.patch.object(cli, '_get_version_branch_path')
-    def test_autogen_process_directives(self, get_version_branch_path):
+    def test_autogen_process_directives(
+            self,
+            get_version_branch_path,
+            use_separate_migration_branches):
 
+        use_separate_migration_branches.return_value = True
         get_version_branch_path.side_effect = lambda cfg, release, branch: (
             "/foo/expand" if branch == 'expand' else "/foo/contract")
 
@@ -697,6 +751,21 @@ class TestCli(base.BaseTestCase):
                 ### end Alembic commands ###"""),
             alembic_ag_api.render_python_code(contract.upgrade_ops)
         )
+
+    @mock.patch.object(cli, '_get_branch_points', return_value=[])
+    @mock.patch.object(cli.CONF, 'split_branches',
+                       new_callable=mock.PropertyMock,
+                       return_value=True, create=True)
+    def test__use_separate_migration_branches_enforced(self, *mocks):
+        self.assertTrue(cli._use_separate_migration_branches(self.configs[0]))
+
+    @mock.patch.object(cli, '_get_branch_points', return_value=[])
+    def test__use_separate_migration_branches_no_branch_points(self, *mocks):
+        self.assertFalse(cli._use_separate_migration_branches(self.configs[0]))
+
+    @mock.patch.object(cli, '_get_branch_points', return_value=['fake1'])
+    def test__use_separate_migration_branches_with_branch_points(self, *mocks):
+        self.assertTrue(cli._use_separate_migration_branches(self.configs[0]))
 
     @mock.patch('alembic.script.ScriptDirectory.walk_revisions')
     def test__find_milestone_revisions_one_branch(self, walk_mock):

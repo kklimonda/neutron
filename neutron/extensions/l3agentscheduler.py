@@ -15,16 +15,15 @@
 
 import abc
 
-from neutron_lib import constants
-from neutron_lib import exceptions
 from oslo_log import log as logging
-import six
 import webob.exc
 
 from neutron._i18n import _, _LE
 from neutron.api import extensions
 from neutron.api.v2 import base
 from neutron.api.v2 import resource
+from neutron.common import constants
+from neutron.common import exceptions
 from neutron.common import rpc as n_rpc
 from neutron.extensions import agent
 from neutron import manager
@@ -184,11 +183,6 @@ class DVRL3CannotRemoveFromDvrAgent(exceptions.Conflict):
                 "an agent in 'dvr' mode.")
 
 
-class RouterDoesntSupportScheduling(exceptions.Conflict):
-    message = _("Router %(router_id)s does not support agent scheduling.")
-
-
-@six.add_metaclass(abc.ABCMeta)
 class L3AgentSchedulerPluginBase(object):
     """REST API to operate the l3 agent scheduler.
 
@@ -210,10 +204,6 @@ class L3AgentSchedulerPluginBase(object):
     @abc.abstractmethod
     def list_l3_agents_hosting_router(self, context, router_id):
         pass
-
-    def router_supports_scheduling(self, context, router_id):
-        """Override this method to conditionally schedule routers."""
-        return True
 
 
 def notify(context, action, router_id, agent_id):

@@ -367,33 +367,3 @@ class OVSLibTestCase(base.BaseOVSLinuxTestCase):
         self.assertTrue(self.ovs.bridge_exists(name))
         br.destroy()
         self.assertFalse(self.ovs.bridge_exists(name))
-
-    def test_db_find_column_type_list(self):
-        """Fixate output for vsctl/native ovsdb_interface.
-
-        Makes sure that db_find search queries give the same result for both
-        implementations.
-        """
-        bridge_name = base.get_rand_name(prefix=net_helpers.BR_PREFIX)
-        self.addCleanup(self.ovs.delete_bridge, bridge_name)
-        br = self.ovs.add_bridge(bridge_name)
-        port_name = base.get_rand_name(prefix=net_helpers.PORT_PREFIX)
-        br.add_port(port_name)
-        self.ovs.set_db_attribute('Port', port_name, 'tag', 42)
-
-        # wrap list/find in transaction so we get a single isolated snapshot
-        with self.ovs.ovsdb.transaction(check_error=True) as txn:
-            tags = txn.add(self.ovs.ovsdb.db_list('Port', columns=['tag']))
-            len_0_list = txn.add(self.ovs.ovsdb.db_find(
-                    'Port', ('tag', '!=', []), columns=['tag']))
-            single_value = txn.add(self.ovs.ovsdb.db_find(
-                    'Port', ('tag', '=', 42), columns=['tag']))
-
-        # Make sure that there is data to query.
-        # It should be, but let's be a little paranoid here as otherwise
-        # the test has no sense
-        tags_present = [t for t in tags.result if t['tag'] != []]
-        self.assertTrue(tags_present)
-        tags_42 = [t for t in tags_present if t['tag'] == 42]
-        self.assertEqual(tags_42, single_value.result)
-        self.assertItemsEqual(len_0_list.result, tags_present)

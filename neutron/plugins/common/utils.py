@@ -16,23 +16,16 @@
 Common utilities and helper functions for OpenStack Networking Plugins.
 """
 
-import contextlib
 import hashlib
 
-import debtcollector
-from neutron_lib import constants as n_const
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_utils import encodeutils
-from oslo_utils import excutils
+import six
 import webob.exc
 
-from neutron._i18n import _, _LE, _LI
+from neutron._i18n import _, _LI
 from neutron.api.v2 import attributes
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
+from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron.plugins.common import constants as p_const
 
@@ -75,29 +68,24 @@ def verify_tunnel_range(tunnel_range, tunnel_type):
     if tunnel_type in mappings:
         for ident in tunnel_range:
             if not mappings[tunnel_type](ident):
-                raise exceptions.NetworkTunnelRangeError(
+                raise n_exc.NetworkTunnelRangeError(
                     tunnel_range=tunnel_range,
                     error=_("%(id)s is not a valid %(type)s identifier") %
                     {'id': ident, 'type': tunnel_type})
     if tunnel_range[1] < tunnel_range[0]:
-        raise exceptions.NetworkTunnelRangeError(
+        raise n_exc.NetworkTunnelRangeError(
             tunnel_range=tunnel_range,
             error=_("End of tunnel range is less "
                     "than start of tunnel range"))
-
-
-def raise_invalid_tag(vlan_str, vlan_range):
-    """Raise an exception for invalid tag."""
-    raise n_exc.NetworkVlanRangeError(
-        vlan_range=vlan_range,
-        error=_("%s is not a valid VLAN tag") % vlan_str)
 
 
 def verify_vlan_range(vlan_range):
     """Raise an exception for invalid tags or malformed range."""
     for vlan_tag in vlan_range:
         if not is_valid_vlan_tag(vlan_tag):
-            raise_invalid_tag(str(vlan_tag), vlan_range)
+            raise n_exc.NetworkVlanRangeError(
+                vlan_range=vlan_range,
+                error=_("%s is not a valid VLAN tag") % vlan_tag)
     if vlan_range[1] < vlan_range[0]:
         raise n_exc.NetworkVlanRangeError(
             vlan_range=vlan_range,
@@ -108,25 +96,13 @@ def parse_network_vlan_range(network_vlan_range):
     """Interpret a string as network[:vlan_begin:vlan_end]."""
     entry = network_vlan_range.strip()
     if ':' in entry:
-        if entry.count(':') != 2:
-            raise n_exc.NetworkVlanRangeError(
-                vlan_range=entry,
-                error=_("Need exactly two values for VLAN range"))
-        network, vlan_min, vlan_max = entry.split(':')
+        try:
+            network, vlan_min, vlan_max = entry.split(':')
+            vlan_range = (int(vlan_min), int(vlan_max))
+        except ValueError as ex:
+            raise n_exc.NetworkVlanRangeError(vlan_range=entry, error=ex)
         if not network:
             raise n_exc.PhysicalNetworkNameError()
-
-        try:
-            vlan_min = int(vlan_min)
-        except ValueError:
-            raise_invalid_tag(vlan_min, entry)
-
-        try:
-            vlan_max = int(vlan_max)
-        except ValueError:
-            raise_invalid_tag(vlan_max, entry)
-
-        vlan_range = (vlan_min, vlan_max)
         verify_vlan_range(vlan_range)
         return network, vlan_range
     else:
@@ -166,32 +142,15 @@ def _fixup_res_dict(context, attr_name, res_dict, check_allow_post=True):
     return res_dict
 
 
-def create_network(core_plugin, context, net, check_allow_post=True):
+def create_network(core_plugin, context, net):
     net_data = _fixup_res_dict(context, attributes.NETWORKS,
-                               net.get('network', {}),
-                               check_allow_post=check_allow_post)
+                               net.get('network', {}))
     return core_plugin.create_network(context, {'network': net_data})
 
 
-@debtcollector.removals.remove(
-    message="This will be removed in the O cycle. "
-            "Please call update_network directly on the plugin."
-)
-def update_network(core_plugin, context, network_id, net_data):
-    network = core_plugin.update_network(
-        context, network_id, {resources.NETWORK: net_data})
-    # bundle the plugin API update with any other action required to
-    # reflect a state change on the network, e.g. DHCP notifications
-    registry.notify(resources.NETWORK, events.BEFORE_RESPONSE, core_plugin,
-                    context=context, data={resources.NETWORK: network},
-                    method_name='network.update.end')
-    return network
-
-
-def create_subnet(core_plugin, context, subnet, check_allow_post=True):
+def create_subnet(core_plugin, context, subnet):
     subnet_data = _fixup_res_dict(context, attributes.SUBNETS,
-                                  subnet.get('subnet', {}),
-                                  check_allow_post=check_allow_post)
+                                  subnet.get('subnet', {}))
     return core_plugin.create_subnet(context, {'subnet': subnet_data})
 
 
@@ -200,32 +159,6 @@ def create_port(core_plugin, context, port, check_allow_post=True):
                                 port.get('port', {}),
                                 check_allow_post=check_allow_post)
     return core_plugin.create_port(context, {'port': port_data})
-
-
-@contextlib.contextmanager
-def delete_port_on_error(core_plugin, context, port_id):
-    try:
-        yield
-    except Exception:
-        with excutils.save_and_reraise_exception():
-            try:
-                core_plugin.delete_port(context, port_id,
-                                        l3_port_check=False)
-            except Exception:
-                LOG.exception(_LE("Failed to delete port: %s"), port_id)
-
-
-@contextlib.contextmanager
-def update_port_on_error(core_plugin, context, port_id, revert_value):
-    try:
-        yield
-    except Exception:
-        with excutils.save_and_reraise_exception():
-            try:
-                core_plugin.update_port(context, port_id,
-                                        {'port': revert_value})
-            except Exception:
-                LOG.exception(_LE("Failed to update port: %s"), port_id)
 
 
 def get_interface_name(name, prefix='', max_len=n_const.DEVICE_NAME_MAX_LEN):
@@ -247,7 +180,10 @@ def get_interface_name(name, prefix='', max_len=n_const.DEVICE_NAME_MAX_LEN):
                            "given length for an interface name."))
 
     namelen = max_len - len(prefix) - INTERFACE_HASH_LEN
-    hashed_name = hashlib.sha1(encodeutils.to_utf8(name))
+    if isinstance(name, six.text_type):
+        hashed_name = hashlib.sha1(name.encode('utf-8'))
+    else:
+        hashed_name = hashlib.sha1(name)
     new_name = ('%(prefix)s%(truncated)s%(hash)s' %
                 {'prefix': prefix, 'truncated': name[0:namelen],
                  'hash': hashed_name.hexdigest()[0:INTERFACE_HASH_LEN]})

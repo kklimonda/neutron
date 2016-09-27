@@ -22,7 +22,6 @@ from oslo_log import log as logging
 from oslo_utils import importutils
 
 from neutron.common import config as common_config
-from neutron.common import profiler
 from neutron.common import utils as n_utils
 
 
@@ -47,5 +46,4 @@ def main():
     mod.init_config()
     common_config.setup_logging()
     n_utils.log_opt_values(LOG)
-    profiler.setup("neutron-ovs-agent", cfg.CONF.host)
     mod.main()

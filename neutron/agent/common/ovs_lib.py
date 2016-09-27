@@ -19,7 +19,6 @@ import operator
 import time
 import uuid
 
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
@@ -30,12 +29,15 @@ from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.common import utils
 from neutron.agent.linux import ip_lib
 from neutron.agent.ovsdb import api as ovsdb
-from neutron.conf.agent import ovs_conf
+from neutron.common import exceptions
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants
 
 UINT64_BITMASK = (1 << 64) - 1
+
+# Default timeout for ovs-vsctl command
+DEFAULT_OVS_VSCTL_TIMEOUT = 10
 
 # Special return value for an invalid OVS ofport
 INVALID_OFPORT = -1
@@ -45,7 +47,14 @@ UNASSIGNED_OFPORT = []
 FAILMODE_SECURE = 'secure'
 FAILMODE_STANDALONE = 'standalone'
 
-ovs_conf.register_ovs_agent_opts()
+OPTS = [
+    cfg.IntOpt('ovs_vsctl_timeout',
+               default=DEFAULT_OVS_VSCTL_TIMEOUT,
+               help=_('Timeout in seconds for ovs-vsctl commands. '
+                      'If the timeout expires, ovs commands will fail with '
+                      'ALARMCLOCK error.')),
+]
+cfg.CONF.register_opts(OPTS)
 
 LOG = logging.getLogger(__name__)
 
@@ -111,7 +120,10 @@ class BaseOVS(object):
 
         self.ovsdb.add_br(bridge_name,
                           datapath_type).execute()
-        return OVSBridge(bridge_name)
+        br = OVSBridge(bridge_name)
+        # Don't return until vswitchd sets up the internal port
+        br.get_port_ofport(bridge_name)
+        return br
 
     def delete_bridge(self, bridge_name):
         self.ovsdb.del_br(bridge_name).execute()
@@ -209,6 +221,8 @@ class OVSBridge(BaseOVS):
             if secure_mode:
                 txn.add(self.ovsdb.set_fail_mode(self.br_name,
                                                  FAILMODE_SECURE))
+        # Don't return until vswitchd sets up the internal port
+        self.get_port_ofport(self.br_name)
 
     def destroy(self):
         self.delete_bridge(self.br_name)
@@ -234,6 +248,8 @@ class OVSBridge(BaseOVS):
             if interface_attr_tuples:
                 txn.add(self.ovsdb.db_set('Interface', port_name,
                                           *interface_attr_tuples))
+        # Don't return until the port has been assigned by vswitchd
+        self.get_port_ofport(port_name)
 
     def delete_port(self, port_name):
         self.ovsdb.del_port(port_name, self.br_name).execute()

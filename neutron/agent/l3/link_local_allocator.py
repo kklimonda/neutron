@@ -35,7 +35,7 @@ class LinkLocalAllocator(ItemAllocator):
     These link local addresses are used for routing inside the fip namespaces.
     The associations need to persist across agent restarts to maintain
     consistency.  Without this, there is disruption in network connectivity
-    as the agent rewires the connections with the new IP address associations.
+    as the agent rewires the connections with the new IP address assocations.
 
     Persisting these in the database is unnecessary and would degrade
     performance.

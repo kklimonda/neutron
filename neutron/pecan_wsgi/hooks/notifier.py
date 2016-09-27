@@ -13,17 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log
 from oslo_serialization import jsonutils
 from pecan import hooks
 
 from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
+from neutron.common import constants
 from neutron.common import rpc as n_rpc
 from neutron import manager
 from neutron.pecan_wsgi import constants as pecan_constants
-from neutron.pecan_wsgi.hooks import utils
 
 LOG = log.getLogger(__name__)
 
@@ -43,12 +42,10 @@ class NotifierHook(hooks.PecanHook):
             # this is scoped to avoid a dependency on nova client when nova
             # notifications aren't enabled
             from neutron.notifiers import nova
-            self._nova_notifier = nova.Notifier.get_instance()
+            self._nova_notifier = nova.Notifier()
         self._nova_notifier.send_network_change(action_resource, *args)
 
     def _notify_dhcp_agent(self, context, resource_name, action, resources):
-        # NOTE(kevinbenton): we should remove this whole method in Ocata and
-        # make plugins emit the core resource events
         plugin = manager.NeutronManager.get_plugin_for_resource(resource_name)
         notifier_method = '%s.%s.end' % (resource_name, action)
         # use plugin's dhcp notifier, if this is already instantiated
@@ -57,10 +54,6 @@ class NotifierHook(hooks.PecanHook):
             agent_notifiers.get(constants.AGENT_TYPE_DHCP) or
             dhcp_rpc_agent_api.DhcpAgentNotifyAPI()
         )
-        native_map = getattr(dhcp_agent_notifier, 'uses_native_notifications',
-                             {})
-        if native_map.get(resource_name, {}).get(action):
-            return
         # The DHCP Agent does not accept bulk notifications
         for resource in resources:
             item = {resource_name: resource}
@@ -72,8 +65,6 @@ class NotifierHook(hooks.PecanHook):
             return
         resource = state.request.context.get('resource')
         if not resource:
-            return
-        if utils.is_member_action(utils.get_controller(state)):
             return
         action = pecan_constants.ACTION_MAP.get(state.request.method)
         event = '%s.%s.start' % (resource, action)
@@ -90,6 +81,8 @@ class NotifierHook(hooks.PecanHook):
                             event, payload)
 
     def after(self, state):
+        # if the after hook is executed the request completed successfully and
+        # therefore notifications must be sent
         resource_name = state.request.context.get('resource')
         collection_name = state.request.context.get('collection')
         neutron_context = state.request.context.get('neutron_context')
@@ -100,12 +93,6 @@ class NotifierHook(hooks.PecanHook):
         action = pecan_constants.ACTION_MAP.get(state.request.method)
         if not action or action == 'get':
             LOG.debug("No notification will be sent for action: %s", action)
-            return
-        if utils.is_member_action(utils.get_controller(state)):
-            return
-        if state.response.status_int > 300:
-            LOG.debug("No notification will be sent due to unsuccessful "
-                      "status code: %s", state.response.status_int)
             return
 
         if action == 'delete':
@@ -133,6 +120,7 @@ class NotifierHook(hooks.PecanHook):
             self._notify_dhcp_agent(
                 neutron_context, resource_name,
                 action, resources)
+
         if cfg.CONF.notify_nova_on_port_data_changes:
             orig = {}
             if action == 'update':
@@ -149,6 +137,11 @@ class NotifierHook(hooks.PecanHook):
 
         event = '%s.%s.end' % (resource_name, action)
         if action == 'delete':
+            if state.response.status_int > 300:
+                # don't notify when unsuccessful
+                # NOTE(kevinbenton): we may want to be more strict with the
+                # response codes
+                return
             resource_id = state.request.context.get('resource_id')
             payload = {resource_name + '_id': resource_id}
         elif action in ('create', 'update'):

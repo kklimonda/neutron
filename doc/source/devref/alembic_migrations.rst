@@ -113,7 +113,7 @@ Neutron makes use of alembic branches for two purposes.
 1. Independent Sub-Project Tables
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Various `sub-projects <../stadium/sub_projects.html>`_ can be installed with Neutron. Each
+Various `sub-projects <sub_projects.html>`_ can be installed with Neutron. Each
 sub-project registers its own alembic branch which is responsible for migrating
 the schemas of the tables owned by the sub-project.
 
@@ -249,7 +249,7 @@ a virtualenv + testdb environment as described in
 :ref:`neutron-db-manage-without-devstack`.
 
 Stop the neutron service. Work from the base directory of the neutron (or
-sub-project) repo. Check out the master branch and do ``git pull`` to
+sub-project) repo. Check out the master branch and and do ``git pull`` to
 ensure it is fully up to date. Check out your development branch and rebase to
 master.
 
@@ -416,27 +416,6 @@ If a contraction script depends on a script from expansion stream, the
 following directive should be added in the contraction script::
 
     depends_on = ('<expansion-revision>',)
-
-Expand and Contract Branch Exceptions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-In some cases, we have to have "expand" operations in contract migrations. For
-example, table 'networksegments' was renamed in contract migration, so all
-operations with this table are required to be in contract branch as well.
-For such cases, we use the ``contract_creation_exceptions`` that should be
-implemented as part of such migrations. This is needed to get functional tests
-pass.
-
-Usage::
-
-    def contract_creation_exceptions():
-        """Docstring should explain why we allow such exception for contract
-        branch.
-        """
-        return {
-            sqlalchemy_obj_type: ['name']
-            # For example: sa.Column: ['subnets.segment_id']
-        }
 
 
 HEAD files for conflict management

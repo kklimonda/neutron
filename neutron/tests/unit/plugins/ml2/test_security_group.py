@@ -17,8 +17,8 @@
 import math
 
 import mock
-from neutron_lib import constants as const
 
+from neutron.common import constants as const
 from neutron import context
 from neutron.extensions import securitygroup as ext_sg
 from neutron import manager
@@ -27,10 +27,12 @@ from neutron.tests.unit.agent import test_securitygroups_rpc as test_sg_rpc
 from neutron.tests.unit.api.v2 import test_base
 from neutron.tests.unit.extensions import test_securitygroup as test_sg
 
+PLUGIN_NAME = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 NOTIFIER = 'neutron.plugins.ml2.rpc.AgentNotifierApi'
 
 
 class Ml2SecurityGroupsTestCase(test_sg.SecurityGroupDBTestCase):
+    _plugin_name = PLUGIN_NAME
 
     def setUp(self, plugin=None):
         test_sg_rpc.set_firewall_driver(test_sg_rpc.FIREWALL_HYBRID_DRIVER)
@@ -39,7 +41,7 @@ class Ml2SecurityGroupsTestCase(test_sg.SecurityGroupDBTestCase):
         self.notifier = mock.Mock()
         notifier_cls.return_value = self.notifier
         self.useFixture(tools.AttributeMapMemento())
-        super(Ml2SecurityGroupsTestCase, self).setUp('ml2')
+        super(Ml2SecurityGroupsTestCase, self).setUp(PLUGIN_NAME)
 
     def tearDown(self):
         super(Ml2SecurityGroupsTestCase, self).tearDown()

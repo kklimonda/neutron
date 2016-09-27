@@ -16,6 +16,7 @@
 from oslo_config import cfg
 
 from neutron._i18n import _
+from neutron.common import constants
 
 ml2_opts = [
     cfg.ListOpt('type_drivers',
@@ -39,13 +40,12 @@ ml2_opts = [
                        "entrypoints to be loaded from the "
                        "neutron.ml2.extension_drivers namespace. "
                        "For example: extension_drivers = port_security,qos")),
-    cfg.IntOpt('path_mtu', default=0,
+    cfg.IntOpt('path_mtu', default=constants.DEFAULT_NETWORK_MTU,
                help=_('Maximum size of an IP packet (MTU) that can traverse '
                       'the underlying physical network infrastructure without '
-                      'fragmentation when using an overlay/tunnel protocol. '
-                      'This option allows specifying a physical network MTU '
-                      'value that differs from the default global_physnet_mtu '
-                      'value.')),
+                      'fragmentation for overlay/tunnel networks. In most '
+                      'cases, use the same value as the global_physnet_mtu '
+                      'option.')),
     cfg.ListOpt('physical_network_mtus',
                 default=[],
                 help=_("A list of mappings of physical networks to MTU "
@@ -61,11 +61,7 @@ ml2_opts = [
                       "will have the same type as tenant networks. Allowed "
                       "values for external_network_type config option depend "
                       "on the network type values configured in type_drivers "
-                      "config option.")),
-    cfg.IntOpt('overlay_ip_version',
-               default=4,
-               help=_("IP version of all overlay (tunnel) network endpoints. "
-                      "Use a value of 4 for IPv4 or 6 for IPv6."))
+                      "config option."))
 ]
 
 

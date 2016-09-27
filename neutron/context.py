@@ -19,7 +19,6 @@ import copy
 import datetime
 
 from oslo_context import context as oslo_context
-from oslo_db.sqlalchemy import enginefacade
 
 from neutron.db import api as db_api
 from neutron import policy
@@ -32,26 +31,30 @@ class ContextBase(oslo_context.RequestContext):
 
     """
 
-    def __init__(self, user_id=None, tenant_id=None, is_admin=None,
-                 timestamp=None, tenant_name=None, user_name=None,
+    def __init__(self, user_id, tenant_id, is_admin=None, roles=None,
+                 timestamp=None, request_id=None, tenant_name=None,
+                 user_name=None, overwrite=True, auth_token=None,
                  is_advsvc=None, **kwargs):
         """Object initialization.
 
         :param overwrite: Set to False to ensure that the greenthread local
             copy of the index is not overwritten.
-        """
-        # NOTE(jamielennox): We maintain these arguments in order for tests
-        # that pass arguments positionally.
-        kwargs.setdefault('user', user_id)
-        kwargs.setdefault('tenant', tenant_id)
-        super(ContextBase, self).__init__(is_admin=is_admin, **kwargs)
 
+        :param kwargs: Extra arguments that might be present, but we ignore
+            because they possibly came in from older rpc messages.
+        """
+        super(ContextBase, self).__init__(auth_token=auth_token,
+                                          user=user_id, tenant=tenant_id,
+                                          is_admin=is_admin,
+                                          request_id=request_id,
+                                          overwrite=overwrite)
         self.user_name = user_name
         self.tenant_name = tenant_name
 
         if not timestamp:
             timestamp = datetime.datetime.utcnow()
         self.timestamp = timestamp
+        self.roles = roles or []
         self.is_advsvc = is_advsvc
         if self.is_advsvc is None:
             self.is_advsvc = self.is_admin or policy.check_is_advsvc(self)
@@ -84,6 +87,7 @@ class ContextBase(oslo_context.RequestContext):
             'user_id': self.user_id,
             'tenant_id': self.tenant_id,
             'project_id': self.project_id,
+            'roles': self.roles,
             'timestamp': str(self.timestamp),
             'tenant_name': self.tenant_name,
             'project_name': self.tenant_name,
@@ -93,15 +97,7 @@ class ContextBase(oslo_context.RequestContext):
 
     @classmethod
     def from_dict(cls, values):
-        return cls(user_id=values.get('user_id', values.get('user')),
-                   tenant_id=values.get('tenant_id', values.get('project_id')),
-                   is_admin=values.get('is_admin'),
-                   roles=values.get('roles'),
-                   timestamp=values.get('timestamp'),
-                   request_id=values.get('request_id'),
-                   tenant_name=values.get('tenant_name'),
-                   user_name=values.get('user_name'),
-                   auth_token=values.get('auth_token'))
+        return cls(**values)
 
     def elevated(self):
         """Return a version of this context with admin flag set."""
@@ -114,22 +110,13 @@ class ContextBase(oslo_context.RequestContext):
         return context
 
 
-@enginefacade.transaction_context_provider
-class ContextBaseWithSession(ContextBase):
-    pass
-
-
-class Context(ContextBaseWithSession):
+class Context(ContextBase):
     def __init__(self, *args, **kwargs):
         super(Context, self).__init__(*args, **kwargs)
         self._session = None
 
     @property
     def session(self):
-        # TODO(akamyshnikova): checking for session attribute won't be needed
-        # when reader and writer will be used
-        if hasattr(super(Context, self), 'session'):
-            return super(Context, self).session
         if self._session is None:
             self._session = db_api.get_session()
         return self._session

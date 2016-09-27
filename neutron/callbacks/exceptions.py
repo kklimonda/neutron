@@ -10,16 +10,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import exceptions
-
 from neutron._i18n import _
+from neutron.common import exceptions
 
 
 class Invalid(exceptions.NeutronException):
     message = _("The value '%(value)s' for %(element)s is not valid.")
 
 
-class CallbackFailure(exceptions.MultipleExceptions):
+class CallbackFailure(Exception):
 
     def __init__(self, errors):
         self.errors = errors
@@ -29,18 +28,6 @@ class CallbackFailure(exceptions.MultipleExceptions):
             return ','.join(str(error) for error in self.errors)
         else:
             return str(self.errors)
-
-    @property
-    def inner_exceptions(self):
-        if isinstance(self.errors, list):
-            return [self._unpack_if_notification_error(e) for e in self.errors]
-        return [self._unpack_if_notification_error(self.errors)]
-
-    @staticmethod
-    def _unpack_if_notification_error(exc):
-        if isinstance(exc, NotificationError):
-            return exc.error
-        return exc
 
 
 class NotificationError(object):

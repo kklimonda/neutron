@@ -25,7 +25,6 @@ class DvrRouterBase(router.RouterInfo):
 
         self.agent = agent
         self.host = host
-        self.snat_ports = None
 
     def process(self, agent):
         super(DvrRouterBase, self).process(agent)

@@ -14,9 +14,7 @@
 #    under the License.
 
 import abc
-import copy
 
-import fixtures
 import mock
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -24,7 +22,6 @@ from oslo_serialization import jsonutils
 from oslo_service import wsgi as base_wsgi
 import routes
 import six
-import testtools
 import webob
 import webob.exc as webexc
 import webtest
@@ -50,27 +47,6 @@ LOG = logging.getLogger(__name__)
 _uuid = test_base._uuid
 _get_path = test_base._get_path
 extensions_path = ':'.join(neutron.tests.unit.extensions.__path__)
-
-
-class CustomExtensionCheckMapMemento(fixtures.Fixture):
-    """Create a copy of the custom extension support check map so it can be
-    restored during test cleanup.
-    """
-
-    def _setUp(self):
-        self._map_contents_backup = copy.deepcopy(
-            extensions.EXTENSION_SUPPORTED_CHECK_MAP
-        )
-        self._plugin_agnostic_extensions_backup = set(
-            extensions._PLUGIN_AGNOSTIC_EXTENSIONS
-        )
-        self.addCleanup(self._restore)
-
-    def _restore(self):
-        extensions.EXTENSION_SUPPORTED_CHECK_MAP = self._map_contents_backup
-        extensions._PLUGIN_AGNOSTIC_EXTENSIONS = (
-            self._plugin_agnostic_extensions_backup
-        )
 
 
 class ExtensionsTestApp(base_wsgi.Router):
@@ -191,8 +167,7 @@ class ResourceExtensionTest(base.BaseTestCase):
             return {'collection': 'value'}
 
     class DummySvcPlugin(wsgi.Controller):
-            @classmethod
-            def get_plugin_type(cls):
+            def get_plugin_type(self):
                 return constants.DUMMY
 
             def index(self, request, **kwargs):
@@ -240,8 +215,7 @@ class ResourceExtensionTest(base.BaseTestCase):
             def index(self, request):
                 return ""
 
-            @classmethod
-            def get_plugin_type(cls):
+            def get_plugin_type(self):
                 return constants.DUMMY
 
         res_ext = extensions.ResourceExtension(
@@ -555,7 +529,7 @@ class RequestExtensionTest(base.BaseTestCase):
         def extend_response_data(req, res):
             data = jsonutils.loads(res.body)
             data['FOXNSOX:extended_key'] = req.GET.get('extended_key')
-            res.body = jsonutils.dump_as_bytes(data)
+            res.body = jsonutils.dumps(data).encode('utf-8')
             return res
 
         app = self._setup_app_with_request_handler(extend_response_data, 'GET')
@@ -581,7 +555,7 @@ class RequestExtensionTest(base.BaseTestCase):
         def _update_handler(req, res):
             data = jsonutils.loads(res.body)
             data['uneditable'] = req.params['uneditable']
-            res.body = jsonutils.dump_as_bytes(data)
+            res.body = jsonutils.dumps(data).encode('utf-8')
             return res
 
         base_app = webtest.TestApp(setup_base_app(self))
@@ -626,14 +600,7 @@ class ExtensionManagerTest(base.BaseTestCase):
         default_ext = list(constants.DEFAULT_SERVICE_PLUGINS.values())[0]
         ext_mgr.add_extension(ext_stubs.StubExtensionWithReqs(default_ext))
         ext_mgr.extend_resources("2.0", attr_map)
-        # none of the default extensions should be loaded as their
-        # requirements are not satisfied, and yet we do not fail.
-        self.assertFalse(ext_mgr.extensions)
-
-    def test__check_faulty_extensions_raise_not_default_ext(self):
-        ext_mgr = extensions.ExtensionManager('')
-        with testtools.ExpectedException(exceptions.ExtensionsNotFound):
-            ext_mgr._check_faulty_extensions(set(['foo']))
+        self.assertIn(default_ext, ext_mgr.extensions)
 
     def test_invalid_extensions_are_not_registered(self):
 
@@ -823,47 +790,6 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
         self.assertRaises(exceptions.ExtensionsNotFound,
                           extensions.PluginAwareExtensionManager,
                           '', plugin_info)
-
-    def test_custom_supported_implementation(self):
-        self.useFixture(CustomExtensionCheckMapMemento())
-
-        class FakePlugin(object):
-            pass
-
-        class FakeExtension(ext_stubs.StubExtension):
-            extensions.register_custom_supported_check(
-                'stub_extension', lambda: True, plugin_agnostic=True
-            )
-
-        ext = FakeExtension()
-
-        plugin_info = {constants.CORE: FakePlugin()}
-        ext_mgr = extensions.PluginAwareExtensionManager('', plugin_info)
-        ext_mgr.add_extension(ext)
-        self.assertIn("stub_extension", ext_mgr.extensions)
-
-        extensions.register_custom_supported_check(
-            'stub_extension', lambda: False, plugin_agnostic=True
-        )
-        ext_mgr = extensions.PluginAwareExtensionManager('', plugin_info)
-        ext_mgr.add_extension(ext)
-        self.assertNotIn("stub_extension", ext_mgr.extensions)
-
-    def test_custom_supported_implementation_plugin_specific(self):
-        self.useFixture(CustomExtensionCheckMapMemento())
-
-        class FakePlugin(object):
-            pass
-
-        class FakeExtension(ext_stubs.StubExtension):
-            extensions.register_custom_supported_check(
-                'stub_plugin_extension', lambda: True, plugin_agnostic=False
-            )
-
-        plugin_info = {constants.CORE: FakePlugin()}
-        self.assertRaises(
-            exceptions.ExtensionsNotFound,
-            extensions.PluginAwareExtensionManager, '', plugin_info)
 
 
 class ExtensionControllerTest(testlib_api.WebTestCase):

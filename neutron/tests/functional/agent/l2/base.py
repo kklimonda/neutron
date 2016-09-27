@@ -18,17 +18,18 @@ import random
 
 import eventlet
 import mock
-from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_utils import uuidutils
 
 from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
-from neutron.agent.l2 import l2_agent_extensions_manager as ext_manager
+from neutron.agent.l2.extensions import manager as ext_manager
 from neutron.agent.linux import interface
 from neutron.agent.linux import polling
+from neutron.agent.linux import utils as agent_utils
+from neutron.common import config as common_config
+from neutron.common import constants as n_const
 from neutron.common import utils
-from neutron.conf import common as common_config
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import config \
     as ovs_config
@@ -155,7 +156,7 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
         self._mock_get_events(agent, polling_manager, ports)
         self.addCleanup(polling_manager.stop)
         polling_manager.start()
-        utils.wait_until_true(
+        agent_utils.wait_until_true(
             polling_manager._monitor.is_active)
         agent.check_ovs_status = mock.Mock(
             return_value=constants.OVS_NORMAL)
@@ -212,7 +213,7 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
                'physical_network': network.get('physical_network', 'physnet'),
                'segmentation_id': network.get('segmentation_id', 1),
                'fixed_ips': port['fixed_ips'],
-               'device_owner': n_const.DEVICE_OWNER_COMPUTE_PREFIX,
+               'device_owner': 'compute',
                'port_security_enabled': True,
                'security_groups': ['default'],
                'admin_state_up': True}
@@ -227,9 +228,9 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
             return agent.int_br.db_get_val(
                 'Interface', port, 'options', check_error=True)
 
-        utils.wait_until_true(
+        agent_utils.wait_until_true(
             lambda: get_peer(self.patch_int) == {'peer': self.patch_tun})
-        utils.wait_until_true(
+        agent_utils.wait_until_true(
             lambda: get_peer(self.patch_tun) == {'peer': self.patch_int})
 
     def assert_bridge_ports(self):
@@ -360,7 +361,7 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
 
     def wait_until_ports_state(self, ports, up, timeout=60):
         port_ids = [p['id'] for p in ports]
-        utils.wait_until_true(
+        agent_utils.wait_until_true(
             lambda: self._expected_plugin_rpc_call(
                 self.agent.plugin_rpc.update_device_list, port_ids, up),
             timeout=timeout)

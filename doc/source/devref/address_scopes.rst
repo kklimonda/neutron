@@ -83,13 +83,13 @@ from tenancy.
 
 Prior to the Mitaka release, there was implicitly only a single 'shared'
 address scope.  Arbitrary address overlap was allowed making it pretty much a
-"free for all".  To make things seem somewhat sane, normal users are not able
-to use routers to cross-plug networks from different projects and NAT was used
+"free for all".  To make things seem somewhat sane, normal tenants are not able
+to use routers to cross-plug networks from different tenants and NAT was used
 between internal networks and external networks.  It was almost as if each
-project had a private address scope.
+tenant had a private address scope.
 
 The problem is that this model cannot support use cases where NAT is not
-desired or supported (e.g. IPv6) or we want to allow different projects to
+desired or supported (e.g. IPv6) or we want to allow different tenants to
 cross-plug their networks.
 
 An AddressScope covers only one address family.  But, they work equally well
@@ -138,7 +138,7 @@ Here is an example of how the json will look in the context of a router port::
 
 To implement floating IPs crossing scope boundaries, the L3 agent needs to know
 the target scope of the floating ip.  The fixed address is not enough to
-disambiguate because, theoretically, there could be overlapping addresses from
+disambiguate because, theoritically, there could be overlapping addresses from
 different scopes.  The scope is computed [#]_ from the floating ip fixed port
 and attached to the floating ip dict under the 'fixed_ip_address_scope'
 attribute.  Here's what the json looks like (trimmed)::
