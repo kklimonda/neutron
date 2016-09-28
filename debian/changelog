@@ -1,3 +1,9 @@
+neutron (2:9.0.0~rc2-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream release candidate for OpenStack Newton.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Wed, 28 Sep 2016 13:47:43 -0400
+
 neutron (2:9.0.0~rc1-0ubuntu2) yakkety; urgency=medium
 
   * d/control: Require miniminum dnsmasq of 2.76 to ensure availability
