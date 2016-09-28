@@ -16,9 +16,10 @@
 import os
 import re
 
-import debtcollector
 import eventlet
 import netaddr
+from neutron_lib import constants
+from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
@@ -26,8 +27,8 @@ import six
 
 from neutron._i18n import _, _LE
 from neutron.agent.common import utils
-from neutron.common import constants
-from neutron.common import exceptions
+from neutron.common import exceptions as n_exc
+from neutron.common import utils as common_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -239,13 +240,15 @@ class IPWrapper(SubProcessBase):
         if port and len(port) == 2:
             cmd.extend(['port', port[0], port[1]])
         elif port:
-            raise exceptions.NetworkVxlanPortRangeError(vxlan_range=port)
+            raise n_exc.NetworkVxlanPortRangeError(vxlan_range=port)
         self._as_root([], 'link', cmd)
         return (IPDevice(name, namespace=self.namespace))
 
     @classmethod
     def get_namespaces(cls):
-        output = cls._execute([], 'netns', ('list',))
+        output = cls._execute(
+            [], 'netns', ('list',),
+            run_as_root=cfg.CONF.AGENT.use_helper_for_ns_read)
         return [l.split()[0] for l in output.splitlines()]
 
 
@@ -656,7 +659,7 @@ class IpAddrCommand(IpDeviceCommandBase):
                     address=address, reason=_('Duplicate address detected'))
         errmsg = _("Exceeded %s second limit waiting for "
                    "address to leave the tentative state.") % wait_time
-        utils.utils.wait_until_true(
+        common_utils.wait_until_true(
             is_address_ready, timeout=wait_time, sleep=0.20,
             exception=AddressNotReady(address=address, reason=errmsg))
 
@@ -777,57 +780,12 @@ class IpRouteCommand(IpDeviceCommandBase):
 
         return retval
 
-    @debtcollector.removals.remove(message="Will be removed in the N cycle.")
-    def pullup_route(self, interface_name, ip_version):
-        """Ensures that the route entry for the interface is before all
-        others on the same subnet.
-        """
-        options = [ip_version]
-        device_list = []
-        device_route_list_lines = self._run(options,
-                                            ('list',
-                                             'proto', 'kernel',
-                                             'dev', interface_name)
-                                            ).split('\n')
-        for device_route_line in device_route_list_lines:
-            try:
-                subnet = device_route_line.split()[0]
-            except Exception:
-                continue
-            subnet_route_list_lines = self._run(options,
-                                                ('list',
-                                                 'proto', 'kernel',
-                                                 'match', subnet)
-                                                ).split('\n')
-            for subnet_route_line in subnet_route_list_lines:
-                i = iter(subnet_route_line.split())
-                while(next(i) != 'dev'):
-                    pass
-                device = next(i)
-                try:
-                    while(next(i) != 'src'):
-                        pass
-                    src = next(i)
-                except Exception:
-                    src = ''
-                if device != interface_name:
-                    device_list.append((device, src))
-                else:
-                    break
-
-            for (device, src) in device_list:
-                self._as_root(options, ('del', subnet, 'dev', device))
-                if (src != ''):
-                    self._as_root(options,
-                                  ('append', subnet,
-                                   'proto', 'kernel',
-                                   'src', src,
-                                   'dev', device))
-                else:
-                    self._as_root(options,
-                                  ('append', subnet,
-                                   'proto', 'kernel',
-                                   'dev', device))
+    def flush(self, ip_version, table=None, **kwargs):
+        args = ['flush']
+        args += self._table_args(table)
+        for k, v in kwargs.items():
+            args += [k, v]
+        self._as_root([ip_version], tuple(args))
 
     def add_route(self, cidr, via=None, table=None, **kwargs):
         ip_version = get_ip_version(cidr)

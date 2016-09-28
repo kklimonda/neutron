@@ -17,8 +17,10 @@ import collections
 import re
 
 import netaddr
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import netutils
 import six
 
 from neutron._i18n import _LI
@@ -28,7 +30,6 @@ from neutron.agent.linux import ipset_manager
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_manager
 from neutron.agent.linux import utils
-from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as c_utils
@@ -40,7 +41,6 @@ SPOOF_FILTER = 'spoof-filter'
 CHAIN_NAME_PREFIX = {firewall.INGRESS_DIRECTION: 'i',
                      firewall.EGRESS_DIRECTION: 'o',
                      SPOOF_FILTER: 's'}
-ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES = [131, 135, 143]
 IPSET_DIRECTION = {firewall.INGRESS_DIRECTION: 'src',
                    firewall.EGRESS_DIRECTION: 'dst'}
 # length of all device prefixes (e.g. qvo, tap, qvb)
@@ -48,6 +48,10 @@ LINUX_DEV_PREFIX_LEN = 3
 LINUX_DEV_LEN = 14
 MAX_CONNTRACK_ZONES = 65535
 comment_rule = iptables_manager.comment_rule
+
+
+def get_hybrid_port_name(port_name):
+    return (constants.TAP_DEVICE_PREFIX + port_name)[:LINUX_DEV_LEN]
 
 
 class mac_iptables(netaddr.mac_eui48):
@@ -143,6 +147,9 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
     def update_security_group_members(self, sg_id, sg_members):
         LOG.debug("Update members of security group (%s)", sg_id)
         self.sg_members[sg_id] = collections.defaultdict(list, sg_members)
+        if self.enable_ipset:
+            for ip_version, current_ips in sg_members.items():
+                self.ipset.set_members(sg_id, ip_version, current_ips)
 
     def _set_ports(self, port):
         if not firewall.port_sec_enabled(port):
@@ -380,9 +387,11 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
             mac_ipv4_pairs.append((mac, ip_address))
         else:
             mac_ipv6_pairs.append((mac, ip_address))
-            lla = str(ipv6_utils.get_ipv6_addr_by_EUI64(
-                    constants.IPV6_LLA_PREFIX, mac))
-            mac_ipv6_pairs.append((mac, lla))
+            lla = str(netutils.get_ipv6_addr_by_EUI64(
+                    constants.IPv6_LLA_PREFIX, mac))
+            if (mac, lla) not in mac_ipv6_pairs:
+                # only add once so we don't generate duplicate rules
+                mac_ipv6_pairs.append((mac, lla))
 
     def _spoofing_rule(self, port, ipv4_rules, ipv6_rules):
         # Fixed rules for traffic sourced from unspecified addresses: 0.0.0.0
@@ -393,7 +402,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                                     '-j RETURN', comment=ic.DHCP_CLIENT)]
         # Allow neighbor solicitation and multicast listener discovery
         # from the unspecified address for duplicate address detection
-        for icmp6_type in ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES:
+        for icmp6_type in constants.ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES:
             ipv6_rules += [comment_rule('-s ::/128 -d ff02::/16 '
                                         '-p ipv6-icmp -m icmp6 '
                                         '--icmpv6-type %s -j RETURN' %
@@ -447,7 +456,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         # Allow multicast listener, neighbor solicitation and
         # neighbor advertisement into the instance
         icmpv6_rules = []
-        for icmp6_type in constants.ICMPV6_ALLOWED_TYPES:
+        for icmp6_type in firewall.ICMPV6_ALLOWED_TYPES:
             icmpv6_rules += ['-p ipv6-icmp -m icmp6 --icmpv6-type %s '
                              '-j RETURN' % icmp6_type]
         return icmpv6_rules
@@ -502,10 +511,6 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         # select rules for current port and direction
         security_group_rules = self._select_sgr_by_direction(port, direction)
         security_group_rules += self._select_sg_rules_for_port(port, direction)
-        # make sure ipset members are updated for remote security groups
-        if self.enable_ipset:
-            remote_sg_ids = self._get_remote_sg_ids(port, direction)
-            self._update_ipset_members(remote_sg_ids)
         # split groups by ip version
         # for ipv4, iptables command is used
         # for ipv6, iptables6 command is used
@@ -536,12 +541,6 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                             ipv4_iptables_rules,
                             ipv6_iptables_rules)
         self._drop_dhcp_rule(ipv4_iptables_rules, ipv6_iptables_rules)
-
-    def _update_ipset_members(self, security_group_ids):
-        for ip_version, sg_ids in security_group_ids.items():
-            for sg_id in sg_ids:
-                current_ips = self.sg_members[sg_id][ip_version]
-                self.ipset.set_members(sg_id, ip_version, current_ips)
 
     def _generate_ipset_rule_args(self, sg_rule, remote_gid):
         ethertype = sg_rule.get('ethertype')
@@ -911,16 +910,17 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
 
 class OVSHybridIptablesFirewallDriver(IptablesFirewallDriver):
     OVS_HYBRID_TAP_PREFIX = constants.TAP_DEVICE_PREFIX
+    OVS_HYBRID_PLUG_REQUIRED = True
 
     def _port_chain_name(self, port, direction):
         return iptables_manager.get_chain_name(
             '%s%s' % (CHAIN_NAME_PREFIX[direction], port['device']))
 
-    def _get_device_name(self, port):
-        return (self.OVS_HYBRID_TAP_PREFIX + port['device'])[:LINUX_DEV_LEN]
-
     def _get_br_device_name(self, port):
         return ('qvb' + port['device'])[:LINUX_DEV_LEN]
+
+    def _get_device_name(self, port):
+        return get_hybrid_port_name(port['device'])
 
     def _get_jump_rule(self, port, direction):
         if direction == firewall.INGRESS_DIRECTION:

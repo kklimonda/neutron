@@ -16,13 +16,14 @@
 import copy
 
 import mock
+from neutron_lib import constants
 import six
+import testtools
 
 from neutron.agent.l3 import agent as neutron_l3_agent
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import utils
-from neutron.common import constants as l3_constants
+from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
 from neutron.tests.common import l3_test_common
 from neutron.tests.common import net_helpers
@@ -40,12 +41,12 @@ class L3HATestCase(framework.L3AgentTestFramework):
             self.agent, 'enqueue_state_change').start()
         router_info = self.generate_router_info(enable_ha=True)
         router = self.manage_router(self.agent, router_info)
-        utils.wait_until_true(lambda: router.ha_state == 'master')
+        common_utils.wait_until_true(lambda: router.ha_state == 'master')
 
         self.fail_ha_router(router)
-        utils.wait_until_true(lambda: router.ha_state == 'backup')
+        common_utils.wait_until_true(lambda: router.ha_state == 'backup')
 
-        utils.wait_until_true(lambda: enqueue_mock.call_count == 3)
+        common_utils.wait_until_true(lambda: enqueue_mock.call_count == 3)
         calls = [args[0] for args in enqueue_mock.call_args_list]
         self.assertEqual((router.router_id, 'backup'), calls[0])
         self.assertEqual((router.router_id, 'master'), calls[1])
@@ -70,9 +71,9 @@ class L3HATestCase(framework.L3AgentTestFramework):
         router_info = self.generate_router_info(enable_ha=True)
         router2 = self.manage_router(self.agent, router_info)
 
-        utils.wait_until_true(lambda: router1.ha_state == 'backup')
-        utils.wait_until_true(lambda: router2.ha_state == 'master')
-        utils.wait_until_true(
+        common_utils.wait_until_true(lambda: router1.ha_state == 'backup')
+        common_utils.wait_until_true(lambda: router2.ha_state == 'master')
+        common_utils.wait_until_true(
             lambda: self._expected_rpc_report(
                 {router1.router_id: 'standby', router2.router_id: 'active'}))
 
@@ -96,6 +97,20 @@ class L3HATestCase(framework.L3AgentTestFramework):
         # Advts from upstream router when no external gateway is configured.
         self._router_lifecycle(enable_ha=True, dual_stack=True,
                                v6_ext_gw_with_sub=False)
+
+    @testtools.skipUnless(ipv6_utils.is_enabled(), "IPv6 is not enabled")
+    def test_ipv6_router_advts_after_router_state_change(self):
+        # Schedule router to l3 agent, and then add router gateway. Verify
+        # that router gw interface is configured to receive Router Advts.
+        router_info = l3_test_common.prepare_router_data(
+            enable_snat=True, enable_ha=True, dual_stack=True, enable_gw=False)
+        router = self.manage_router(self.agent, router_info)
+        common_utils.wait_until_true(lambda: router.ha_state == 'master')
+        _ext_dev_name, ex_port = l3_test_common.prepare_ext_gw_test(
+            mock.Mock(), router)
+        router_info['gw_port'] = ex_port
+        router.process(self.agent)
+        self._assert_ipv6_accept_ra(router)
 
     def test_keepalived_configuration(self):
         router_info = self.generate_router_info(enable_ha=True)
@@ -150,7 +165,8 @@ class L3HATestCase(framework.L3AgentTestFramework):
         restarted_agent = neutron_l3_agent.L3NATAgentWithStateReport(
             self.agent.host, self.agent.conf)
         self.manage_router(restarted_agent, router1.router)
-        utils.wait_until_true(lambda: self.floating_ips_configured(router1))
+        common_utils.wait_until_true(
+            lambda: self.floating_ips_configured(router1))
         self.assertIn(
             router1._get_primary_vip(),
             self._get_addresses_on_device(
@@ -160,11 +176,11 @@ class L3HATestCase(framework.L3AgentTestFramework):
     def test_ha_router_ipv6_radvd_status(self):
         router_info = self.generate_router_info(ip_version=6, enable_ha=True)
         router1 = self.manage_router(self.agent, router_info)
-        utils.wait_until_true(lambda: router1.ha_state == 'master')
-        utils.wait_until_true(lambda: router1.radvd.enabled)
+        common_utils.wait_until_true(lambda: router1.ha_state == 'master')
+        common_utils.wait_until_true(lambda: router1.radvd.enabled)
 
         def _check_lla_status(router, expected):
-            internal_devices = router.router[l3_constants.INTERFACE_KEY]
+            internal_devices = router.router[constants.INTERFACE_KEY]
             for device in internal_devices:
                 lladdr = ip_lib.get_ipv6_lladdr(device['mac_address'])
                 exists = ip_lib.device_exists_with_ips_and_mac(
@@ -178,8 +194,9 @@ class L3HATestCase(framework.L3AgentTestFramework):
         ha_device = ip_lib.IPDevice(device_name, namespace=router1.ns_name)
         ha_device.link.set_down()
 
-        utils.wait_until_true(lambda: router1.ha_state == 'backup')
-        utils.wait_until_true(lambda: not router1.radvd.enabled, timeout=10)
+        common_utils.wait_until_true(lambda: router1.ha_state == 'backup')
+        common_utils.wait_until_true(
+            lambda: not router1.radvd.enabled, timeout=10)
         _check_lla_status(router1, False)
 
     def test_ha_router_process_ipv6_subnets_to_existing_port(self):
@@ -192,8 +209,8 @@ class L3HATestCase(framework.L3AgentTestFramework):
             for ip_addr in ip_cidrs:
                 self.assertIn(ip_addr, config)
 
-        interface_id = router.router[l3_constants.INTERFACE_KEY][0]['id']
-        slaac = l3_constants.IPV6_SLAAC
+        interface_id = router.router[constants.INTERFACE_KEY][0]['id']
+        slaac = constants.IPV6_SLAAC
         slaac_mode = {'ra_mode': slaac, 'address_mode': slaac}
 
         # Add a second IPv6 subnet to the router internal interface.
@@ -201,11 +218,11 @@ class L3HATestCase(framework.L3AgentTestFramework):
                 ip_version=6, ipv6_subnet_modes=[slaac_mode],
                 interface_id=interface_id)
         router.process(self.agent)
-        utils.wait_until_true(lambda: router.ha_state == 'master')
+        common_utils.wait_until_true(lambda: router.ha_state == 'master')
 
         # Verify that router internal interface is present and is configured
         # with IP address from both the subnets.
-        internal_iface = router.router[l3_constants.INTERFACE_KEY][0]
+        internal_iface = router.router[constants.INTERFACE_KEY][0]
         self.assertEqual(2, len(internal_iface['fixed_ips']))
         self._assert_internal_devices(router)
 
@@ -214,16 +231,16 @@ class L3HATestCase(framework.L3AgentTestFramework):
 
         # Remove one subnet from the router internal iface
         interfaces = copy.deepcopy(router.router.get(
-            l3_constants.INTERFACE_KEY, []))
+            constants.INTERFACE_KEY, []))
         fixed_ips, subnets = [], []
         fixed_ips.append(interfaces[0]['fixed_ips'][0])
         subnets.append(interfaces[0]['subnets'][0])
         interfaces[0].update({'fixed_ips': fixed_ips, 'subnets': subnets})
-        router.router[l3_constants.INTERFACE_KEY] = interfaces
+        router.router[constants.INTERFACE_KEY] = interfaces
         router.process(self.agent)
 
         # Verify that router internal interface has a single ipaddress
-        internal_iface = router.router[l3_constants.INTERFACE_KEY][0]
+        internal_iface = router.router[constants.INTERFACE_KEY][0]
         self.assertEqual(1, len(internal_iface['fixed_ips']))
         self._assert_internal_devices(router)
 
@@ -235,7 +252,7 @@ class L3HATestCase(framework.L3AgentTestFramework):
         router = self.manage_router(self.agent, router_info)
 
         self.fail_ha_router(router)
-        utils.wait_until_true(lambda: router.ha_state == 'backup')
+        common_utils.wait_until_true(lambda: router.ha_state == 'backup')
 
         # The purpose of the test is to simply make sure no exception is raised
         port = router.get_ex_gw_port()
@@ -247,14 +264,26 @@ class L3HATestCase(framework.L3AgentTestFramework):
         router = self.manage_router(self.agent, router_info)
         ex_gw_port = router.get_ex_gw_port()
         interface_name = router.get_external_device_interface_name(ex_gw_port)
-        utils.wait_until_true(lambda: router.ha_state == 'master')
+        common_utils.wait_until_true(lambda: router.ha_state == 'master')
         self._add_fip(router, '172.168.1.20', fixed_address='10.0.0.3')
         router.process(self.agent)
-        router.router[l3_constants.FLOATINGIP_KEY] = []
+        router.router[constants.FLOATINGIP_KEY] = []
         # The purpose of the test is to simply make sure no exception is raised
         # Because router.process will consume the FloatingIpSetupException,
         # call the configure_fip_addresses directly here
         router.configure_fip_addresses(interface_name)
+
+    def test_ha_port_status_update(self):
+        router_info = self.generate_router_info(enable_ha=True)
+        router_info[constants.HA_INTERFACE_KEY]['status'] = (
+            constants.PORT_STATUS_DOWN)
+        router1 = self.manage_router(self.agent, router_info)
+        common_utils.wait_until_true(lambda: router1.ha_state == 'backup')
+
+        router1.router[constants.HA_INTERFACE_KEY]['status'] = (
+            constants.PORT_STATUS_ACTIVE)
+        self.agent._process_updated_router(router1.router)
+        common_utils.wait_until_true(lambda: router1.ha_state == 'master')
 
 
 class L3HATestFailover(framework.L3AgentTestFramework):
@@ -284,7 +313,7 @@ class L3HATestFailover(framework.L3AgentTestFramework):
         router1 = self.manage_router(self.agent, router_info)
 
         router_info_2 = copy.deepcopy(router_info)
-        router_info_2[l3_constants.HA_INTERFACE_KEY] = (
+        router_info_2[constants.HA_INTERFACE_KEY] = (
             l3_test_common.get_ha_interface(ip='169.254.192.2',
                                             mac='22:22:22:22:22:22'))
 
@@ -293,10 +322,10 @@ class L3HATestFailover(framework.L3AgentTestFramework):
             self.NESTED_NAMESPACE_SEPARATOR, self.failover_agent.host)
         router2 = self.manage_router(self.failover_agent, router_info_2)
 
-        utils.wait_until_true(lambda: router1.ha_state == 'master')
-        utils.wait_until_true(lambda: router2.ha_state == 'backup')
+        common_utils.wait_until_true(lambda: router1.ha_state == 'master')
+        common_utils.wait_until_true(lambda: router2.ha_state == 'backup')
 
         self.fail_ha_router(router1)
 
-        utils.wait_until_true(lambda: router2.ha_state == 'master')
-        utils.wait_until_true(lambda: router1.ha_state == 'backup')
+        common_utils.wait_until_true(lambda: router2.ha_state == 'master')
+        common_utils.wait_until_true(lambda: router1.ha_state == 'backup')

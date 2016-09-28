@@ -14,22 +14,23 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from sqlalchemy import sql
-
+from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
+from sqlalchemy import sql
 
 from neutron._i18n import _, _LE
 from neutron.api.v2 import attributes
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import exceptions as n_exc
+from neutron.common import exceptions as c_exc
+from neutron.db import api as db_api
 from neutron.db import common_db_mixin
 from neutron.db import db_base_plugin_v2
 from neutron.db import external_net_db
-from neutron.db import model_base
 from neutron.db import models_v2
+from neutron.db import standard_attr
 from neutron.extensions import l3
 from neutron import manager
 from neutron.plugins.common import constants
@@ -42,13 +43,14 @@ IS_DEFAULT = 'is_default'
 CHECK_REQUIREMENTS = 'dry-run'
 
 
-def _extend_external_network_default(self, net_res, net_db):
+def _extend_external_network_default(core_plugin, net_res, net_db):
     """Add is_default field to 'show' response."""
     if net_db.external is not None:
         net_res[IS_DEFAULT] = net_db.external.is_default
     return net_res
 
 
+@db_api.retry_if_session_inactive()
 def _ensure_external_network_default_value_callback(
     resource, event, trigger, context, request, network):
     """Ensure the is_default db field matches the create/update request."""
@@ -95,15 +97,29 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
     # - update router gateway -> prevent operation
     # - ...
 
+    @property
+    def core_plugin(self):
+        if not getattr(self, '_core_plugin', None):
+            self._core_plugin = manager.NeutronManager.get_plugin()
+        return self._core_plugin
+
+    @property
+    def l3_plugin(self):
+        if not getattr(self, '_l3_plugin', None):
+            self._l3_plugin = manager.NeutronManager.get_service_plugins().get(
+                constants.L3_ROUTER_NAT)
+        return self._l3_plugin
+
     def get_auto_allocated_topology(self, context, tenant_id, fields=None):
         """Return tenant's network associated to auto-allocated topology.
 
         The topology will be provisioned upon return, if network is missing.
         """
+        fields = fields or []
         tenant_id = self._validate(context, tenant_id)
         if CHECK_REQUIREMENTS in fields:
             # for dry-run requests, simply validates that subsequent
-            # requests can be fullfilled based on a set of requirements
+            # requests can be fulfilled based on a set of requirements
             # such as existence of default networks, pools, etc.
             return self._check_requirements(context, tenant_id)
         elif fields:
@@ -120,26 +136,42 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
             context)
 
         # If we reach this point, then we got some work to do!
-        subnets = self._provision_tenant_private_network(context, tenant_id)
-        network_id = subnets[0]['network_id']
-        router = self._provision_external_connectivity(
-            context, default_external_network, subnets, tenant_id)
-        network_id = self._save(
-            context, tenant_id, network_id, router['id'], subnets)
+        network_id = self._build_topology(
+            context, tenant_id, default_external_network)
         return self._response(network_id, tenant_id, fields=fields)
 
-    @property
-    def core_plugin(self):
-        if not getattr(self, '_core_plugin', None):
-            self._core_plugin = manager.NeutronManager.get_plugin()
-        return self._core_plugin
+    def delete_auto_allocated_topology(self, context, tenant_id):
+        tenant_id = self._validate(context, tenant_id)
+        topology = self._get_auto_allocated_topology(context, tenant_id)
+        if topology:
+            subnets = self.core_plugin.get_subnets(
+                context,
+                filters={'network_id': [topology['network_id']]})
+            self._cleanup(
+                context, network_id=topology['network_id'],
+                router_id=topology['router_id'], subnets=subnets)
 
-    @property
-    def l3_plugin(self):
-        if not getattr(self, '_l3_plugin', None):
-            self._l3_plugin = manager.NeutronManager.get_service_plugins().get(
-                constants.L3_ROUTER_NAT)
-        return self._l3_plugin
+    def _build_topology(self, context, tenant_id, default_external_network):
+        """Build the network topology and returns its network UUID."""
+        try:
+            subnets = self._provision_tenant_private_network(
+                context, tenant_id)
+            network_id = subnets[0]['network_id']
+            router = self._provision_external_connectivity(
+                context, default_external_network, subnets, tenant_id)
+            network_id = self._save(
+                context, tenant_id, network_id, router['id'], subnets)
+            return network_id
+        except exceptions.UnknownProvisioningError as e:
+            # Clean partially provisioned topologies, and reraise the
+            # error. If it can be retried, so be it.
+            LOG.error(_LE("Unknown error while provisioning topology for "
+                          "tenant %(tenant_id)s. Reason: %(reason)s"),
+                      {'tenant_id': tenant_id, 'reason': e})
+            self._cleanup(
+                context, network_id=e.network_id,
+                router_id=e.router_id, subnets=e.subnets)
+            raise e.error
 
     def _check_requirements(self, context, tenant_id):
         """Raise if requirements are not met."""
@@ -164,12 +196,15 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
 
         return tenant_id
 
-    def _get_auto_allocated_network(self, context, tenant_id):
-        """Get the auto allocated network for the tenant."""
+    def _get_auto_allocated_topology(self, context, tenant_id):
+        """Return the auto allocated topology record if present or None."""
         with context.session.begin(subtransactions=True):
-            network = (context.session.query(models.AutoAllocatedTopology).
+            return (context.session.query(models.AutoAllocatedTopology).
                 filter_by(tenant_id=tenant_id).first())
 
+    def _get_auto_allocated_network(self, context, tenant_id):
+        """Get the auto allocated network for the tenant."""
+        network = self._get_auto_allocated_topology(context, tenant_id)
         if network:
             return network['network_id']
 
@@ -188,8 +223,8 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
                 external_net_db.ExternalNetwork).
                 filter_by(is_default=sql.true()).
                 join(models_v2.Network).
-                join(model_base.StandardAttribute).
-                order_by(model_base.StandardAttribute.id).all())
+                join(standard_attr.StandardAttribute).
+                order_by(standard_attr.StandardAttribute.id).all())
 
         if not default_external_networks:
             LOG.error(_LE("Unable to find default external network "
@@ -201,7 +236,7 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
             LOG.error(_LE("Multiple external default networks detected. "
                           "Network %s is true 'default'."),
                       default_external_networks[0]['network_id'])
-        return default_external_networks[0]
+        return default_external_networks[0].network_id
 
     def _get_supported_subnetpools(self, context):
         """Return the default subnet pools available."""
@@ -224,7 +259,7 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
         try:
             network_args = {
                 'name': 'auto_allocated_network',
-                'admin_state_up': True,
+                'admin_state_up': False,
                 'tenant_id': tenant_id,
                 'shared': False
             }
@@ -242,43 +277,55 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
                 subnets.append(p_utils.create_subnet(
                     self.core_plugin, context, {'subnet': subnet_args}))
             return subnets
-        except (ValueError, n_exc.BadRequest, n_exc.NotFound):
+        except (c_exc.SubnetAllocationError, ValueError,
+                n_exc.BadRequest, n_exc.NotFound) as e:
             LOG.error(_LE("Unable to auto allocate topology for tenant "
-                          "%s due to missing requirements, e.g. default "
-                          "or shared subnetpools"), tenant_id)
+                          "%(tenant_id)s due to missing or unmet "
+                          "requirements. Reason: %(reason)s"),
+                      {'tenant_id': tenant_id, 'reason': e})
             if network:
                 self._cleanup(context, network['id'])
             raise exceptions.AutoAllocationFailure(
                 reason=_("Unable to provide tenant private network"))
+        except Exception as e:
+            network_id = network['id'] if network else None
+            raise exceptions.UnknownProvisioningError(e, network_id=network_id)
 
     def _provision_external_connectivity(
         self, context, default_external_network, subnets, tenant_id):
         """Uplink tenant subnet(s) to external network."""
         router_args = {
             'name': 'auto_allocated_router',
-            l3.EXTERNAL_GW_INFO: default_external_network,
+            l3.EXTERNAL_GW_INFO: {'network_id': default_external_network},
             'tenant_id': tenant_id,
             'admin_state_up': True
         }
         router = None
+        attached_subnets = []
         try:
             router = self.l3_plugin.create_router(
                 context, {'router': router_args})
-            attached_subnets = []
             for subnet in subnets:
                 self.l3_plugin.add_router_interface(
                     context, router['id'], {'subnet_id': subnet['id']})
                 attached_subnets.append(subnet)
             return router
-        except n_exc.BadRequest:
+        except n_exc.BadRequest as e:
             LOG.error(_LE("Unable to auto allocate topology for tenant "
-                          "%s because of router errors."), tenant_id)
-            if router:
-                self._cleanup(context,
-                    network_id=subnets[0]['network_id'],
-                    router_id=router['id'], subnets=attached_subnets)
+                          "%(tenant_id)s because of router errors. "
+                          "Reason: %(reason)s"),
+                      {'tenant_id': tenant_id, 'reason': e})
+            router_id = router['id'] if router else None
+            self._cleanup(context,
+                network_id=subnets[0]['network_id'],
+                router_id=router_id, subnets=attached_subnets)
             raise exceptions.AutoAllocationFailure(
                 reason=_("Unable to provide external connectivity"))
+        except Exception as e:
+            router_id = router['id'] if router else None
+            raise exceptions.UnknownProvisioningError(
+                e, network_id=subnets[0]['network_id'],
+                router_id=router_id, subnets=subnets)
 
     def _save(self, context, tenant_id, network_id, router_id, subnets):
         """Save auto-allocated topology, or revert in case of DB errors."""
@@ -286,13 +333,17 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
             # NOTE(armax): saving the auto allocated topology in a
             # separate transaction will keep the Neutron DB and the
             # Neutron plugin backend in sync, thus allowing for a
-            # more bullet proof cleanup.
+            # more bullet proof cleanup. Any other error will have
+            # to bubble up.
             with context.session.begin(subtransactions=True):
                 context.session.add(
                     models.AutoAllocatedTopology(
                         tenant_id=tenant_id,
                         network_id=network_id,
                         router_id=router_id))
+            self.core_plugin.update_network(
+                context, network_id,
+                {'network': {'admin_state_up': True}})
         except db_exc.DBDuplicateEntry:
             LOG.error(_LE("Multiple auto-allocated networks detected for "
                           "tenant %(tenant)s. Attempting clean up for "
@@ -303,17 +354,34 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
             self._cleanup(
                 context, network_id=network_id,
                 router_id=router_id, subnets=subnets)
-            network_id = self._get_auto_allocated_network(
-                context, tenant_id)
+            network_id = self._get_auto_allocated_network(context, tenant_id)
+        except Exception as e:
+            raise exceptions.UnknownProvisioningError(
+                e, network_id=network_id,
+                router_id=router_id, subnets=subnets)
         return network_id
 
     def _cleanup(self, context, network_id=None, router_id=None, subnets=None):
         """Clean up auto allocated resources."""
+        # Concurrent attempts to delete the topology may interleave and
+        # cause some operations to fail with NotFound exceptions. Rather
+        # than fail partially, the exceptions should be ignored and the
+        # cleanup should proceed uninterrupted.
         if router_id:
             for subnet in subnets or []:
-                self.l3_plugin.remove_router_interface(
+                ignore_notfound(
+                    self.l3_plugin.remove_router_interface,
                     context, router_id, {'subnet_id': subnet['id']})
-            self.l3_plugin.delete_router(context, router_id)
+            ignore_notfound(self.l3_plugin.delete_router, context, router_id)
 
         if network_id:
-            self.core_plugin.delete_network(context, network_id)
+            ignore_notfound(
+                self.core_plugin.delete_network, context, network_id)
+
+
+def ignore_notfound(func, *args, **kwargs):
+    """Call the given function and pass if a `NotFound` exception is raised."""
+    try:
+        return func(*args, **kwargs)
+    except n_exc.NotFound:
+        pass

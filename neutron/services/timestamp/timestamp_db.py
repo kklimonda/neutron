@@ -12,9 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import datetime
-import time
-
+from neutron_lib import exceptions as n_exc
 from oslo_log import log
 from oslo_utils import timeutils
 from sqlalchemy import event
@@ -22,10 +20,11 @@ from sqlalchemy import exc as sql_exc
 from sqlalchemy.orm import session as se
 
 from neutron._i18n import _LW
-from neutron.common import exceptions as n_exc
-from neutron.db import model_base
+from neutron.db import standard_attr
 
 LOG = log.getLogger(__name__)
+
+CHANGED_SINCE = 'changed_since'
 
 
 class TimeStamp_db_mixin(object):
@@ -39,27 +38,23 @@ class TimeStamp_db_mixin(object):
         # And translate it from string to datetime type.
         # Then compare with the timestamp in db which has
         # datetime type.
-        values = filters and filters.get('changed_since', [])
+        values = filters and filters.get(CHANGED_SINCE, [])
         if not values:
             return query
-        data = filters['changed_since'][0]
+        data = filters[CHANGED_SINCE][0]
         try:
-            # this block checks queried timestamp format.
-            datetime.datetime.fromtimestamp(time.mktime(
-                time.strptime(data,
-                              self.ISO8601_TIME_FORMAT)))
+            changed_since_string = timeutils.parse_isotime(data)
         except Exception:
-            msg = _LW("The input changed_since must be in the "
-                      "following format: YYYY-MM-DDTHH:MM:SS")
+            msg = _LW("The input %s must be in the "
+                      "following format: YYYY-MM-DDTHH:MM:SSZ") % CHANGED_SINCE
             raise n_exc.InvalidInput(error_message=msg)
-        changed_since_string = timeutils.parse_isotime(data)
         changed_since = (timeutils.
                          normalize_time(changed_since_string))
         target_model_class = list(query._mapper_adapter_map.keys())[0]
-        query = query.join(model_base.StandardAttribute,
+        query = query.join(standard_attr.StandardAttribute,
                            target_model_class.standard_attr_id ==
-                           model_base.StandardAttribute.id).filter(
-                           model_base.StandardAttribute.updated_at
+                           standard_attr.StandardAttribute.id).filter(
+                           standard_attr.StandardAttribute.updated_at
                            >= changed_since)
         return query
 
@@ -68,17 +63,17 @@ class TimeStamp_db_mixin(object):
 
         while objs_list:
             obj = objs_list.pop()
-            if (isinstance(obj, model_base.HasStandardAttributes)
+            if (isinstance(obj, standard_attr.HasStandardAttributes)
                 and obj.standard_attr_id):
-                obj.standard_attr.updated_at = timeutils.utcnow()
+                obj.updated_at = timeutils.utcnow()
 
     def register_db_events(self):
-        event.listen(model_base.StandardAttribute, 'before_insert',
+        event.listen(standard_attr.StandardAttribute, 'before_insert',
                      self._add_timestamp)
         event.listen(se.Session, 'before_flush', self.update_timestamp)
 
     def unregister_db_events(self):
-        self._unregister_db_event(model_base.StandardAttribute,
+        self._unregister_db_event(standard_attr.StandardAttribute,
                                   'before_insert', self._add_timestamp)
         self._unregister_db_event(se.Session, 'before_flush',
                                   self.update_timestamp)
@@ -91,15 +86,15 @@ class TimeStamp_db_mixin(object):
                         listen_obj)
 
     def _format_timestamp(self, resource_db, result):
-        result['created_at'] = (resource_db.standard_attr.created_at.
-                                strftime(self.ISO8601_TIME_FORMAT))
-        result['updated_at'] = (resource_db.standard_attr.updated_at.
-                                strftime(self.ISO8601_TIME_FORMAT))
+        result['created_at'] = (resource_db.created_at.
+                                strftime(self.ISO8601_TIME_FORMAT)) + 'Z'
+        result['updated_at'] = (resource_db.updated_at.
+                                strftime(self.ISO8601_TIME_FORMAT)) + 'Z'
 
     def extend_resource_dict_timestamp(self, plugin_obj,
                                        resource_res, resource_db):
-        if (resource_db and resource_db.standard_attr.created_at and
-                resource_db.standard_attr.updated_at):
+        if (resource_db and resource_db.created_at and
+                resource_db.updated_at):
             self._format_timestamp(resource_db, resource_res)
 
     def _add_timestamp(self, mapper, _conn, target):

@@ -14,6 +14,8 @@
 #    under the License.
 
 from keystoneauth1 import loading as ks_loading
+from neutron_lib import constants
+from neutron_lib import exceptions as exc
 from novaclient import client as nova_client
 from novaclient import exceptions as nova_exceptions
 from oslo_config import cfg
@@ -22,8 +24,9 @@ from oslo_utils import uuidutils
 from sqlalchemy.orm import attributes as sql_attr
 
 from neutron._i18n import _LE, _LI, _LW
-from neutron.common import constants
-from neutron.common import exceptions as exc
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
 from neutron import context
 from neutron import manager
 from neutron.notifiers import batch_notifier
@@ -42,14 +45,15 @@ NOVA_API_VERSION = "2"
 
 class Notifier(object):
 
+    _instance = None
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
     def __init__(self):
-        # FIXME(jamielennox): A notifier is being created for each Controller
-        # and each Notifier is handling it's own auth. That means that we are
-        # authenticating the exact same thing len(controllers) times. This
-        # should be an easy thing to optimize.
-        # FIXME(kevinbenton): remove this comment and the one above once the
-        # switch to pecan is complete since only one notifier is constructed
-        # in the pecan notification hook.
         auth = ks_loading.load_auth_from_conf_options(cfg.CONF, 'nova')
 
         session = ks_loading.load_session_from_conf_options(
@@ -69,11 +73,21 @@ class Notifier(object):
         self.batch_notifier = batch_notifier.BatchNotifier(
             cfg.CONF.send_events_interval, self.send_events)
 
+        # register callbacks for events pertaining resources affecting Nova
+        callback_resources = (
+            resources.FLOATING_IP,
+            resources.PORT,
+        )
+        for resource in callback_resources:
+            registry.subscribe(self._send_nova_notification,
+                               resource, events.BEFORE_RESPONSE)
+
     def _is_compute_port(self, port):
         try:
             if (port['device_id'] and uuidutils.is_uuid_like(port['device_id'])
-                    and port['device_owner'].startswith(
-                        constants.DEVICE_OWNER_COMPUTE_PREFIX)):
+                    and port['device_owner'].startswith((
+                        constants.DEVICE_OWNER_COMPUTE_PREFIX,
+                        constants.DEVICE_OWNER_BAREMETAL_PREFIX))):
                 return True
         except (KeyError, AttributeError):
             pass
@@ -96,6 +110,11 @@ class Notifier(object):
         if not hasattr(self, '_plugin_ref'):
             self._plugin_ref = manager.NeutronManager.get_plugin()
         return self._plugin_ref
+
+    def _send_nova_notification(self, resource, event, trigger,
+                                action=None, original=None, data=None,
+                                **kwargs):
+        self.send_network_change(action, original, data)
 
     def send_network_change(self, action, original_obj,
                             returned_obj):
@@ -155,26 +174,31 @@ class Notifier(object):
             else:
                 return self._get_network_changed_event(port['device_id'])
 
+    def _can_notify(self, port):
+        if not port.id:
+            LOG.warning(_LW("Port ID not set! Nova will not be notified of "
+                            "port status change."))
+            return False
+
+        # If there is no device_id set there is nothing we can do here.
+        if not port.device_id:
+            LOG.debug("device_id is not set on port %s yet.", port.id)
+            return False
+
+        # We only want to notify about nova ports.
+        if not self._is_compute_port(port):
+            return False
+
+        return True
+
     def record_port_status_changed(self, port, current_port_status,
                                    previous_port_status, initiator):
         """Determine if nova needs to be notified due to port status change.
         """
         # clear out previous _notify_event
         port._notify_event = None
-        # If there is no device_id set there is nothing we can do here.
-        if not port.device_id:
-            LOG.debug("device_id is not set on port yet.")
+        if not self._can_notify(port):
             return
-
-        if not port.id:
-            LOG.warning(_LW("Port ID not set! Nova will not be notified of "
-                            "port status change."))
-            return
-
-        # We only want to notify about nova ports.
-        if not self._is_compute_port(port):
-            return
-
         # We notify nova when a vif is unplugged which only occurs when
         # the status goes from ACTIVE to DOWN.
         if (previous_port_status == constants.PORT_STATUS_ACTIVE and
@@ -210,6 +234,24 @@ class Notifier(object):
         event = getattr(port, "_notify_event", None)
         self.batch_notifier.queue_event(event)
         port._notify_event = None
+
+    def notify_port_active_direct(self, port):
+        """Notify nova about active port
+
+        Used when port was wired on the host other than port's current host
+        according to port binding. This happens during live migration.
+        In this case ml2 plugin skips port status update but we still we need
+        to notify nova.
+        """
+        if not self._can_notify(port):
+            return
+
+        port._notify_event = (
+            {'server_uuid': port.device_id,
+             'name': VIF_PLUGGED,
+             'status': 'completed',
+             'tag': port.id})
+        self.send_port_status(None, None, port)
 
     def send_events(self, batched_events):
         LOG.debug("Sending events: %s", batched_events)

@@ -12,9 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.api.v2 import attributes
 from neutron.db import db_base_plugin_v2
 from neutron.db import models_v2
+from neutron.db import standard_attr
+from neutron.objects import base as base_obj
 from neutron.services import service_base
 from neutron.services.timestamp import timestamp_db as ts_db
 
@@ -23,27 +24,25 @@ class TimeStampPlugin(service_base.ServicePluginBase,
                       ts_db.TimeStamp_db_mixin):
     """Implements Neutron Timestamp Service plugin."""
 
-    supported_extension_aliases = ['timestamp_core']
+    supported_extension_aliases = ['standard-attr-timestamp']
 
     def __init__(self):
         super(TimeStampPlugin, self).__init__()
         self.register_db_events()
-        for resources in [attributes.NETWORKS, attributes.PORTS,
-                          attributes.SUBNETS, attributes.SUBNETPOOLS]:
+        rs_model_maps = standard_attr.get_standard_attr_resource_model_map()
+        for rsmap, model in rs_model_maps.items():
             db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
-                resources, [self.extend_resource_dict_timestamp])
-
-        for model in [models_v2.Network, models_v2.Port, models_v2.Subnet,
-                      models_v2.SubnetPool]:
+                rsmap, [self.extend_resource_dict_timestamp])
             db_base_plugin_v2.NeutronDbPluginV2.register_model_query_hook(
-                model,
-                "change_since_query",
-                None,
-                None,
+                model, "change_since_query", None, None,
                 self._change_since_result_filter_hook)
+        # TODO(jlibosva): Move this to register_model_query_hook
+        base_obj.register_filter_hook_on_model(
+            models_v2.SubnetPool, ts_db.CHANGED_SINCE)
 
-    def get_plugin_type(self):
-        return 'timestamp_core'
+    @classmethod
+    def get_plugin_type(cls):
+        return 'timestamp'
 
     def get_plugin_description(self):
-        return "Neutron core resources timestamp addition support"
+        return "Adds timestamps to Neutron resources with standard attributes"

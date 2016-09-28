@@ -13,11 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
-
 import mock
-from oslo_versionedobjects import base as obj_base
+from oslo_utils import uuidutils
 from oslo_versionedobjects import fields as obj_fields
+from oslo_versionedobjects import fixture
 import testtools
 
 from neutron.api.rpc.callbacks import resources
@@ -29,30 +28,45 @@ from neutron.objects import base as objects_base
 from neutron.tests import base
 
 
-def _create_test_dict():
-    return {'id': 'uuid',
+TEST_EVENT = 'test_event'
+TEST_VERSION = '1.0'
+
+
+def _create_test_dict(uuid=None):
+    return {'id': uuid or uuidutils.generate_uuid(),
             'field': 'foo'}
 
 
-def _create_test_resource(context=None):
+def _create_test_resource(context=None, resource_cls=None):
+    resource_cls = resource_cls or FakeResource
     resource_dict = _create_test_dict()
-    resource = FakeResource(context, **resource_dict)
+    resource = resource_cls(context, **resource_dict)
     resource.obj_reset_changes()
     return resource
 
 
-class FakeResource(objects_base.NeutronObject):
-    # Version 1.0: Initial version
-    VERSION = '1.0'
+class BaseFakeResource(objects_base.NeutronObject):
+    @classmethod
+    def get_objects(cls, context, **kwargs):
+        return list()
+
+
+class FakeResource(BaseFakeResource):
+    VERSION = TEST_VERSION
 
     fields = {
         'id': obj_fields.UUIDField(),
         'field': obj_fields.StringField()
     }
 
-    @classmethod
-    def get_objects(cls, context, **kwargs):
-        return list()
+
+class FakeResource2(BaseFakeResource):
+    VERSION = TEST_VERSION
+
+    fields = {
+        'id': obj_fields.UUIDField(),
+        'field': obj_fields.StringField()
+    }
 
 
 class ResourcesRpcBaseTestCase(base.BaseTestCase):
@@ -60,20 +74,25 @@ class ResourcesRpcBaseTestCase(base.BaseTestCase):
     def setUp(self):
         super(ResourcesRpcBaseTestCase, self).setUp()
 
-        # TODO(mhickey) This is using temp registry pattern. The
-        # pattern solution is to backup the object registry, register
-        # a class locally, and then restore the original registry.
-        # Refer to https://review.openstack.org/#/c/263800/ for more
-        # details. This code should be updated when the patch is merged.
-        self._base_test_backup = copy.copy(
-            obj_base.VersionedObjectRegistry._registry._obj_classes)
-        self.addCleanup(self._restore_obj_registry)
+        self.obj_registry = self.useFixture(
+            fixture.VersionedObjectRegistryFixture())
 
         self.context = context.get_admin_context()
+        mock.patch.object(resources_rpc.resources,
+                          'is_valid_resource_type').start()
+        mock.patch.object(resources_rpc.resources, 'get_resource_cls',
+                          side_effect=self._get_resource_cls).start()
 
-    def _restore_obj_registry(self):
-        obj_base.VersionedObjectRegistry._registry._obj_classes = (
-            self._base_test_backup)
+        self.resource_objs = [_create_test_resource(self.context)
+                              for _ in range(2)]
+        self.resource_objs2 = [_create_test_resource(self.context,
+                                                     FakeResource2)
+                               for _ in range(2)]
+
+    @staticmethod
+    def _get_resource_cls(resource_type):
+        return {FakeResource.obj_name(): FakeResource,
+                FakeResource2.obj_name(): FakeResource2}.get(resource_type)
 
 
 class _ValidateResourceTypeTestCase(base.BaseTestCase):
@@ -110,9 +129,6 @@ class ResourcesPullRpcApiTestCase(ResourcesRpcBaseTestCase):
 
     def setUp(self):
         super(ResourcesPullRpcApiTestCase, self).setUp()
-        mock.patch.object(resources_rpc, '_validate_resource_type').start()
-        mock.patch('neutron.api.rpc.callbacks.resources.get_resource_cls',
-                   return_value=FakeResource).start()
         self.rpc = resources_rpc.ResourcesPullRpcApi()
         mock.patch.object(self.rpc, 'client').start()
         self.cctxt_mock = self.rpc.client.prepare.return_value
@@ -121,7 +137,7 @@ class ResourcesPullRpcApiTestCase(ResourcesRpcBaseTestCase):
         self.assertIs(self.rpc, resources_rpc.ResourcesPullRpcApi())
 
     def test_pull(self):
-        obj_base.VersionedObjectRegistry.register(FakeResource)
+        self.obj_registry.register(FakeResource)
         expected_obj = _create_test_resource(self.context)
         resource_id = expected_obj.id
         self.cctxt_mock.call.return_value = expected_obj.obj_to_primitive()
@@ -131,7 +147,7 @@ class ResourcesPullRpcApiTestCase(ResourcesRpcBaseTestCase):
 
         self.cctxt_mock.call.assert_called_once_with(
             self.context, 'pull', resource_type='FakeResource',
-            version=FakeResource.VERSION, resource_id=resource_id)
+            version=TEST_VERSION, resource_id=resource_id)
         self.assertEqual(expected_obj, result)
 
     def test_pull_resource_not_found(self):
@@ -162,18 +178,18 @@ class ResourcesPullRpcCallbackTestCase(ResourcesRpcBaseTestCase):
 
     def setUp(self):
         super(ResourcesPullRpcCallbackTestCase, self).setUp()
-        obj_base.VersionedObjectRegistry.register(FakeResource)
+        self.obj_registry.register(FakeResource)
         self.callbacks = resources_rpc.ResourcesPullRpcCallback()
         self.resource_obj = _create_test_resource(self.context)
 
     def test_pull(self):
-        resource_dict = _create_test_dict()
+        resource_dict = _create_test_dict(uuid=self.resource_obj.id)
         with mock.patch.object(
                 resources_rpc.prod_registry, 'pull',
                 return_value=self.resource_obj) as registry_mock:
             primitive = self.callbacks.pull(
                 self.context, resource_type=FakeResource.obj_name(),
-                version=FakeResource.VERSION,
+                version=TEST_VERSION,
                 resource_id=self.resource_obj.id)
         registry_mock.assert_called_once_with(
             'FakeResource', self.resource_obj.id, context=self.context)
@@ -193,58 +209,96 @@ class ResourcesPullRpcCallbackTestCase(ResourcesRpcBaseTestCase):
 
 
 class ResourcesPushRpcApiTestCase(ResourcesRpcBaseTestCase):
+    """Tests the neutron server side of the RPC interface."""
 
     def setUp(self):
         super(ResourcesPushRpcApiTestCase, self).setUp()
         mock.patch.object(resources_rpc.n_rpc, 'get_client').start()
-        mock.patch.object(resources_rpc, '_validate_resource_type').start()
         self.rpc = resources_rpc.ResourcesPushRpcApi()
         self.cctxt_mock = self.rpc.client.prepare.return_value
-        self.resource_obj = _create_test_resource(self.context)
+        mock.patch.object(version_manager, 'get_resource_versions',
+                         return_value=set([TEST_VERSION])).start()
 
     def test__prepare_object_fanout_context(self):
         expected_topic = topics.RESOURCE_TOPIC_PATTERN % {
-            'resource_type': resources.get_resource_type(self.resource_obj),
-            'version': self.resource_obj.VERSION}
+            'resource_type': resources.get_resource_type(
+                self.resource_objs[0]),
+            'version': TEST_VERSION}
 
-        with mock.patch.object(resources_rpc.resources, 'get_resource_cls',
-                return_value=FakeResource):
-            observed = self.rpc._prepare_object_fanout_context(
-                self.resource_obj, self.resource_obj.VERSION)
+        observed = self.rpc._prepare_object_fanout_context(
+            self.resource_objs[0], self.resource_objs[0].VERSION, '1.0')
 
         self.rpc.client.prepare.assert_called_once_with(
-            fanout=True, topic=expected_topic)
+            fanout=True, topic=expected_topic, version='1.0')
         self.assertEqual(self.cctxt_mock, observed)
 
-    def test_pushy(self):
-        with mock.patch.object(resources_rpc.resources, 'get_resource_cls',
-                return_value=FakeResource):
-            with mock.patch.object(version_manager, 'get_resource_versions',
-                    return_value=set([FakeResource.VERSION])):
-                self.rpc.push(
-                    self.context, self.resource_obj, 'TYPE')
+    def test_push_single_type(self):
+        self.rpc.push(
+            self.context, self.resource_objs, TEST_EVENT)
 
         self.cctxt_mock.cast.assert_called_once_with(
             self.context, 'push',
-            resource=self.resource_obj.obj_to_primitive(),
-            event_type='TYPE')
+            resource_list=[resource.obj_to_primitive()
+                           for resource in self.resource_objs],
+            event_type=TEST_EVENT)
+
+    def test_push_mixed(self):
+        self.rpc.push(
+            self.context, self.resource_objs + self.resource_objs2,
+            event_type=TEST_EVENT)
+
+        self.cctxt_mock.cast.assert_any_call(
+            self.context, 'push',
+            resource_list=[resource.obj_to_primitive()
+                           for resource in self.resource_objs],
+            event_type=TEST_EVENT)
+
+        self.cctxt_mock.cast.assert_any_call(
+            self.context, 'push',
+            resource_list=[resource.obj_to_primitive()
+                           for resource in self.resource_objs2],
+            event_type=TEST_EVENT)
+
+    def test_push_mitaka_backwardscompat(self):
+        #TODO(mangelajo) remove in Ocata, since the 'resource' parameter
+        #                is just for backwards compatibility with Mitaka
+        #                agents.
+        self.rpc.push(
+            self.context, [self.resource_objs[0]], TEST_EVENT)
+
+        self.cctxt_mock.cast.assert_called_once_with(
+            self.context, 'push',
+            resource=self.resource_objs[0].obj_to_primitive(),
+            event_type=TEST_EVENT)
 
 
 class ResourcesPushRpcCallbackTestCase(ResourcesRpcBaseTestCase):
+    """Tests the agent-side of the RPC interface."""
 
     def setUp(self):
         super(ResourcesPushRpcCallbackTestCase, self).setUp()
-        mock.patch.object(resources_rpc, '_validate_resource_type').start()
-        mock.patch.object(
-            resources_rpc.resources,
-            'get_resource_cls', return_value=FakeResource).start()
-        self.resource_obj = _create_test_resource(self.context)
-        self.resource_prim = self.resource_obj.obj_to_primitive()
         self.callbacks = resources_rpc.ResourcesPushRpcCallback()
 
     @mock.patch.object(resources_rpc.cons_registry, 'push')
     def test_push(self, reg_push_mock):
-        obj_base.VersionedObjectRegistry.register(FakeResource)
-        self.callbacks.push(self.context, self.resource_prim, 'TYPE')
-        reg_push_mock.assert_called_once_with(self.resource_obj.obj_name(),
-                                              self.resource_obj, 'TYPE')
+        self.obj_registry.register(FakeResource)
+        self.callbacks.push(self.context,
+                            resource_list=[resource.obj_to_primitive()
+                                           for resource in self.resource_objs],
+                            event_type=TEST_EVENT)
+        reg_push_mock.assert_called_once_with(self.resource_objs[0].obj_name(),
+                                              self.resource_objs,
+                                              TEST_EVENT)
+
+    @mock.patch.object(resources_rpc.cons_registry, 'push')
+    def test_push_mitaka_backwardscompat(self, reg_push_mock):
+        #TODO(mangelajo) remove in Ocata, since the 'resource' parameter
+        #                is just for backwards compatibility with Mitaka
+        #                agents.
+        self.obj_registry.register(FakeResource)
+        self.callbacks.push(self.context,
+                            resource=self.resource_objs[0].obj_to_primitive(),
+                            event_type=TEST_EVENT)
+        reg_push_mock.assert_called_once_with(self.resource_objs[0].obj_name(),
+                                              [self.resource_objs[0]],
+                                              TEST_EVENT)

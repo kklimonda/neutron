@@ -12,11 +12,11 @@
 
 import mock
 import netaddr
+from neutron_lib import constants
 from oslo_config import cfg
+from oslo_utils import netutils
 from oslo_utils import uuidutils
 
-from neutron.common import constants
-from neutron.common import ipv6_utils
 from neutron import context
 from neutron.ipam import driver
 from neutron.ipam import exceptions as ipam_exc
@@ -132,18 +132,7 @@ class TestIpamAnySubnetRequest(IpamSubnetRequestTestCase):
                           constants.IPv6,
                           129)
 
-    def test_subnet_request_bad_gateway(self):
-        cfg.CONF.set_override('force_gateway_on_subnet', True)
-        self.assertRaises(ipam_exc.IpamValueInvalid,
-                          ipam_req.AnySubnetRequest,
-                          self.tenant_id,
-                          self.subnet_id,
-                          constants.IPv6,
-                          64,
-                          gateway_ip='2000::1')
-
-    def test_subnet_request_good_gateway(self):
-        cfg.CONF.set_override('force_gateway_on_subnet', False)
+    def test_subnet_request_gateway(self):
         request = ipam_req.AnySubnetRequest(self.tenant_id,
                                             self.subnet_id,
                                             constants.IPv6,
@@ -183,17 +172,7 @@ class TestIpamSpecificSubnetRequest(IpamSubnetRequestTestCase):
         self.assertEqual(netaddr.IPAddress('1.2.3.1'), request.gateway_ip)
         self.assertEqual(netaddr.IPNetwork('1.2.3.0/24'), request.subnet_cidr)
 
-    def test_subnet_request_bad_gateway(self):
-        cfg.CONF.set_override('force_gateway_on_subnet', True)
-        self.assertRaises(ipam_exc.IpamValueInvalid,
-                          ipam_req.SpecificSubnetRequest,
-                          self.tenant_id,
-                          self.subnet_id,
-                          '2001::1',
-                          gateway_ip='2000::1')
-
-    def test_subnet_request_good_gateway(self):
-        cfg.CONF.set_override('force_gateway_on_subnet', False)
+    def test_subnet_request_gateway(self):
         request = ipam_req.SpecificSubnetRequest(self.tenant_id,
                                                  self.subnet_id,
                                                  '2001::1',
@@ -225,8 +204,8 @@ class TestAddressRequest(base.BaseTestCase):
     def test_automatic_address_request_eui64(self):
         subnet_cidr = '2607:f0d0:1002:51::/64'
         port_mac = 'aa:bb:cc:dd:ee:ff'
-        eui_addr = str(ipv6_utils.get_ipv6_addr_by_EUI64(subnet_cidr,
-                                                         port_mac))
+        eui_addr = str(netutils.get_ipv6_addr_by_EUI64(subnet_cidr,
+                                                       port_mac))
         request = ipam_req.AutomaticAddressRequest(
             address_type=self.EUI64,
             prefix=subnet_cidr,
@@ -309,24 +288,36 @@ class TestAddressRequestFactory(base.BaseTestCase):
     def test_specific_address_request_is_loaded(self):
         for address in ('10.12.0.15', 'fffe::1'):
             ip = {'ip_address': address}
+            port = {'device_owner':
+                    constants.DEVICE_OWNER_COMPUTE_PREFIX + 'None'}
             self.assertIsInstance(
-                ipam_req.AddressRequestFactory.get_request(None, None, ip),
+                ipam_req.AddressRequestFactory.get_request(None, port, ip),
                 ipam_req.SpecificAddressRequest)
 
     def test_any_address_request_is_loaded(self):
         for addr in [None, '']:
             ip = {'ip_address': addr}
+            port = {'device_owner':
+                    constants.DEVICE_OWNER_COMPUTE_PREFIX + 'None'}
             self.assertIsInstance(
-                ipam_req.AddressRequestFactory.get_request(None, None, ip),
+                ipam_req.AddressRequestFactory.get_request(None, port, ip),
                 ipam_req.AnyAddressRequest)
 
     def test_automatic_address_request_is_loaded(self):
         ip = {'mac': '6c:62:6d:de:cf:49',
               'subnet_cidr': '2001:470:abcd::/64',
               'eui64_address': True}
+        port = {'device_owner': constants.DEVICE_OWNER_COMPUTE_PREFIX + 'None'}
         self.assertIsInstance(
-            ipam_req.AddressRequestFactory.get_request(None, None, ip),
+            ipam_req.AddressRequestFactory.get_request(None, port, ip),
             ipam_req.AutomaticAddressRequest)
+
+    def test_prefernext_address_request_on_dhcp_port(self):
+        ip = {}
+        port = {'device_owner': constants.DEVICE_OWNER_DHCP}
+        self.assertIsInstance(
+            ipam_req.AddressRequestFactory.get_request(None, port, ip),
+            ipam_req.PreferNextAddressRequest)
 
 
 class TestSubnetRequestFactory(IpamSubnetRequestTestCase):

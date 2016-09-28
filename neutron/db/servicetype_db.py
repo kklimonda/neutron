@@ -15,11 +15,11 @@
 
 from itertools import chain
 
+from neutron_lib.db import model_base
 from oslo_log import log as logging
 import sqlalchemy as sa
 
 from neutron.api.v2 import attributes as attr
-from neutron.db import model_base
 from neutron.services import provider_configuration as pconf
 
 LOG = logging.getLogger(__name__)
@@ -77,6 +77,12 @@ class ServiceTypeManager(object):
                 service_type=service_type
             )
         return providers[0]
+
+    def get_provider_names_by_resource_ids(self, context, resource_ids):
+        query = (
+            context.session.query(ProviderResourceAssociation).
+            filter(ProviderResourceAssociation.resource_id.in_(resource_ids)))
+        return {rec.resource_id: rec.provider_name for rec in query}
 
     def add_resource_association(self, context, service_type, provider_name,
                                  resource_id):

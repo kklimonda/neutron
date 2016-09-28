@@ -16,6 +16,8 @@
 import collections
 import re
 
+from neutron_lib import constants
+from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
@@ -27,7 +29,6 @@ import six
 from neutron._i18n import _, _LE, _LW
 from neutron.api.v2 import attributes
 from neutron.common import constants as const
-from neutron.common import exceptions
 
 
 LOG = logging.getLogger(__name__)
@@ -89,11 +90,12 @@ def _is_attribute_explicitly_set(attribute_name, resource, target, action):
         # default value of an attribute, but check whether it was explicitly
         # marked as being updated instead.
         return (attribute_name in target[const.ATTRIBUTES_TO_UPDATE] and
-                target[attribute_name] is not attributes.ATTR_NOT_SPECIFIED)
-    return ('default' in resource[attribute_name] and
-            attribute_name in target and
-            target[attribute_name] is not attributes.ATTR_NOT_SPECIFIED and
-            target[attribute_name] != resource[attribute_name]['default'])
+                target[attribute_name] is not constants.ATTR_NOT_SPECIFIED)
+    result = (attribute_name in target and
+              target[attribute_name] is not constants.ATTR_NOT_SPECIFIED)
+    if result and 'default' in resource[attribute_name]:
+        return target[attribute_name] != resource[attribute_name]['default']
+    return result
 
 
 def _should_validate_sub_attributes(attribute, sub_attr):
@@ -110,7 +112,7 @@ def _build_subattr_match_rule(attr_name, attr, action, target):
     # typing for API attributes
     # Expect a dict as type descriptor
     validate = attr['validate']
-    key = list(filter(lambda k: k.startswith('type:dict'), validate.keys()))
+    key = [k for k in validate.keys() if k.startswith('type:dict')]
     if not key:
         LOG.warning(_LW("Unable to find data type descriptor "
                         "for attribute %s"),

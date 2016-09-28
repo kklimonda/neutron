@@ -15,10 +15,12 @@
 
 import os
 
+from neutron_lib import constants
 from oslo_config import cfg
 
 from neutron.agent import securitygroups_rpc
-from neutron.common import constants
+from neutron.callbacks import events
+from neutron.callbacks import registry
 from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
@@ -41,7 +43,8 @@ class OpenvswitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
     network.
     """
 
-    supported_qos_rule_types = [qos_consts.RULE_TYPE_BANDWIDTH_LIMIT]
+    supported_qos_rule_types = [qos_consts.RULE_TYPE_BANDWIDTH_LIMIT,
+                                qos_consts.RULE_TYPE_DSCP_MARKING]
 
     def __init__(self):
         sg_enabled = securitygroups_rpc.is_firewall_enabled()
@@ -85,10 +88,34 @@ class OpenvswitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         return self.vif_type
 
     def get_vif_details(self, agent, context):
-        if (agent['configurations'].get('datapath_type') !=
-                a_const.OVS_DATAPATH_NETDEV):
-            return self.vif_details
-        caps = agent['configurations'].get('ovs_capabilities', {})
+        vif_details = self._pre_get_vif_details(agent, context)
+        self._set_bridge_name(context.current, vif_details)
+        return vif_details
+
+    @staticmethod
+    def _set_bridge_name(port, vif_details):
+        # REVISIT(rawlin): add BridgeName as a nullable column to the Port
+        # model and simply check here if it's set and insert it into the
+        # vif_details.
+
+        def set_bridge_name_inner(bridge_name):
+            vif_details[portbindings.VIF_DETAILS_BRIDGE_NAME] = bridge_name
+
+        registry.notify(
+            a_const.OVS_BRIDGE_NAME, events.BEFORE_READ,
+            set_bridge_name_inner, port=port)
+
+    def _pre_get_vif_details(self, agent, context):
+        a_config = agent['configurations']
+        if a_config.get('datapath_type') != a_const.OVS_DATAPATH_NETDEV:
+            details = dict(self.vif_details)
+            hybrid = portbindings.OVS_HYBRID_PLUG
+            if hybrid in a_config:
+                # we only override the vif_details for hybrid plugging set
+                # in the constructor if the agent specifically requests it
+                details[hybrid] = a_config[hybrid]
+            return details
+        caps = a_config.get('ovs_capabilities', {})
         if a_const.OVS_DPDK_VHOST_USER in caps.get('iface_types', []):
             sock_path = self.agent_vhu_sockpath(agent, context.current['id'])
             return {

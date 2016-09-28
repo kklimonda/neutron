@@ -13,10 +13,12 @@
 #    under the License.
 
 import mock
+from neutron_lib import constants
 
 from neutron.api.rpc.handlers import l3_rpc
-from neutron.api.v2 import attributes
-from neutron.common import constants
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
 from neutron.common import topics
 from neutron import context
 from neutron.extensions import external_net
@@ -129,8 +131,8 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
             self.context,
             {'port': {'tenant_id': '',
                       'network_id': network_id,
-                      'mac_address': attributes.ATTR_NOT_SPECIFIED,
-                      'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
+                      'mac_address': constants.ATTR_NOT_SPECIFIED,
+                      'fixed_ips': constants.ATTR_NOT_SPECIFIED,
                       'device_id': self.l3_agent['id'],
                       'device_owner': constants.DEVICE_OWNER_AGENT_GW,
                       portbindings.HOST_ID: '',
@@ -875,7 +877,7 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                                  constants.DEVICE_OWNER_LOADBALANCER)
                 # Now change the compute port admin_state_up from True to
                 # False, and see if the vrrp ports device_owner and binding
-                # inheritence reverts back to normal
+                # inheritance reverts back to normal
                 mod_int_port = self.core_plugin.update_port(
                     self.context, cur_int_port['id'],
                     {'port': {
@@ -1533,3 +1535,73 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
             self.context, router['id'])
         self.assertEqual(1, len(agents['agents']))
         self.assertEqual(self.l3_agent['id'], agents['agents'][0]['id'])
+
+    def test_add_router_interface_by_subnet_notification(self):
+        notif_handler = mock.Mock()
+        registry.subscribe(notif_handler.callback,
+                           resources.ROUTER_INTERFACE,
+                           events.BEFORE_CREATE)
+        router = self._create_router()
+        with self.network() as net, \
+                self.subnet(network=net) as subnet:
+            self.l3_plugin.add_router_interface(
+                    self.context, router['id'],
+                    {'subnet_id': subnet['subnet']['id']})
+            kwargs = {'context': self.context, 'router_id': router['id'],
+                      'network_id': net['network']['id']}
+            notif_handler.callback.assert_called_once_with(
+                resources.ROUTER_INTERFACE, events.BEFORE_CREATE,
+                mock.ANY, **kwargs)
+
+    def test_add_router_interface_by_port_notification(self):
+        notif_handler = mock.Mock()
+        registry.subscribe(notif_handler.callback,
+                           resources.ROUTER_INTERFACE,
+                           events.BEFORE_CREATE)
+        router = self._create_router()
+        with self.network() as net, \
+                self.subnet(network=net) as subnet, \
+                self.port(subnet=subnet) as port:
+            self.l3_plugin.add_router_interface(
+                    self.context, router['id'],
+                    {'port_id': port['port']['id']})
+            kwargs = {'context': self.context, 'router_id': router['id'],
+                      'network_id': net['network']['id']}
+            notif_handler.callback.assert_called_once_with(
+                resources.ROUTER_INTERFACE, events.BEFORE_CREATE,
+                mock.ANY, **kwargs)
+
+
+class L3DvrTestCaseMigration(L3DvrTestCase):
+    def test_update_router_db_centralized_to_distributed_with_ports(self):
+        with self.subnet() as subnet1:
+            kwargs = {'arg_list': (external_net.EXTERNAL,),
+                      external_net.EXTERNAL: True}
+            with self.network(**kwargs) as ext_net, \
+                    self.subnet(network=ext_net,
+                                cidr='30.0.0.0/24'):
+                router = self._create_router(distributed=False)
+                self.l3_plugin.add_router_interface(
+                    self.context, router['id'],
+                    {'subnet_id': subnet1['subnet']['id']})
+                self.l3_plugin._update_router_gw_info(
+                    self.context, router['id'],
+                    {'network_id': ext_net['network']['id']})
+                self.assertEqual(
+                    0, len(self.l3_plugin._get_snat_sync_interfaces(
+                        self.context, [router['id']])))
+
+                # router needs to be in admin state down in order to be
+                # upgraded to DVR
+                self.l3_plugin.update_router(
+                    self.context, router['id'],
+                    {'router': {'admin_state_up': False}})
+                self.assertFalse(router['distributed'])
+                self.l3_plugin.update_router(
+                    self.context, router['id'],
+                    {'router': {'distributed': True}})
+                router = self.l3_plugin.get_router(self.context, router['id'])
+                self.assertTrue(router['distributed'])
+                self.assertEqual(
+                    1, len(self.l3_plugin._get_snat_sync_interfaces(
+                        self.context, [router['id']])))

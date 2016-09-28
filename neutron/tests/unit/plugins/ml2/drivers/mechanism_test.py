@@ -13,7 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.common import constants as const
+from neutron_lib import constants as const
+
 from neutron.extensions import portbindings
 from neutron.plugins.ml2 import driver_api as api
 
@@ -33,7 +34,6 @@ class TestMechanismDriver(api.MechanismDriver):
             assert(context.current['id'] == context.original['id'])
         else:
             assert(not context.original)
-        assert(context.network_segments)
 
     def create_network_precommit(self, context):
         self._check_network_context(context, False)
@@ -240,3 +240,7 @@ class TestMechanismDriver(api.MechanismDriver):
                                 portbindings.VIF_TYPE_BINDING_FAILED,
                                 {portbindings.CAP_PORT_FILTER: False})
             self.bound_ports.add((context.current['id'], host))
+
+    def filter_hosts_with_segment_access(
+            self, context, segments, candidate_hosts, agent_getter):
+        return set()

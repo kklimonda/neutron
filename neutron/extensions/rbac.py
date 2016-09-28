@@ -12,13 +12,14 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-from oslo_config import cfg
+
+from neutron_lib import exceptions as n_exc
 
 from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
-from neutron.common import exceptions as n_exc
+from neutron.conf import quota
 from neutron.db import rbac_db_models
 from neutron import manager
 from neutron.quota import resource_registry
@@ -59,12 +60,12 @@ RESOURCE_ATTRIBUTE_MAP = {
                         'enforce_policy': True},
         'object_id': {'allow_post': True, 'allow_put': False,
                       'validate': {'type:uuid': None},
-                      'is_visible': True, 'default': None,
-                      'enforce_policy': True},
+                      'is_visible': True, 'enforce_policy': True},
         'target_tenant': {'allow_post': True, 'allow_put': True,
-                          'is_visible': True, 'enforce_policy': True,
-                          'default': None},
+                          'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
+                          'is_visible': True, 'enforce_policy': True},
         'tenant_id': {'allow_post': True, 'allow_put': False,
+                      'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'required_by_policy': True, 'is_visible': True},
         'action': {'allow_post': True, 'allow_put': False,
                    # action depends on type so validation has to occur in
@@ -72,18 +73,12 @@ RESOURCE_ATTRIBUTE_MAP = {
                    'validate': {'type:string': attr.DESCRIPTION_MAX_LEN},
                    # we set enforce_policy so operators can define policies
                    # that restrict actions
-                   'is_visible': True, 'enforce_policy': True,
-                   'default': None},
+                   'is_visible': True, 'enforce_policy': True}
     }
 }
 
-rbac_quota_opts = [
-    cfg.IntOpt('quota_rbac_policy', default=10,
-               deprecated_name='quota_rbac_entry',
-               help=_('Default number of RBAC entries allowed per tenant. '
-                      'A negative value means unlimited.'))
-]
-cfg.CONF.register_opts(rbac_quota_opts, 'QUOTAS')
+# Register the configuration options
+quota.register_quota_opts(quota.rbac_quota_opts)
 
 
 class Rbac(extensions.ExtensionDescriptor):

@@ -14,19 +14,20 @@
 #    under the License.
 
 import abc
+import time
 
 import netaddr
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_log import versionutils
 import six
 
 from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.common import ovs_lib
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.common import constants as n_const
 from neutron.common import exceptions
-from neutron.common import ipv6_utils
 
 
 LOG = logging.getLogger(__name__)
@@ -41,12 +42,6 @@ OPTS = [
                        'Support kernels with limited namespace support '
                        '(e.g. RHEL 6.5) so long as ovs_use_veth is set to '
                        'True.')),
-    cfg.IntOpt('network_device_mtu',
-               deprecated_for_removal=True,
-               help=_('MTU setting for device. This option will be removed in '
-                      'Newton. Please use the system-wide segment_mtu setting '
-                      'which the agents will take into account when wiring '
-                      'VIFs.')),
 ]
 
 
@@ -55,21 +50,10 @@ class LinuxInterfaceDriver(object):
 
     # from linux IF_NAMESIZE
     DEV_NAME_LEN = 14
-    DEV_NAME_PREFIX = n_const.TAP_DEVICE_PREFIX
+    DEV_NAME_PREFIX = constants.TAP_DEVICE_PREFIX
 
     def __init__(self, conf):
         self.conf = conf
-        if self.conf.network_device_mtu:
-            self._validate_network_device_mtu()
-
-    def _validate_network_device_mtu(self):
-        if (ipv6_utils.is_enabled() and
-            self.conf.network_device_mtu < n_const.IPV6_MIN_MTU):
-            LOG.error(_LE("IPv6 protocol requires a minimum MTU of "
-                          "%(min_mtu)s, while the configured value is "
-                          "%(current_mtu)s"), {'min_mtu': n_const.IPV6_MIN_MTU,
-                          'current_mtu': self.conf.network_device_mtu})
-            raise SystemExit(1)
 
     @property
     def use_gateway_ips(self):
@@ -180,8 +164,8 @@ class LinuxInterfaceDriver(object):
         # Manage on-link routes (routes without an associated address)
         new_onlink_cidrs = set(s['cidr'] for s in extra_subnets or [])
 
-        v4_onlink = device.route.list_onlink_routes(n_const.IP_VERSION_4)
-        v6_onlink = device.route.list_onlink_routes(n_const.IP_VERSION_6)
+        v4_onlink = device.route.list_onlink_routes(constants.IP_VERSION_4)
+        v6_onlink = device.route.list_onlink_routes(constants.IP_VERSION_6)
         existing_onlink_cidrs = set(r['cidr'] for r in v4_onlink + v6_onlink)
 
         for route in new_onlink_cidrs - existing_onlink_cidrs:
@@ -248,6 +232,10 @@ class LinuxInterfaceDriver(object):
                 self.plug_new(network_id, port_id, device_name, mac_address,
                               bridge, namespace, prefix, mtu)
             except TypeError:
+                versionutils.report_deprecated_feature(
+                    LOG,
+                    _LW('Interface driver does not support MTU parameter. '
+                        'This may not work in future releases.'))
                 self.plug_new(network_id, port_id, device_name, mac_address,
                               bridge, namespace, prefix)
         else:
@@ -287,7 +275,7 @@ class NullDriver(LinuxInterfaceDriver):
 class OVSInterfaceDriver(LinuxInterfaceDriver):
     """Driver for creating an internal interface on an OVS bridge."""
 
-    DEV_NAME_PREFIX = n_const.TAP_DEVICE_PREFIX
+    DEV_NAME_PREFIX = constants.TAP_DEVICE_PREFIX
 
     def __init__(self, conf):
         super(OVSInterfaceDriver, self).__init__(conf)
@@ -297,7 +285,7 @@ class OVSInterfaceDriver(LinuxInterfaceDriver):
     def _get_tap_name(self, dev_name, prefix=None):
         if self.conf.ovs_use_veth:
             dev_name = dev_name.replace(prefix or self.DEV_NAME_PREFIX,
-                                        n_const.TAP_DEVICE_PREFIX)
+                                        constants.TAP_DEVICE_PREFIX)
         return dev_name
 
     def _ovs_add_port(self, bridge, device_name, port_id, mac_address,
@@ -334,8 +322,20 @@ class OVSInterfaceDriver(LinuxInterfaceDriver):
         internal = not self.conf.ovs_use_veth
         self._ovs_add_port(bridge, tap_name, port_id, mac_address,
                            internal=internal)
-
-        ns_dev.link.set_address(mac_address)
+        for i in range(9):
+            # workaround for the OVS shy port syndrome. ports sometimes
+            # hide for a bit right after they are first created.
+            # see bug/1618987
+            try:
+                ns_dev.link.set_address(mac_address)
+                break
+            except RuntimeError as e:
+                LOG.warning(_LW("Got error trying to set mac, retrying: %s"),
+                            str(e))
+                time.sleep(1)
+        else:
+            # didn't break, we give it one last shot without catching
+            ns_dev.link.set_address(mac_address)
 
         # Add an interface created by ovs to the namespace.
         if not self.conf.ovs_use_veth and namespace:
@@ -346,7 +346,6 @@ class OVSInterfaceDriver(LinuxInterfaceDriver):
         # the device is moved into a namespace, otherwise OVS bridge does not
         # allow to set MTU that is higher than the least of all device MTUs on
         # the bridge
-        mtu = self.conf.network_device_mtu or mtu
         if mtu:
             ns_dev.link.set_mtu(mtu)
             if self.conf.ovs_use_veth:
@@ -381,7 +380,7 @@ class OVSInterfaceDriver(LinuxInterfaceDriver):
 class IVSInterfaceDriver(LinuxInterfaceDriver):
     """Driver for creating an internal interface on an IVS bridge."""
 
-    DEV_NAME_PREFIX = n_const.TAP_DEVICE_PREFIX
+    DEV_NAME_PREFIX = constants.TAP_DEVICE_PREFIX
 
     def __init__(self, conf):
         super(IVSInterfaceDriver, self).__init__(conf)
@@ -389,7 +388,7 @@ class IVSInterfaceDriver(LinuxInterfaceDriver):
 
     def _get_tap_name(self, dev_name, prefix=None):
         dev_name = dev_name.replace(prefix or self.DEV_NAME_PREFIX,
-                                    n_const.TAP_DEVICE_PREFIX)
+                                    constants.TAP_DEVICE_PREFIX)
         return dev_name
 
     def _ivs_add_port(self, device_name, port_id, mac_address):
@@ -410,7 +409,6 @@ class IVSInterfaceDriver(LinuxInterfaceDriver):
         ns_dev = ip.device(device_name)
         ns_dev.link.set_address(mac_address)
 
-        mtu = self.conf.network_device_mtu or mtu
         if mtu:
             ns_dev.link.set_mtu(mtu)
             root_dev.link.set_mtu(mtu)
@@ -450,14 +448,13 @@ class BridgeInterfaceDriver(LinuxInterfaceDriver):
 
         # Enable agent to define the prefix
         tap_name = device_name.replace(prefix or self.DEV_NAME_PREFIX,
-                                       n_const.TAP_DEVICE_PREFIX)
+                                       constants.TAP_DEVICE_PREFIX)
         # Create ns_veth in a namespace if one is configured.
         root_veth, ns_veth = ip.add_veth(tap_name, device_name,
                                          namespace2=namespace)
         root_veth.disable_ipv6()
         ns_veth.link.set_address(mac_address)
 
-        mtu = self.conf.network_device_mtu or mtu
         if mtu:
             root_veth.link.set_mtu(mtu)
             ns_veth.link.set_mtu(mtu)

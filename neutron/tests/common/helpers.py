@@ -14,18 +14,18 @@
 
 import datetime
 import os
+import random
 
+from neutron_lib import constants
 from oslo_utils import timeutils
 import six
 import testtools
 
 import neutron
-from neutron.common import constants
 from neutron.common import topics
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import common_db_mixin
-from neutron.services.bgp.common import constants as bgp_const
 
 HOST = 'localhost'
 DEFAULT_AZ = 'nova'
@@ -45,13 +45,17 @@ def find_sample_file(filename):
         path=os.path.join(neutron.__path__[0], '..', 'etc'))
 
 
+def get_test_log_path():
+    return os.environ.get('OS_LOG_PATH', '/tmp')
+
+
 class FakePlugin(common_db_mixin.CommonDbMixin,
                  agents_db.AgentDbMixin):
     pass
 
 
 def _get_l3_agent_dict(host, agent_mode, internal_only=True,
-                       ext_net_id='', ext_bridge='', router_id=None,
+                       ext_net_id='', ext_bridge='',
                        az=DEFAULT_AZ):
     return {
         'agent_type': constants.AGENT_TYPE_L3,
@@ -62,12 +66,12 @@ def _get_l3_agent_dict(host, agent_mode, internal_only=True,
         'configurations': {'agent_mode': agent_mode,
                            'handle_internal_only_routers': internal_only,
                            'external_network_bridge': ext_bridge,
-                           'gateway_external_network_id': ext_net_id,
-                           'router_id': router_id}}
+                           'gateway_external_network_id': ext_net_id}}
 
 
-def _register_agent(agent):
-    plugin = FakePlugin()
+def _register_agent(agent, plugin=None):
+    if not plugin:
+        plugin = FakePlugin()
     admin_context = context.get_admin_context()
     plugin.create_or_update_agent(admin_context, agent)
     return plugin._get_agent_by_type_and_host(
@@ -76,9 +80,9 @@ def _register_agent(agent):
 
 def register_l3_agent(host=HOST, agent_mode=constants.L3_AGENT_MODE_LEGACY,
                       internal_only=True, ext_net_id='', ext_bridge='',
-                      router_id=None, az=DEFAULT_AZ):
+                      az=DEFAULT_AZ):
     agent = _get_l3_agent_dict(host, agent_mode, internal_only, ext_net_id,
-                               ext_bridge, router_id, az)
+                               ext_bridge, az)
     return _register_agent(agent)
 
 
@@ -98,30 +102,6 @@ def register_dhcp_agent(host=HOST, networks=0, admin_state_up=True,
                         alive=True, az=DEFAULT_AZ):
     agent = _register_agent(
         _get_dhcp_agent_dict(host, networks, az=az))
-
-    if not admin_state_up:
-        set_agent_admin_state(agent['id'])
-    if not alive:
-        kill_agent(agent['id'])
-
-    return FakePlugin()._get_agent_by_type_and_host(
-        context.get_admin_context(), agent['agent_type'], agent['host'])
-
-
-def _get_bgp_dragent_dict(host):
-    agent = {
-        'binary': 'neutron-bgp-dragent',
-        'host': host,
-        'topic': 'q-bgp_dragent',
-        'agent_type': bgp_const.AGENT_TYPE_BGP_ROUTING,
-        'configurations': {'bgp_speakers': 1}}
-    return agent
-
-
-def register_bgp_dragent(host=HOST, admin_state_up=True,
-                        alive=True):
-    agent = _register_agent(
-        _get_bgp_dragent_dict(host))
 
     if not admin_state_up:
         set_agent_admin_state(agent['id'])
@@ -156,35 +136,74 @@ def set_agent_admin_state(agent_id, admin_state_up=False):
         {'agent': {'admin_state_up': admin_state_up}})
 
 
-def _get_ovs_agent_dict(host, agent_type, binary, tunnel_types,
-                        tunneling_ip='20.0.0.1', interface_mappings=None,
-                        l2pop_network_types=None):
+def _get_l2_agent_dict(host, agent_type, binary, tunnel_types=None,
+                       tunneling_ip='20.0.0.1', interface_mappings=None,
+                       bridge_mappings=None, l2pop_network_types=None,
+                       device_mappings=None, start_flag=True):
     agent = {
         'binary': binary,
         'host': host,
         'topic': constants.L2_AGENT_TOPIC,
-        'configurations': {'tunneling_ip': tunneling_ip,
-                           'tunnel_types': tunnel_types},
+        'configurations': {},
         'agent_type': agent_type,
         'tunnel_type': [],
-        'start_flag': True}
+        'start_flag': start_flag}
 
+    if tunnel_types is not None:
+        agent['configurations']['tunneling_ip'] = tunneling_ip
+        agent['configurations']['tunnel_types'] = tunnel_types
+    if bridge_mappings is not None:
+        agent['configurations']['bridge_mappings'] = bridge_mappings
     if interface_mappings is not None:
         agent['configurations']['interface_mappings'] = interface_mappings
     if l2pop_network_types is not None:
         agent['configurations']['l2pop_network_types'] = l2pop_network_types
+    if device_mappings is not None:
+        agent['configurations']['device_mappings'] = device_mappings
     return agent
 
 
 def register_ovs_agent(host=HOST, agent_type=constants.AGENT_TYPE_OVS,
                        binary='neutron-openvswitch-agent',
                        tunnel_types=['vxlan'], tunneling_ip='20.0.0.1',
-                       interface_mappings=None,
-                       l2pop_network_types=None):
-    agent = _get_ovs_agent_dict(host, agent_type, binary, tunnel_types,
-                                tunneling_ip, interface_mappings,
-                                l2pop_network_types)
-    return _register_agent(agent)
+                       interface_mappings=None, bridge_mappings=None,
+                       l2pop_network_types=None, plugin=None, start_flag=True):
+    agent = _get_l2_agent_dict(host, agent_type, binary, tunnel_types,
+                               tunneling_ip, interface_mappings,
+                               bridge_mappings, l2pop_network_types,
+                               start_flag=start_flag)
+    return _register_agent(agent, plugin)
+
+
+def register_linuxbridge_agent(host=HOST,
+                               agent_type=constants.AGENT_TYPE_LINUXBRIDGE,
+                               binary='neutron-linuxbridge-agent',
+                               tunnel_types=['vxlan'], tunneling_ip='20.0.0.1',
+                               interface_mappings=None, bridge_mappings=None,
+                               plugin=None):
+    agent = _get_l2_agent_dict(host, agent_type, binary, tunnel_types,
+                               tunneling_ip=tunneling_ip,
+                               interface_mappings=interface_mappings,
+                               bridge_mappings=bridge_mappings)
+    return _register_agent(agent, plugin)
+
+
+def register_macvtap_agent(host=HOST,
+                           agent_type=constants.AGENT_TYPE_MACVTAP,
+                           binary='neutron-macvtap-agent',
+                           interface_mappings=None, plugin=None):
+    agent = _get_l2_agent_dict(host, agent_type, binary,
+                               interface_mappings=interface_mappings)
+    return _register_agent(agent, plugin)
+
+
+def register_sriovnicswitch_agent(host=HOST,
+                                  agent_type=constants.AGENT_TYPE_NIC_SWITCH,
+                                  binary='neutron-sriov-nic-agent',
+                                  device_mappings=None, plugin=None):
+    agent = _get_l2_agent_dict(host, agent_type, binary,
+                               device_mappings=device_mappings)
+    return _register_agent(agent, plugin)
 
 
 def requires_py2(testcase):
@@ -193,3 +212,11 @@ def requires_py2(testcase):
 
 def requires_py3(testcase):
     return testtools.skipUnless(six.PY3, "requires python 3.x")(testcase)
+
+
+def get_not_used_vlan(bridge, vlan_range):
+    port_vlans = bridge.ovsdb.db_find(
+        'Port', ('tag', '!=', []), columns=['tag']).execute()
+    used_vlan_tags = {val['tag'] for val in port_vlans}
+    available_vlans = vlan_range - used_vlan_tags
+    return random.choice(list(available_vlans))

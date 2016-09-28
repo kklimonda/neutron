@@ -16,12 +16,14 @@
 import os
 
 import mock
+from neutron_lib.api import converters
+from neutron_lib import constants
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_policy import policy as oslo_policy
 from oslo_utils import uuidutils
 import six
-from six import moves
 import six.moves.urllib.parse as urlparse
 import webob
 from webob import exc
@@ -29,11 +31,10 @@ import webtest
 
 from neutron.api import api_common
 from neutron.api import extensions
-from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
 from neutron.api.v2 import attributes
 from neutron.api.v2 import base as v2_base
 from neutron.api.v2 import router
-from neutron.common import exceptions as n_exc
+from neutron.callbacks import registry
 from neutron import context
 from neutron import manager
 from neutron import policy
@@ -136,10 +137,18 @@ def _list_cmp(l1, l2):
 
 
 class APIv2TestCase(APIv2TestBase):
+
+    @staticmethod
+    def _get_policy_attrs(attr_info):
+        policy_attrs = {name for (name, info) in attr_info.items()
+                        if info.get('required_by_policy')}
+        if 'tenant_id' in policy_attrs:
+            policy_attrs.add('project_id')
+        return sorted(policy_attrs)
+
     def _do_field_list(self, resource, base_fields):
         attr_info = attributes.RESOURCE_ATTRIBUTE_MAP[resource]
-        policy_attrs = [name for (name, info) in attr_info.items()
-                        if info.get('required_by_policy')]
+        policy_attrs = self._get_policy_attrs(attr_info)
         for name, info in attr_info.items():
             if info.get('primary_key'):
                 policy_attrs.append(name)
@@ -487,6 +496,7 @@ class APIv2TestCase(APIv2TestBase):
                                            'id',
                                            'subnets',
                                            'shared',
+                                           'project_id',
                                            'tenant_id']))
         instance.get_networks.assert_called_once_with(mock.ANY, **kwargs)
 
@@ -770,7 +780,11 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
 
     def test_create_use_defaults(self):
         net_id = _uuid()
-        initial_input = {'network': {'name': 'net1', 'tenant_id': _uuid()}}
+        tenant_id = _uuid()
+
+        initial_input = {'network': {'name': 'net1',
+                                     'tenant_id': tenant_id,
+                                     'project_id': tenant_id}}
         full_input = {'network': {'admin_state_up': True,
                                   'shared': False}}
         full_input['network'].update(initial_input['network'])
@@ -806,7 +820,8 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         # tenant_id should be fetched from env
         initial_input = {'network': {'name': 'net1'}}
         full_input = {'network': {'admin_state_up': True,
-                      'shared': False, 'tenant_id': tenant_id}}
+                      'shared': False, 'tenant_id': tenant_id,
+                      'project_id': tenant_id}}
         full_input['network'].update(initial_input['network'])
 
         return_value = {'id': net_id, 'status': "ACTIVE"}
@@ -917,11 +932,12 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         device_id = _uuid()
         initial_input = {'port': {'name': '', 'network_id': net_id,
                                   'tenant_id': tenant_id,
+                                  'project_id': tenant_id,
                                   'device_id': device_id,
                                   'admin_state_up': True}}
         full_input = {'port': {'admin_state_up': True,
-                               'mac_address': attributes.ATTR_NOT_SPECIFIED,
-                               'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
+                               'mac_address': constants.ATTR_NOT_SPECIFIED,
+                               'fixed_ips': constants.ATTR_NOT_SPECIFIED,
                                'device_owner': ''}}
         full_input['port'].update(initial_input['port'])
         return_value = {'id': _uuid(), 'status': 'ACTIVE',
@@ -1098,6 +1114,11 @@ class JSONV2TestCase(APIv2TestBase, testlib_api.WebTestCase):
         self._test_update(tenant_id + "bad", tenant_id,
                           exc.HTTPNotFound.code, expect_errors=True)
 
+    def test_update_keystone_no_tenant(self):
+        tenant_id = _uuid()
+        self._test_update(tenant_id, None,
+                          exc.HTTPNotFound.code, expect_errors=True)
+
     def test_update_readonly_field(self):
         data = {'network': {'status': "NANANA"}}
         res = self.api.put(_get_path('networks', id=_uuid()),
@@ -1212,8 +1233,10 @@ class SubresourceTest(base.BaseTestCase):
 
     def test_create_sub_resource(self):
         instance = self.plugin.return_value
+        tenant_id = _uuid()
 
-        body = {'dummy': {'foo': 'bar', 'tenant_id': _uuid()}}
+        body = {'dummy': {'foo': 'bar', 'tenant_id': tenant_id,
+                          'project_id': tenant_id}}
         self.api.post_json('/networks/id1/dummies', body)
         instance.create_network_dummy.assert_called_once_with(mock.ANY,
                                                               network_id='id1',
@@ -1328,6 +1351,11 @@ class NotificationTest(APIv2TestBase):
         for msg, event in zip(fake_notifier.NOTIFICATIONS, expected_events):
             self.assertEqual('INFO', msg['priority'])
             self.assertEqual(event, msg['event_type'])
+            if opname == 'delete' and event == 'network.delete.end':
+                self.assertIn('payload', msg)
+                resource = msg['payload']
+                self.assertIn('network_id', resource)
+                self.assertIn('network', resource)
 
         self.assertEqual(expected_code, res.status_int)
 
@@ -1341,20 +1369,19 @@ class NotificationTest(APIv2TestBase):
         self._resource_op_notifier('update', 'network')
 
 
-class DHCPNotificationTest(APIv2TestBase):
+class RegistryNotificationTest(APIv2TestBase):
 
     def setUp(self):
         # This test does not have database support so tracking cannot be used
         cfg.CONF.set_override('track_quota_usage', False, group='QUOTAS')
-        super(DHCPNotificationTest, self).setUp()
+        super(RegistryNotificationTest, self).setUp()
 
-    def _test_dhcp_notifier(self, opname, resource, initial_input=None):
+    def _test_registry_notify(self, opname, resource, initial_input=None):
         instance = self.plugin.return_value
         instance.get_networks.return_value = initial_input
         instance.get_networks_count.return_value = 0
         expected_code = exc.HTTPCreated.code
-        with mock.patch.object(dhcp_rpc_agent_api.DhcpAgentNotifyAPI,
-                               'notify') as dhcp_notifier:
+        with mock.patch.object(registry, 'notify') as notify:
             if opname == 'create':
                 res = self.api.post_json(
                     _get_path('networks'),
@@ -1367,35 +1394,27 @@ class DHCPNotificationTest(APIv2TestBase):
             if opname == 'delete':
                 res = self.api.delete(_get_path('networks', id=_uuid()))
                 expected_code = exc.HTTPNoContent.code
-            expected_item = mock.call(mock.ANY, mock.ANY,
-                                      resource + "." + opname + ".end")
-            if initial_input and resource not in initial_input:
-                resource += 's'
-            num = len(initial_input[resource]) if initial_input and isinstance(
-                initial_input[resource], list) else 1
-            expected = [expected_item for x in moves.range(num)]
-            self.assertEqual(expected, dhcp_notifier.call_args_list)
-            self.assertEqual(num, dhcp_notifier.call_count)
+            self.assertTrue(notify.called)
         self.assertEqual(expected_code, res.status_int)
 
-    def test_network_create_dhcp_notifer(self):
+    def test_network_create_registry_notify(self):
         input = {'network': {'name': 'net',
                              'tenant_id': _uuid()}}
-        self._test_dhcp_notifier('create', 'network', input)
+        self._test_registry_notify('create', 'network', input)
 
-    def test_network_delete_dhcp_notifer(self):
-        self._test_dhcp_notifier('delete', 'network')
+    def test_network_delete_registry_notify(self):
+        self._test_registry_notify('delete', 'network')
 
-    def test_network_update_dhcp_notifer(self):
+    def test_network_update_registry_notify(self):
         input = {'network': {'name': 'net'}}
-        self._test_dhcp_notifier('update', 'network', input)
+        self._test_registry_notify('update', 'network', input)
 
-    def test_networks_create_bulk_dhcp_notifer(self):
+    def test_networks_create_bulk_registry_notify(self):
         input = {'networks': [{'name': 'net1',
                                'tenant_id': _uuid()},
                               {'name': 'net2',
                                'tenant_id': _uuid()}]}
-        self._test_dhcp_notifier('create', 'network', input)
+        self._test_registry_notify('create', 'network', input)
 
 
 class QuotaTest(APIv2TestBase):
@@ -1497,7 +1516,9 @@ class ExtensionTestCase(base.BaseTestCase):
 
     def test_extended_create(self):
         net_id = _uuid()
-        initial_input = {'network': {'name': 'net1', 'tenant_id': _uuid(),
+        tenant_id = _uuid()
+        initial_input = {'network': {'name': 'net1', 'tenant_id': tenant_id,
+                                     'project_id': tenant_id,
                                      'v2attrs:something_else': "abc"}}
         data = {'network': {'admin_state_up': True, 'shared': False}}
         data['network'].update(initial_input['network'])
@@ -1592,7 +1613,7 @@ class FiltersTestCase(base.BaseTestCase):
         request = webob.Request.blank(path)
         attr_info = {
             'foo': {
-                'convert_list_to': attributes.convert_kvp_list_to_dict,
+                'convert_list_to': converters.convert_kvp_list_to_dict,
             }
         }
         expect_val = {'foo': {'key': ['2', '4']}, 'bar': ['3'], 'qux': ['1']}
@@ -1602,7 +1623,7 @@ class FiltersTestCase(base.BaseTestCase):
     def test_attr_info_with_convert_to(self):
         path = '/?foo=4&bar=3&baz=2&qux=1'
         request = webob.Request.blank(path)
-        attr_info = {'foo': {'convert_to': attributes.convert_to_int}}
+        attr_info = {'foo': {'convert_to': converters.convert_to_int}}
         expect_val = {'foo': [4], 'bar': ['3'], 'baz': ['2'], 'qux': ['1']}
         actual_val = api_common.get_filters(request, attr_info)
         self.assertEqual(expect_val, actual_val)

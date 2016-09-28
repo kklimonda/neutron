@@ -15,9 +15,12 @@
 
 import eventlet
 import netaddr
+from neutron_lib import constants as lib_const
 from oslo_config import cfg
+from oslo_context import context as common_context
 from oslo_log import log as logging
 import oslo_messaging
+from oslo_serialization import jsonutils
 from oslo_service import loopingcall
 from oslo_service import periodic_task
 from oslo_utils import excutils
@@ -31,6 +34,8 @@ from neutron.agent.l3 import dvr_edge_router as dvr_router
 from neutron.agent.l3 import dvr_local_router as dvr_local_router
 from neutron.agent.l3 import ha
 from neutron.agent.l3 import ha_router
+from neutron.agent.l3 import l3_agent_extension_api as l3_ext_api
+from neutron.agent.l3 import l3_agent_extensions_manager as l3_ext_manager
 from neutron.agent.l3 import legacy_router
 from neutron.agent.l3 import namespace_manager
 from neutron.agent.l3 import namespaces
@@ -48,15 +53,9 @@ from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
+from neutron.common import utils
 from neutron import context as n_context
 from neutron import manager
-
-try:
-    from neutron_fwaas.services.firewall.agents.l3reference \
-        import firewall_l3_agent
-except Exception:
-    # TODO(dougw) - REMOVE THIS FROM NEUTRON; during l3_agent refactor only
-    from neutron.services.firewall.agents.l3reference import firewall_l3_agent
 
 LOG = logging.getLogger(__name__)
 # TODO(Carl) Following constants retained to increase SNR during refactoring
@@ -68,6 +67,13 @@ EXTERNAL_DEV_PREFIX = namespaces.EXTERNAL_DEV_PREFIX
 # Needed to reduce load on server side and to speed up resync on agent side.
 SYNC_ROUTERS_MAX_CHUNK_SIZE = 256
 SYNC_ROUTERS_MIN_CHUNK_SIZE = 32
+
+
+def log_verbose_exc(message, router_payload):
+    LOG.exception(message)
+    LOG.debug("Payload:\n%s",
+              utils.DelayedStringRenderer(jsonutils.dumps,
+                                          router_payload, indent=5))
 
 
 class L3PluginApi(object):
@@ -159,8 +165,7 @@ class L3PluginApi(object):
                           host=self.host, network_id=fip_net)
 
 
-class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
-                 ha.AgentMixin,
+class L3NATAgent(ha.AgentMixin,
                  dvr.AgentMixin,
                  manager.Manager):
     """Manager for L3NatAgent
@@ -196,7 +201,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
         self.driver = common_utils.load_interface_driver(self.conf)
 
-        self.context = n_context.get_admin_context_without_session()
+        self._context = n_context.get_admin_context_without_session()
         self.plugin_rpc = L3PluginApi(topics.L3PLUGIN, host)
         self.fullsync = True
         self.sync_routers_chunk_size = SYNC_ROUTERS_MAX_CHUNK_SIZE
@@ -226,9 +231,11 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                                     'to retrieve service plugins enabled. '
                                     'Check connectivity to neutron server. '
                                     'Retrying... '
-                                    'Detailed message: %(msg)s.') % {'msg': e})
+                                    'Detailed message: %(msg)s.'), {'msg': e})
                     continue
             break
+
+        self.init_extension_manager(self.plugin_rpc)
 
         self.metadata_driver = None
         if self.conf.enable_metadata_proxy:
@@ -240,7 +247,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             self.metadata_driver)
 
         self._queue = queue.RouterProcessingQueue()
-        super(L3NATAgent, self).__init__(conf=self.conf)
+        super(L3NATAgent, self).__init__(host=self.conf.host)
 
         self.target_ex_net_id = None
         self.use_ipv6 = ipv6_utils.is_enabled()
@@ -261,12 +268,6 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             msg = _LE('An interface driver must be specified')
             LOG.error(msg)
             raise SystemExit(1)
-        if self.conf.external_network_bridge:
-            LOG.warning(_LW("Using an 'external_network_bridge' value other "
-                            "than '' is deprecated. Any other values may "
-                            "not be supported in the future. Note that the "
-                            "default value is 'br-ex' so it must be "
-                            "explicitly set to a blank value."))
 
         if self.conf.ipv6_gateway:
             # ipv6_gateway configured. Check for valid v6 link-local address.
@@ -324,12 +325,12 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             kwargs['host'] = self.host
 
         if router.get('distributed') and router.get('ha'):
-            if self.conf.agent_mode == l3_constants.L3_AGENT_MODE_DVR_SNAT:
+            if self.conf.agent_mode == lib_const.L3_AGENT_MODE_DVR_SNAT:
                 kwargs['state_change_callback'] = self.enqueue_state_change
                 return dvr_edge_ha_router.DvrEdgeHaRouter(*args, **kwargs)
 
         if router.get('distributed'):
-            if self.conf.agent_mode == l3_constants.L3_AGENT_MODE_DVR_SNAT:
+            if self.conf.agent_mode == lib_const.L3_AGENT_MODE_DVR_SNAT:
                 return dvr_router.DvrEdgeRouter(*args, **kwargs)
             else:
                 return dvr_local_router.DvrLocalRouter(*args, **kwargs)
@@ -349,14 +350,12 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
         ri.initialize(self.process_monitor)
 
-        # TODO(Carl) This is a hook in to fwaas.  It should be cleaned up.
-        self.process_router_add(ri)
-
     def _safe_router_removed(self, router_id):
         """Try to delete a router and return True if successful."""
 
         try:
             self._router_removed(router_id)
+            self.l3_ext_manager.delete_router(self.context, router_id)
         except Exception:
             LOG.exception(_LE('Error while deleting router %s'), router_id)
             return False
@@ -378,6 +377,15 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         del self.router_info[router_id]
 
         registry.notify(resources.ROUTER, events.AFTER_DELETE, self, router=ri)
+
+    def init_extension_manager(self, connection):
+        l3_ext_manager.register_opts(self.conf)
+        self.agent_api = l3_ext_api.L3AgentExtensionAPI(self.router_info)
+        self.l3_ext_manager = (
+            l3_ext_manager.L3AgentExtensionsManager(self.conf))
+        self.l3_ext_manager.initialize(
+            connection, lib_const.L3_AGENT_MODE,
+            self.agent_api)
 
     def router_deleted(self, context, router_id):
         """Deal with router deletion RPC message."""
@@ -417,9 +425,6 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                       self.conf.external_network_bridge)
             return
 
-        if self.conf.router_id and router['id'] != self.conf.router_id:
-            raise n_exc.RouterNotCompatibleWithAgent(router_id=router['id'])
-
         # Either ex_net_id or handle_internal_only_routers must be set
         ex_net_id = (router['external_gateway_info'] or {}).get('network_id')
         if not ex_net_id and not self.conf.handle_internal_only_routers:
@@ -445,6 +450,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         ri.router = router
         ri.process(self)
         registry.notify(resources.ROUTER, events.AFTER_CREATE, self, router=ri)
+        self.l3_ext_manager.add_router(self.context, router)
 
     def _process_updated_router(self, router):
         ri = self.router_info[router['id']]
@@ -453,6 +459,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                         self, router=ri)
         ri.process(self)
         registry.notify(resources.ROUTER, events.AFTER_UPDATE, self, router=ri)
+        self.l3_ext_manager.update_router(self.context, router)
 
     def _resync_router(self, router_update,
                        priority=queue.PRIORITY_SYNC_ROUTERS_TASK):
@@ -500,15 +507,16 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             try:
                 self._process_router_if_compatible(router)
             except n_exc.RouterNotCompatibleWithAgent as e:
-                LOG.exception(e.msg)
+                log_verbose_exc(e.msg, router)
                 # Was the router previously handled by this agent?
                 if router['id'] in self.router_info:
                     LOG.error(_LE("Removing incompatible router '%s'"),
                               router['id'])
                     self._safe_router_removed(router['id'])
             except Exception:
-                msg = _LE("Failed to process compatible router '%s'")
-                LOG.exception(msg, update.id)
+                log_verbose_exc(
+                    _LE("Failed to process compatible router: %s") % update.id,
+                    router)
                 self._resync_router(update)
                 continue
 
@@ -526,7 +534,6 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
     # is responsible for task execution.
     @periodic_task.periodic_task(spacing=1, run_immediately=True)
     def periodic_sync_routers_task(self, context):
-        self.process_services_sync(context)
         if not self.fullsync:
             return
         LOG.debug("Starting fullsync periodic_sync_routers_task")
@@ -550,15 +557,15 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         prev_router_ids = set(self.router_info)
         curr_router_ids = set()
         timestamp = timeutils.utcnow()
-
+        router_ids = []
+        chunk = []
         try:
-            router_ids = ([self.conf.router_id] if self.conf.router_id else
-                          self.plugin_rpc.get_router_ids(context))
+            router_ids = self.plugin_rpc.get_router_ids(context)
             # fetch routers by chunks to reduce the load on server and to
             # start router processing earlier
             for i in range(0, len(router_ids), self.sync_routers_chunk_size):
-                routers = self.plugin_rpc.get_routers(
-                    context, router_ids[i:i + self.sync_routers_chunk_size])
+                chunk = router_ids[i:i + self.sync_routers_chunk_size]
+                routers = self.plugin_rpc.get_routers(context, chunk)
                 LOG.debug('Processing :%r', routers)
                 for r in routers:
                     curr_router_ids.add(r['id'])
@@ -567,8 +574,12 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                         # need to keep fip namespaces as well
                         ext_net_id = (r['external_gateway_info'] or {}).get(
                             'network_id')
+                        is_snat_agent = (self.conf.agent_mode ==
+                            lib_const.L3_AGENT_MODE_DVR_SNAT)
                         if ext_net_id:
                             ns_manager.keep_ext_net(ext_net_id)
+                        elif is_snat_agent:
+                            ns_manager.ensure_snat_cleanup(r['id'])
                     update = queue.RouterUpdate(
                         r['id'],
                         queue.PRIORITY_SYNC_ROUTERS_TASK,
@@ -591,7 +602,9 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                           self.sync_routers_chunk_size)
             raise
         except oslo_messaging.MessagingException:
-            LOG.exception(_LE("Failed synchronizing routers due to RPC error"))
+            failed_routers = chunk or router_ids
+            LOG.exception(_LE("Failed synchronizing routers '%s' "
+                              "due to RPC error"), failed_routers)
             raise n_exc.AbortSyncRouters()
 
         self.fullsync = False
@@ -610,6 +623,13 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                                         timestamp=timestamp,
                                         action=queue.DELETE_ROUTER)
             self._queue.add(update)
+
+    @property
+    def context(self):
+        # generate a new request-id on each call to make server side tracking
+        # of RPC calls easier.
+        self._context.request_id = common_context.generate_request_id()
+        return self._context
 
     def after_start(self):
         # Note: the FWaaS' vArmourL3NATAgent is a subclass of L3NATAgent. It
@@ -641,7 +661,6 @@ class L3NATAgentWithStateReport(L3NATAgent):
             'topic': topics.L3_AGENT,
             'configurations': {
                 'agent_mode': self.conf.agent_mode,
-                'router_id': self.conf.router_id,
                 'handle_internal_only_routers':
                 self.conf.handle_internal_only_routers,
                 'external_network_bridge': self.conf.external_network_bridge,
@@ -650,7 +669,7 @@ class L3NATAgentWithStateReport(L3NATAgent):
                 'interface_driver': self.conf.interface_driver,
                 'log_agent_heartbeats': self.conf.AGENT.log_agent_heartbeats},
             'start_flag': True,
-            'agent_type': l3_constants.AGENT_TYPE_L3}
+            'agent_type': lib_const.AGENT_TYPE_L3}
         report_interval = self.conf.AGENT.report_interval
         if report_interval:
             self.heartbeat = loopingcall.FixedIntervalLoopingCall(
@@ -667,9 +686,9 @@ class L3NATAgentWithStateReport(L3NATAgent):
             ex_gw_port = ri.get_ex_gw_port()
             if ex_gw_port:
                 num_ex_gw_ports += 1
-            num_interfaces += len(ri.router.get(l3_constants.INTERFACE_KEY,
+            num_interfaces += len(ri.router.get(lib_const.INTERFACE_KEY,
                                                 []))
-            num_floating_ips += len(ri.router.get(l3_constants.FLOATINGIP_KEY,
+            num_floating_ips += len(ri.router.get(lib_const.FLOATINGIP_KEY,
                                                   []))
         configurations = self.agent_state['configurations']
         configurations['routers'] = num_routers
