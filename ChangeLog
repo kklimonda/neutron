@@ -1,6 +1,54 @@
 CHANGES
 =======
 
+9.0.0.0rc2
+----------
+
+* Process OVS trunk bridges associated to VM deletes
+* Correct fix for IPv6 auto address interfaces
+* Refetch subnet/network from DB in ML2 update ops
+* Add missing revision number altercations
+* Send a callback before attaching a subnet to a router
+* Fixes for missing IPs on subnets in DHCP agent
+* Not check subnet with dhcp disabled when get_isolated_subnets
+* Handle add/remove subports events loss due to agent failures
+* ovsfw: fix troublesome port_rule_masking
+* Add MAC address to subports in trunk_details
+* Retry port update on IpAddressAllocationNotFound
+* Fix dhcp_release6 error when not supported
+* Fix ML2 revision_number handling in port updates
+* Fix ML2 test extension driver API test cases
+* Update trunk metadata during wire/unwire operations
+* Ensure trunk status is acknowledged during OVS subport operations
+* Allow more time for DB migration tests
+* Try to reuse existing IPs when a port update specifies subnet
+* Clean-up Tempest test networks with project_id
+* Add to rally quotas to handle worst case quota race
+* Add basic status transition trunk scenario test
+* Stop oslo_messaging from error logging CallbackNotFound
+* Garbage collect HasStandardAttributes subclasses in StandardAttrTestCase
+* Install dibbler.filters rootwrap file
+* Add admin api tests for project-id
+* Fix a release note typo for implicit provider loading deprecation
+* Do not retry default security group creation
+* fullstack: execute qos tests for all ovsdb/of interface permutations
+* OVS agent: configure both OF10 and OF13
+* Always cleanup stale devices on DHCP setup failure
+* Fix linuxbridge trunk subport RPC event handler
+* Make DHCP agent use 'revision_number'
+* Don't immediately restart in DHCP agent on port change
+* Updated from global requirements
+* DHCP: enhance DHCP release log
+* Forbid importing neutron.tests.* from outside tests subtree
+* Don't warn in VLAN Plumber on tagless children
+* Disable DHCP on agent port removal
+* Change the prefix for trunk subports device_owner
+* Include timezone in timestamp fields
+* Add common way to extend standard attribute models
+* Fix useless use of _nxm variant in an OVS field name
+* Update UPPER_CONSTRAINTS_FILE for stable/newton
+* Update .gitreview for stable/newton
+
 9.0.0.0rc1
 ----------
 

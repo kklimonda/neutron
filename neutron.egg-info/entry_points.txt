@@ -96,7 +96,7 @@ revisions = neutron.services.revisions.revision_plugin:RevisionPlugin
 router = neutron.services.l3_router.l3_router_plugin:L3RouterPlugin
 segments = neutron.services.segments.plugin:Plugin
 tag = neutron.services.tag.tag_plugin:TagPlugin
-timestamp_core = neutron.services.timestamp.timestamp_plugin:TimeStampPlugin
+timestamp = neutron.services.timestamp.timestamp_plugin:TimeStampPlugin
 trunk = neutron.services.trunk.plugin:TrunkPlugin
 
 [neutron.services.external_dns_drivers]
