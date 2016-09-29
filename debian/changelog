@@ -1,3 +1,9 @@
+neutron (2:9.0.0~rc3-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream release candidate for OpenStack Newton.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 29 Sep 2016 08:17:58 -0400
+
 neutron (2:9.0.0~rc2-0ubuntu1) yakkety; urgency=medium
 
   * New upstream release candidate for OpenStack Newton.
