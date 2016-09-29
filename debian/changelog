@@ -1,3 +1,10 @@
+neutron (2:9.0.0~rc3-0ubuntu2) UNRELEASED; urgency=medium
+
+  * d/control: oslo.log min version level in global-requirements is too low,
+    so set min version to upper-constraints level (LP: #1628883).
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 29 Sep 2016 08:38:44 -0400
+
 neutron (2:9.0.0~rc3-0ubuntu1) yakkety; urgency=medium
 
   * New upstream release candidate for OpenStack Newton.
