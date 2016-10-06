@@ -1,8 +1,8 @@
 CHANGES
 =======
 
-9.0.0.0rc3
-----------
+9.0.0
+-----
 
 * Ignore NULL fixed_ips for duplicate floating_ip check
 
