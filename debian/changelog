@@ -1,4 +1,4 @@
-neutron (2:9.0.0-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.0.0-0ubuntu1) yakkety; urgency=medium
 
   [ Corey Bryant ]
   * d/control: oslo.log min version level in global-requirements is too low,
