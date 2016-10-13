@@ -13,14 +13,16 @@
 #    under the License.
 
 from oslo_config import cfg
+from oslo_db import api as oslo_db_api
+from oslo_db import exception as oslo_db_exception
 from oslo_log import log
 from oslo_utils import excutils
 from sqlalchemy import event
 from sqlalchemy import exc as sql_exc
 
-from neutron._i18n import _LE, _LW
 from neutron.db import api as db_api
 from neutron.db.quota import api as quota_api
+from neutron.i18n import _LE, _LW
 
 LOG = log.getLogger(__name__)
 
@@ -34,7 +36,8 @@ def _count_resource(context, plugin, collection_name, tenant_id):
     # and count in python, allowing older plugins to still be supported
     try:
         obj_count_getter = getattr(plugin, count_getter_name)
-        return obj_count_getter(context, filters={'tenant_id': [tenant_id]})
+        meh = obj_count_getter(context, filters={'tenant_id': [tenant_id]})
+        return meh
     except (NotImplementedError, AttributeError):
         obj_getter = getattr(plugin, "get_%s" % collection_name)
         obj_list = obj_getter(context, filters={'tenant_id': [tenant_id]})
@@ -207,7 +210,11 @@ class TrackedResource(BaseResource):
     # can happen is two or more workers are trying to create a resource of a
     # give kind for the same tenant concurrently. Retrying the operation will
     # ensure that an UPDATE statement is emitted rather than an INSERT one
-    @db_api.retry_if_session_inactive()
+    @oslo_db_api.wrap_db_retry(
+        max_retries=db_api.MAX_RETRIES,
+        exception_checker=lambda exc:
+        isinstance(exc, (oslo_db_exception.DBDuplicateEntry,
+                         oslo_db_exception.DBDeadlock)))
     def _set_quota_usage(self, context, tenant_id, in_use):
         return quota_api.set_quota_usage(
             context, self.name, tenant_id, in_use=in_use)

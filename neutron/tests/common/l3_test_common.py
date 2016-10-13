@@ -1,4 +1,4 @@
-# Copyright (c) 2015 OpenStack Foundation
+# Copyright (c) 2015 Openstack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -13,13 +13,11 @@
 #    under the License.
 
 import copy
-
 import netaddr
-from neutron_lib import constants as lib_constants
 from oslo_utils import uuidutils
 from six import moves
 
-from neutron.common import constants as n_const
+from neutron.common import constants as l3_constants
 
 _uuid = uuidutils.generate_uuid
 
@@ -33,7 +31,7 @@ def get_ha_interface(ip='169.254.192.1', mac='12:34:56:78:2b:5d'):
     subnet_id = _uuid()
     return {'admin_state_up': True,
             'device_id': _uuid(),
-            'device_owner': lib_constants.DEVICE_OWNER_ROUTER_HA_INTF,
+            'device_owner': 'network:router_ha_interface',
             'fixed_ips': [{'ip_address': ip,
                            'prefixlen': 18,
                            'subnet_id': subnet_id}],
@@ -54,7 +52,7 @@ def get_ha_interface(ip='169.254.192.1', mac='12:34:56:78:2b:5d'):
 def prepare_router_data(ip_version=4, enable_snat=None, num_internal_ports=1,
                         enable_floating_ip=False, enable_ha=False,
                         extra_routes=False, dual_stack=False,
-                        enable_gw=True, v6_ext_gw_with_sub=True, **kwargs):
+                        v6_ext_gw_with_sub=True, **kwargs):
     fixed_ips = []
     subnets = []
     gateway_mac = kwargs.get('gateway_mac', 'ca:fe:de:ad:be:ee')
@@ -87,14 +85,12 @@ def prepare_router_data(ip_version=4, enable_snat=None, num_internal_ports=1,
         raise ValueError("Invalid ip_version: %s" % ip_version)
 
     router_id = _uuid()
-    ex_gw_port = {}
-    if enable_gw:
-        ex_gw_port = {'id': _uuid(),
-                      'mac_address': gateway_mac,
-                      'network_id': _uuid(),
-                      'fixed_ips': fixed_ips,
-                      'subnets': subnets,
-                      'extra_subnets': extra_subnets}
+    ex_gw_port = {'id': _uuid(),
+                  'mac_address': gateway_mac,
+                  'network_id': _uuid(),
+                  'fixed_ips': fixed_ips,
+                  'subnets': subnets,
+                  'extra_subnets': extra_subnets}
 
     routes = []
     if extra_routes:
@@ -103,12 +99,12 @@ def prepare_router_data(ip_version=4, enable_snat=None, num_internal_ports=1,
     router = {
         'id': router_id,
         'distributed': False,
-        lib_constants.INTERFACE_KEY: [],
+        l3_constants.INTERFACE_KEY: [],
         'routes': routes,
         'gw_port': ex_gw_port}
 
     if enable_floating_ip:
-        router[lib_constants.FLOATINGIP_KEY] = [{
+        router[l3_constants.FLOATINGIP_KEY] = [{
             'id': _uuid(),
             'port_id': _uuid(),
             'status': 'DOWN',
@@ -120,7 +116,7 @@ def prepare_router_data(ip_version=4, enable_snat=None, num_internal_ports=1,
     if enable_ha:
         router['ha'] = True
         router['ha_vr_id'] = 1
-        router[lib_constants.HA_INTERFACE_KEY] = (get_ha_interface())
+        router[l3_constants.HA_INTERFACE_KEY] = (get_ha_interface())
 
     if enable_snat is not None:
         router['enable_snat'] = enable_snat
@@ -133,7 +129,7 @@ def get_subnet_id(port):
 
 def router_append_interface(router, count=1, ip_version=4, ra_mode=None,
                             addr_mode=None, dual_stack=False):
-    interfaces = router[lib_constants.INTERFACE_KEY]
+    interfaces = router[l3_constants.INTERFACE_KEY]
     current = sum(
         [netaddr.IPNetwork(subnet['cidr']).version == ip_version
          for p in interfaces for subnet in p['subnets']])
@@ -180,7 +176,7 @@ def router_append_interface(router, count=1, ip_version=4, ra_mode=None,
 
 def router_append_subnet(router, count=1, ip_version=4,
                          ipv6_subnet_modes=None, interface_id=None,
-                         dns_nameservers=None, network_mtu=0):
+                         network_mtu=0):
     if ip_version == 6:
         subnet_mode_none = {'ra_mode': None, 'address_mode': None}
         if not ipv6_subnet_modes:
@@ -203,7 +199,7 @@ def router_append_subnet(router, count=1, ip_version=4,
     else:
         raise ValueError("Invalid ip_version: %s" % ip_version)
 
-    interfaces = copy.deepcopy(router.get(lib_constants.INTERFACE_KEY, []))
+    interfaces = copy.deepcopy(router.get(l3_constants.INTERFACE_KEY, []))
     if interface_id:
         try:
             interface = next(i for i in interfaces
@@ -227,7 +223,6 @@ def router_append_subnet(router, count=1, ip_version=4,
                 {'id': subnet_id,
                  'cidr': cidr_pool % (i + num_existing_subnets),
                  'gateway_ip': gw_pool % (i + num_existing_subnets),
-                 'dns_nameservers': dns_nameservers,
                  'ipv6_ra_mode': ipv6_subnet_modes[i]['ra_mode'],
                  'ipv6_address_mode': ipv6_subnet_modes[i]['address_mode']})
 
@@ -248,11 +243,11 @@ def router_append_subnet(router, count=1, ip_version=4,
              'fixed_ips': fixed_ips,
              'subnets': subnets})
 
-    router[lib_constants.INTERFACE_KEY] = interfaces
+    router[l3_constants.INTERFACE_KEY] = interfaces
 
 
 def router_append_pd_enabled_subnet(router, count=1):
-    interfaces = router[lib_constants.INTERFACE_KEY]
+    interfaces = router[l3_constants.INTERFACE_KEY]
     current = sum(netaddr.IPNetwork(subnet['cidr']).version == 6
                   for p in interfaces for subnet in p['subnets'])
 
@@ -269,10 +264,10 @@ def router_append_pd_enabled_subnet(router, count=1):
                                'subnet_id': subnet_id}],
                 'mac_address': str(mac_address),
                 'subnets': [{'id': subnet_id,
-                             'cidr': n_const.PROVISIONAL_IPV6_PD_PREFIX,
+                             'cidr': l3_constants.PROVISIONAL_IPV6_PD_PREFIX,
                              'gateway_ip': '::1',
-                             'ipv6_ra_mode': lib_constants.IPV6_SLAAC,
-                             'subnetpool_id': lib_constants.IPV6_PD_POOL_ID}]}
+                             'ipv6_ra_mode': l3_constants.IPV6_SLAAC,
+                             'subnetpool_id': l3_constants.IPV6_PD_POOL_ID}]}
         interfaces.append(intf)
         pd_intfs.append(intf)
         mac_address.value += 1

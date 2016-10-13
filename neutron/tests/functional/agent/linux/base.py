@@ -12,10 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from debtcollector import moves
 import testscenarios
 
-from neutron.common import utils
+from neutron.tests import base as tests_base
 from neutron.tests.functional import base
 
 
@@ -27,14 +26,12 @@ MARKED_BLOCK_RULE = '-m mark --mark %s -j DROP' % MARK_VALUE
 ICMP_BLOCK_RULE = '-p icmp -j DROP'
 
 
-get_rand_name = moves.moved_function(
-    utils.get_rand_name, 'get_rand_name', __name__,
-    message='use "neutron.common.utils.get_rand_name" instead',
-    version='Newton', removal_version='Ocata')
+#TODO(jschwarz): Move these two functions to neutron/tests/common/
+get_rand_name = tests_base.get_rand_name
 
 
 # Regarding MRO, it goes BaseOVSLinuxTestCase, WithScenarios,
-# BaseSudoTestCase, ..., UnitTest, object. setUp is not defined in
+# BaseSudoTestCase, ..., UnitTest, object. setUp is not dfined in
 # WithScenarios, so it will correctly be found in BaseSudoTestCase.
 class BaseOVSLinuxTestCase(testscenarios.WithScenarios, base.BaseSudoTestCase):
     scenarios = [

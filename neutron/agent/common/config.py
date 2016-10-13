@@ -16,25 +16,21 @@
 import os
 
 from oslo_config import cfg
+from oslo_log import log as logging
 
-from neutron._i18n import _
 from neutron.common import config
+
+
+LOG = logging.getLogger(__name__)
 
 
 ROOT_HELPER_OPTS = [
     cfg.StrOpt('root_helper', default='sudo',
-               help=_("Root helper application. "
-                      "Use 'sudo neutron-rootwrap /etc/neutron/rootwrap.conf' "
-                      "to use the real root filter facility. Change to 'sudo' "
-                      "to skip the filtering and just run the command "
-                      "directly.")),
+               help=_('Root helper application.')),
     cfg.BoolOpt('use_helper_for_ns_read',
                 default=True,
-                help=_("Use the root helper when listing the namespaces on a "
-                       "system. This may not be required depending on the "
-                       "security configuration. If the root helper is "
-                       "not required, set this to False for a performance "
-                       "improvement.")),
+                help=_('Use the root helper to read the namespaces from '
+                       'the operating system.')),
     # We can't just use root_helper=sudo neutron-rootwrap-daemon $cfg because
     # it isn't appropriate for long-lived processes spawned with create_process
     # Having a bool use_rootwrap_daemon option precludes specifying the
@@ -57,19 +53,16 @@ INTERFACE_DRIVER_OPTS = [
                help=_("The driver used to manage the virtual interface.")),
 ]
 
+USE_NAMESPACES_OPTS = [
+    cfg.BoolOpt('use_namespaces', default=True,
+                help=_("Allow overlapping IP. This option is deprecated and "
+                       "will be removed in a future release."),
+                deprecated_for_removal=True),
+]
+
 IPTABLES_OPTS = [
     cfg.BoolOpt('comment_iptables_rules', default=True,
-                help=_("Add comments to iptables rules. "
-                       "Set to false to disallow the addition of comments to "
-                       "generated iptables rules that describe each rule's "
-                       "purpose. System must support the iptables comments "
-                       "module for addition of comments.")),
-    cfg.BoolOpt('debug_iptables_rules', default=False,
-                help=_("Duplicate every iptables difference calculation to "
-                       "ensure the format being generated matches the format "
-                       "of iptables-save. This option should not be turned "
-                       "on for production systems because it imposes a "
-                       "performance penalty.")),
+                help=_("Add comments to iptables rules.")),
 ]
 
 PROCESS_MONITOR_OPTS = [
@@ -81,29 +74,13 @@ PROCESS_MONITOR_OPTS = [
                       '(seconds), use 0 to disable')),
 ]
 
-AVAILABILITY_ZONE_OPTS = [
-    # The default AZ name "nova" is selected to match the default
-    # AZ name in Nova and Cinder.
-    cfg.StrOpt('availability_zone', max_length=255, default='nova',
-               help=_("Availability zone of this node")),
-]
-
-EXT_NET_BRIDGE_OPTS = [
-    cfg.StrOpt('external_network_bridge', default='',
-               deprecated_for_removal=True,
-               help=_("Name of bridge used for external network "
-                      "traffic. When this parameter is set, the L3 agent will "
-                      "plug an interface directly into an external bridge "
-                      "which will not allow any wiring by the L2 agent. Using "
-                      "this will result in incorrect port statuses. This "
-                      "option is deprecated and will be removed in Ocata."))
-]
-
 
 def get_log_args(conf, log_file_name, **kwargs):
     cmd_args = []
     if conf.debug:
         cmd_args.append('--debug')
+    if conf.verbose:
+        cmd_args.append('--verbose')
     if (conf.log_dir or conf.log_file):
         cmd_args.append('--log-file=%s' % log_file_name)
         log_dir = None
@@ -139,16 +116,16 @@ def register_interface_driver_opts_helper(conf):
     conf.register_opts(INTERFACE_DRIVER_OPTS)
 
 
+def register_use_namespaces_opts_helper(conf):
+    conf.register_opts(USE_NAMESPACES_OPTS)
+
+
 def register_iptables_opts(conf):
     conf.register_opts(IPTABLES_OPTS, 'AGENT')
 
 
 def register_process_monitor_opts(conf):
     conf.register_opts(PROCESS_MONITOR_OPTS, 'AGENT')
-
-
-def register_availability_zone_opts_helper(conf):
-    conf.register_opts(AVAILABILITY_ZONE_OPTS, 'AGENT')
 
 
 def get_root_helper(conf):
@@ -159,8 +136,7 @@ def setup_conf():
     bind_opts = [
         cfg.StrOpt('state_path',
                    default='/var/lib/neutron',
-                   help=_("Where to store Neutron state files. "
-                          "This directory must be writable by the agent.")),
+                   help=_('Top-level directory for maintaining dhcp state')),
     ]
 
     conf = cfg.ConfigOpts()

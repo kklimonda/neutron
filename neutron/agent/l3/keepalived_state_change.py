@@ -20,13 +20,12 @@ from oslo_config import cfg
 from oslo_log import log as logging
 import requests
 
-from neutron._i18n import _, _LE
 from neutron.agent.l3 import ha
 from neutron.agent.linux import daemon
 from neutron.agent.linux import ip_monitor
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import config
-from neutron.conf.agent.l3 import keepalived
+from neutron.i18n import _LE
 
 
 LOG = logging.getLogger(__name__)
@@ -98,16 +97,42 @@ class MonitorDaemon(daemon.Daemon):
         LOG.debug('Notified agent router %s, state %s', self.router_id, state)
 
 
+def register_opts(conf):
+    conf.register_cli_opt(
+        cfg.StrOpt('router_id', help=_('ID of the router')))
+    conf.register_cli_opt(
+        cfg.StrOpt('namespace', help=_('Namespace of the router')))
+    conf.register_cli_opt(
+        cfg.StrOpt('conf_dir', help=_('Path to the router directory')))
+    conf.register_cli_opt(
+        cfg.StrOpt('monitor_interface', help=_('Interface to monitor')))
+    conf.register_cli_opt(
+        cfg.StrOpt('monitor_cidr', help=_('CIDR to monitor')))
+    conf.register_cli_opt(
+        cfg.StrOpt('pid_file', help=_('Path to PID file for this process')))
+    conf.register_cli_opt(
+        cfg.StrOpt('user', help=_('User (uid or name) running this process '
+                                  'after its initialization')))
+    conf.register_cli_opt(
+        cfg.StrOpt('group', help=_('Group (gid or name) running this process '
+                                   'after its initialization')))
+    conf.register_opt(
+        cfg.StrOpt('metadata_proxy_socket',
+                   default='$state_path/metadata_proxy',
+                   help=_('Location of Metadata Proxy UNIX domain '
+                          'socket')))
+
+
 def configure(conf):
     config.init(sys.argv[1:])
     conf.set_override('log_dir', cfg.CONF.conf_dir)
     conf.set_override('debug', True)
+    conf.set_override('verbose', True)
     config.setup_logging()
 
 
 def main():
-    keepalived.register_cli_l3_agent_keepalived_opts()
-    keepalived.register_l3_agent_keepalived_opts()
+    register_opts(cfg.CONF)
     configure(cfg.CONF)
     MonitorDaemon(cfg.CONF.pid_file,
                   cfg.CONF.router_id,

@@ -15,7 +15,6 @@
 
 from oslo_config import cfg
 
-from neutron._i18n import _
 
 ml2_opts = [
     cfg.ListOpt('type_drivers',
@@ -25,9 +24,7 @@ ml2_opts = [
     cfg.ListOpt('tenant_network_types',
                 default=['local'],
                 help=_("Ordered list of network_types to allocate as tenant "
-                       "networks. The default value 'local' is useful for "
-                       "single-box testing but provides no connectivity "
-                       "between hosts.")),
+                       "networks.")),
     cfg.ListOpt('mechanism_drivers',
                 default=[],
                 help=_("An ordered list of networking mechanism driver "
@@ -37,22 +34,23 @@ ml2_opts = [
                 default=[],
                 help=_("An ordered list of extension driver "
                        "entrypoints to be loaded from the "
-                       "neutron.ml2.extension_drivers namespace. "
-                       "For example: extension_drivers = port_security,qos")),
+                       "neutron.ml2.extension_drivers namespace.")),
     cfg.IntOpt('path_mtu', default=0,
-               help=_('Maximum size of an IP packet (MTU) that can traverse '
-                      'the underlying physical network infrastructure without '
-                      'fragmentation when using an overlay/tunnel protocol. '
-                      'This option allows specifying a physical network MTU '
-                      'value that differs from the default global_physnet_mtu '
-                      'value.')),
+               help=_('The maximum permissible size of an unfragmented '
+                      'packet travelling from and to addresses where '
+                      'encapsulated Neutron traffic is sent.  If <= 0, '
+                      'the path MTU is indeterminate.')),
+    cfg.IntOpt('segment_mtu', default=0,
+               help=_('The maximum permissible size of an unfragmented '
+                      'packet travelling a L2 network segment.  If <= 0, the '
+                      'segment MTU is indeterminate.')),
     cfg.ListOpt('physical_network_mtus',
                 default=[],
                 help=_("A list of mappings of physical networks to MTU "
                        "values. The format of the mapping is "
                        "<physnet>:<mtu val>. This mapping allows "
                        "specifying a physical network MTU value that "
-                       "differs from the default global_physnet_mtu value.")),
+                       "differs from the default segment_mtu value.")),
     cfg.StrOpt('external_network_type',
                help=_("Default network type for external networks when no "
                       "provider attributes are specified. By default it is "
@@ -61,11 +59,7 @@ ml2_opts = [
                       "will have the same type as tenant networks. Allowed "
                       "values for external_network_type config option depend "
                       "on the network type values configured in type_drivers "
-                      "config option.")),
-    cfg.IntOpt('overlay_ip_version',
-               default=4,
-               help=_("IP version of all overlay (tunnel) network endpoints. "
-                      "Use a value of 4 for IPv4 or 6 for IPv6."))
+                      "config option."))
 ]
 
 

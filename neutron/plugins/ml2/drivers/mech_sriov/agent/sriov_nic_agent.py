@@ -15,30 +15,28 @@
 
 
 import collections
-import itertools
 import socket
 import sys
 import time
 
-from neutron_lib import constants as n_constants
+import eventlet
+eventlet.monkey_patch()
+
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import loopingcall
-from osprofiler import profiler
 import six
 
-from neutron._i18n import _, _LE, _LI, _LW
-from neutron.agent.l2 import l2_agent_extensions_manager as ext_manager
+from neutron.agent.l2.extensions import manager as ext_manager
 from neutron.agent import rpc as agent_rpc
 from neutron.agent import securitygroups_rpc as sg_rpc
-from neutron.api.rpc.callbacks import resources
 from neutron.common import config as common_config
-from neutron.common import profiler as setup_profiler
+from neutron.common import constants as n_constants
 from neutron.common import topics
 from neutron.common import utils as n_utils
 from neutron import context
-from neutron.extensions import portbindings
+from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common import config
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
@@ -69,21 +67,14 @@ class SriovNicSwitchRpcCallbacks(sg_rpc.SecurityGroupAgentRpcCallbackMixin):
     def port_update(self, context, **kwargs):
         LOG.debug("port_update received")
         port = kwargs.get('port')
-
-        vnic_type = port.get(portbindings.VNIC_TYPE)
-        if vnic_type and vnic_type == portbindings.VNIC_DIRECT_PHYSICAL:
-            LOG.debug("The SR-IOV agent doesn't handle %s ports.",
-                      portbindings.VNIC_DIRECT_PHYSICAL)
-            return
-
         # Put the port mac address in the updated_devices set.
         # Do not store port details, as if they're used for processing
         # notifications there is no guarantee the notifications are
         # processed in the same order as the relevant API requests.
         mac = port['mac_address']
         pci_slot = None
-        if port.get(portbindings.PROFILE):
-            pci_slot = port[portbindings.PROFILE].get('pci_slot')
+        if port.get('binding:profile'):
+            pci_slot = port['binding:profile'].get('pci_slot')
 
         if pci_slot:
             self.agent.updated_devices.add((mac, pci_slot))
@@ -105,7 +96,6 @@ class SriovNicSwitchRpcCallbacks(sg_rpc.SecurityGroupAgentRpcCallbackMixin):
             self.agent.updated_devices.add(port_data['device'])
 
 
-@profiler.trace_cls("rpc")
 class SriovNicSwitchAgent(object):
     def __init__(self, physical_devices_mappings, exclude_devices,
                  polling_interval):
@@ -115,6 +105,14 @@ class SriovNicSwitchAgent(object):
         self.conf = cfg.CONF
         self.setup_eswitch_mgr(physical_devices_mappings,
                                exclude_devices)
+        configurations = {'device_mappings': physical_devices_mappings}
+        self.agent_state = {
+            'binary': 'neutron-sriov-nic-agent',
+            'host': self.conf.host,
+            'topic': n_constants.L2_AGENT_TOPIC,
+            'configurations': configurations,
+            'agent_type': n_constants.AGENT_TYPE_NIC_SWITCH,
+            'start_flag': True}
 
         # Stores port update notifications for processing in the main loop
         self.updated_devices = set()
@@ -127,20 +125,6 @@ class SriovNicSwitchAgent(object):
         self._setup_rpc()
         self.ext_manager = self._create_agent_extension_manager(
             self.connection)
-
-        configurations = {'device_mappings': physical_devices_mappings,
-                          'extensions': self.ext_manager.names()}
-
-        #TODO(mangelajo): optimize resource_versions (see ovs agent)
-        self.agent_state = {
-            'binary': 'neutron-sriov-nic-agent',
-            'host': self.conf.host,
-            'topic': n_constants.L2_AGENT_TOPIC,
-            'configurations': configurations,
-            'agent_type': n_constants.AGENT_TYPE_NIC_SWITCH,
-            'resource_versions': resources.LOCAL_RESOURCE_VERSIONS,
-            'start_flag': True}
-
         # The initialization is complete; we can start receiving messages
         self.connection.consume_in_threads()
         # Initialize iteration counter
@@ -151,13 +135,14 @@ class SriovNicSwitchAgent(object):
         LOG.info(_LI("RPC agent_id: %s"), self.agent_id)
 
         self.topic = topics.AGENT
-        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
         # RPC network init
         # Handle updates from service
         self.endpoints = [SriovNicSwitchRpcCallbacks(self.context, self,
                                                      self.sg_agent)]
         # Define the listening consumers for the agent
         consumers = [[topics.PORT, topics.UPDATE],
+                     [topics.NETWORK, topics.DELETE],
                      [topics.NETWORK, topics.UPDATE],
                      [topics.SECURITY_GROUP, topics.UPDATE]]
         self.connection = agent_rpc.create_consumers(self.endpoints,
@@ -177,21 +162,17 @@ class SriovNicSwitchAgent(object):
             self.agent_state.get('configurations')['devices'] = devices
             self.state_rpc.report_state(self.context,
                                         self.agent_state)
-
-            # we only want to update resource versions on startup
-            self.agent_state.pop('resource_versions', None)
             self.agent_state.pop('start_flag', None)
         except Exception:
             LOG.exception(_LE("Failed reporting state!"))
 
     def _create_agent_extension_manager(self, connection):
         ext_manager.register_opts(self.conf)
-        mgr = ext_manager.L2AgentExtensionsManager(self.conf)
+        mgr = ext_manager.AgentExtensionsManager(self.conf)
         mgr.initialize(connection, 'sriov')
         return mgr
 
-    def setup_eswitch_mgr(self, device_mappings, exclude_devices=None):
-        exclude_devices = exclude_devices or {}
+    def setup_eswitch_mgr(self, device_mappings, exclude_devices={}):
         self.eswitch_mgr = esm.ESwitchManager()
         self.eswitch_mgr.discover_devices(device_mappings, exclude_devices)
 
@@ -333,7 +314,7 @@ class SriovNicSwitchAgent(object):
                     self.ext_manager.delete_port(self.context, port)
                 else:
                     LOG.warning(_LW("port_id to device with MAC "
-                                    "%s not found"), mac)
+                                 "%s not found"), mac)
                 dev_details = self.plugin_rpc.update_device_down(self.context,
                                                                  mac,
                                                                  self.agent_id,
@@ -415,7 +396,7 @@ class SriovNicAgentConfigParser(object):
         Parse and validate the consistency in both mappings
         """
         self.device_mappings = n_utils.parse_mappings(
-            cfg.CONF.SRIOV_NIC.physical_device_mappings, unique_keys=False)
+            cfg.CONF.SRIOV_NIC.physical_device_mappings)
         self.exclude_devices = config.parse_exclude_devices(
             cfg.CONF.SRIOV_NIC.exclude_devices)
         self._validate()
@@ -426,8 +407,7 @@ class SriovNicAgentConfigParser(object):
         Validate that network_device in excluded_device
         exists in device mappings
         """
-        dev_net_set = set(itertools.chain.from_iterable(
-                          six.itervalues(self.device_mappings)))
+        dev_net_set = set(self.device_mappings.values())
         for dev_name in self.exclude_devices.keys():
             if dev_name not in dev_net_set:
                 raise ValueError(_("Device name %(dev_name)s is missing from "
@@ -461,6 +441,9 @@ def main():
         LOG.exception(_LE("Agent Initialization Failed"))
         raise SystemExit(1)
     # Start everything.
-    setup_profiler.setup("neutron-sriov-nic-agent", cfg.CONF.host)
     LOG.info(_LI("Agent initialized successfully, now running... "))
     agent.daemon_loop()
+
+
+if __name__ == '__main__':
+    main()

@@ -15,8 +15,9 @@
 
 import os
 
+from oslo_log import log as logging
+
 from neutron.agent.common import config
-from neutron.agent.l3 import ha_router
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import external_process
 from neutron.agent.linux import utils
@@ -26,6 +27,7 @@ from neutron.callbacks import resources
 from neutron.common import constants
 from neutron.common import exceptions
 
+LOG = logging.getLogger(__name__)
 
 # Access with redirection to metadata proxy iptables mark mask
 METADATA_SERVICE_NAME = 'metadata-proxy'
@@ -33,15 +35,11 @@ METADATA_SERVICE_NAME = 'metadata-proxy'
 
 class MetadataDriver(object):
 
-    monitors = {}
-
     def __init__(self, l3_agent):
         self.metadata_port = l3_agent.conf.metadata_port
         self.metadata_access_mark = l3_agent.conf.metadata_access_mark
         registry.subscribe(
             after_router_added, resources.ROUTER, events.AFTER_CREATE)
-        registry.subscribe(
-            after_router_updated, resources.ROUTER, events.AFTER_UPDATE)
         registry.subscribe(
             before_router_removed, resources.ROUTER, events.BEFORE_DELETE)
 
@@ -126,7 +124,6 @@ class MetadataDriver(object):
                                                      callback=callback)
         pm.enable()
         monitor.register(uuid, METADATA_SERVICE_NAME, pm)
-        cls.monitors[router_id] = pm
 
     @classmethod
     def destroy_monitored_metadata_proxy(cls, monitor, uuid, conf):
@@ -134,7 +131,6 @@ class MetadataDriver(object):
         # No need to pass ns name as it's not needed for disable()
         pm = cls._get_metadata_proxy_process_manager(uuid, conf)
         pm.disable()
-        cls.monitors.pop(uuid, None)
 
     @classmethod
     def _get_metadata_proxy_process_manager(cls, router_id, conf, ns_name=None,
@@ -158,20 +154,13 @@ def after_router_added(resource, event, l3_agent, **kwargs):
         router.iptables_manager.ipv4['nat'].add_rule(c, r)
     router.iptables_manager.apply()
 
-    if not isinstance(router, ha_router.HaRouter):
+    if not router.is_ha:
         proxy.spawn_monitored_metadata_proxy(
             l3_agent.process_monitor,
             router.ns_name,
             proxy.metadata_port,
             l3_agent.conf,
             router_id=router.router_id)
-
-
-def after_router_updated(resource, event, l3_agent, **kwargs):
-    router = kwargs['router']
-    proxy = l3_agent.metadata_driver
-    if not proxy.monitors.get(router.router_id):
-        after_router_added(resource, event, l3_agent, **kwargs)
 
 
 def before_router_removed(resource, event, l3_agent, **kwargs):

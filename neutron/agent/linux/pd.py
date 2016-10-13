@@ -13,22 +13,22 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import eventlet
 import functools
 import signal
-
-import eventlet
-from neutron_lib import constants as n_const
-from oslo_config import cfg
-from oslo_log import log as logging
-from oslo_utils import netutils
 import six
+
 from stevedore import driver
 
-from neutron._i18n import _
+from oslo_config import cfg
+from oslo_log import log as logging
+
+from neutron.agent.linux import utils as linux_utils
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.common import constants as l3_constants
+from neutron.common import ipv6_utils
 from neutron.common import utils
 
 LOG = logging.getLogger(__name__)
@@ -175,8 +175,8 @@ class PrefixDelegation(object):
 
     @staticmethod
     def _get_lla(mac):
-        lla = netutils.get_ipv6_addr_by_EUI64(n_const.IPv6_LLA_PREFIX,
-                                              mac)
+        lla = ipv6_utils.get_ipv6_addr_by_EUI64(l3_constants.IPV6_LLA_PREFIX,
+                                                mac)
         return lla
 
     def _get_llas(self, gw_ifname, ns_name):
@@ -195,7 +195,7 @@ class PrefixDelegation(object):
                                            router['ns_name'],
                                            'link')
             # There is a delay before the LLA becomes active.
-            # This is because the kernel runs DAD to make sure LLA uniqueness
+            # This is because the kernal runs DAD to make sure LLA uniqueness
             # Spawn a thread to wait for the interface to be ready
             self._spawn_lla_thread(router['gw_interface'],
                                    router['ns_name'],
@@ -220,17 +220,17 @@ class PrefixDelegation(object):
     def _ensure_lla_task(self, gw_ifname, ns_name, lla_with_mask):
         # It would be insane for taking so long unless DAD test failed
         # In that case, the subnet would never be assigned a prefix.
-        utils.wait_until_true(functools.partial(self._lla_available,
-                                                gw_ifname,
-                                                ns_name,
-                                                lla_with_mask),
-                              timeout=l3_constants.LLA_TASK_TIMEOUT,
-                              sleep=2)
+        linux_utils.wait_until_true(functools.partial(self._lla_available,
+                                                      gw_ifname,
+                                                      ns_name,
+                                                      lla_with_mask),
+                                    timeout=l3_constants.LLA_TASK_TIMEOUT,
+                                    sleep=2)
 
     def _lla_available(self, gw_ifname, ns_name, lla_with_mask):
         llas = self._get_llas(gw_ifname, ns_name)
         if self._is_lla_active(lla_with_mask, llas):
-            LOG.debug("LLA %s is active now", lla_with_mask)
+            LOG.debug("LLA %s is active now" % lla_with_mask)
             self.pd_update_cb()
             return True
 
@@ -277,15 +277,12 @@ class PrefixDelegation(object):
             self.notifier(self.context, prefix_update)
 
     def after_start(self):
-        LOG.debug('SIGUSR1 signal handler set')
-        signal.signal(signal.SIGUSR1, self._handle_sigusr1)
+        LOG.debug('SIGHUP signal handler set')
+        signal.signal(signal.SIGHUP, self._handle_sighup)
 
-    def _handle_sigusr1(self, signum, frame):
-        """Update PD on receiving SIGUSR1.
-
-        The external DHCPv6 client uses SIGUSR1 to notify agent
-        of prefix changes.
-        """
+    def _handle_sighup(self, signum, frame):
+        # The external DHCPv6 client uses SIGHUP to notify agent
+        # of prefix changes.
         self.pd_update_cb()
 
     def _get_sync_data(self):

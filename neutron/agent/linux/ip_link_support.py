@@ -15,11 +15,11 @@
 
 import re
 
-from neutron_lib import exceptions as n_exc
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LE
 from neutron.agent.linux import utils
+from neutron.common import exceptions as n_exc
+from neutron.i18n import _LE
 
 
 LOG = logging.getLogger(__name__)
@@ -41,7 +41,6 @@ class IpLinkConstants(object):
     IP_LINK_CAPABILITY_STATE = "state"
     IP_LINK_CAPABILITY_VLAN = "vlan"
     IP_LINK_CAPABILITY_RATE = "rate"
-    IP_LINK_CAPABILITY_MIN_TX_RATE = "min_tx_rate"
     IP_LINK_CAPABILITY_SPOOFCHK = "spoofchk"
     IP_LINK_SUB_CAPABILITY_QOS = "qos"
 

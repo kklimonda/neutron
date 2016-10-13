@@ -46,8 +46,8 @@ class TestSriovAgentConfig(base.BaseTestCase):
 
     DEVICE_MAPPING_WITH_SPACES_LIST = ['physnet7 : p7p1',
                                        'physnet3 : p3p1 ']
-    DEVICE_MAPPING = {'physnet7': ['p7p1'],
-                      'physnet3': ['p3p1']}
+    DEVICE_MAPPING = {'physnet7': 'p7p1',
+                      'physnet3': 'p3p1'}
 
     def test_defaults(self):
         self.assertEqual(config.DEFAULT_DEVICE_MAPPINGS,
@@ -62,24 +62,23 @@ class TestSriovAgentConfig(base.BaseTestCase):
                               self.DEVICE_MAPPING_LIST,
                               'SRIOV_NIC')
         device_mappings = n_utils.parse_mappings(
-            cfg.CONF.SRIOV_NIC.physical_device_mappings, unique_keys=False)
-        self.assertEqual(self.DEVICE_MAPPING, device_mappings)
+            cfg.CONF.SRIOV_NIC.physical_device_mappings)
+        self.assertEqual(device_mappings, self.DEVICE_MAPPING)
 
     def test_device_mappings_with_error(self):
         cfg.CONF.set_override('physical_device_mappings',
                               self.DEVICE_MAPPING_WITH_ERROR_LIST,
                               'SRIOV_NIC')
         self.assertRaises(ValueError, n_utils.parse_mappings,
-                          cfg.CONF.SRIOV_NIC.physical_device_mappings,
-                          unique_keys=False)
+                          cfg.CONF.SRIOV_NIC.physical_device_mappings)
 
     def test_device_mappings_with_spaces(self):
         cfg.CONF.set_override('physical_device_mappings',
                               self.DEVICE_MAPPING_WITH_SPACES_LIST,
                               'SRIOV_NIC')
         device_mappings = n_utils.parse_mappings(
-            cfg.CONF.SRIOV_NIC.physical_device_mappings, unique_keys=False)
-        self.assertEqual(self.DEVICE_MAPPING, device_mappings)
+            cfg.CONF.SRIOV_NIC.physical_device_mappings)
+        self.assertEqual(device_mappings, self.DEVICE_MAPPING)
 
     def test_exclude_devices(self):
         cfg.CONF.set_override('exclude_devices',
@@ -87,7 +86,7 @@ class TestSriovAgentConfig(base.BaseTestCase):
                               'SRIOV_NIC')
         exclude_devices = config.parse_exclude_devices(
             cfg.CONF.SRIOV_NIC.exclude_devices)
-        self.assertEqual(self.EXCLUDE_DEVICES, exclude_devices)
+        self.assertEqual(exclude_devices, self.EXCLUDE_DEVICES)
 
     def test_exclude_devices_with_spaces(self):
         cfg.CONF.set_override('exclude_devices',
@@ -95,7 +94,7 @@ class TestSriovAgentConfig(base.BaseTestCase):
                               'SRIOV_NIC')
         exclude_devices = config.parse_exclude_devices(
             cfg.CONF.SRIOV_NIC.exclude_devices)
-        self.assertEqual(self.EXCLUDE_DEVICES, exclude_devices)
+        self.assertEqual(exclude_devices, self.EXCLUDE_DEVICES)
 
     def test_exclude_devices_with_error(self):
         cfg.CONF.set_override('exclude_devices',
@@ -115,8 +114,8 @@ class TestSriovAgentConfig(base.BaseTestCase):
         config_parser.parse()
         device_mappings = config_parser.device_mappings
         exclude_devices = config_parser.exclude_devices
-        self.assertEqual(self.EXCLUDE_DEVICES, exclude_devices)
-        self.assertEqual(self.DEVICE_MAPPING, device_mappings)
+        self.assertEqual(exclude_devices, self.EXCLUDE_DEVICES)
+        self.assertEqual(device_mappings, self.DEVICE_MAPPING)
 
     def test_validate_config_fail(self):
         cfg.CONF.set_override('physical_device_mappings',

@@ -13,9 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import exceptions
-
-from neutron._i18n import _
+from neutron.common import exceptions
 
 
 class InvalidSubnetRequestType(exceptions.BadRequest):
@@ -64,23 +62,7 @@ class IpAddressGenerationFailure(exceptions.Conflict):
     message = _("No more IP addresses available for subnet %(subnet_id)s.")
 
 
-class IpAddressGenerationFailureAllSubnets(IpAddressGenerationFailure):
-    message = _("No more IP addresses available.")
-
-
-class IpAddressGenerationFailureNoMatchingSubnet(IpAddressGenerationFailure):
-    message = _("No valid service subnet for the given device owner.")
-
-
-class IPAllocationFailed(exceptions.NeutronException):
-    message = _("IP allocation failed. Try again later.")
-
-
 class IpamValueInvalid(exceptions.Conflict):
     def __init__(self, message=None):
         self.message = message
         super(IpamValueInvalid, self).__init__()
-
-
-class DeferIpam(exceptions.NeutronException):
-    message = _("Exception used to signal that IP allocation is deferred")

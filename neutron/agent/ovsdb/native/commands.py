@@ -1,4 +1,4 @@
-# Copyright (c) 2015 OpenStack Foundation
+# Copyright (c) 2015 Openstack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -17,9 +17,9 @@ import collections
 from oslo_log import log as logging
 from oslo_utils import excutils
 
-from neutron._i18n import _, _LE
 from neutron.agent.ovsdb import api
 from neutron.agent.ovsdb.native import idlutils
+from neutron.i18n import _LE
 
 LOG = logging.getLogger(__name__)
 
@@ -48,8 +48,6 @@ class BaseCommand(api.Command):
             ", ".join("%s=%s" % (k, v) for k, v in command_info.items()
                       if k not in ['api', 'result']))
 
-    __repr__ = __str__
-
 
 class AddBridgeCommand(BaseCommand):
     def __init__(self, api, name, may_exist, datapath_type):
@@ -63,8 +61,6 @@ class AddBridgeCommand(BaseCommand):
             br = idlutils.row_by_value(self.api.idl, 'Bridge', 'name',
                                        self.name, None)
             if br:
-                if self.datapath_type:
-                    br.datapath_type = self.datapath_type
                 return
         row = txn.insert(self.api._tables['Bridge'])
         row.name = self.name
@@ -96,7 +92,7 @@ class DelBridgeCommand(BaseCommand):
             if self.if_exists:
                 return
             else:
-                msg = _("Bridge %s does not exist") % self.name
+                msg = _LE("Bridge %s does not exist") % self.name
                 LOG.error(msg)
                 raise RuntimeError(msg)
         self.api._ovs.verify('bridges')
@@ -303,7 +299,6 @@ class AddPortCommand(BaseCommand):
         br.ports = ports
 
         iface = txn.insert(self.api._tables['Interface'])
-        txn.expected_ifaces.add(iface.uuid)
         iface.name = self.port
         port.verify('interfaces')
         ifaces = getattr(port, 'interfaces', [])
@@ -325,7 +320,7 @@ class DelPortCommand(BaseCommand):
         except idlutils.RowNotFound:
             if self.if_exists:
                 return
-            msg = _("Port %s does not exist") % self.port
+            msg = _LE("Port %s does not exist") % self.port
             raise RuntimeError(msg)
         if self.bridge:
             br = idlutils.row_by_value(self.api.idl, 'Bridge', 'name',
@@ -336,7 +331,7 @@ class DelPortCommand(BaseCommand):
 
         if port.uuid not in br.ports and not self.if_exists:
             # TODO(twilson) Make real errors across both implementations
-            msg = _("Port %(port)s does not exist on %(bridge)s!") % {
+            msg = _LE("Port %(port)s does not exist on %(bridge)s!") % {
                 'port': self.name, 'bridge': self.bridge
             }
             LOG.error(msg)
@@ -417,7 +412,7 @@ class DbListCommand(BaseCommand):
 
     def run_idl(self, txn):
         table_schema = self.api._tables[self.table]
-        columns = self.columns or list(table_schema.columns.keys()) + ['_uuid']
+        columns = self.columns or table_schema.columns.keys() + ['_uuid']
         if self.records:
             row_uuids = []
             for record in self.records:
@@ -430,7 +425,7 @@ class DbListCommand(BaseCommand):
                     # NOTE(kevinbenton): this is converted to a RuntimeError
                     # for compat with the vsctl version. It might make more
                     # sense to change this to a RowNotFoundError in the future.
-                    raise RuntimeError(_(
+                    raise RuntimeError(_LE(
                           "Row doesn't exist in the DB. Request info: "
                           "Table=%(table)s. Columns=%(columns)s. "
                           "Records=%(records)s.") % {
@@ -455,7 +450,7 @@ class DbFindCommand(BaseCommand):
         self.table = self.api._tables[table]
         self.conditions = conditions
         self.columns = (kwargs.get('columns') or
-                        list(self.table.columns.keys()) + ['_uuid'])
+                        self.table.columns.keys() + ['_uuid'])
 
     def run_idl(self, txn):
         self.result = [

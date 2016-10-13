@@ -14,27 +14,20 @@
 #    under the License.
 
 import abc
-import collections
-import functools
-import itertools
 import random
 
-from neutron_lib import constants as lib_const
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 import six
 from sqlalchemy import sql
 
-from neutron._i18n import _LE, _LW
 from neutron.common import constants
 from neutron.common import utils
-from neutron.db import api as db_api
 from neutron.db import l3_agentschedulers_db
 from neutron.db import l3_db
 from neutron.db import l3_hamode_db
-from neutron.extensions import availability_zone as az_ext
-from neutron.extensions import l3
+from neutron.i18n import _LE, _LW
 
 
 LOG = logging.getLogger(__name__)
@@ -88,31 +81,35 @@ class L3Scheduler(object):
             l3_db.Router.id ==
             l3_agentschedulers_db.RouterL3AgentBinding.router_id)
         query = context.session.query(l3_db.Router.id).filter(no_agent_binding)
-        query = query.filter(l3_db.Router.status ==
-                             constants.ROUTER_STATUS_ACTIVE)
         unscheduled_router_ids = [router_id_[0] for router_id_ in query]
         if unscheduled_router_ids:
             return plugin.get_routers(
                 context, filters={'id': unscheduled_router_ids})
         return []
 
-    def _get_routers_to_schedule(self, context, plugin, router_ids=None):
+    def _get_routers_to_schedule(self, context, plugin,
+                                 router_ids=None, exclude_distributed=False):
         """Verify that the routers specified need to be scheduled.
 
         :param context: the context
         :param plugin: the core plugin
         :param router_ids: the list of routers to be checked for scheduling
+        :param exclude_distributed: whether or not to consider dvr routers
         :returns: the list of routers to be scheduled
         """
         if router_ids is not None:
-            filters = {'id': router_ids,
-                       'status': [constants.ROUTER_STATUS_ACTIVE]}
-            routers = plugin.get_routers(context, filters=filters)
-            result = self._filter_unscheduled_routers(context, plugin, routers)
+            routers = plugin.get_routers(context, filters={'id': router_ids})
+            unscheduled_routers = self._filter_unscheduled_routers(
+                context, plugin, routers)
         else:
-            result = self._get_unscheduled_routers(context, plugin)
-        return [r for r in result
-                if plugin.router_supports_scheduling(context, r['id'])]
+            unscheduled_routers = self._get_unscheduled_routers(context,
+                                                                plugin)
+
+        if exclude_distributed:
+            unscheduled_routers = [
+                r for r in unscheduled_routers if not r.get('distributed')
+            ]
+        return unscheduled_routers
 
     def _get_routers_can_schedule(self, context, plugin, routers, l3_agent):
         """Get the subset of routers that can be scheduled on the L3 agent."""
@@ -138,27 +135,30 @@ class L3Scheduler(object):
         :returns: True if routers have been successfully assigned to host
         """
         l3_agent = plugin.get_enabled_agent_on_host(
-            context, lib_const.AGENT_TYPE_L3, host)
+            context, constants.AGENT_TYPE_L3, host)
         if not l3_agent:
-            return
+            return False
 
+        # NOTE(armando-migliaccio): DVR routers should not be auto
+        # scheduled because auto-scheduling may interfere with the
+        # placement rules for IR and SNAT namespaces.
         unscheduled_routers = self._get_routers_to_schedule(
-            context, plugin, router_ids)
+            context, plugin, router_ids, exclude_distributed=True)
         if not unscheduled_routers:
             if utils.is_extension_supported(
-                    plugin, lib_const.L3_HA_MODE_EXT_ALIAS):
-                self._schedule_ha_routers_to_additional_agent(
+                    plugin, constants.L3_HA_MODE_EXT_ALIAS):
+                return self._schedule_ha_routers_to_additional_agent(
                     plugin, context, l3_agent)
-                return
 
         target_routers = self._get_routers_can_schedule(
             context, plugin, unscheduled_routers, l3_agent)
         if not target_routers:
-            LOG.warning(_LW('No routers compatible with L3 agent '
-                            'configuration on host %s'), host)
-            return
+            LOG.warn(_LW('No routers compatible with L3 agent configuration'
+                         ' on host %s'), host)
+            return False
 
         self._bind_routers(context, plugin, target_routers, l3_agent)
+        return True
 
     def _get_candidates(self, plugin, context, sync_router):
         """Return L3 agents where a router could be scheduled."""
@@ -169,25 +169,28 @@ class L3Scheduler(object):
             # active any time
             current_l3_agents = plugin.get_l3_agents_hosting_routers(
                 context, [sync_router['id']], admin_state_up=True)
-            if current_l3_agents:
-                LOG.debug('Router %(router_id)s has already been hosted '
-                          'by L3 agent %(agent_id)s',
+            is_router_distributed = sync_router.get('distributed', False)
+            if current_l3_agents and not is_router_distributed:
+                LOG.debug('Router %(router_id)s has already been hosted'
+                          ' by L3 agent %(agent_id)s',
                           {'router_id': sync_router['id'],
                            'agent_id': current_l3_agents[0]['id']})
                 return []
 
             active_l3_agents = plugin.get_l3_agents(context, active=True)
             if not active_l3_agents:
-                LOG.warning(_LW('No active L3 agents'))
+                LOG.warn(_LW('No active L3 agents'))
                 return []
-            candidates = plugin.get_l3_agent_candidates(context,
-                                                        sync_router,
-                                                        active_l3_agents)
-            if not candidates:
-                LOG.warning(_LW('No L3 agents can host the router %s'),
-                            sync_router['id'])
-
-            return candidates
+            potential_candidates = list(
+                set(active_l3_agents) - set(current_l3_agents))
+            new_l3agents = []
+            if potential_candidates:
+                new_l3agents = plugin.get_l3_agent_candidates(
+                    context, sync_router, potential_candidates)
+                if not new_l3agents:
+                    LOG.warn(_LW('No L3 agents can host the router %s'),
+                             sync_router['id'])
+            return new_l3agents
 
     def _bind_routers(self, context, plugin, routers, l3_agent):
         for router in routers:
@@ -200,30 +203,19 @@ class L3Scheduler(object):
             else:
                 self.bind_router(context, router['id'], l3_agent)
 
-    def bind_router(self, context, router_id, chosen_agent,
-                    binding_index=l3_agentschedulers_db.LOWEST_BINDING_INDEX):
+    def bind_router(self, context, router_id, chosen_agent):
         """Bind the router to the l3 agent which has been chosen."""
-        # Pre-cache the agent's id so that if an exception is raised we can
-        # safely access its value. Otherwise, sqlalchemy will try to fetch it
-        # from the database during a rollback, which is bad for us.
-        agent_id = chosen_agent.id
-
         try:
             with context.session.begin(subtransactions=True):
                 binding = l3_agentschedulers_db.RouterL3AgentBinding()
                 binding.l3_agent = chosen_agent
                 binding.router_id = router_id
-                binding.binding_index = binding_index
                 context.session.add(binding)
-        except db_exc.DBDuplicateEntry as error:
+        except db_exc.DBDuplicateEntry:
             LOG.debug('Router %(router_id)s has already been scheduled '
-                      'to L3 agent %(agent_id)s (tried to bind with '
-                      'binding_index %(binding_index)d). The conflict was '
-                      'with columns %(columns)r.',
-                      {'agent_id': agent_id,
-                       'router_id': router_id,
-                       'binding_index': binding_index,
-                       'columns': error.columns})
+                      'to L3 agent %(agent_id)s.',
+                      {'agent_id': chosen_agent.id,
+                       'router_id': router_id})
             return
         except db_exc.DBReferenceError:
             LOG.debug('Router %s has already been removed '
@@ -231,20 +223,34 @@ class L3Scheduler(object):
             return
 
         LOG.debug('Router %(router_id)s is scheduled to L3 agent '
-                  '%(agent_id)s with binding_index %(binding_index)d',
-                  {'router_id': router_id,
-                   'agent_id': agent_id,
-                   'binding_index': binding_index})
-        return binding
+                  '%(agent_id)s', {'router_id': router_id,
+                                   'agent_id': chosen_agent.id})
 
     def _schedule_router(self, plugin, context, router_id,
                          candidates=None):
-        if not plugin.router_supports_scheduling(context, router_id):
-            return
         sync_router = plugin.get_router(context, router_id)
         candidates = candidates or self._get_candidates(
             plugin, context, sync_router)
-        if not candidates:
+        chosen_agent = None
+        if sync_router.get('distributed', False):
+            for chosen_agent in candidates:
+                self.bind_router(context, router_id, chosen_agent)
+
+            # For Distributed routers check for SNAT Binding before
+            # calling the schedule_snat_router
+            snat_bindings = plugin.get_snat_bindings(context, [router_id])
+            router_gw_exists = sync_router.get('external_gateway_info', False)
+            if not snat_bindings and router_gw_exists:
+                # If GW exists for DVR routers and no SNAT binding
+                # call the schedule_snat_router
+                chosen_agent = plugin.schedule_snat_router(
+                    context, router_id, sync_router)
+            elif not router_gw_exists and snat_bindings:
+                # If DVR router and no Gateway but SNAT Binding exists then
+                # call the unbind_snat_servicenode to unbind the snat service
+                # from agent
+                plugin.unbind_snat_servicenode(context, router_id)
+        elif not candidates:
             return
         elif sync_router.get('ha', False):
             chosen_agents = self._bind_ha_router(plugin, context,
@@ -279,56 +285,15 @@ class L3Scheduler(object):
             return False
         return True
 
-    def _add_port_from_net(self, plugin, ctxt, router_id, tenant_id, ha_net):
-        """small wrapper function to unpack network id from ha_network"""
-        return plugin.add_ha_port(ctxt, router_id, ha_net.network.id,
-                                  tenant_id)
-
     def create_ha_port_and_bind(self, plugin, context, router_id,
-                                tenant_id, agent, is_manual_scheduling=False):
+                                tenant_id, agent):
         """Creates and binds a new HA port for this agent."""
-        ctxt = context.elevated()
-        creator = functools.partial(self._add_port_from_net,
-                                    plugin, ctxt, router_id, tenant_id)
-        dep_getter = functools.partial(plugin.get_ha_network, ctxt, tenant_id)
-        dep_creator = functools.partial(plugin._create_ha_network,
-                                        ctxt, tenant_id)
-        dep_deleter = functools.partial(plugin._delete_ha_network, ctxt)
-        dep_id_attr = 'network_id'
-
-        for attempts in range(1, db_api.MAX_RETRIES + 1):
-            binding_index = plugin.get_vacant_binding_index(
-                context, router_id, is_manual_scheduling)
-            if binding_index == -1:
-                LOG.debug("Couldn't find a vacant binding_index for router %s",
-                          router_id)
-                return
-
-            # This might fail in case of concurrent calls, which is good for us
-            # as we can skip the rest of this function.
-            if not self.bind_router(context, router_id, agent, binding_index):
-                return
-
-            try:
-                port_binding = utils.create_object_with_dependency(
-                    creator, dep_getter, dep_creator,
-                    dep_id_attr, dep_deleter)[0]
-                with db_api.autonested_transaction(context.session):
-                    port_binding.l3_agent_id = agent['id']
-                return
-            except db_exc.DBDuplicateEntry:
-                LOG.debug("Router %(router)s already scheduled for agent "
-                          "%(agent)s", {'router': router_id,
-                                        'agent': agent['id']})
-                return
-            except l3.RouterNotFound:
-                LOG.debug('Router %s has already been removed '
-                          'by concurrent operation', router_id)
-                return
-
-    def get_ha_routers_l3_agents_counts(self, context, plugin, filters=None):
-        """Return a mapping (router, # agents) matching specified filters."""
-        return plugin.get_ha_routers_l3_agents_count(context)
+        ha_network = plugin.get_ha_network(context, tenant_id)
+        port_binding = plugin.add_ha_port(context.elevated(), router_id,
+                                          ha_network.network.id, tenant_id)
+        with context.session.begin(subtransactions=True):
+            port_binding.l3_agent_id = agent['id']
+        self.bind_router(context, router_id, agent)
 
     def _schedule_ha_routers_to_additional_agent(self, plugin, context, agent):
         """Bind already scheduled routers to the agent.
@@ -338,12 +303,16 @@ class L3Scheduler(object):
         is not yet reached.
         """
 
-        routers_agents = self.get_ha_routers_l3_agents_counts(context, plugin,
-                                                              agent)
+        routers_agents = plugin.get_ha_routers_l3_agents_count(context)
+
+        scheduled = False
         admin_ctx = context.elevated()
-        underscheduled_routers = [router for router, agents in routers_agents
-                                  if (not self.max_ha_agents or
-                                      agents < self.max_ha_agents)]
+        underscheduled_router_ids = [
+            router_id for router_id, tenant_id, agents in routers_agents
+            if (not self.max_ha_agents or agents < self.max_ha_agents)
+        ]
+        underscheduled_routers = plugin.get_routers(
+            context, filters={'id': underscheduled_router_ids})
         schedulable_routers = self._get_routers_can_schedule(
             admin_ctx, plugin, underscheduled_routers, agent)
         for router in schedulable_routers:
@@ -353,29 +322,22 @@ class L3Scheduler(object):
                                              router['id'],
                                              router['tenant_id'],
                                              agent)
+                scheduled = True
+
+        return scheduled
 
     def _bind_ha_router_to_agents(self, plugin, context, router_id,
                                  chosen_agents):
         port_bindings = plugin.get_ha_router_port_bindings(context,
                                                            [router_id])
-        binding_indices = range(l3_agentschedulers_db.LOWEST_BINDING_INDEX,
-                                len(port_bindings) + 1)
-        for port_binding, agent, binding_index in zip(
-            port_bindings, chosen_agents, binding_indices):
+        for port_binding, agent in zip(port_bindings, chosen_agents):
+            with context.session.begin(subtransactions=True):
+                port_binding.l3_agent_id = agent.id
+                self.bind_router(context, router_id, agent)
 
-            if not self.bind_router(context, router_id, agent, binding_index):
-                continue
-            try:
-                with db_api.autonested_transaction(context.session):
-                    port_binding.l3_agent_id = agent.id
-            except db_exc.DBDuplicateEntry:
-                LOG.debug("Router %(router)s already scheduled for agent "
-                          "%(agent)s", {'router': router_id,
-                                        'agent': agent.id})
-            else:
-                LOG.debug('HA Router %(router_id)s is scheduled to L3 agent '
-                          '%(agent_id)s)',
-                          {'router_id': router_id, 'agent_id': agent.id})
+            LOG.debug('HA Router %(router_id)s is scheduled to L3 agent '
+                      '%(agent_id)s)',
+                      {'router_id': router_id, 'agent_id': agent.id})
 
     def _bind_ha_router(self, plugin, context, router_id, candidates):
         """Bind a HA router to agents based on a specific policy."""
@@ -427,79 +389,3 @@ class LeastRoutersScheduler(L3Scheduler):
         ordered_agents = plugin.get_l3_agents_ordered_by_num_routers(
             context, [candidate['id'] for candidate in candidates])
         return ordered_agents[:num_agents]
-
-
-class AZLeastRoutersScheduler(LeastRoutersScheduler):
-    """Availability zone aware scheduler.
-
-       If a router is ha router, allocate L3 agents distributed AZs
-       according to router's az_hints.
-    """
-    def _get_az_hints(self, router):
-        return (router.get(az_ext.AZ_HINTS) or
-                cfg.CONF.default_availability_zones)
-
-    def _get_routers_can_schedule(self, context, plugin, routers, l3_agent):
-        """Overwrite L3Scheduler's method to filter by availability zone."""
-        target_routers = []
-        for r in routers:
-            az_hints = self._get_az_hints(r)
-            if not az_hints or l3_agent['availability_zone'] in az_hints:
-                target_routers.append(r)
-
-        if not target_routers:
-            return
-
-        return super(AZLeastRoutersScheduler, self)._get_routers_can_schedule(
-            context, plugin, target_routers, l3_agent)
-
-    def _get_candidates(self, plugin, context, sync_router):
-        """Overwrite L3Scheduler's method to filter by availability zone."""
-        all_candidates = (
-            super(AZLeastRoutersScheduler, self)._get_candidates(
-                plugin, context, sync_router))
-
-        candidates = []
-        az_hints = self._get_az_hints(sync_router)
-        for agent in all_candidates:
-            if not az_hints or agent['availability_zone'] in az_hints:
-                candidates.append(agent)
-
-        return candidates
-
-    def get_ha_routers_l3_agents_counts(self, context, plugin, filters=None):
-        """Overwrite L3Scheduler's method to filter by availability zone."""
-        all_routers_agents = (
-            super(AZLeastRoutersScheduler, self).
-            get_ha_routers_l3_agents_counts(context, plugin, filters))
-        if filters is None:
-            return all_routers_agents
-
-        routers_agents = []
-        for router, agents in all_routers_agents:
-            az_hints = self._get_az_hints(router)
-            if az_hints and filters['availability_zone'] not in az_hints:
-                continue
-            routers_agents.append((router, agents))
-
-        return routers_agents
-
-    def _choose_router_agents_for_ha(self, plugin, context, candidates):
-        ordered_agents = plugin.get_l3_agents_ordered_by_num_routers(
-            context, [candidate['id'] for candidate in candidates])
-        num_agents = self._get_num_of_agents_for_ha(len(ordered_agents))
-
-        # Order is kept in each az
-        group_by_az = collections.defaultdict(list)
-        for agent in ordered_agents:
-            az = agent['availability_zone']
-            group_by_az[az].append(agent)
-
-        selected_agents = []
-        for az, agents in itertools.cycle(group_by_az.items()):
-            if not agents:
-                continue
-            selected_agents.append(agents.pop(0))
-            if len(selected_agents) >= num_agents:
-                break
-        return selected_agents

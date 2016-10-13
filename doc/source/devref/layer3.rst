@@ -1,26 +1,3 @@
-..
-      Licensed under the Apache License, Version 2.0 (the "License"); you may
-      not use this file except in compliance with the License. You may obtain
-      a copy of the License at
-
-          http://www.apache.org/licenses/LICENSE-2.0
-
-      Unless required by applicable law or agreed to in writing, software
-      distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-      WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-      License for the specific language governing permissions and limitations
-      under the License.
-
-
-      Convention for heading levels in Neutron devref:
-      =======  Heading 0 (reserved for the title in a document)
-      -------  Heading 1
-      ~~~~~~~  Heading 2
-      +++++++  Heading 3
-      '''''''  Heading 4
-      (Avoid deeper levels because they do not render well.)
-
-
 Layer 3 Networking in Neutron - via Layer 3 agent & OpenVSwitch
 ===============================================================
 
@@ -170,7 +147,7 @@ Neutron Routers are realized in OpenVSwitch
 Finding the router in ip/ipconfig
 ---------------------------------
 
-* http://docs.openstack.org/admin-guide/networking.html
+* http://docs.openstack.org/admin-guide-cloud/networking.html
 
         The neutron-l3-agent uses the Linux IP stack and iptables to perform L3 forwarding and NAT.
         In order to support multiple routers with potentially overlapping IP addresses, neutron-l3-agent
@@ -212,13 +189,11 @@ For example::
 Provider Networking
 -------------------
 
-Neutron can also be configured to create `provider networks <http://docs.openstack.org/admin-guide/networking_adv-features.html#provider-networks>`_
-
-.. include:: l3_agent_extensions.rst
+Neutron can also be configured to create `provider networks <http://docs.openstack.org/admin-guide-cloud/networking_adv-features.html#provider-networks>`_
 
 Further Reading
 ---------------
 * `Packet Pushers - Neutron Network Implementation on Linux <http://packetpushers.net/openstack-quantum-network-implementation-in-linux/>`_
-* `OpenStack Administrator Guide <http://docs.openstack.org/admin-guide/networking.html>`_
+* `OpenStack Cloud Administrator Guide <http://docs.openstack.org/admin-guide-cloud/networking.html>`_
 * `Neutron - Layer 3 API extension usage guide <http://docs.openstack.org/api/openstack-network/2.0/content/router_ext.html>`_
 *  `Darragh O'Reilly -  The Quantum L3 router and floating IPs <http://techbackground.blogspot.com/2013/05/the-quantum-l3-router-and-floating-ips.html>`_

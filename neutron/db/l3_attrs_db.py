@@ -12,11 +12,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.db import model_base
 import sqlalchemy as sa
 from sqlalchemy import orm
 
 from neutron.db import db_base_plugin_v2
+from neutron.db import l3_db
+from neutron.db import model_base
 from neutron.extensions import l3
 
 
@@ -43,11 +44,9 @@ class RouterExtraAttributes(model_base.BASEV2):
                    server_default=sa.sql.false(),
                    nullable=False)
     ha_vr_id = sa.Column(sa.Integer())
-    # Availability Zone support
-    availability_zone_hints = sa.Column(sa.String(255))
 
     router = orm.relationship(
-        'Router',
+        l3_db.Router,
         backref=orm.backref("extra_attributes", lazy='joined',
                             uselist=False, cascade='delete'))
 

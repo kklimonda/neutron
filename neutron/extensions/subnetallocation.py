@@ -13,9 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-
 from neutron.api import extensions
+from neutron.common import constants
 
 
 class Subnetallocation(extensions.ExtensionDescriptor):
@@ -36,6 +35,9 @@ class Subnetallocation(extensions.ExtensionDescriptor):
     @classmethod
     def get_updated(cls):
         return "2015-03-30T10:00:00-00:00"
+
+    def get_required_extensions(self):
+        return ["router"]
 
     @classmethod
     def get_resources(cls):

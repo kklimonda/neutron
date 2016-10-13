@@ -14,7 +14,7 @@ from oslo_config import cfg
 from oslo_log import log
 import six
 
-from neutron._i18n import _, _LI, _LW
+from neutron.i18n import _LI, _LW
 from neutron.quota import resource
 
 LOG = log.getLogger(__name__)
@@ -34,12 +34,6 @@ def register_resource_by_name(resource_name, plural_name=None):
 
 def get_all_resources():
     return ResourceRegistry.get_instance().resources
-
-
-def unregister_all_resources():
-    if not ResourceRegistry._instance:
-        return
-    return ResourceRegistry.get_instance().unregister_resources()
 
 
 def get_resource(resource_name):
@@ -189,10 +183,6 @@ class ResourceRegistry(object):
         if not cfg.CONF.QUOTAS.track_quota_usage:
             return
 
-        if isinstance(self._resources.get(resource_name),
-                      resource.CountableResource):
-            raise RuntimeError(_("Resource %s is already registered as a "
-                                 "countable resource.") % resource_name)
         current_model_class = self._tracked_resource_mappings.setdefault(
             resource_name, model_class)
 
@@ -222,7 +212,7 @@ class ResourceRegistry(object):
 
     def register_resource(self, resource):
         if resource.name in self._resources:
-            LOG.warning(_LW('%s is already registered'), resource.name)
+            LOG.warn(_LW('%s is already registered'), resource.name)
         if resource.name in self._tracked_resource_mappings:
             resource.register_events()
         self._resources[resource.name] = resource

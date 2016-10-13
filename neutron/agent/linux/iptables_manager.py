@@ -31,12 +31,12 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 import six
 
-from neutron._i18n import _, _LE, _LW
 from neutron.agent.common import config
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import utils as linux_utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
+from neutron.i18n import _LE, _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -118,10 +118,7 @@ class IptablesRule(object):
             chain = '%s-%s' % (self.wrap_name, self.chain)
         else:
             chain = self.chain
-        rule = '-A %s %s' % (chain, self.rule)
-        # If self.rule is '' the above will cause a trailing space, which
-        # could cause us to not match on save/restore, so strip it now.
-        return comment_rule(rule.strip(), self.comment)
+        return comment_rule('-A %s %s' % (chain, self.rule), self.comment)
 
 
 class IptablesTable(object):
@@ -253,10 +250,10 @@ class IptablesTable(object):
                                                           top, self.wrap_name,
                                                           comment=comment)))
         except ValueError:
-            LOG.warning(_LW('Tried to remove rule that was not there:'
-                            ' %(chain)r %(rule)r %(wrap)r %(top)r'),
-                        {'chain': chain, 'rule': rule,
-                         'top': top, 'wrap': wrap})
+            LOG.warn(_LW('Tried to remove rule that was not there:'
+                         ' %(chain)r %(rule)r %(wrap)r %(top)r'),
+                     {'chain': chain, 'rule': rule,
+                      'top': top, 'wrap': wrap})
 
     def _get_chain_rules(self, chain, wrap):
         chain = get_chain_name(chain, wrap)
@@ -339,11 +336,6 @@ class IptablesManager(object):
             builtin_chains[4].update(
                 {'mangle': ['PREROUTING', 'INPUT', 'FORWARD', 'OUTPUT',
                             'POSTROUTING']})
-            self.ipv6.update(
-                {'mangle': IptablesTable(binary_name=self.wrap_name)})
-            builtin_chains[6].update(
-                {'mangle': ['PREROUTING', 'INPUT', 'FORWARD', 'OUTPUT',
-                            'POSTROUTING']})
             self.ipv4.update(
                 {'nat': IptablesTable(binary_name=self.wrap_name)})
             builtin_chains[4].update({'nat': ['PREROUTING',
@@ -393,12 +385,9 @@ class IptablesManager(object):
             self.ipv4['mangle'].add_chain('mark')
             self.ipv4['mangle'].add_rule('PREROUTING', '-j $mark')
 
-    def get_tables(self, ip_version):
-        return {4: self.ipv4, 6: self.ipv6}[ip_version]
-
     def get_chain(self, table, chain, ip_version=4, wrap=True):
         try:
-            requested_table = self.get_tables(ip_version)[table]
+            requested_table = {4: self.ipv4, 6: self.ipv6}[ip_version][table]
         except KeyError:
             return []
         return requested_table._get_chain_rules(chain, wrap)
@@ -415,11 +404,8 @@ class IptablesManager(object):
         finally:
             try:
                 self.defer_apply_off()
-            except n_exc.IpTablesApplyException:
-                # already in the format we want, just reraise
-                raise
             except Exception:
-                msg = _('Failure applying iptables rules')
+                msg = _LE('Failure applying iptables rules')
                 LOG.exception(msg)
                 raise n_exc.IpTablesApplyException(msg)
 
@@ -442,16 +428,7 @@ class IptablesManager(object):
             lock_name += '-' + self.namespace
 
         with lockutils.lock(lock_name, utils.SYNCHRONIZED_PREFIX, True):
-            first = self._apply_synchronized()
-            if not cfg.CONF.AGENT.debug_iptables_rules:
-                return first
-            second = self._apply_synchronized()
-            if second:
-                msg = (_("IPTables Rules did not converge. Diff: %s") %
-                       '\n'.join(second))
-                LOG.error(msg)
-                raise n_exc.IpTablesApplyException(msg)
-            return first
+            return self._apply_synchronized()
 
     def get_rules_for_table(self, table):
         """Runs iptables-save on a table and returns the results."""
@@ -668,8 +645,8 @@ class IptablesManager(object):
         """Return the sum of the traffic counters of all rules of a chain."""
         cmd_tables = self._get_traffic_counters_cmd_tables(chain, wrap)
         if not cmd_tables:
-            LOG.warning(_LW('Attempted to get traffic counters of chain %s '
-                            'which does not exist'), chain)
+            LOG.warn(_LW('Attempted to get traffic counters of chain %s which '
+                         'does not exist'), chain)
             return
 
         name = get_chain_name(chain, wrap)
@@ -765,11 +742,6 @@ def _generate_chain_diff_iptables_commands(chain, old_chain_rules,
         elif line.startswith('+'):  # line added
             # strip the chain name since we have to add it before the index
             rule = line[5:].split(' ', 1)[-1]
-            # IptablesRule does not add trailing spaces for rules, so we
-            # have to detect that here by making sure this chain isn't
-            # referencing itself
-            if rule == chain:
-                rule = ''
             # rule inserted at this position
             statements.append('-I %s %d %s' % (chain, old_index, rule))
         old_index += 1

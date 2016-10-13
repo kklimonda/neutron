@@ -12,13 +12,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os
-import shutil
-
 import mock
-from neutron_lib import exceptions as n_exc
+
 from oslo_config import cfg
 
+from neutron.common import exceptions as n_exc
 from neutron import manager
 from neutron.plugins.common import constants
 from neutron.services import provider_configuration as provconf
@@ -37,7 +35,7 @@ class ParseServiceProviderConfigurationTestCase(base.BaseTestCase):
 
     def test_default_service_provider_configuration(self):
         providers = cfg.CONF.service_providers.service_provider
-        self.assertEqual([], providers)
+        self.assertEqual(providers, [])
 
     def test_parse_single_service_provider_opt(self):
         self._set_override([constants.LOADBALANCER +
@@ -47,8 +45,8 @@ class ParseServiceProviderConfigurationTestCase(base.BaseTestCase):
                     'driver': 'driver_path',
                     'default': False}
         res = provconf.parse_service_provider_opt()
-        self.assertEqual(1, len(res))
-        self.assertEqual([expected], res)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res, [expected])
 
     def test_parse_single_default_service_provider_opt(self):
         self._set_override([constants.LOADBALANCER +
@@ -58,8 +56,8 @@ class ParseServiceProviderConfigurationTestCase(base.BaseTestCase):
                     'driver': 'driver_path',
                     'default': True}
         res = provconf.parse_service_provider_opt()
-        self.assertEqual(1, len(res))
-        self.assertEqual([expected], res)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res, [expected])
 
     def test_parse_multi_service_provider_opt(self):
         self._set_override([constants.LOADBALANCER +
@@ -126,11 +124,11 @@ class ProviderConfigurationTestCase(base.BaseTestCase):
                 'driver': 'path',
                 'default': False}
         pconf.add_provider(prov)
-        self.assertEqual(1, len(pconf.providers))
-        self.assertEqual([(constants.LOADBALANCER, 'name')],
-                         list(pconf.providers.keys()))
-        self.assertEqual([{'driver': 'path', 'default': False}],
-                         list(pconf.providers.values()))
+        self.assertEqual(len(pconf.providers), 1)
+        self.assertEqual(list(pconf.providers.keys()),
+                         [(constants.LOADBALANCER, 'name')])
+        self.assertEqual(list(pconf.providers.values()),
+                         [{'driver': 'path', 'default': False}])
 
     def test_add_duplicate_provider(self):
         pconf = provconf.ProviderConfiguration()
@@ -140,7 +138,7 @@ class ProviderConfigurationTestCase(base.BaseTestCase):
                 'default': False}
         pconf.add_provider(prov)
         self.assertRaises(n_exc.Invalid, pconf.add_provider, prov)
-        self.assertEqual(1, len(pconf.providers))
+        self.assertEqual(len(pconf.providers), 1)
 
     def test_get_service_providers(self):
         self._set_override([constants.LOADBALANCER + ':name:path',
@@ -170,7 +168,7 @@ class ProviderConfigurationTestCase(base.BaseTestCase):
                 filters={'name': [prov['name']],
                          'service_type': prov['service_type']}
             )
-            self.assertEqual([prov], p)
+            self.assertEqual(p, [prov])
 
     def test_get_service_providers_with_fields(self):
         self._set_override([constants.LOADBALANCER + ":name:path",
@@ -190,7 +188,7 @@ class ProviderConfigurationTestCase(base.BaseTestCase):
                          'service_type': prov['service_type']},
                 fields=['name']
             )
-            self.assertEqual([{'name': prov['name']}], p)
+            self.assertEqual(p, [{'name': prov['name']}])
 
 
 class GetProviderDriverClassTestCase(base.BaseTestCase):
@@ -214,68 +212,3 @@ class NeutronModuleTestCase(base.BaseTestCase):
         mod.ini(base.ETCDIR)
         self.assertEqual(['foo', 'bar'], mod.service_providers(),
                          'Expected two providers, only one read')
-
-
-class NeutronModuleConfigDirTestCase(base.BaseTestCase):
-
-    def setup_config(self):
-        self.config_parse(args=['--config-dir', base.ETCDIR])
-
-    def test_can_parse_multi_opt_service_provider_from_conf_dir(self):
-        mod = provconf.NeutronModule('neutron_test')
-        mod.ini()
-        self.assertEqual(['foo', 'bar'], mod.service_providers())
-
-
-class NeutronModuleMultiConfigDirTestCase(base.BaseTestCase):
-
-    def setUp(self):
-        self.tmpdir = self.get_default_temp_dir().path
-        shutil.copyfile(
-            os.path.join(base.ETCDIR, 'neutron_test2.conf.example'),
-            os.path.join(self.tmpdir, 'neutron_test.conf'))
-        super(NeutronModuleMultiConfigDirTestCase, self).setUp()
-
-    def setup_config(self):
-        self.config_parse(args=[
-            # NOTE(ihrachys): we expect the second directory to be checked
-            '--config-dir', self.tmpdir, '--config-dir', base.ETCDIR
-        ])
-
-    def test_read_configuration_from_all_matching_files(self):
-        mod = provconf.NeutronModule('neutron_test')
-        mod.ini()
-        self.assertEqual(['zzz', 'foo', 'bar'], mod.service_providers())
-
-
-class NeutronModuleMultiConfigFileTestCase(base.BaseTestCase):
-
-    def setUp(self):
-        self.tmpdir = self.get_default_temp_dir().path
-        self.filepath1 = os.path.join(self.tmpdir, 'neutron_test.conf')
-        self.filepath2 = os.path.join(base.ETCDIR, 'neutron_test.conf')
-        shutil.copyfile(
-            os.path.join(base.ETCDIR, 'neutron_test2.conf.example'),
-            self.filepath1)
-        super(NeutronModuleMultiConfigFileTestCase, self).setUp()
-
-    def setup_config(self):
-        self.config_parse(args=[
-            # NOTE(ihrachys): we expect both directories to be checked
-            '--config-file', self.filepath1, '--config-file', self.filepath2
-        ])
-
-    def test_read_configuration_from_all_matching_files(self):
-        mod = provconf.NeutronModule('neutron_test')
-        mod.ini()
-        self.assertEqual(['zzz', 'foo', 'bar'], mod.service_providers())
-
-
-class NeutronModuleConfigNotParsedTestCase(base.DietTestCase):
-
-    def setup_config(self):
-        pass
-
-    def test_ini_no_crash_if_config_files_not_parsed(self):
-        mod = provconf.NeutronModule('neutron_test')
-        mod.ini()

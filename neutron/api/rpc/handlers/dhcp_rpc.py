@@ -17,23 +17,19 @@ import copy
 import itertools
 import operator
 
-from neutron_lib import constants
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
 
-from neutron._i18n import _, _LW
-from neutron.callbacks import resources
-from neutron.common import constants as n_const
+from neutron.api.v2 import attributes
+from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.db import api as db_api
-from neutron.db import provisioning_blocks
 from neutron.extensions import portbindings
-from neutron.extensions import segment as segment_ext
+from neutron.i18n import _LW
 from neutron import manager
 from neutron.plugins.common import utils as p_utils
 from neutron.quota import resource_registry
@@ -61,20 +57,9 @@ class DhcpRpcCallback(object):
     #           RPC client for many releases, it should be OK to bump the
     #           minor release instead and claim RPC compatibility with the
     #           last few client versions.
-    #     1.3 - Removed release_port_fixed_ip. It's not used by reference DHCP
-    #           agent since Juno, so similar rationale for not bumping the
-    #           major version as above applies here too.
-    #     1.4 - Removed update_lease_expiration. It's not used by reference
-    #           DHCP agent since Juno, so similar rationale for not bumping the
-    #           major version as above applies here too.
-    #     1.5 - Added dhcp_ready_on_ports.
-    #     1.6 - Removed get_active_networks. It's not used by reference
-    #           DHCP agent since Havana, so similar rationale for not bumping
-    #           the major version as above applies here too.
-
     target = oslo_messaging.Target(
-        namespace=n_const.RPC_NAMESPACE_DHCP_PLUGIN,
-        version='1.6')
+        namespace=constants.RPC_NAMESPACE_DHCP_PLUGIN,
+        version='1.2')
 
     def _get_active_networks(self, context, **kwargs):
         """Retrieve and return a list of the active networks."""
@@ -100,32 +85,35 @@ class DhcpRpcCallback(object):
                 return plugin.update_port(context, port['id'], port)
             else:
                 msg = _('Unrecognized action')
-                raise exceptions.Invalid(message=msg)
-        except (db_exc.DBReferenceError,
-                exceptions.NetworkNotFound,
-                exceptions.SubnetNotFound,
-                exceptions.InvalidInput,
-                exceptions.IpAddressGenerationFailure) as e:
+                raise n_exc.Invalid(message=msg)
+        except (db_exc.DBError, n_exc.NetworkNotFound,
+                n_exc.SubnetNotFound, n_exc.IpAddressGenerationFailure) as e:
             with excutils.save_and_reraise_exception(reraise=False) as ctxt:
-                if isinstance(e, exceptions.IpAddressGenerationFailure):
+                if isinstance(e, n_exc.IpAddressGenerationFailure):
                     # Check if the subnet still exists and if it does not,
                     # this is the reason why the ip address generation failed.
                     # In any other unlikely event re-raise
                     try:
                         subnet_id = port['port']['fixed_ips'][0]['subnet_id']
                         plugin.get_subnet(context, subnet_id)
-                    except exceptions.SubnetNotFound:
+                    except n_exc.SubnetNotFound:
                         pass
                     else:
                         ctxt.reraise = True
-                if ctxt.reraise:
-                    net_id = port['port']['network_id']
-                    LOG.warning(_LW("Action %(action)s for network %(net_id)s "
-                                    "could not complete successfully: "
-                                    "%(reason)s"),
-                                {"action": action,
-                                 "net_id": net_id,
-                                 'reason': e})
+                net_id = port['port']['network_id']
+                LOG.warn(_LW("Action %(action)s for network %(net_id)s "
+                             "could not complete successfully: %(reason)s"),
+                         {"action": action, "net_id": net_id, 'reason': e})
+
+    def get_active_networks(self, context, **kwargs):
+        """Retrieve and return a list of the active network ids."""
+        # NOTE(arosen): This method is no longer used by the DHCP agent but is
+        # left so that neutron-dhcp-agents will still continue to work if
+        # neutron-server is upgraded and not the agent.
+        host = kwargs.get('host')
+        LOG.debug('get_active_networks requested from %s', host)
+        nets = self._get_active_networks(context, **kwargs)
+        return [net['id'] for net in nets]
 
     def _group_by_network_id(self, res):
         grouped = {}
@@ -149,30 +137,6 @@ class DhcpRpcCallback(object):
         # the order changes.
         subnets = sorted(plugin.get_subnets(context, filters=filters),
                          key=operator.itemgetter('id'))
-        # Handle the possibility that the dhcp agent(s) only has connectivity
-        # inside a segment.  If the segment service plugin is loaded and
-        # there are active dhcp enabled subnets, then filter out the subnets
-        # that are not on the host's segment.
-        seg_plug = manager.NeutronManager.get_service_plugins().get(
-            segment_ext.SegmentPluginBase.get_plugin_type())
-        seg_subnets = [subnet for subnet in subnets
-                       if subnet.get('segment_id')]
-        if seg_plug and seg_subnets:
-            host_segment_ids = seg_plug.get_segments_by_hosts(context, [host])
-            # Gather the ids of all the subnets that are on a segment that
-            # this host touches
-            seg_subnet_ids = {subnet['id'] for subnet in seg_subnets
-                              if subnet['segment_id'] in host_segment_ids}
-            # Gather the ids of all the networks that are routed
-            routed_net_ids = {seg_subnet['network_id']
-                              for seg_subnet in seg_subnets}
-            # Remove the subnets with segments that are not in the same
-            # segments as the host.  Do this only for the networks that are
-            # routed because we want non-routed networks to work as
-            # before.
-            subnets = [subnet for subnet in subnets
-                       if subnet['network_id'] not in routed_net_ids or
-                       subnet['id'] in seg_subnet_ids]
 
         grouped_subnets = self._group_by_network_id(subnets)
         grouped_ports = self._group_by_network_id(ports)
@@ -183,7 +147,7 @@ class DhcpRpcCallback(object):
         return networks
 
     def get_network_info(self, context, **kwargs):
-        """Retrieve and return extended information about a network."""
+        """Retrieve and return a extended information about a network."""
         network_id = kwargs.get('network_id')
         host = kwargs.get('host')
         LOG.debug('Network %(network_id)s requested from '
@@ -192,32 +156,17 @@ class DhcpRpcCallback(object):
         plugin = manager.NeutronManager.get_plugin()
         try:
             network = plugin.get_network(context, network_id)
-        except exceptions.NetworkNotFound:
+        except n_exc.NetworkNotFound:
             LOG.debug("Network %s could not be found, it might have "
                       "been deleted concurrently.", network_id)
             return
         filters = dict(network_id=[network_id])
-        subnets = plugin.get_subnets(context, filters=filters)
-        seg_plug = manager.NeutronManager.get_service_plugins().get(
-            segment_ext.SegmentPluginBase.get_plugin_type())
-        if seg_plug and subnets:
-            seg_subnets = [subnet for subnet in subnets
-                           if subnet.get('segment_id')]
-            # If there are no subnets with segments, then this is not a routed
-            # network and no filtering should take place.
-            if seg_subnets:
-                segment_ids = seg_plug.get_segments_by_hosts(context, [host])
-                # There might be something to do if no segment_ids exist that
-                # are mapped to this host.  However, it seems that if this
-                # host is not mapped to any segments and this is a routed
-                # network, then this host shouldn't have even been scheduled
-                # to.
-                subnets = [subnet for subnet in seg_subnets
-                           if subnet['segment_id'] in segment_ids]
         # NOTE(kevinbenton): we sort these because the agent builds tags
         # based on position in the list and has to restart the process if
         # the order changes.
-        network['subnets'] = sorted(subnets, key=operator.itemgetter('id'))
+        network['subnets'] = sorted(
+            plugin.get_subnets(context, filters=filters),
+            key=operator.itemgetter('id'))
         network['ports'] = plugin.get_ports(context, filters=filters)
         return network
 
@@ -233,6 +182,41 @@ class DhcpRpcCallback(object):
                   {'network_id': network_id, 'host': host})
         plugin = manager.NeutronManager.get_plugin()
         plugin.delete_ports_by_device_id(context, device_id, network_id)
+
+    @db_api.retry_db_errors
+    def release_port_fixed_ip(self, context, **kwargs):
+        """Release the fixed_ip associated the subnet on a port."""
+        host = kwargs.get('host')
+        network_id = kwargs.get('network_id')
+        device_id = kwargs.get('device_id')
+        subnet_id = kwargs.get('subnet_id')
+
+        LOG.debug('DHCP port remove fixed_ip for %(subnet_id)s request '
+                  'from %(host)s',
+                  {'subnet_id': subnet_id, 'host': host})
+        plugin = manager.NeutronManager.get_plugin()
+        filters = dict(network_id=[network_id], device_id=[device_id])
+        ports = plugin.get_ports(context, filters=filters)
+
+        if ports:
+            port = ports[0]
+
+            fixed_ips = port.get('fixed_ips', [])
+            for i in range(len(fixed_ips)):
+                if fixed_ips[i]['subnet_id'] == subnet_id:
+                    del fixed_ips[i]
+                    break
+            plugin.update_port(context, port['id'], dict(port=port))
+
+    def update_lease_expiration(self, context, **kwargs):
+        """Release the fixed_ip associated the subnet on a port."""
+        # NOTE(arosen): This method is no longer used by the DHCP agent but is
+        # left so that neutron-dhcp-agents will still continue to work if
+        # neutron-server is upgraded and not the agent.
+        host = kwargs.get('host')
+
+        LOG.warning(_LW('Updating lease expiration is now deprecated. Issued  '
+                        'from host %s.'), host)
 
     @db_api.retry_db_errors
     @resource_registry.mark_resources_dirty
@@ -254,7 +238,7 @@ class DhcpRpcCallback(object):
         port['port']['device_owner'] = constants.DEVICE_OWNER_DHCP
         port['port'][portbindings.HOST_ID] = host
         if 'mac_address' not in port['port']:
-            port['port']['mac_address'] = constants.ATTR_NOT_SPECIFIED
+            port['port']['mac_address'] = attributes.ATTR_NOT_SPECIFIED
         plugin = manager.NeutronManager.get_plugin()
         return self._port_action(plugin, context, port, 'create_port')
 
@@ -266,27 +250,13 @@ class DhcpRpcCallback(object):
         port['id'] = kwargs.get('port_id')
         port['port'][portbindings.HOST_ID] = host
         plugin = manager.NeutronManager.get_plugin()
-        try:
-            old_port = plugin.get_port(context, port['id'])
-            if (old_port['device_id'] != n_const.DEVICE_ID_RESERVED_DHCP_PORT
-                and old_port['device_id'] !=
-                utils.get_dhcp_agent_device_id(port['port']['network_id'],
-                                               host)):
-                raise n_exc.DhcpPortInUse(port_id=port['id'])
-            LOG.debug('Update dhcp port %(port)s '
-                      'from %(host)s.',
-                      {'port': port,
-                       'host': host})
-            return self._port_action(plugin, context, port, 'update_port')
-        except exceptions.PortNotFound:
-            LOG.debug('Host %(host)s tried to update port '
-                      '%(port_id)s which no longer exists.',
-                      {'host': host, 'port_id': port['id']})
-            return None
-
-    @db_api.retry_db_errors
-    def dhcp_ready_on_ports(self, context, port_ids):
-        for port_id in port_ids:
-            provisioning_blocks.provisioning_complete(
-                context, port_id, resources.PORT,
-                provisioning_blocks.DHCP_ENTITY)
+        old_port = plugin.get_port(context, port['id'])
+        if (old_port['device_id'] != constants.DEVICE_ID_RESERVED_DHCP_PORT
+            and old_port['device_id'] !=
+            utils.get_dhcp_agent_device_id(port['port']['network_id'], host)):
+            raise n_exc.DhcpPortInUse(port_id=port['id'])
+        LOG.debug('Update dhcp port %(port)s '
+                  'from %(host)s.',
+                  {'port': port,
+                   'host': host})
+        return self._port_action(plugin, context, port, 'update_port')

@@ -15,9 +15,8 @@
 #    under the License.
 
 import mock
-from neutron_lib import constants as const
 
-from neutron.common import constants as n_const
+from neutron.common import constants as const
 from neutron.tests.unit.plugins.ml2.drivers.openvswitch.agent.\
     openflow.ovs_ofctl import ovs_bridge_test_base
 
@@ -193,19 +192,19 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         ip_addresses = ['2001:db8::1', 'fdf8:f53b:82e4::1/128']
         self.br.install_icmpv6_na_spoofing_protection(port, ip_addresses)
         expected = [
-            call.add_flow(dl_type=n_const.ETHERTYPE_IPV6, actions='normal',
+            call.add_flow(dl_type=const.ETHERTYPE_IPV6, actions='normal',
                           icmp_type=const.ICMPV6_TYPE_NA,
-                          nw_proto=const.PROTO_NUM_IPV6_ICMP,
+                          nw_proto=const.PROTO_NUM_ICMP_V6,
                           nd_target='2001:db8::1',
                           priority=2, table=24, in_port=8888),
-            call.add_flow(dl_type=n_const.ETHERTYPE_IPV6, actions='normal',
+            call.add_flow(dl_type=const.ETHERTYPE_IPV6, actions='normal',
                           icmp_type=const.ICMPV6_TYPE_NA,
-                          nw_proto=const.PROTO_NUM_IPV6_ICMP,
+                          nw_proto=const.PROTO_NUM_ICMP_V6,
                           nd_target='fdf8:f53b:82e4::1/128',
                           priority=2, table=24, in_port=8888),
-            call.add_flow(dl_type=n_const.ETHERTYPE_IPV6,
+            call.add_flow(dl_type=const.ETHERTYPE_IPV6,
                           icmp_type=const.ICMPV6_TYPE_NA,
-                          nw_proto=const.PROTO_NUM_IPV6_ICMP,
+                          nw_proto=const.PROTO_NUM_ICMP_V6,
                           priority=10, table=0, in_port=8888,
                           actions='resubmit(,24)')
         ]
@@ -232,9 +231,8 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         self.br.delete_arp_spoofing_protection(port)
         expected = [
             call.delete_flows(table_id=0, in_port=8888, proto='arp'),
-            call.delete_flows(table_id=0, in_port=8888,
-                              icmp_type=const.ICMPV6_TYPE_NA,
-                              nw_proto=const.PROTO_NUM_IPV6_ICMP),
+            call.delete_flows(table_id=0, in_port=8888, icmp_type=136,
+                              nw_proto=58),
             call.delete_flows(table_id=24, in_port=8888),
         ]
         self.assertEqual(expected, self.mock.mock_calls)

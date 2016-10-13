@@ -12,23 +12,27 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-from oslo_utils import uuidutils
 import testscenarios
+
+from oslo_utils import uuidutils
 
 from neutron.tests.fullstack import base
 from neutron.tests.fullstack.resources import environment
 from neutron.tests.fullstack.resources import machine
-from neutron.tests.fullstack import utils
-from neutron.tests.unit import testlib_api
-
-load_tests = testlib_api.module_load_tests
 
 
-class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
+load_tests = testscenarios.load_tests_apply_scenarios
 
-    of_interface = None
-    ovsdb_interface = None
+
+class TestConnectivitySameNetwork(base.BaseFullStackTestCase):
+
+    scenarios = [
+        ('VXLAN', {'network_type': 'vxlan',
+                   'l2_pop': False}),
+        ('GRE and l2pop', {'network_type': 'gre',
+                           'l2_pop': True}),
+        ('VLANs', {'network_type': 'vlan',
+                   'l2_pop': False})]
 
     def setUp(self):
         host_descriptions = [
@@ -36,18 +40,15 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
             # is enabled, because l2pop code makes assumptions about the
             # agent types present on machines.
             environment.HostDescription(
-                l3_agent=self.l2_pop,
-                of_interface=self.of_interface,
-                ovsdb_interface=self.ovsdb_interface,
-                l2_agent_type=self.l2_agent_type) for _ in range(3)]
+                l3_agent=self.l2_pop) for _ in range(2)]
         env = environment.Environment(
             environment.EnvironmentDescription(
                 network_type=self.network_type,
                 l2_pop=self.l2_pop),
             host_descriptions)
-        super(BaseConnectivitySameNetworkTest, self).setUp(env)
+        super(TestConnectivitySameNetwork, self).setUp(env)
 
-    def _test_connectivity(self):
+    def test_connectivity(self):
         tenant_uuid = uuidutils.generate_uuid()
 
         network = self.safe_client.create_network(tenant_uuid)
@@ -61,44 +62,9 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
                     network['id'],
                     tenant_uuid,
                     self.safe_client))
-            for i in range(3)]
+            for i in range(2)]
 
         for vm in vms:
             vm.block_until_boot()
 
         vms[0].block_until_ping(vms[1].ip)
-        vms[0].block_until_ping(vms[2].ip)
-        vms[1].block_until_ping(vms[2].ip)
-
-
-class TestOvsConnectivitySameNetwork(BaseConnectivitySameNetworkTest):
-
-    l2_agent_type = constants.AGENT_TYPE_OVS
-    network_scenarios = [
-        ('VXLAN', {'network_type': 'vxlan',
-                   'l2_pop': False}),
-        ('GRE and l2pop', {'network_type': 'gre',
-                           'l2_pop': True}),
-        ('VLANs', {'network_type': 'vlan',
-                   'l2_pop': False})]
-    scenarios = testscenarios.multiply_scenarios(
-        network_scenarios, utils.get_ovs_interface_scenarios())
-
-    def test_connectivity(self):
-        self._test_connectivity()
-
-
-class TestLinuxBridgeConnectivitySameNetwork(BaseConnectivitySameNetworkTest):
-
-    l2_agent_type = constants.AGENT_TYPE_LINUXBRIDGE
-    scenarios = [
-        ('VXLAN', {'network_type': 'vxlan',
-                   'l2_pop': False}),
-        ('VLANs', {'network_type': 'vlan',
-                   'l2_pop': False}),
-        ('VXLAN and l2pop', {'network_type': 'vxlan',
-                             'l2_pop': True})
-    ]
-
-    def test_connectivity(self):
-        self._test_connectivity()

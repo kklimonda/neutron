@@ -22,7 +22,6 @@ import oslo_i18n
 
 from neutron.agent.linux import utils
 from neutron.tests import base
-from neutron.tests.common import helpers
 
 
 _marker = object()
@@ -61,7 +60,7 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
         self.mock_popen.return_value = ["", ""]
         stdout = utils.execute(["ls", self.test_file[:-1]],
                                check_exit_code=False)
-        self.assertEqual("", stdout)
+        self.assertEqual(stdout, "")
 
     def test_execute_raises(self):
         self.mock_popen.side_effect = RuntimeError
@@ -135,11 +134,12 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
             self.mock_popen.return_value = [bytes_odata, b'']
             result = utils.execute(['cat'], process_input=str_idata)
             self.mock_popen.assert_called_once_with(bytes_idata)
+            self.assertEqual(str_odata, result)
         else:
             self.mock_popen.return_value = [str_odata, '']
             result = utils.execute(['cat'], process_input=str_idata)
             self.mock_popen.assert_called_once_with(str_idata)
-        self.assertEqual(str_odata, result)
+            self.assertEqual(str_odata, result)
 
     def test_return_str_data(self):
         str_data = "%s\n" % self.test_file
@@ -147,15 +147,20 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
         result = utils.execute(['ls', self.test_file], return_stderr=True)
         self.assertEqual((str_data, ''), result)
 
-    @helpers.requires_py3
-    def test_surrogateescape_in_decoding_out_data(self):
-        bytes_err_data = b'\xed\xa0\xbd'
-        err_data = bytes_err_data.decode('utf-8', 'surrogateescape')
+    def test_raise_unicodeerror_in_decoding_out_data(self):
+        class m_bytes(bytes):
+            def decode(self, encoding=None):
+                raise UnicodeError
+
+        err_data = 'UnicodeError'
+        bytes_err_data = b'UnicodeError'
         out_data = "%s\n" % self.test_file
-        bytes_out_data = out_data.encode(encoding='utf-8')
-        self.mock_popen.return_value = [bytes_out_data, bytes_err_data]
-        result = utils.execute(['ls', self.test_file], return_stderr=True)
-        self.assertEqual((out_data, err_data), result)
+        bytes_out_data = m_bytes(out_data.encode(encoding='utf-8'))
+        if six.PY3:
+            self.mock_popen.return_value = [bytes_out_data, bytes_err_data]
+            result = utils.execute(['ls', self.test_file],
+                                   return_stderr=True)
+            self.assertEqual((bytes_out_data, err_data), result)
 
 
 class AgentUtilsExecuteEncodeTest(base.BaseTestCase):
@@ -181,16 +186,45 @@ class AgentUtilsGetInterfaceMAC(base.BaseTestCase):
         self.assertEqual(actual_val, expect_val)
 
 
+class AgentUtilsReplaceFile(base.BaseTestCase):
+    def _test_replace_file_helper(self, explicit_perms=None):
+        # make file to replace
+        with mock.patch('tempfile.NamedTemporaryFile') as ntf:
+            ntf.return_value.name = '/baz'
+            with mock.patch('os.chmod') as chmod:
+                with mock.patch('os.rename') as rename:
+                    if explicit_perms is None:
+                        expected_perms = 0o644
+                        utils.replace_file('/foo', 'bar')
+                    else:
+                        expected_perms = explicit_perms
+                        utils.replace_file('/foo', 'bar', explicit_perms)
+
+                    expected = [mock.call('w+', dir='/', delete=False),
+                                mock.call().write('bar'),
+                                mock.call().close()]
+
+                    ntf.assert_has_calls(expected)
+                    chmod.assert_called_once_with('/baz', expected_perms)
+                    rename.assert_called_once_with('/baz', '/foo')
+
+    def test_replace_file_with_default_perms(self):
+        self._test_replace_file_helper()
+
+    def test_replace_file_with_0o600_perms(self):
+        self._test_replace_file_helper(0o600)
+
+
 class TestFindChildPids(base.BaseTestCase):
 
     def test_returns_empty_list_for_exit_code_1(self):
         with mock.patch.object(utils, 'execute',
                                side_effect=RuntimeError('Exit code: 1')):
-            self.assertEqual([], utils.find_child_pids(-1))
+            self.assertEqual(utils.find_child_pids(-1), [])
 
     def test_returns_empty_list_for_no_output(self):
         with mock.patch.object(utils, 'execute', return_value=''):
-            self.assertEqual([], utils.find_child_pids(-1))
+            self.assertEqual(utils.find_child_pids(-1), [])
 
     def test_returns_list_of_child_process_ids_for_good_ouput(self):
         with mock.patch.object(utils, 'execute', return_value=' 123 \n 185\n'):
@@ -377,9 +411,9 @@ class TestUnixDomainWSGIServer(base.BaseTestCase):
         super(TestUnixDomainWSGIServer, self).setUp()
         self.eventlet_p = mock.patch.object(utils, 'eventlet')
         self.eventlet = self.eventlet_p.start()
-        self.server = utils.UnixDomainWSGIServer('test')
 
     def test_start(self):
+        self.server = utils.UnixDomainWSGIServer('test')
         mock_app = mock.Mock()
         with mock.patch.object(self.server, '_launch') as launcher:
             self.server.start(mock_app, '/the/path', workers=5, backlog=128)
@@ -393,6 +427,7 @@ class TestUnixDomainWSGIServer(base.BaseTestCase):
             launcher.assert_called_once_with(mock_app, workers=5)
 
     def test_run(self):
+        self.server = utils.UnixDomainWSGIServer('test')
         self.server._run('app', 'sock')
 
         self.eventlet.wsgi.server.assert_called_once_with(
@@ -401,4 +436,18 @@ class TestUnixDomainWSGIServer(base.BaseTestCase):
             protocol=utils.UnixDomainHttpProtocol,
             log=mock.ANY,
             max_size=self.server.num_threads
+        )
+
+    def test_num_threads(self):
+        num_threads = 8
+        self.server = utils.UnixDomainWSGIServer('test',
+                                                 num_threads=num_threads)
+        self.server._run('app', 'sock')
+
+        self.eventlet.wsgi.server.assert_called_once_with(
+            'sock',
+            'app',
+            protocol=utils.UnixDomainHttpProtocol,
+            log=mock.ANY,
+            max_size=num_threads
         )

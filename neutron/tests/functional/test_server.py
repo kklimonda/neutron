@@ -13,21 +13,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import httplib2
+import mock
 import os
 import signal
 import socket
 import time
 import traceback
 
-import httplib2
-import mock
 from oslo_config import cfg
 import psutil
 
-from neutron.common import utils
+from neutron.agent.linux import utils
 from neutron import service
 from neutron.tests import base
-from neutron import worker as neutron_worker
+from neutron import worker
 from neutron import wsgi
 
 
@@ -35,7 +35,7 @@ CONF = cfg.CONF
 
 # This message will be written to temporary file each time
 # start method is called.
-FAKE_START_MSG = b"start"
+FAKE_START_MSG = "start".encode("utf-8")
 
 TARGET_PLUGIN = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 
@@ -46,7 +46,7 @@ class TestNeutronServer(base.BaseTestCase):
         self.service_pid = None
         self.workers = None
         self.temp_file = self.get_temp_file_path("test_server.tmp")
-        self.health_checker = self._check_active
+        self.health_checker = None
         self.pipein, self.pipeout = os.pipe()
         self.addCleanup(self._destroy_workers)
 
@@ -82,9 +82,7 @@ class TestNeutronServer(base.BaseTestCase):
 
         self.service_pid = pid
 
-        # If number of workers is 1 it is assumed that we run
-        # a service in the current process.
-        if self.workers > 1:
+        if self.workers > 0:
             # Wait at most 10 seconds to spawn workers
             condition = lambda: self.workers == len(self._get_workers())
 
@@ -113,23 +111,18 @@ class TestNeutronServer(base.BaseTestCase):
             except psutil.NoSuchProcess:
                 return None
 
-        if self.workers > 1:
+        if self.workers > 0:
             return [proc.pid for proc in psutil.process_iter()
                     if safe_ppid(proc) == self.service_pid]
         else:
             return [proc.pid for proc in psutil.process_iter()
                     if proc.pid == self.service_pid]
 
-    def _check_active(self):
-        """Dummy service activity check."""
-        time.sleep(5)
-        return True
-
     def _fake_start(self):
         with open(self.temp_file, 'a') as f:
             f.write(FAKE_START_MSG)
 
-    def _test_restart_service_on_sighup(self, service, workers=1):
+    def _test_restart_service_on_sighup(self, service, workers=0):
         """Test that a service correctly (re)starts on receiving SIGHUP.
 
         1. Start a service with a given number of workers.
@@ -195,7 +188,7 @@ class TestWsgiServer(TestNeutronServer):
         except socket.error:
             return False
 
-    def _run_wsgi(self, workers=1):
+    def _run_wsgi(self, workers=0):
         """Start WSGI server with a test application."""
 
         # Mock start method to check that children are started again on
@@ -223,12 +216,17 @@ class TestRPCServer(TestNeutronServer):
 
     def setUp(self):
         super(TestRPCServer, self).setUp()
-        self.setup_coreplugin('ml2')
+        self.setup_coreplugin(TARGET_PLUGIN)
         self._plugin_patcher = mock.patch(TARGET_PLUGIN, autospec=True)
         self.plugin = self._plugin_patcher.start()
         self.plugin.return_value.rpc_workers_supported = True
+        self.health_checker = self._check_active
 
-    def _serve_rpc(self, workers=1):
+    def _check_active(self):
+        time.sleep(5)
+        return True
+
+    def _serve_rpc(self, workers=0):
         """Start RPC server with a given number of workers."""
 
         # Mock start method to check that children are started again on
@@ -241,11 +239,9 @@ class TestRPCServer(TestNeutronServer):
                 get_plugin.return_value = self.plugin
 
                 CONF.set_override("rpc_workers", workers)
-                # not interested in state report workers specifically
-                CONF.set_override("rpc_state_report_workers", 0)
 
-                rpc_workers_launcher = service.start_rpc_workers()
-                rpc_workers_launcher.wait()
+                launcher = service.serve_rpc()
+                launcher.wait()
 
     def test_restart_rpc_on_sighup_multiple_workers(self):
         self._test_restart_service_on_sighup(service=self._serve_rpc,
@@ -257,18 +253,19 @@ class TestPluginWorker(TestNeutronServer):
 
     def setUp(self):
         super(TestPluginWorker, self).setUp()
-        self.setup_coreplugin('ml2')
+        self.setup_coreplugin(TARGET_PLUGIN)
         self._plugin_patcher = mock.patch(TARGET_PLUGIN, autospec=True)
         self.plugin = self._plugin_patcher.start()
 
-    def _start_plugin(self, workers=1):
+    def _start_plugin(self, workers=0):
         with mock.patch('neutron.manager.NeutronManager.get_plugin') as gp:
             gp.return_value = self.plugin
-            plugin_workers_launcher = service.start_plugins_workers()
-            plugin_workers_launcher.wait()
+            launchers = service.start_plugin_workers()
+            for launcher in launchers:
+                launcher.wait()
 
     def test_start(self):
-        class FakeWorker(neutron_worker.NeutronWorker):
+        class FakeWorker(worker.NeutronWorker):
             def start(self):
                 pass
 

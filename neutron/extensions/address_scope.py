@@ -14,22 +14,16 @@
 
 import abc
 
-from neutron_lib.api import converters
-from neutron_lib import constants
-from neutron_lib import exceptions as nexception
-import six
-
-from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
+from neutron.common import exceptions as nexception
 from neutron import manager
+import six
 
 ADDRESS_SCOPE = 'address_scope'
 ADDRESS_SCOPES = '%ss' % ADDRESS_SCOPE
 ADDRESS_SCOPE_ID = 'address_scope_id'
-IPV4_ADDRESS_SCOPE = 'ipv4_%s' % ADDRESS_SCOPE
-IPV6_ADDRESS_SCOPE = 'ipv6_%s' % ADDRESS_SCOPE
 
 # Attribute Map
 RESOURCE_ATTRIBUTE_MAP = {
@@ -52,29 +46,17 @@ RESOURCE_ATTRIBUTE_MAP = {
         attr.SHARED: {'allow_post': True,
                       'allow_put': True,
                       'default': False,
-                      'convert_to': converters.convert_to_boolean,
+                      'convert_to': attr.convert_to_boolean,
                       'is_visible': True,
                       'required_by_policy': True,
                       'enforce_policy': True},
-        'ip_version': {'allow_post': True, 'allow_put': False,
-                       'convert_to': converters.convert_to_int,
-                       'validate': {'type:values': [4, 6]},
-                       'is_visible': True},
     },
     attr.SUBNETPOOLS: {
         ADDRESS_SCOPE_ID: {'allow_post': True,
                            'allow_put': True,
-                           'default': constants.ATTR_NOT_SPECIFIED,
+                           'default': attr.ATTR_NOT_SPECIFIED,
                            'validate': {'type:uuid_or_none': None},
                            'is_visible': True}
-    },
-    attr.NETWORKS: {
-        IPV4_ADDRESS_SCOPE: {'allow_post': False,
-                             'allow_put': False,
-                             'is_visible': True},
-        IPV6_ADDRESS_SCOPE: {'allow_post': False,
-                             'allow_put': False,
-                             'is_visible': True},
     }
 }
 

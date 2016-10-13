@@ -16,7 +16,6 @@
 from pecan import hooks
 import webob
 
-from neutron._i18n import _
 from neutron import manager
 
 
@@ -27,7 +26,8 @@ class OwnershipValidationHook(hooks.PecanHook):
     def before(self, state):
         if state.request.method != 'POST':
             return
-        for item in state.request.context.get('resources', []):
+        items = state.request.resources
+        for item in items:
             self._validate_network_tenant_ownership(state, item)
 
     def _validate_network_tenant_ownership(self, state, resource_item):

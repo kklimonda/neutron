@@ -26,22 +26,35 @@ from oslo_service import service as common_service
 from oslo_utils import excutils
 from oslo_utils import importutils
 
-from neutron._i18n import _LE, _LI
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.common import config
-from neutron.common import profiler
 from neutron.common import rpc as n_rpc
-from neutron.conf import service
 from neutron import context
 from neutron.db import api as session
+from neutron.i18n import _LE, _LI
 from neutron import manager
-from neutron import worker as neutron_worker
+from neutron import worker
 from neutron import wsgi
 
 
-service.register_service_opts(service.service_opts)
+service_opts = [
+    cfg.IntOpt('periodic_interval',
+               default=40,
+               help=_('Seconds between running periodic tasks')),
+    cfg.IntOpt('api_workers',
+               help=_('Number of separate API worker processes for service. '
+                      'If not specified, the default is equal to the number '
+                      'of CPUs available for best performance.')),
+    cfg.IntOpt('rpc_workers',
+               default=1,
+               help=_('Number of RPC worker processes for service')),
+    cfg.IntOpt('periodic_fuzzy_delay',
+               default=5,
+               help=_('Range of seconds to randomly delay when starting the '
+                      'periodic task scheduler to reduce stampeding. '
+                      '(Disable by setting to 0)')),
+]
+CONF = cfg.CONF
+CONF.register_opts(service_opts)
 
 LOG = logging.getLogger(__name__)
 
@@ -68,13 +81,16 @@ class WsgiService(object):
 
 class NeutronApiService(WsgiService):
     """Class for neutron-api service."""
-    def __init__(self, app_name):
-        profiler.setup('neutron-server', cfg.CONF.host)
-        super(NeutronApiService, self).__init__(app_name)
 
     @classmethod
     def create(cls, app_name='neutron'):
-        # Setup logging early
+
+        # Setup logging early, supplying both the CLI options and the
+        # configuration mapping from the config file
+        # We only update the conf dict for the verbose and debug
+        # flags. Everything else must be set up in the conf file...
+        # Log the options used when starting if we're in debug mode...
+
         config.setup_logging()
         service = cls(app_name)
         return service
@@ -90,24 +106,32 @@ def serve_wsgi(cls):
             LOG.exception(_LE('Unrecoverable error: please check log '
                               'for details.'))
 
-    registry.notify(resources.PROCESS, events.BEFORE_SPAWN, service)
     return service
 
 
-class RpcWorker(neutron_worker.NeutronWorker):
+def start_plugin_workers():
+    launchers = []
+    # NOTE(twilson) get_service_plugins also returns the core plugin
+    for plugin in manager.NeutronManager.get_unique_service_plugins():
+        # TODO(twilson) Instead of defaulting here, come up with a good way to
+        # share a common get_workers default between NeutronPluginBaseV2 and
+        # ServicePluginBase
+        for plugin_worker in getattr(plugin, 'get_workers', tuple)():
+            launcher = common_service.ProcessLauncher(cfg.CONF)
+            launcher.launch_service(plugin_worker)
+            launchers.append(launcher)
+    return launchers
+
+
+class RpcWorker(worker.NeutronWorker):
     """Wraps a worker to be handled by ProcessLauncher"""
     start_listeners_method = 'start_rpc_listeners'
 
-    def __init__(self, plugins, worker_process_count=1):
-        super(RpcWorker, self).__init__(
-            worker_process_count=worker_process_count
-        )
-
+    def __init__(self, plugins):
         self._plugins = plugins
         self._servers = []
 
     def start(self):
-        super(RpcWorker, self).start()
         for plugin in self._plugins:
             if hasattr(plugin, self.start_listeners_method):
                 try:
@@ -145,11 +169,7 @@ class RpcWorker(neutron_worker.NeutronWorker):
         config.reset_service()
 
 
-class RpcReportsWorker(RpcWorker):
-    start_listeners_method = 'start_rpc_state_reports_listener'
-
-
-def _get_rpc_workers():
+def serve_rpc():
     plugin = manager.NeutronManager.get_plugin()
     service_plugins = (
         manager.NeutronManager.get_service_plugins().values())
@@ -169,118 +189,27 @@ def _get_rpc_workers():
                       cfg.CONF.rpc_workers)
         raise NotImplementedError()
 
-    # passing service plugins only, because core plugin is among them
-    rpc_workers = [RpcWorker(service_plugins,
-                             worker_process_count=cfg.CONF.rpc_workers)]
-
-    if (cfg.CONF.rpc_state_report_workers > 0 and
-            plugin.rpc_state_report_workers_supported()):
-        rpc_workers.append(
-            RpcReportsWorker(
-                [plugin],
-                worker_process_count=cfg.CONF.rpc_state_report_workers
-            )
-        )
-    return rpc_workers
-
-
-def _get_plugins_workers():
-    # NOTE(twilson) get_service_plugins also returns the core plugin
-    plugins = manager.NeutronManager.get_unique_service_plugins()
-
-    # TODO(twilson) Instead of defaulting here, come up with a good way to
-    # share a common get_workers default between NeutronPluginBaseV2 and
-    # ServicePluginBase
-    return [
-        plugin_worker
-        for plugin in plugins if hasattr(plugin, 'get_workers')
-        for plugin_worker in plugin.get_workers()
-    ]
-
-
-class AllServicesNeutronWorker(neutron_worker.NeutronWorker):
-    def __init__(self, services, worker_process_count=1):
-        super(AllServicesNeutronWorker, self).__init__(worker_process_count)
-        self._services = services
-        self._launcher = common_service.Launcher(cfg.CONF)
-
-    def start(self):
-        for srv in self._services:
-            self._launcher.launch_service(srv)
-        super(AllServicesNeutronWorker, self).start()
-
-    def stop(self):
-        self._launcher.stop()
-
-    def wait(self):
-        self._launcher.wait()
-
-    def reset(self):
-        self._launcher.restart()
-
-
-def _start_workers(workers):
-    process_workers = [
-        plugin_worker for plugin_worker in workers
-        if plugin_worker.worker_process_count > 0
-    ]
-
     try:
-        if process_workers:
-            worker_launcher = common_service.ProcessLauncher(
-                cfg.CONF, wait_interval=1.0
-            )
+        # passing service plugins only, because core plugin is among them
+        rpc = RpcWorker(service_plugins)
 
-            # add extra process worker and spawn there all workers with
-            # worker_process_count == 0
-            thread_workers = [
-                plugin_worker for plugin_worker in workers
-                if plugin_worker.worker_process_count < 1
-            ]
-            if thread_workers:
-                process_workers.append(
-                    AllServicesNeutronWorker(thread_workers)
-                )
-
-            # dispose the whole pool before os.fork, otherwise there will
-            # be shared DB connections in child processes which may cause
-            # DB errors.
-            session.context_manager.dispose_pool()
-
-            for worker in process_workers:
-                worker_launcher.launch_service(worker,
-                                               worker.worker_process_count)
-        else:
-            worker_launcher = common_service.ServiceLauncher(cfg.CONF)
-            for worker in workers:
-                worker_launcher.launch_service(worker)
-        return worker_launcher
+        # dispose the whole pool before os.fork, otherwise there will
+        # be shared DB connections in child processes which may cause
+        # DB errors.
+        LOG.debug('using launcher for rpc, workers=%s', cfg.CONF.rpc_workers)
+        session.dispose()
+        launcher = common_service.ProcessLauncher(cfg.CONF, wait_interval=1.0)
+        launcher.launch_service(rpc, workers=cfg.CONF.rpc_workers)
+        return launcher
     except Exception:
         with excutils.save_and_reraise_exception():
             LOG.exception(_LE('Unrecoverable error: please check log for '
                               'details.'))
 
 
-def start_all_workers():
-    workers = _get_rpc_workers() + _get_plugins_workers()
-    return _start_workers(workers)
-
-
-def start_rpc_workers():
-    rpc_workers = _get_rpc_workers()
-
-    LOG.debug('using launcher for rpc, workers=%s', cfg.CONF.rpc_workers)
-    return _start_workers(rpc_workers)
-
-
-def start_plugins_workers():
-    plugins_workers = _get_plugins_workers()
-    return _start_workers(plugins_workers)
-
-
 def _get_api_workers():
     workers = cfg.CONF.api_workers
-    if workers is None:
+    if not workers:
         workers = processutils.get_worker_count()
     return workers
 
@@ -290,10 +219,6 @@ def _run_wsgi(app_name):
     if not app:
         LOG.error(_LE('No known API applications configured.'))
         return
-    return run_wsgi_app(app)
-
-
-def run_wsgi_app(app):
     server = wsgi.Server("Neutron")
     server.start(app, cfg.CONF.bind_port, cfg.CONF.bind_host,
                  workers=_get_api_workers())
@@ -322,7 +247,6 @@ class Service(n_rpc.Service):
         self.periodic_fuzzy_delay = periodic_fuzzy_delay
         self.saved_args, self.saved_kwargs = args, kwargs
         self.timers = []
-        profiler.setup(binary, host)
         super(Service, self).__init__(host, topic, manager=self.manager)
 
     def start(self):
@@ -357,30 +281,30 @@ class Service(n_rpc.Service):
                periodic_fuzzy_delay=None):
         """Instantiates class and passes back application object.
 
-        :param host: defaults to cfg.CONF.host
+        :param host: defaults to CONF.host
         :param binary: defaults to basename of executable
         :param topic: defaults to bin_name - 'neutron-' part
-        :param manager: defaults to cfg.CONF.<topic>_manager
-        :param report_interval: defaults to cfg.CONF.report_interval
-        :param periodic_interval: defaults to cfg.CONF.periodic_interval
-        :param periodic_fuzzy_delay: defaults to cfg.CONF.periodic_fuzzy_delay
+        :param manager: defaults to CONF.<topic>_manager
+        :param report_interval: defaults to CONF.report_interval
+        :param periodic_interval: defaults to CONF.periodic_interval
+        :param periodic_fuzzy_delay: defaults to CONF.periodic_fuzzy_delay
 
         """
         if not host:
-            host = cfg.CONF.host
+            host = CONF.host
         if not binary:
             binary = os.path.basename(inspect.stack()[-1][1])
         if not topic:
             topic = binary.rpartition('neutron-')[2]
             topic = topic.replace("-", "_")
         if not manager:
-            manager = cfg.CONF.get('%s_manager' % topic, None)
+            manager = CONF.get('%s_manager' % topic, None)
         if report_interval is None:
-            report_interval = cfg.CONF.report_interval
+            report_interval = CONF.report_interval
         if periodic_interval is None:
-            periodic_interval = cfg.CONF.periodic_interval
+            periodic_interval = CONF.periodic_interval
         if periodic_fuzzy_delay is None:
-            periodic_fuzzy_delay = cfg.CONF.periodic_fuzzy_delay
+            periodic_fuzzy_delay = CONF.periodic_fuzzy_delay
         service_obj = cls(host, binary, topic, manager,
                           report_interval=report_interval,
                           periodic_interval=periodic_interval,

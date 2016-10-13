@@ -14,18 +14,15 @@
 # limitations under the License.
 
 import mock
-from neutron_lib import constants as l3_const
-from neutron_lib import exceptions
 from oslo_utils import uuidutils
-import testtools
 
-from neutron.common import constants as n_const
+from neutron.common import constants as l3_const
+from neutron.common import exceptions
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import common_db_mixin
 from neutron.db import l3_agentschedulers_db
 from neutron.db import l3_dvr_db
-from neutron.extensions import portbindings
 from neutron import manager
 from neutron.plugins.common import constants as plugin_const
 from neutron.tests.unit.db import test_db_base_plugin_v2
@@ -43,7 +40,8 @@ class FakeL3Plugin(common_db_mixin.CommonDbMixin,
 class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
     def setUp(self):
-        super(L3DvrTestCase, self).setUp(plugin='ml2')
+        core_plugin = 'neutron.plugins.ml2.plugin.Ml2Plugin'
+        super(L3DvrTestCase, self).setUp(plugin=core_plugin)
         self.core_plugin = manager.NeutronManager.get_plugin()
         self.ctx = context.get_admin_context()
         self.mixin = FakeL3Plugin()
@@ -52,16 +50,25 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         with self.ctx.session.begin(subtransactions=True):
             return self.mixin._create_router_db(self.ctx, router, 'foo_tenant')
 
-    def create_port(self, net_id, port_info):
-        with self.ctx.session.begin(subtransactions=True):
-            return self._create_port(self.fmt, net_id, **port_info)
-
     def _test__create_router_db(self, expected=False, distributed=None):
         router = {'name': 'foo_router', 'admin_state_up': True}
         if distributed is not None:
             router['distributed'] = distributed
         result = self._create_router(router)
         self.assertEqual(expected, result.extra_attributes['distributed'])
+
+    def test_router_id_query(self):
+        # need to create an object that has the common db method required
+        class DVRwithCommon(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
+                            common_db_mixin.CommonDbMixin):
+            pass
+        self.mixin = DVRwithCommon()
+        routers = [self._create_router({'name': '%s' % x,
+                                        'admin_state_up': True})
+                   for x in range(10)]
+        expected = [router['id'] for router in routers]
+        router_ids = self.mixin._get_router_ids(self.ctx)
+        self.assertEqual(sorted(expected), sorted(router_ids))
 
     def test_create_router_db_default(self):
         self._test__create_router_db(expected=False)
@@ -115,7 +122,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             return_value={'agents': [agent]})
         self.mixin._unbind_router = mock.Mock()
         router_db = self.mixin._update_router_db(
-            self.ctx, router_id, distributed)
+            self.ctx, router_id, distributed, mock.ANY)
         # Assert that the DB value has changed
         self.assertTrue(router_db.extra_attributes.distributed)
         self.assertEqual(1,
@@ -263,13 +270,13 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
     def _helper_delete_floatingip_agent_gateway_port(self, port_host):
         ports = [{
             'id': 'my_port_id',
-            portbindings.HOST_ID: 'foo_host',
+            'binding:host_id': 'foo_host',
             'network_id': 'ext_network_id',
             'device_owner': l3_const.DEVICE_OWNER_ROUTER_GW
         },
                 {
             'id': 'my_new_port_id',
-            portbindings.HOST_ID: 'my_foo_host',
+            'binding:host_id': 'my_foo_host',
             'network_id': 'ext_network_id',
             'device_owner': l3_const.DEVICE_OWNER_ROUTER_GW
         }]
@@ -409,7 +416,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         router, fip = self._floatingip_on_port_test_setup(None)
 
         self.assertNotIn(l3_const.FLOATINGIP_KEY, router)
-        self.assertNotIn(n_const.FLOATINGIP_AGENT_INTF_KEY, router)
+        self.assertNotIn(l3_const.FLOATINGIP_AGENT_INTF_KEY, router)
 
     def test_floatingip_on_port_with_host(self):
         router, fip = self._floatingip_on_port_test_setup(_uuid())
@@ -417,16 +424,16 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         self.assertTrue(self.mixin._get_fip_sync_interfaces.called)
 
         self.assertIn(l3_const.FLOATINGIP_KEY, router)
-        self.assertIn(n_const.FLOATINGIP_AGENT_INTF_KEY, router)
+        self.assertIn(l3_const.FLOATINGIP_AGENT_INTF_KEY, router)
         self.assertIn(fip, router[l3_const.FLOATINGIP_KEY])
         self.assertIn('fip_interface',
-            router[n_const.FLOATINGIP_AGENT_INTF_KEY])
+            router[l3_const.FLOATINGIP_AGENT_INTF_KEY])
 
     def _setup_test_create_floatingip(
         self, fip, floatingip_db, router_db):
         port = {
             'id': '1234',
-            portbindings.HOST_ID: 'myhost',
+            'binding:host_id': 'myhost',
             'network_id': 'external_net'
         }
 
@@ -435,16 +442,11 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                                   '_get_dvr_service_port_hostid') as vmp,\
                 mock.patch.object(
                     self.mixin,
-                    '_get_dvr_migrating_service_port_hostid'
-                                 ) as mvmp,\
-                mock.patch.object(
-                    self.mixin,
                     'create_fip_agent_gw_port_if_not_exists') as c_fip,\
                 mock.patch.object(l3_dvr_db.l3_db.L3_NAT_db_mixin,
                                   '_update_fip_assoc'):
             grtr.return_value = router_db
             vmp.return_value = 'my-host'
-            mvmp.return_value = 'my-future-host'
             self.mixin._update_fip_assoc(
                 self.ctx, fip, floatingip_db, port)
             return c_fip
@@ -484,6 +486,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                        'distributed': True}
         router = self._create_router(router_dict)
         plugin = mock.MagicMock()
+        plugin.get_subnet_ids_on_router = mock.Mock()
         with self.network() as net_ext,\
                 self.subnet() as subnet1,\
                 self.subnet(cidr='20.0.0.0/24') as subnet2:
@@ -529,119 +532,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             dvr_ports = self.core_plugin.get_ports(
                 self.ctx, filters=dvr_filters)
             self.assertEqual(1, len(dvr_ports))
-
-    def _setup_router_with_v4_and_v6(self):
-        router_dict = {'name': 'test_router', 'admin_state_up': True,
-                       'distributed': True}
-        router = self._create_router(router_dict)
-        plugin = mock.MagicMock()
-        with self.network() as net_ext, self.network() as net_int:
-            ext_net_id = net_ext['network']['id']
-            self.core_plugin.update_network(
-                self.ctx, ext_net_id,
-                {'network': {'router:external': True}})
-            self.mixin.update_router(
-                self.ctx, router['id'],
-                {'router': {'external_gateway_info':
-                            {'network_id': ext_net_id}}})
-            with self.subnet(
-                network=net_int, cidr='20.0.0.0/24') as subnet_v4,\
-                self.subnet(
-                    network=net_int, cidr='fe80::/64',
-                    gateway_ip='fe80::1', ip_version=6) as subnet_v6:
-                self.mixin.add_router_interface(self.ctx, router['id'],
-                    {'subnet_id': subnet_v4['subnet']['id']})
-                self.mixin.add_router_interface(self.ctx, router['id'],
-                    {'subnet_id': subnet_v6['subnet']['id']})
-                get_svc_plugin = mock.patch.object(
-                    manager.NeutronManager, 'get_service_plugins').start()
-                get_svc_plugin.return_value = {
-                    plugin_const.L3_ROUTER_NAT: plugin}
-                self.mixin.manager = manager
-                return router, subnet_v4, subnet_v6
-
-    def test_undo_router_interface_change_on_csnat_error(self):
-        self._test_undo_router_interface_change_on_csnat_error(False)
-
-    def test_undo_router_interface_change_on_csnat_error_revert_failure(self):
-        self._test_undo_router_interface_change_on_csnat_error(True)
-
-    def _test_undo_router_interface_change_on_csnat_error(self, fail_revert):
-        router, subnet_v4, subnet_v6 = self._setup_router_with_v4_and_v6()
-        net = {'network': {'id': subnet_v6['subnet']['network_id'],
-                           'tenant_id': subnet_v6['subnet']['tenant_id']}}
-        orig_update = self.mixin._core_plugin.update_port
-
-        def update_port(*args, **kwargs):
-            # 1st port update is the interface, 2nd is csnat, 3rd is revert
-            # we want to simulate errors after the 1st
-            update_port.calls += 1
-            if update_port.calls == 2:
-                raise RuntimeError('csnat update failure')
-            if update_port.calls == 3 and fail_revert:
-                # this is to ensure that if the revert fails, the original
-                # exception is raised (not this ValueError)
-                raise ValueError('failure from revert')
-            return orig_update(*args, **kwargs)
-        update_port.calls = 0
-        self.mixin._core_plugin.update_port = update_port
-
-        with self.subnet(network=net, cidr='fe81::/64',
-                         gateway_ip='fe81::1', ip_version=6) as subnet2_v6:
-            with testtools.ExpectedException(RuntimeError):
-                self.mixin.add_router_interface(self.ctx, router['id'],
-                    {'subnet_id': subnet2_v6['subnet']['id']})
-            if fail_revert:
-                # a revert failure will mean the interface is still added
-                # so we can't re-add it
-                return
-            # starting over should work if first interface was cleaned up
-            self.mixin.add_router_interface(self.ctx, router['id'],
-                {'subnet_id': subnet2_v6['subnet']['id']})
-
-    def test_remove_router_interface_csnat_ports_removal_with_ipv6(self):
-        router, subnet_v4, subnet_v6 = self._setup_router_with_v4_and_v6()
-        csnat_filters = {'device_owner':
-                         [l3_const.DEVICE_OWNER_ROUTER_SNAT]}
-        csnat_ports = self.core_plugin.get_ports(
-            self.ctx, filters=csnat_filters)
-        self.assertEqual(2, len(csnat_ports))
-        dvr_filters = {'device_owner':
-                       [l3_const.DEVICE_OWNER_DVR_INTERFACE]}
-        dvr_ports = self.core_plugin.get_ports(
-            self.ctx, filters=dvr_filters)
-        self.assertEqual(2, len(dvr_ports))
-        self.mixin.remove_router_interface(
-            self.ctx, router['id'],
-            {'subnet_id': subnet_v4['subnet']['id']})
-        csnat_ports = self.core_plugin.get_ports(
-            self.ctx, filters=csnat_filters)
-        self.assertEqual(1, len(csnat_ports))
-        self.assertEqual(
-            subnet_v6['subnet']['id'],
-            csnat_ports[0]['fixed_ips'][0]['subnet_id'])
-
-        dvr_ports = self.core_plugin.get_ports(
-            self.ctx, filters=dvr_filters)
-        self.assertEqual(1, len(dvr_ports))
-
-    def test_remove_router_interface_csnat_port_missing_ip(self):
-        # NOTE(kevinbenton): this is a contrived scenario to reproduce
-        # a condition observed in bug/1609540. Once we figure out why
-        # these ports lose their IP we can remove this test.
-        router, subnet_v4, subnet_v6 = self._setup_router_with_v4_and_v6()
-        self.mixin.remove_router_interface(
-            self.ctx, router['id'],
-            {'subnet_id': subnet_v4['subnet']['id']})
-        csnat_filters = {'device_owner':
-                         [l3_const.DEVICE_OWNER_ROUTER_SNAT]}
-        csnat_ports = self.core_plugin.get_ports(
-            self.ctx, filters=csnat_filters)
-        self.core_plugin.update_port(self.ctx, csnat_ports[0]['id'],
-                                     {'port': {'fixed_ips': []}})
-        self.mixin.remove_router_interface(
-            self.ctx, router['id'],
-            {'subnet_id': subnet_v6['subnet']['id']})
+            self.assertEqual(1, plugin.get_subnet_ids_on_router.call_count)
 
     def test__validate_router_migration_notify_advanced_services(self):
         router = {'name': 'foo_router', 'admin_state_up': False}
@@ -652,37 +543,6 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             kwargs = {'context': self.ctx, 'router': router_db}
             mock_notify.assert_called_once_with(
                 'router', 'before_update', self.mixin, **kwargs)
-
-    def test_validate_add_router_interface_by_subnet_notify_advanced_services(
-        self):
-        router = {'name': 'foo_router', 'admin_state_up': False}
-        router_db = self._create_router(router)
-        with self.network() as net, \
-                self.subnet(network={'network': net['network']}) as sub, \
-                mock.patch.object(
-                    self.mixin,
-                    '_notify_attaching_interface') as mock_notify:
-            interface_info = {'subnet_id': sub['subnet']['id']}
-            self.mixin.add_router_interface(self.ctx, router_db.id,
-                                            interface_info)
-            mock_notify.assert_called_once_with(self.ctx, router_db.id,
-                                                sub['subnet']['network_id'])
-
-    def test_validate_add_router_interface_by_port_notify_advanced_services(
-        self):
-        router = {'name': 'foo_router', 'admin_state_up': False}
-        router_db = self._create_router(router)
-        with self.network() as net, \
-                self.subnet(network={'network': net['network']}) as sub, \
-                self.port(subnet=sub) as port, \
-                mock.patch.object(
-                    self.mixin,
-                    '_notify_attaching_interface') as mock_notify:
-            interface_info = {'port_id': port['port']['id']}
-            self.mixin.add_router_interface(self.ctx, router_db.id,
-                                            interface_info)
-            mock_notify.assert_called_once_with(self.ctx, router_db.id,
-                                                net['network']['id'])
 
     def _test_update_arp_entry_for_dvr_service_port(
             self, device_owner, action):
@@ -760,46 +620,3 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                 self.assertEqual(1, len(router_ports))
                 self.assertEqual(l3_const.DEVICE_OWNER_ROUTER_GW,
                                  router_ports[0]['device_owner'])
-
-    def test_add_router_interface_by_port_failure(self):
-        router_dict = {'name': 'test_router',
-                       'admin_state_up': True,
-                       'distributed': True}
-        router = self._create_router(router_dict)
-        with self.subnet(cidr='10.10.10.0/24') as subnet:
-            port_dict = {
-                'device_id': '',
-                'device_owner': '',
-                'admin_state_up': True,
-                'fixed_ips': [{'subnet_id': subnet['subnet']['id'],
-                               'ip_address': '10.10.10.100'}]
-            }
-            net_id = subnet['subnet']['network_id']
-            port_res = self.create_port(net_id, port_dict)
-            port = self.deserialize(self.fmt, port_res)
-            self.assertIn('port', port, message='Create port failed.')
-
-            orig_update_port = self.mixin._core_plugin.update_port
-            call_info = {'count': 0}
-
-            def _fake_update_port(*args, **kwargs):
-                call_info['count'] += 1
-                if call_info['count'] == 2:
-                    raise RuntimeError()
-                else:
-                    return orig_update_port(*args, **kwargs)
-
-            # NOTE(trananhkma): expect that update_port() only raises an error
-            # at the 2nd function call (Update owner after actual process
-            # again in order).
-            with mock.patch.object(self.mixin._core_plugin, 'update_port',
-                                   side_effect=_fake_update_port):
-                self.assertRaises(
-                    RuntimeError,
-                    self.mixin.add_router_interface,
-                    self.ctx, router['id'], {'port_id': port['port']['id']})
-
-            port_info = self.core_plugin.get_port(self.ctx, port['port']['id'])
-            self.assertEqual(port_dict['device_id'], port_info['device_id'])
-            self.assertEqual(port_dict['device_owner'],
-                             port_info['device_owner'])

@@ -13,19 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib import constants
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
+from oslo_serialization import jsonutils
 import six
 
-from neutron.common import constants as n_const
+from neutron.common import constants
+from neutron.common import exceptions
 from neutron.common import utils
 from neutron import context as neutron_context
 from neutron.db import api as db_api
 from neutron.extensions import l3
 from neutron.extensions import portbindings
+from neutron.i18n import _LE
 from neutron import manager
 from neutron.plugins.common import constants as plugin_constants
 
@@ -45,9 +46,7 @@ class L3RpcCallback(object):
     # 1.5 Added update_ha_routers_states
     # 1.6 Added process_prefix_update to support IPv6 Prefix Delegation
     # 1.7 Added method delete_agent_gateway_port for DVR Routers
-    # 1.8 Added address scope information
-    # 1.9 Added get_router_ids
-    target = oslo_messaging.Target(version='1.9')
+    target = oslo_messaging.Target(version='1.7')
 
     @property
     def plugin(self):
@@ -62,19 +61,6 @@ class L3RpcCallback(object):
                 plugin_constants.L3_ROUTER_NAT]
         return self._l3plugin
 
-    def get_router_ids(self, context, host):
-        """Returns IDs of routers scheduled to l3 agent on <host>
-
-        This will autoschedule unhosted routers to l3 agent on <host> and then
-        return all ids of routers scheduled to it.
-        """
-        if utils.is_extension_supported(
-                self.l3plugin, constants.L3_AGENT_SCHEDULER_EXT_ALIAS):
-            if cfg.CONF.router_auto_schedule:
-                self.l3plugin.auto_schedule_routers(context, host,
-                                                    router_ids=None)
-        return self.l3plugin.list_router_ids_on_host(context, host)
-
     @db_api.retry_db_errors
     def sync_routers(self, context, **kwargs):
         """Sync routers according to filters to a specific agent.
@@ -87,8 +73,14 @@ class L3RpcCallback(object):
         router_ids = kwargs.get('router_ids')
         host = kwargs.get('host')
         context = neutron_context.get_admin_context()
-        if utils.is_extension_supported(
-            self.l3plugin, constants.L3_AGENT_SCHEDULER_EXT_ALIAS):
+        if not self.l3plugin:
+            routers = {}
+            LOG.error(_LE('No plugin for L3 routing registered! Will reply '
+                          'to l3 agent with empty router dictionary.'))
+        elif utils.is_extension_supported(
+                self.l3plugin, constants.L3_AGENT_SCHEDULER_EXT_ALIAS):
+            if cfg.CONF.router_auto_schedule:
+                self.l3plugin.auto_schedule_routers(context, host, router_ids)
             routers = (
                 self.l3plugin.list_active_sync_routers_on_active_l3_agent(
                     context, host, router_ids))
@@ -97,6 +89,9 @@ class L3RpcCallback(object):
         if utils.is_extension_supported(
             self.plugin, constants.PORT_BINDING_EXT_ALIAS):
             self._ensure_host_set_on_ports(context, host, routers)
+        LOG.debug("Routers returned to l3 agent:\n %s",
+                  utils.DelayedStringRenderer(jsonutils.dumps,
+                                              routers, indent=5))
         return routers
 
     def _ensure_host_set_on_ports(self, context, host, routers):
@@ -111,11 +106,10 @@ class L3RpcCallback(object):
                                               gw_port_host,
                                               router.get('gw_port'),
                                               router['id'])
-                for p in router.get(n_const.SNAT_ROUTER_INTF_KEY, []):
-                    self._ensure_host_set_on_port(
-                        context, gw_port_host, p, router['id'],
-                        ha_router_port=router.get('ha'))
-
+                for p in router.get(constants.SNAT_ROUTER_INTF_KEY, []):
+                    self._ensure_host_set_on_port(context,
+                                                  gw_port_host,
+                                                  p, router['id'])
             else:
                 self._ensure_host_set_on_port(
                     context, host,
@@ -189,8 +183,8 @@ class L3RpcCallback(object):
             # Ports that are DVR interfaces have multiple bindings (based on
             # of hosts on which DVR router interfaces are spawned). Such
             # bindings are created/updated here by invoking
-            # update_distributed_port_binding
-            self.plugin.update_distributed_port_binding(context, port['id'],
+            # update_dvr_port_binding
+            self.plugin.update_dvr_port_binding(context, port['id'],
                                                 {'port':
                                                  {portbindings.HOST_ID: host,
                                                   'device_id': router_id}
@@ -212,7 +206,6 @@ class L3RpcCallback(object):
         plugins = manager.NeutronManager.get_service_plugins()
         return plugins.keys()
 
-    @db_api.retry_db_errors
     def update_floatingip_statuses(self, context, router_id, fip_statuses):
         """Update operational status for a floating IP."""
         with context.session.begin(subtransactions=True):
@@ -267,7 +260,6 @@ class L3RpcCallback(object):
                   'host': host})
         return agent_port
 
-    @db_api.retry_db_errors
     def update_ha_routers_states(self, context, **kwargs):
         """Update states for HA routers.
 
@@ -291,7 +283,6 @@ class L3RpcCallback(object):
                                         {'subnet': {'cidr': prefix}}))
         return updated_subnets
 
-    @db_api.retry_db_errors
     def delete_agent_gateway_port(self, context, **kwargs):
         """Delete Floatingip agent gateway port."""
         network_id = kwargs.get('network_id')

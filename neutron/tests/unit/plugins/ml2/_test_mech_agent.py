@@ -41,8 +41,7 @@ class FakeNetworkContext(api.NetworkContext):
 
 class FakePortContext(api.PortContext):
     def __init__(self, agent_type, agents, segments,
-                 vnic_type=portbindings.VNIC_NORMAL,
-                 original=None):
+                 vnic_type=portbindings.VNIC_NORMAL):
         self._agent_type = agent_type
         self._agents = agents
         self._network_context = FakeNetworkContext(segments)
@@ -50,16 +49,15 @@ class FakePortContext(api.PortContext):
         self._bound_segment_id = None
         self._bound_vif_type = None
         self._bound_vif_details = None
-        self._original = original
 
     @property
     def current(self):
         return {'id': PORT_ID,
-                portbindings.VNIC_TYPE: self._bound_vnic_type}
+                'binding:vnic_type': self._bound_vnic_type}
 
     @property
     def original(self):
-        return self._original or {}
+        return None
 
     @property
     def status(self):

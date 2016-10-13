@@ -21,23 +21,25 @@ import pwd
 import shlex
 import socket
 import struct
+import tempfile
 import threading
 
-import debtcollector
+from debtcollector import removals
 import eventlet
 from eventlet.green import subprocess
 from eventlet import greenthread
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_log import loggers
 from oslo_rootwrap import client
-from oslo_utils import encodeutils
 from oslo_utils import excutils
+import six
 from six.moves import http_client as httplib
 
-from neutron._i18n import _, _LE
 from neutron.agent.common import config
+from neutron.common import constants
 from neutron.common import utils
+from neutron.i18n import _LE
 from neutron import wsgi
 
 
@@ -62,7 +64,7 @@ class RootwrapDaemonHelper(object):
 
 
 def addl_env_args(addl_env):
-    """Build arguments for adding additional environment vars with env"""
+    """Build arugments for adding additional environment vars with env"""
 
     # NOTE (twilson) If using rootwrap, an EnvFilter should be set up for the
     # command instead of a CommandFilter.
@@ -105,10 +107,11 @@ def execute(cmd, process_input=None, addl_env=None,
             check_exit_code=True, return_stderr=False, log_fail_as_error=True,
             extra_ok_codes=None, run_as_root=False):
     try:
-        if process_input is not None:
-            _process_input = encodeutils.to_utf8(process_input)
+        if (process_input is None or
+            isinstance(process_input, six.binary_type)):
+            _process_input = process_input
         else:
-            _process_input = None
+            _process_input = process_input.encode('utf-8')
         if run_as_root and cfg.CONF.AGENT.root_helper_daemon:
             returncode, _stdout, _stderr = (
                 execute_rootwrap_daemon(cmd, process_input, addl_env))
@@ -118,27 +121,42 @@ def execute(cmd, process_input=None, addl_env=None,
             _stdout, _stderr = obj.communicate(_process_input)
             returncode = obj.returncode
             obj.stdin.close()
-        _stdout = utils.safe_decode_utf8(_stdout)
-        _stderr = utils.safe_decode_utf8(_stderr)
+        if six.PY3:
+            if isinstance(_stdout, bytes):
+                try:
+                    _stdout = _stdout.decode(encoding='utf-8')
+                except UnicodeError:
+                    pass
+            if isinstance(_stderr, bytes):
+                try:
+                    _stderr = _stderr.decode(encoding='utf-8')
+                except UnicodeError:
+                    pass
+
+        command_str = {
+            'cmd': cmd,
+            'code': returncode
+        }
+        m = _("\nCommand: %(cmd)s"
+              "\nExit code: %(code)d\n") % command_str
 
         extra_ok_codes = extra_ok_codes or []
-        if returncode and returncode not in extra_ok_codes:
-            msg = _("Exit code: %(returncode)d; "
-                    "Stdin: %(stdin)s; "
-                    "Stdout: %(stdout)s; "
-                    "Stderr: %(stderr)s") % {
-                        'returncode': returncode,
-                        'stdin': process_input or '',
-                        'stdout': _stdout,
-                        'stderr': _stderr}
+        if returncode and returncode in extra_ok_codes:
+            returncode = None
 
-            if log_fail_as_error:
-                LOG.error(msg)
-            if check_exit_code:
-                raise RuntimeError(msg)
+        if returncode and log_fail_as_error:
+            command_str['stdin'] = process_input or ''
+            command_str['stdout'] = _stdout
+            command_str['stderr'] = _stderr
+            m += _("Stdin: %(stdin)s\n"
+                  "Stdout: %(stdout)s\n"
+                  "Stderr: %(stderr)s") % command_str
+            LOG.error(m)
         else:
-            LOG.debug("Exit code: %d", returncode)
+            LOG.debug(m)
 
+        if returncode and check_exit_code:
+            raise RuntimeError(m)
     finally:
         # NOTE(termie): this appears to be necessary to let the subprocess
         #               call clean something up in between calls, without
@@ -153,10 +171,28 @@ def get_interface_mac(interface):
     MAC_END = 24
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     dev = interface[:constants.DEVICE_NAME_MAX_LEN]
-    dev = encodeutils.to_utf8(dev)
+    if isinstance(dev, six.text_type):
+        dev = dev.encode('utf-8')
     info = fcntl.ioctl(s.fileno(), 0x8927, struct.pack('256s', dev))
     return ''.join(['%02x:' % ord(char)
                     for char in info[MAC_START:MAC_END]])[:-1]
+
+
+def replace_file(file_name, data, file_mode=0o644):
+    """Replaces the contents of file_name with data in a safe manner.
+
+    First write to a temp file and then rename. Since POSIX renames are
+    atomic, the file is unlikely to be corrupted by competing writes.
+
+    We create the tempfile on the same device to ensure that it can be renamed.
+    """
+
+    base_dir = os.path.dirname(os.path.abspath(file_name))
+    tmp_file = tempfile.NamedTemporaryFile('w+', dir=base_dir, delete=False)
+    tmp_file.write(data)
+    tmp_file.close()
+    os.chmod(tmp_file.name, file_mode)
+    os.rename(tmp_file.name, file_name)
 
 
 def find_child_pids(pid):
@@ -174,6 +210,11 @@ def find_child_pids(pid):
                 ctxt.reraise = False
                 return []
     return [x.strip() for x in raw_pids.split('\n') if x.strip()]
+
+
+@removals.remove(message='Use neutron.common.utils.ensure_dir instead.')
+def ensure_dir(*args, **kwargs):
+    return utils.ensure_dir(*args, **kwargs)
 
 
 def _get_conf_base(cfg_root, uuid, ensure_conf_dir):
@@ -202,6 +243,12 @@ def get_value_from_file(filename, converter=None):
                 LOG.error(_LE('Unable to convert value in %s'), filename)
     except IOError:
         LOG.debug('Unable to access %s', filename)
+
+
+def get_value_from_conf_file(cfg_root, uuid, cfg_file, converter=None):
+    """A helper function to read a value from one of a config file."""
+    file_name = get_conf_file_name(cfg_root, uuid, cfg_file)
+    return get_value_from_file(file_name, converter)
 
 
 def remove_conf_files(cfg_root, uuid):
@@ -283,9 +330,20 @@ def pid_invoked_with_cmdline(pid, expected_cmd):
     return cmd_matches_expected(cmd, expected_cmd)
 
 
-wait_until_true = debtcollector.moves.moved_function(
-    utils.wait_until_true, 'wait_until_true', __name__,
-    version='Newton', removal_version='Ocata')
+def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
+    """
+    Wait until callable predicate is evaluated as True
+
+    :param predicate: Callable deciding whether waiting should continue.
+    Best practice is to instantiate predicate with functools.partial()
+    :param timeout: Timeout in seconds how long should function wait.
+    :param sleep: Polling interval for results in seconds.
+    :param exception: Exception class for eventlet.Timeout.
+    (see doc for eventlet.Timeout for more information)
+    """
+    with eventlet.timeout.Timeout(timeout, exception):
+        while not predicate():
+            eventlet.sleep(sleep)
 
 
 def ensure_directory_exists_without_file(path):
@@ -335,12 +393,6 @@ class UnixDomainHTTPConnection(httplib.HTTPConnection):
 
 
 class UnixDomainHttpProtocol(eventlet.wsgi.HttpProtocol):
-    # TODO(jlibosva): This is just a workaround not to set TCP_NODELAY on
-    # socket due to 40714b1ffadd47b315ca07f9b85009448f0fe63d evenlet change
-    # This should be removed once
-    # https://github.com/eventlet/eventlet/issues/301 is fixed
-    disable_nagle_algorithm = False
-
     def __init__(self, request, client_address, server):
         if client_address == '':
             client_address = ('<local>', 0)
@@ -350,11 +402,12 @@ class UnixDomainHttpProtocol(eventlet.wsgi.HttpProtocol):
 
 
 class UnixDomainWSGIServer(wsgi.Server):
-    def __init__(self, name):
+    def __init__(self, name, num_threads=None):
         self._socket = None
         self._launcher = None
         self._server = None
-        super(UnixDomainWSGIServer, self).__init__(name, disable_ssl=True)
+        super(UnixDomainWSGIServer, self).__init__(name, disable_ssl=True,
+                                                   num_threads=num_threads)
 
     def start(self, application, file_socket, workers, backlog, mode=None):
         self._socket = eventlet.listen(file_socket,
@@ -372,4 +425,4 @@ class UnixDomainWSGIServer(wsgi.Server):
                              application,
                              max_size=self.num_threads,
                              protocol=UnixDomainHttpProtocol,
-                             log=logger)
+                             log=loggers.WritableLogger(logger))

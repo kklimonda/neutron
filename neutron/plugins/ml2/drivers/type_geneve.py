@@ -13,14 +13,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.db import model_base
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log
 import sqlalchemy as sa
 from sqlalchemy import sql
 
-from neutron._i18n import _, _LE
+from neutron.common import exceptions as n_exc
+from neutron.db import model_base
+from neutron.i18n import _LE
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers import type_tunnel
 
@@ -36,12 +36,9 @@ geneve_opts = [
                default=p_const.GENEVE_ENCAP_MIN_OVERHEAD,
                help=_("Geneve encapsulation header size is dynamic, this "
                       "value is used to calculate the maximum MTU "
-                      "for the driver. "
-                      "This is the sum of the sizes of the outer "
-                      "ETH + IP + UDP + GENEVE header sizes. "
-                      "The default size for this field is 50, which is the "
-                      "size of the Geneve header without any additional "
-                      "option headers.")),
+                      "for the driver."
+                      "this is the sum of the sizes of the outer "
+                      "ETH + IP + UDP + GENEVE header sizes")),
 ]
 
 cfg.CONF.register_opts(geneve_opts, "ml2_type_geneve")

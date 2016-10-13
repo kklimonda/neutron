@@ -14,16 +14,15 @@
 #    under the License.
 
 import netaddr
-from neutron_lib.db import model_base
 from oslo_config import cfg
 from oslo_log import log as logging
 import sqlalchemy as sa
 from sqlalchemy import orm
 
-from neutron._i18n import _
 from neutron.common import utils
 from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
+from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.extensions import extraroute
 from neutron.extensions import l3
@@ -34,7 +33,7 @@ LOG = logging.getLogger(__name__)
 extra_route_opts = [
     #TODO(nati): use quota framework when it support quota for attributes
     cfg.IntOpt('max_routes', default=30,
-               help=_("Maximum number of routes per router")),
+               help=_("Maximum number of routes")),
 ]
 
 cfg.CONF.register_opts(extra_route_opts)
@@ -50,7 +49,6 @@ class RouterRoute(model_base.BASEV2, models_v2.Route):
                               backref=orm.backref("route_list",
                                                   lazy='joined',
                                                   cascade='delete'))
-    revises_on_change = ('router', )
 
 
 class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
@@ -104,7 +102,6 @@ class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
                 router_id=router_id,
                 quota=cfg.CONF.max_routes)
 
-        context = context.elevated()
         filters = {'device_id': [router_id]}
         ports = self._core_plugin.get_ports(context, filters)
         cidrs = []
