@@ -1,3 +1,9 @@
+neutron (2:8.3.0-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream stable point release for OpenStack Mitaka (LP: #1633191).
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 13 Oct 2016 15:27:09 -0400
+
 neutron (2:8.2.0-0ubuntu1) xenial; urgency=medium
 
   [ Corey Bryant ]
