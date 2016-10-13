@@ -13,25 +13,56 @@
 #    under the License.
 
 from oslo_utils import uuidutils
+import testscenarios
 
+from neutron.agent.common import ovs_lib
+from neutron.agent.linux import bridge_lib
+from neutron.agent.linux import tc_lib
 from neutron.agent.linux import utils
+from neutron.common import constants
 from neutron.services.qos import qos_consts
 from neutron.tests.fullstack import base
 from neutron.tests.fullstack.resources import environment
 from neutron.tests.fullstack.resources import machine
 
+from neutron.plugins.ml2.drivers.linuxbridge.agent.common import \
+    config as linuxbridge_agent_config
+from neutron.plugins.ml2.drivers.linuxbridge.agent import \
+    linuxbridge_neutron_agent as linuxbridge_agent
 from neutron.plugins.ml2.drivers.openvswitch.mech_driver import \
     mech_openvswitch as mech_ovs
+
+
+load_tests = testscenarios.load_tests_apply_scenarios
 
 
 BANDWIDTH_LIMIT = 500
 BANDWIDTH_BURST = 100
 
 
-def _wait_for_rule_applied(vm, limit, burst):
+def _wait_for_rule_applied_ovs_agent(vm, limit, burst):
     utils.wait_until_true(
         lambda: vm.bridge.get_egress_bw_limit_for_port(
             vm.port.name) == (limit, burst))
+
+
+def _wait_for_rule_applied_linuxbridge_agent(vm, limit, burst):
+    port_name = linuxbridge_agent.LinuxBridgeManager.get_tap_device_name(
+        vm.neutron_port['id'])
+    tc = tc_lib.TcCommand(
+        port_name,
+        linuxbridge_agent_config.DEFAULT_KERNEL_HZ_VALUE,
+        namespace=vm.host.host_namespace
+    )
+    utils.wait_until_true(
+        lambda: tc.get_filters_bw_limits() == (limit, burst))
+
+
+def _wait_for_rule_applied(vm, limit, burst):
+    if isinstance(vm.bridge, ovs_lib.OVSBridge):
+        _wait_for_rule_applied_ovs_agent(vm, limit, burst)
+    if isinstance(vm.bridge, bridge_lib.BridgeDevice):
+        _wait_for_rule_applied_linuxbridge_agent(vm, limit, burst)
 
 
 def _wait_for_rule_removed(vm):
@@ -39,13 +70,20 @@ def _wait_for_rule_removed(vm):
     _wait_for_rule_applied(vm, None, None)
 
 
-class TestQoSWithOvsAgent(base.BaseFullStackTestCase):
+class TestQoSWithL2Agent(base.BaseFullStackTestCase):
+
+    scenarios = [
+        ("ovs", {'l2_agent_type': constants.AGENT_TYPE_OVS}),
+        ("linuxbridge", {'l2_agent_type': constants.AGENT_TYPE_LINUXBRIDGE})
+    ]
 
     def setUp(self):
-        host_desc = [environment.HostDescription(l3_agent=False)]
+        host_desc = [environment.HostDescription(
+            l3_agent=False,
+            l2_agent_type=self.l2_agent_type)]
         env_desc = environment.EnvironmentDescription(qos=True)
         env = environment.Environment(env_desc, host_desc)
-        super(TestQoSWithOvsAgent, self).setUp(env)
+        super(TestQoSWithL2Agent, self).setUp(env)
 
     def _create_qos_policy(self):
         return self.safe_client.create_qos_policy(
@@ -80,7 +118,6 @@ class TestQoSWithOvsAgent(base.BaseFullStackTestCase):
 
     def test_qos_policy_rule_lifecycle(self):
         new_limit = BANDWIDTH_LIMIT + 100
-        new_burst = BANDWIDTH_BURST + 50
 
         self.tenant_id = uuidutils.generate_uuid()
         self.network = self.safe_client.create_network(self.tenant_id,
@@ -103,10 +140,15 @@ class TestQoSWithOvsAgent(base.BaseFullStackTestCase):
         self.client.delete_bandwidth_limit_rule(rule['id'], qos_policy_id)
         _wait_for_rule_removed(vm)
 
-        # Create new rule
+        # Create new rule with no given burst value, in such case ovs and lb
+        # agent should apply burst value as
+        # bandwidth_limit * qos_consts.DEFAULT_BURST_RATE
+        new_expected_burst = int(
+            new_limit * qos_consts.DEFAULT_BURST_RATE
+        )
         new_rule = self.safe_client.create_bandwidth_limit_rule(
-            self.tenant_id, qos_policy_id, new_limit, new_burst)
-        _wait_for_rule_applied(vm, new_limit, new_burst)
+            self.tenant_id, qos_policy_id, new_limit)
+        _wait_for_rule_applied(vm, new_limit, new_expected_burst)
 
         # Update qos policy rule id
         self.client.update_bandwidth_limit_rule(
@@ -125,7 +167,7 @@ class TestQoSWithOvsAgent(base.BaseFullStackTestCase):
 class TestQoSWithL2Population(base.BaseFullStackTestCase):
 
     def setUp(self):
-        host_desc = [environment.HostDescription()]
+        host_desc = []  # No need to register agents for this test case
         env_desc = environment.EnvironmentDescription(qos=True, l2_pop=True)
         env = environment.Environment(env_desc, host_desc)
         super(TestQoSWithL2Population, self).setUp(env)

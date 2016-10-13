@@ -17,15 +17,15 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
 
+from neutron._i18n import _, _LE
 from neutron.agent.linux import ip_lib
 from neutron.common import exceptions as nexception
-from neutron.common import topics
 from neutron import context
-from neutron.i18n import _LE
 from neutron.plugins.common import constants
 from neutron.services.firewall.agents import firewall_agent_api as api
 from neutron.services import provider_configuration as provconf
 
+FIREWALL_PLUGIN = 'q-firewall-plugin'
 LOG = logging.getLogger(__name__)
 
 
@@ -81,8 +81,7 @@ class FWaaSL3AgentRpcCallback(api.FWaaSAgentRpcCallbackMixin):
                 raise ImportError(msg % fwaas_driver_class_path)
         self.services_sync = False
         # setup RPC to msg fwaas plugin
-        self.fwplugin_rpc = FWaaSL3PluginApi(topics.FIREWALL_PLUGIN,
-                                             conf.host)
+        self.fwplugin_rpc = FWaaSL3PluginApi(FIREWALL_PLUGIN, conf.host)
         super(FWaaSL3AgentRpcCallback, self).__init__(host=conf.host)
 
     def _get_router_info_list_for_tenant(self, routers, tenant_id):
@@ -93,8 +92,7 @@ class FWaaSL3AgentRpcCallback(api.FWaaSAgentRpcCallbackMixin):
             router['id']
             for router in routers
             if router['tenant_id'] == tenant_id]
-        local_ns_list = (root_ip.get_namespaces()
-                         if self.conf.use_namespaces else [])
+        local_ns_list = root_ip.get_namespaces()
 
         router_info_list = []
         # Pick up namespaces for Tenant Routers
@@ -103,11 +101,8 @@ class FWaaSL3AgentRpcCallback(api.FWaaSAgentRpcCallbackMixin):
             # the router - but this is not yet populated in router_info
             if rid not in self.router_info:
                 continue
-            if self.conf.use_namespaces:
-                router_ns = self.router_info[rid].ns_name
-                if router_ns in local_ns_list:
-                    router_info_list.append(self.router_info[rid])
-            else:
+            router_ns = self.router_info[rid].ns_name
+            if router_ns in local_ns_list:
                 router_info_list.append(self.router_info[rid])
         return router_info_list
 

@@ -14,12 +14,12 @@
 #    under the License.
 
 import abc
-import six
 
 from oslo_log import log
+import six
 
+from neutron._i18n import _LW
 from neutron.extensions import portbindings
-from neutron.i18n import _LW
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
 
@@ -64,7 +64,14 @@ class AgentMechanismDriverBase(api.MechanismDriver):
             LOG.debug("Refusing to bind due to unsupported vnic_type: %s",
                       vnic_type)
             return
-        for agent in context.host_agents(self.agent_type):
+        agents = context.host_agents(self.agent_type)
+        if not agents:
+            LOG.warning(_LW("Port %(pid)s on network %(network)s not bound, "
+                            "no agent registered on host %(host)s"),
+                        {'pid': context.current['id'],
+                         'network': context.network.current['id'],
+                         'host': context.host})
+        for agent in agents:
             LOG.debug("Checking agent: %s", agent)
             if agent['alive']:
                 for segment in context.segments_to_bind:

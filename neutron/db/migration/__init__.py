@@ -21,12 +21,16 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.engine import reflection
 
+from neutron._i18n import _
+
 # Neutron milestones for upgrade aliases
 LIBERTY = 'liberty'
+MITAKA = 'mitaka'
 
 NEUTRON_MILESTONES = [
     # earlier milestones were not tagged
     LIBERTY,
+    MITAKA,
 ]
 
 CREATION_OPERATIONS = (sa.sql.ddl.CreateIndex,

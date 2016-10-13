@@ -15,6 +15,7 @@
 
 import abc
 
+from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
@@ -108,6 +109,10 @@ class Agent(extensions.ExtensionDescriptor):
 
         return [ex]
 
+    def update_attributes_map(self, attributes):
+        super(Agent, self).update_attributes_map(
+            attributes, extension_attrs_map=RESOURCE_ATTRIBUTE_MAP)
+
     def get_extended_resources(self, version):
         if version == "2.0":
             return RESOURCE_ATTRIBUTE_MAP
@@ -134,8 +139,8 @@ class AgentPluginBase(object):
         """Delete agent.
 
         Agents register themselves on reporting state.
-        But if a agent does not report its status
-        for a long time (for example, it is dead for ever. ),
+        But if an agent does not report its status
+        for a long time (for example, it is dead forever. ),
         admin can remove it. Agents must be disabled before
         being removed.
         """

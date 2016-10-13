@@ -17,28 +17,34 @@ import functools
 
 from oslo_config import cfg
 from oslo_log import log as logging
-import six
 from six.moves.urllib import parse
 from webob import exc
 
+from neutron._i18n import _, _LW
 from neutron.common import constants
 from neutron.common import exceptions
-from neutron.i18n import _LW
 
 
 LOG = logging.getLogger(__name__)
 
 
-def get_filters(request, attr_info, skips=[]):
-    """Extracts the filters from the request string.
+def get_filters(request, attr_info, skips=None):
+    return get_filters_from_dict(request.GET.dict_of_lists(),
+                                 attr_info,
+                                 skips)
+
+
+def get_filters_from_dict(data, attr_info, skips=None):
+    """Extracts the filters from a dict of query parameters.
 
     Returns a dict of lists for the filters:
     check=a&check=b&name=Bob&
     becomes:
     {'check': [u'a', u'b'], 'name': [u'Bob']}
     """
+    skips = skips or []
     res = {}
-    for key, values in six.iteritems(request.GET.dict_of_lists()):
+    for key, values in data.items():
         if key in skips:
             continue
         values = [v for v in values if v]
@@ -83,7 +89,7 @@ def get_limit_and_marker(request):
                     pagination, then return None.
     """
     max_limit = _get_pagination_max_limit()
-    limit = _get_limit_param(request, max_limit)
+    limit = _get_limit_param(request)
     if max_limit > 0:
         limit = min(max_limit, limit) or max_limit
     if not limit:
@@ -101,13 +107,13 @@ def _get_pagination_max_limit():
             if max_limit == 0:
                 raise ValueError()
         except ValueError:
-            LOG.warn(_LW("Invalid value for pagination_max_limit: %s. It "
-                         "should be an integer greater to 0"),
-                     cfg.CONF.pagination_max_limit)
+            LOG.warning(_LW("Invalid value for pagination_max_limit: %s. It "
+                            "should be an integer greater to 0"),
+                        cfg.CONF.pagination_max_limit)
     return max_limit
 
 
-def _get_limit_param(request, max_limit):
+def _get_limit_param(request):
     """Extract integer limit from request or fail."""
     try:
         limit = int(request.GET.get('limit', 0))

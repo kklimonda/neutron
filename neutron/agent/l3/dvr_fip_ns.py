@@ -1,4 +1,4 @@
-# Copyright (c) 2015 Openstack Foundation
+# Copyright (c) 2015 OpenStack Foundation
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -14,6 +14,8 @@
 
 import os
 
+from oslo_log import log as logging
+
 from neutron.agent.l3 import fip_rule_priority_allocator as frpa
 from neutron.agent.l3 import link_local_allocator as lla
 from neutron.agent.l3 import namespaces
@@ -21,7 +23,6 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
 from neutron.common import utils as common_utils
 from neutron.ipam import utils as ipam_utils
-from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 
@@ -80,13 +81,13 @@ class FipNamespace(namespaces.Namespace):
     def has_subscribers(self):
         return len(self._subscribers) != 0
 
-    def subscribe(self, router_id):
+    def subscribe(self, external_net_id):
         is_first = not self.has_subscribers()
-        self._subscribers.add(router_id)
+        self._subscribers.add(external_net_id)
         return is_first
 
-    def unsubscribe(self, router_id):
-        self._subscribers.discard(router_id)
+    def unsubscribe(self, external_net_id):
+        self._subscribers.discard(external_net_id)
         return not self.has_subscribers()
 
     def allocate_rule_priority(self, floating_ip):
@@ -241,11 +242,9 @@ class FipNamespace(namespaces.Namespace):
                     ipd.route.add_route(gw_ip, scope='link')
                 ipd.route.add_gateway(gw_ip)
 
-    def _internal_ns_interface_added(self, ip_cidr,
-                                    interface_name, ns_name):
-        ip_wrapper = ip_lib.IPWrapper(namespace=ns_name)
-        ip_wrapper.netns.execute(['ip', 'addr', 'add',
-                                  ip_cidr, 'dev', interface_name])
+    def _add_cidr_to_device(self, device, ip_cidr):
+        if not device.addr.list(to=ip_cidr):
+            device.addr.add(ip_cidr, add_broadcast=False)
 
     def create_rtr_2_fip_link(self, ri):
         """Create interface between router and Floating IP namespace."""
@@ -258,32 +257,27 @@ class FipNamespace(namespaces.Namespace):
         if ri.rtr_fip_subnet is None:
             ri.rtr_fip_subnet = self.local_subnets.allocate(ri.router_id)
         rtr_2_fip, fip_2_rtr = ri.rtr_fip_subnet.get_pair()
-        ip_wrapper = ip_lib.IPWrapper(namespace=ri.ns_name)
-        device_exists = ip_lib.device_exists(rtr_2_fip_name,
-                                             namespace=ri.ns_name)
-        if not device_exists:
-            int_dev = ip_wrapper.add_veth(rtr_2_fip_name,
-                                          fip_2_rtr_name,
-                                          fip_ns_name)
-            self._internal_ns_interface_added(str(rtr_2_fip),
-                                              rtr_2_fip_name,
-                                              ri.ns_name)
-            self._internal_ns_interface_added(str(fip_2_rtr),
-                                              fip_2_rtr_name,
-                                              fip_ns_name)
+        rtr_2_fip_dev = ip_lib.IPDevice(rtr_2_fip_name, namespace=ri.ns_name)
+        fip_2_rtr_dev = ip_lib.IPDevice(fip_2_rtr_name, namespace=fip_ns_name)
+
+        if not rtr_2_fip_dev.exists():
+            ip_wrapper = ip_lib.IPWrapper(namespace=ri.ns_name)
+            rtr_2_fip_dev, fip_2_rtr_dev = ip_wrapper.add_veth(rtr_2_fip_name,
+                                                               fip_2_rtr_name,
+                                                               fip_ns_name)
             mtu = (self.agent_conf.network_device_mtu or
                    ri.get_ex_gw_port().get('mtu'))
             if mtu:
-                int_dev[0].link.set_mtu(mtu)
-                int_dev[1].link.set_mtu(mtu)
-            int_dev[0].link.set_up()
-            int_dev[1].link.set_up()
+                rtr_2_fip_dev.link.set_mtu(mtu)
+                fip_2_rtr_dev.link.set_mtu(mtu)
+            rtr_2_fip_dev.link.set_up()
+            fip_2_rtr_dev.link.set_up()
+
+        self._add_cidr_to_device(rtr_2_fip_dev, str(rtr_2_fip))
+        self._add_cidr_to_device(fip_2_rtr_dev, str(fip_2_rtr))
 
         # add default route for the link local interface
-        device = ip_lib.IPDevice(rtr_2_fip_name, namespace=ri.ns_name)
-        device.route.add_gateway(str(fip_2_rtr.ip), table=FIP_RT_TBL)
-        #setup the NAT rules and chains
-        ri._handle_fip_nat_rules(rtr_2_fip_name)
+        rtr_2_fip_dev.route.add_gateway(str(fip_2_rtr.ip), table=FIP_RT_TBL)
 
     def scan_fip_ports(self, ri):
         # don't scan if not dvr or count is not None
@@ -293,13 +287,6 @@ class FipNamespace(namespaces.Namespace):
         # scan system for any existing fip ports
         ri.dist_fip_count = 0
         rtr_2_fip_interface = self.get_rtr_ext_device_name(ri.router_id)
-        if ip_lib.device_exists(rtr_2_fip_interface, namespace=ri.ns_name):
-            device = ip_lib.IPDevice(rtr_2_fip_interface, namespace=ri.ns_name)
-            existing_cidrs = [addr['cidr'] for addr in device.addr.list()]
-            fip_cidrs = [c for c in existing_cidrs if
-                         common_utils.is_cidr_host(c)]
-            for fip_cidr in fip_cidrs:
-                fip_ip = fip_cidr.split('/')[0]
-                rule_pr = self._rule_priorities.allocate(fip_ip)
-                ri.floating_ips_dict[fip_ip] = rule_pr
-            ri.dist_fip_count = len(fip_cidrs)
+        device = ip_lib.IPDevice(rtr_2_fip_interface, namespace=ri.ns_name)
+        if device.exists():
+            ri.dist_fip_count = len(ri.get_router_cidrs(device))

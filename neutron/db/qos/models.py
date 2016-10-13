@@ -13,22 +13,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_log import log as logging
 import sqlalchemy as sa
 
 from neutron.api.v2 import attributes as attrs
 from neutron.db import model_base
 from neutron.db import models_v2
+from neutron.db import rbac_db_models
 
 
-LOG = logging.getLogger(__name__)
-
-
-class QosPolicy(model_base.BASEV2, models_v2.HasId, models_v2.HasTenant):
+class QosPolicy(model_base.BASEV2, model_base.HasId, model_base.HasTenant):
     __tablename__ = 'qos_policies'
     name = sa.Column(sa.String(attrs.NAME_MAX_LEN))
     description = sa.Column(sa.String(attrs.DESCRIPTION_MAX_LEN))
-    shared = sa.Column(sa.Boolean, nullable=False)
+    rbac_entries = sa.orm.relationship(rbac_db_models.QosPolicyRBAC,
+                                       backref='qos_policy', lazy='joined',
+                                       cascade='all, delete, delete-orphan')
 
 
 class QosNetworkPolicyBinding(model_base.BASEV2):
@@ -69,7 +68,7 @@ class QosPortPolicyBinding(model_base.BASEV2):
                                cascade='delete', lazy='joined'))
 
 
-class QosBandwidthLimitRule(models_v2.HasId, model_base.BASEV2):
+class QosBandwidthLimitRule(model_base.HasId, model_base.BASEV2):
     __tablename__ = 'qos_bandwidth_limit_rules'
     qos_policy_id = sa.Column(sa.String(36),
                               sa.ForeignKey('qos_policies.id',

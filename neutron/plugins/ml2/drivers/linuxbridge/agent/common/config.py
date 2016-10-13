@@ -14,12 +14,13 @@
 
 from oslo_config import cfg
 
-from neutron.agent.common import config
+from neutron._i18n import _
 
 DEFAULT_BRIDGE_MAPPINGS = []
 DEFAULT_INTERFACE_MAPPINGS = []
 DEFAULT_VXLAN_GROUP = '224.0.0.1'
-
+DEFAULT_KERNEL_HZ_VALUE = 250  # [Hz]
+DEFAULT_TC_TBF_LATENCY = 50  # [ms]
 
 vxlan_opts = [
     cfg.BoolOpt('enable_vxlan', default=True,
@@ -33,7 +34,10 @@ vxlan_opts = [
     cfg.StrOpt('vxlan_group', default=DEFAULT_VXLAN_GROUP,
                help=_("Multicast group(s) for vxlan interface. A range of "
                       "group addresses may be specified by using CIDR "
-                      "notation. To reserve a unique group for each possible "
+                      "notation. Specifying a range allows different VNIs to "
+                      "use different group addresses, reducing or eliminating "
+                      "spurious broadcast traffic to the tunnel endpoints. "
+                      "To reserve a unique group for each possible "
                       "(24-bit) VNI, use a /8 such as 239.0.0.0/8. This "
                       "setting must be the same on all the agents.")),
     cfg.IPOpt('local_ip', help=_("Local IP address of the VXLAN endpoints.")),
@@ -41,7 +45,7 @@ vxlan_opts = [
                 help=_("Extension to use alongside ml2 plugin's l2population "
                        "mechanism driver. It enables the plugin to populate "
                        "VXLAN forwarding table.")),
-    cfg.BoolOpt('arp_responder', default=True,
+    cfg.BoolOpt('arp_responder', default=False,
                 help=_("Enable local ARP responder which provides local "
                        "responses instead of performing ARP broadcast into "
                        "the overlay. Enabling local ARP responder is not fully"
@@ -52,40 +56,32 @@ vxlan_opts = [
 bridge_opts = [
     cfg.ListOpt('physical_interface_mappings',
                 default=DEFAULT_INTERFACE_MAPPINGS,
-                help=_("List of <physical_network>:<physical_interface>")),
+                help=_("Comma-separated list of "
+                       "<physical_network>:<physical_interface> tuples "
+                       "mapping physical network names to the agent's "
+                       "node-specific physical network interfaces to be used "
+                       "for flat and VLAN networks. All physical networks "
+                       "listed in network_vlan_ranges on the server should "
+                       "have mappings to appropriate interfaces on each "
+                       "agent.")),
     cfg.ListOpt('bridge_mappings',
                 default=DEFAULT_BRIDGE_MAPPINGS,
                 help=_("List of <physical_network>:<physical_bridge>")),
 ]
 
-agent_opts = [
-    cfg.IntOpt('polling_interval', default=2,
-               help=_("The number of seconds the agent will wait between "
-                      "polling for local device changes.")),
-    cfg.IntOpt('quitting_rpc_timeout', default=10,
-               help=_("Set new timeout in seconds for new rpc calls after "
-                      "agent receives SIGTERM. If value is set to 0, rpc "
-                      "timeout won't be changed")),
-    # TODO(kevinbenton): The following opt is duplicated between the OVS agent
-    # and the Linuxbridge agent to make it easy to back-port. These shared opts
-    # should be moved into a common agent config options location as part of
-    # the deduplication work.
-    cfg.BoolOpt('prevent_arp_spoofing', default=True,
-                help=_("Enable suppression of ARP responses that don't match "
-                       "an IP address that belongs to the port from which "
-                       "they originate. Note: This prevents the VMs attached "
-                       "to this agent from spoofing, it doesn't protect them "
-                       "from other devices which have the capability to spoof "
-                       "(e.g. bare metal or VMs attached to agents without "
-                       "this flag set to True). Spoofing rules will not be "
-                       "added to any ports that have port security disabled. "
-                       "For LinuxBridge, this requires ebtables. For OVS, it "
-                       "requires a version that supports matching ARP "
-                       "headers."))
+qos_options = [
+    cfg.IntOpt('kernel_hz', default=DEFAULT_KERNEL_HZ_VALUE,
+               help=_("Value of host kernel tick rate (hz) for calculating "
+                      "minimum burst value in bandwidth limit rules for "
+                      "a port with QoS. See kernel configuration file for "
+                      "HZ value and tc-tbf manual for more information.")),
+    cfg.IntOpt('tbf_latency', default=DEFAULT_TC_TBF_LATENCY,
+               help=_("Value of latency (ms) for calculating size of queue "
+                      "for a port with QoS. See tc-tbf manual for more "
+                      "information."))
 ]
 
 
 cfg.CONF.register_opts(vxlan_opts, "VXLAN")
 cfg.CONF.register_opts(bridge_opts, "LINUX_BRIDGE")
-cfg.CONF.register_opts(agent_opts, "AGENT")
-config.register_agent_state_opts_helper(cfg.CONF)
+cfg.CONF.register_opts(qos_options, "QOS")

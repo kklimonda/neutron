@@ -21,8 +21,8 @@ import netaddr
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import uuidutils
-import six
 
+from neutron._i18n import _LE
 from neutron.agent.common import ovs_lib
 from neutron.agent.l3 import ha_router
 from neutron.agent.l3 import namespaces
@@ -33,7 +33,6 @@ from neutron.agent.linux import keepalived
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import constants as n_consts
 from neutron.common import utils
-from neutron.i18n import _LE
 from neutron.plugins.common import constants as const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants as ovs_const
@@ -139,7 +138,7 @@ def icmpv6_header_match_supported():
                                table=ovs_const.ARP_SPOOF_TABLE,
                                priority=1,
                                dl_type=n_consts.ETHERTYPE_IPV6,
-                               nw_proto=n_consts.PROTO_NUM_ICMP_V6,
+                               nw_proto=n_consts.PROTO_NUM_IPV6_ICMP,
                                icmp_type=n_consts.ICMPV6_TYPE_NA,
                                nd_target='fdf8:f53b:82e4::10',
                                actions="NORMAL")
@@ -327,10 +326,23 @@ def ovsdb_native_supported():
         LOG.error(_LE("Failed to import required modules. Ensure that the "
                       "python-openvswitch package is installed. Error: %s"),
                   ex)
-    except Exception as ex:
-        LOG.exception(six.text_type(ex))
+    except Exception:
+        LOG.exception(_LE("Unexpected exception occurred."))
 
     return False
+
+
+def ovs_conntrack_supported():
+    random_str = utils.get_random_string(6)
+    br_name = "ovs-test-" + random_str
+
+    with ovs_lib.OVSBridge(br_name) as br:
+        try:
+            br.set_protocols(["OpenFlow%d" % i for i in range(10, 15)])
+        except RuntimeError as e:
+            LOG.debug("Exception while checking ovs conntrack support: %s", e)
+            return False
+    return ofctl_arg_supported(cmd='add-flow', ct_state='+trk', actions='drop')
 
 
 def ebtables_supported():

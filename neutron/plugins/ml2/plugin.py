@@ -14,6 +14,7 @@
 #    under the License.
 
 from eventlet import greenthread
+from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_db import api as oslo_db_api
 from oslo_db import exception as os_db_exception
@@ -26,6 +27,7 @@ from oslo_utils import uuidutils
 from sqlalchemy import exc as sql_exc
 from sqlalchemy.orm import exc as sa_exc
 
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
 from neutron.api.rpc.handlers import dhcp_rpc
@@ -60,12 +62,12 @@ from neutron.db import securitygroups_db
 from neutron.db import securitygroups_rpc_base as sg_db_rpc
 from neutron.db import vlantransparent_db
 from neutron.extensions import allowedaddresspairs as addr_pair
+from neutron.extensions import availability_zone as az_ext
 from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.extensions import portbindings
 from neutron.extensions import portsecurity as psec
 from neutron.extensions import providernet as provider
 from neutron.extensions import vlantransparent
-from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
 from neutron.plugins.common import constants as service_constants
 from neutron.plugins.ml2.common import exceptions as ml2_exc
@@ -73,6 +75,7 @@ from neutron.plugins.ml2 import config  # noqa
 from neutron.plugins.ml2 import db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import driver_context
+from neutron.plugins.ml2.extensions import qos as qos_ext
 from neutron.plugins.ml2 import managers
 from neutron.plugins.ml2 import models
 from neutron.plugins.ml2 import rpc
@@ -84,11 +87,16 @@ LOG = log.getLogger(__name__)
 MAX_BIND_TRIES = 10
 
 
+SERVICE_PLUGINS_REQUIRED_DRIVERS = {
+    'qos': [qos_ext.QOS_EXT_DRIVER_ALIAS]
+}
+
+
 class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 dvr_mac_db.DVRDbMixin,
                 external_net_db.External_net_db_mixin,
                 sg_db_rpc.SecurityGroupServerRpcMixin,
-                agentschedulers_db.DhcpAgentSchedulerDbMixin,
+                agentschedulers_db.AZDhcpAgentSchedulerDbMixin,
                 addr_pair_db.AllowedAddressPairsMixin,
                 vlantransparent_db.Vlantransparent_db_mixin,
                 extradhcpopt_db.ExtraDhcpOptMixin,
@@ -118,7 +126,10 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                     "multi-provider", "allowed-address-pairs",
                                     "extra_dhcp_opt", "subnet_allocation",
                                     "net-mtu", "vlan-transparent",
-                                    "dns-integration"]
+                                    "address-scope",
+                                    "availability_zone",
+                                    "network_availability_zone",
+                                    "default-subnetpools"]
 
     @property
     def supported_extension_aliases(self):
@@ -148,6 +159,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.mechanism_manager.initialize()
         self._setup_dhcp()
         self._start_rpc_notifiers()
+        self.add_agent_status_check(self.agent_health_check)
+        self._verify_service_plugins_requirements()
         LOG.info(_LI("Modular L2 Plugin initialization complete"))
 
     def _setup_rpc(self):
@@ -169,6 +182,17 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         )
         self.start_periodic_dhcp_agent_status_check()
 
+    def _verify_service_plugins_requirements(self):
+        for service_plugin in cfg.CONF.service_plugins:
+            extension_drivers = SERVICE_PLUGINS_REQUIRED_DRIVERS.get(
+                service_plugin, []
+            )
+            for extension_driver in extension_drivers:
+                if extension_driver not in self.extension_manager.names():
+                    raise ml2_exc.ExtensionDriverNotFound(
+                        driver=extension_driver, service_plugin=service_plugin
+                    )
+
     @property
     def supported_qos_rule_types(self):
         return self.mechanism_manager.supported_qos_rule_types
@@ -186,9 +210,24 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         """Start the RPC loop to let the plugin communicate with agents."""
         self._setup_rpc()
         self.topic = topics.PLUGIN
-        self.conn = n_rpc.create_connection(new=True)
+        self.conn = n_rpc.create_connection()
         self.conn.create_consumer(self.topic, self.endpoints, fanout=False)
+        self.conn.create_consumer(
+            topics.SERVER_RESOURCE_VERSIONS,
+            [resources_rpc.ResourcesPushToServerRpcCallback()],
+            fanout=True)
+        # process state reports despite dedicated rpc workers
+        self.conn.create_consumer(topics.REPORTS,
+                                  [agents_db.AgentExtRpcCallback()],
+                                  fanout=False)
         return self.conn.consume_in_threads()
+
+    def start_rpc_state_reports_listener(self):
+        self.conn_reports = n_rpc.create_connection(new=True)
+        self.conn_reports.create_consumer(topics.REPORTS,
+                                          [agents_db.AgentExtRpcCallback()],
+                                          fanout=False)
+        return self.conn_reports.consume_in_threads()
 
     def _filter_nets_provider(self, context, networks, filters):
         return [network
@@ -614,11 +653,13 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
     def _create_network_db(self, context, network):
         net_data = network[attributes.NETWORK]
-        tenant_id = self._get_tenant_id_for_create(context, net_data)
+        tenant_id = net_data['tenant_id']
         session = context.session
         with session.begin(subtransactions=True):
             self._ensure_default_security_group(context, tenant_id)
-            result = super(Ml2Plugin, self).create_network(context, network)
+            net_db = self.create_network_db(context, network)
+            result = self._make_network_dict(net_db, process_extensions=False,
+                                             context=context)
             self.extension_manager.process_create_network(context, net_data,
                                                           result)
             self._process_l3_create(context, result, net_data)
@@ -626,15 +667,28 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             self.type_manager.create_network_segments(context, net_data,
                                                       tenant_id)
             self.type_manager.extend_network_dict_provider(context, result)
+            # Update the transparent vlan if configured
+            if utils.is_extension_supported(self, 'vlan-transparent'):
+                vlt = vlantransparent.get_vlan_transparent(net_data)
+                net_db['vlan_transparent'] = vlt
+                result['vlan_transparent'] = vlt
             mech_context = driver_context.NetworkContext(self, context,
                                                          result)
             self.mechanism_manager.create_network_precommit(mech_context)
 
             if net_data.get(api.MTU, 0) > 0:
-                res = super(Ml2Plugin, self).update_network(context,
-                    result['id'], {'network': {api.MTU: net_data[api.MTU]}})
-                result[api.MTU] = res.get(api.MTU, 0)
+                net_db[api.MTU] = net_data[api.MTU]
+                result[api.MTU] = net_data[api.MTU]
 
+            if az_ext.AZ_HINTS in net_data:
+                self.validate_availability_zones(context, 'network',
+                                                 net_data[az_ext.AZ_HINTS])
+                az_hints = az_ext.convert_az_list_to_string(
+                                                net_data[az_ext.AZ_HINTS])
+                net_db[az_ext.AZ_HINTS] = az_hints
+                result[az_ext.AZ_HINTS] = az_hints
+
+        self._apply_dict_extend_functions('networks', result, net_db)
         return result, mech_context
 
     def create_network(self, context, network):
@@ -735,6 +789,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                     LOG.exception(_LE("Exception auto-deleting subnet %s"),
                                   subnet_id)
 
+    @utils.transaction_guard
     def delete_network(self, context, id):
         # REVISIT(rkukura) The super(Ml2Plugin, self).delete_network()
         # function is not used because it auto-deletes ports and
@@ -869,6 +924,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         self.mechanism_manager.update_subnet_postcommit(mech_context)
         return updated_subnet
 
+    @utils.transaction_guard
     def delete_subnet(self, context, id):
         # REVISIT(rkukura) The super(Ml2Plugin, self).delete_subnet()
         # function is not used because it deallocates the subnet's addresses
@@ -1026,7 +1082,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         with db_api.exc_to_retry(os_db_exception.DBDuplicateEntry),\
                 session.begin(subtransactions=True):
             dhcp_opts = attrs.get(edo_ext.EXTRADHCPOPTS, [])
-            result = super(Ml2Plugin, self).create_port(context, port)
+            port_db = self.create_port_db(context, port)
+            result = self._make_port_dict(port_db, process_extensions=False)
             self.extension_manager.process_create_port(context, attrs, result)
             self._portsec_ext_port_create_processing(context, result, port)
 
@@ -1047,10 +1104,15 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                                       dhcp_opts)
             self.mechanism_manager.create_port_precommit(mech_context)
 
+        self._apply_dict_extend_functions('ports', result, port_db)
         return result, mech_context
 
     def create_port(self, context, port):
-        result, mech_context = self._create_port_db(context, port)
+        # TODO(kevinbenton): remove when bug/1543094 is fixed.
+        with lockutils.lock(port['port']['network_id'],
+                            lock_file_prefix='neutron-create-port',
+                            external=True):
+            result, mech_context = self._create_port_db(context, port)
         # notify any plugin that is interested in port create events
         kwargs = {'context': context, 'port': result}
         registry.notify(resources.PORT, events.AFTER_CREATE, self, **kwargs)
@@ -1258,7 +1320,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         if original_port['admin_state_up'] != updated_port['admin_state_up']:
             need_port_update_notify = True
         # NOTE: In the case of DVR ports, the port-binding is done after
-        # router scheduling when sync_routers is callede and so this call
+        # router scheduling when sync_routers is called and so this call
         # below may not be required for DVR routed interfaces. But still
         # since we don't have the mech_context for the DVR router interfaces
         # at certain times, we just pass the port-context and return it, so
@@ -1346,12 +1408,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
     def delete_port(self, context, id, l3_port_check=True):
         self._pre_delete_port(context, id, l3_port_check)
         # TODO(armax): get rid of the l3 dependency in the with block
-        removed_routers = []
         router_ids = []
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             service_constants.L3_ROUTER_NAT)
-        is_dvr_enabled = utils.is_extension_supported(
-            l3plugin, const.L3_DISTRIBUTED_EXT_ALIAS)
 
         session = context.session
         with session.begin(subtransactions=True):
@@ -1378,9 +1437,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                                binding.host)
                 mech_context = driver_context.PortContext(
                     self, context, port, network, binding, levels)
-                if is_dvr_enabled and utils.is_dvr_serviced(device_owner):
-                    removed_routers = l3plugin.dvr_deletens_if_no_port(
-                        context, id)
                 self.mechanism_manager.delete_port_precommit(mech_context)
                 bound_mech_contexts.append(mech_context)
             if l3plugin:
@@ -1392,15 +1448,14 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             super(Ml2Plugin, self).delete_port(context, id)
 
         self._post_delete_port(
-            context, port, router_ids, removed_routers, bound_mech_contexts)
+            context, port, router_ids, bound_mech_contexts)
 
     def _post_delete_port(
-        self, context, port, router_ids, removed_routers, bound_mech_contexts):
+        self, context, port, router_ids, bound_mech_contexts):
         kwargs = {
             'context': context,
             'port': port,
             'router_ids': router_ids,
-            'removed_routers': removed_routers
         }
         registry.notify(resources.PORT, events.AFTER_DELETE, self, **kwargs)
         try:
@@ -1428,8 +1483,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                            filter(models_v2.Port.id.startswith(port_id)).
                            one())
             except sa_exc.NoResultFound:
-                LOG.debug("No ports have port_id starting with %s",
-                          port_id)
+                LOG.info(_LI("No ports have port_id starting with %s"),
+                         port_id)
                 return
             except sa_exc.MultipleResultsFound:
                 LOG.error(_LE("Multiple ports have port_id starting with %s"),

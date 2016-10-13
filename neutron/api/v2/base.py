@@ -24,6 +24,7 @@ from oslo_utils import excutils
 import six
 import webob.exc
 
+from neutron._i18n import _, _LE, _LI
 from neutron.api import api_common
 from neutron.api.rpc.agentnotifiers import dhcp_rpc_agent_api
 from neutron.api.v2 import attributes
@@ -32,7 +33,6 @@ from neutron.common import constants as const
 from neutron.common import exceptions
 from neutron.common import rpc as n_rpc
 from neutron.db import api as db_api
-from neutron.i18n import _LE, _LI
 from neutron import policy
 from neutron import quota
 from neutron.quota import resource_registry
@@ -526,6 +526,9 @@ class Controller(object):
 
     def delete(self, request, id, **kwargs):
         """Deletes the specified entity."""
+        if request.body:
+            msg = _('Request body is not supported in DELETE.')
+            raise webob.exc.HTTPBadRequest(msg)
         self._notifier.info(request.context,
                             self._resource + '.delete.start',
                             {self._resource + '_id': id})
@@ -610,10 +613,12 @@ class Controller(object):
                            pluralized=self._collection)
         except oslo_policy.PolicyNotAuthorized:
             with excutils.save_and_reraise_exception() as ctxt:
-                # If a tenant is modifying it's own object, it's safe to return
+                # If a tenant is modifying its own object, it's safe to return
                 # a 403. Otherwise, pretend that it doesn't exist to avoid
                 # giving away information.
-                if request.context.tenant_id != orig_obj['tenant_id']:
+                orig_obj_tenant_id = orig_obj.get("tenant_id")
+                if (request.context.tenant_id != orig_obj_tenant_id or
+                    orig_obj_tenant_id is None):
                     ctxt.reraise = False
             msg = _('The resource could not be found.')
             raise webob.exc.HTTPNotFound(msg)

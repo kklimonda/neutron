@@ -80,7 +80,7 @@ class AllowedAddressPairTestPlugin(portsecurity_db.PortSecurityDbMixin,
             ret_port.update(port['port'])
 
             if (delete_addr_pairs or has_addr_pairs):
-                # delete address pairds and readd them
+                # delete address pairs and readd them
                 self._delete_allowed_address_pairs(context, id)
                 self._process_create_allowed_address_pairs(
                     context, ret_port,
@@ -133,7 +133,7 @@ class TestAllowedAddressPairs(AllowedAddressPairDBTestCase):
                                     port_security_enabled=True,
                                     allowed_address_pairs=address_pairs)
             port = self.deserialize(self.fmt, res)
-            self.assertEqual(port['port'][psec.PORTSECURITY], True)
+            self.assertTrue(port['port'][psec.PORTSECURITY])
             self.assertEqual(port['port'][addr_pair.ADDRESS_PAIRS],
                              address_pairs)
             self._delete('ports', port['port']['id'])
@@ -151,7 +151,7 @@ class TestAllowedAddressPairs(AllowedAddressPairDBTestCase):
                                     port_security_enabled=False,
                                     allowed_address_pairs=address_pairs)
             self.deserialize(self.fmt, res)
-            self.assertEqual(res.status_int, 409)
+            self.assertEqual(409, res.status_int)
 
             address_pairs = []
             res = self._create_port(self.fmt, net['network']['id'],
@@ -323,5 +323,5 @@ class TestAllowedAddressPairs(AllowedAddressPairDBTestCase):
             req = self.new_update_request('ports', update_port,
                                           port['port']['id'])
             port = self.deserialize(self.fmt, req.get_response(self.api))
-            self.assertEqual(port['port'][addr_pair.ADDRESS_PAIRS], [])
+            self.assertEqual([], port['port'][addr_pair.ADDRESS_PAIRS])
             self._delete('ports', port['port']['id'])

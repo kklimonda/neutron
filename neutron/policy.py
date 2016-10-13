@@ -13,10 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-"""
-Policy engine for neutron.  Largely copied from nova.
-"""
-
 import collections
 import re
 
@@ -28,10 +24,10 @@ from oslo_utils import excutils
 from oslo_utils import importutils
 import six
 
+from neutron._i18n import _, _LE, _LW
 from neutron.api.v2 import attributes
 from neutron.common import constants as const
 from neutron.common import exceptions
-from neutron.i18n import _LE, _LW
 
 
 LOG = logging.getLogger(__name__)
@@ -94,10 +90,11 @@ def _is_attribute_explicitly_set(attribute_name, resource, target, action):
         # marked as being updated instead.
         return (attribute_name in target[const.ATTRIBUTES_TO_UPDATE] and
                 target[attribute_name] is not attributes.ATTR_NOT_SPECIFIED)
-    return ('default' in resource[attribute_name] and
-            attribute_name in target and
-            target[attribute_name] is not attributes.ATTR_NOT_SPECIFIED and
-            target[attribute_name] != resource[attribute_name]['default'])
+    result = (attribute_name in target and
+              target[attribute_name] is not attributes.ATTR_NOT_SPECIFIED)
+    if result and 'default' in resource[attribute_name]:
+        return target[attribute_name] != resource[attribute_name]['default']
+    return result
 
 
 def _should_validate_sub_attributes(attribute, sub_attr):
@@ -116,8 +113,9 @@ def _build_subattr_match_rule(attr_name, attr, action, target):
     validate = attr['validate']
     key = list(filter(lambda k: k.startswith('type:dict'), validate.keys()))
     if not key:
-        LOG.warn(_LW("Unable to find data type descriptor for attribute %s"),
-                 attr_name)
+        LOG.warning(_LW("Unable to find data type descriptor "
+                        "for attribute %s"),
+                    attr_name)
         return
     data = validate[key[0]]
     if not isinstance(data, dict):
@@ -425,13 +423,3 @@ def check_is_advsvc(context):
     if ADVSVC_CTX_POLICY not in _ENFORCER.rules:
         return False
     return _ENFORCER.enforce(ADVSVC_CTX_POLICY, credentials, credentials)
-
-
-def _extract_roles(rule, roles):
-    if isinstance(rule, policy.RoleCheck):
-        roles.append(rule.match.lower())
-    elif isinstance(rule, policy.RuleCheck):
-        _extract_roles(_ENFORCER.rules[rule.match], roles)
-    elif hasattr(rule, 'rules'):
-        for rule in rule.rules:
-            _extract_roles(rule, roles)

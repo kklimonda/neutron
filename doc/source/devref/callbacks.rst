@@ -1,4 +1,26 @@
-=======================
+..
+      Licensed under the Apache License, Version 2.0 (the "License"); you may
+      not use this file except in compliance with the License. You may obtain
+      a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+      Unless required by applicable law or agreed to in writing, software
+      distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+      WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+      License for the specific language governing permissions and limitations
+      under the License.
+
+
+      Convention for heading levels in Neutron devref:
+      =======  Heading 0 (reserved for the title in a document)
+      -------  Heading 1
+      ~~~~~~~  Heading 2
+      +++++++  Heading 3
+      '''''''  Heading 4
+      (Avoid deeper levels because they do not render well.)
+
+
 Neutron Callback System
 =======================
 
@@ -53,7 +75,7 @@ help understand better some of the principles behind the provided mechanism.
 
 
 Subscribing to events
-=====================
+---------------------
 
 Imagine that you have entity A, B, and C that have some common business over router creation.
 A wants to tell B and C that the router has been created and that they need to get on and
@@ -134,7 +156,7 @@ are flexible to evolve their internals, dynamics, and lifecycles.
 
 
 Subscribing and aborting events
-===============================
+-------------------------------
 
 Interestingly in Neutron, certain events may need to be forbidden from happening due to the
 nature of the resources involved. To this aim, the callback-based mechanism has been designed
@@ -208,9 +230,16 @@ actions during the ABORT_CREATE event. It is worth noting that it is not mandato
 the same callback register to both BEFORE_* and the respective ABORT_* event; as a matter of
 fact, it is best to make use of different callbacks to keep the two logic separate.
 
+As we can see from the last example, exception which is triggered in some callback will be
+recorded, and it will not prevent the other remaining callbacks execution. Exception triggered in
+callback of BEFORE_XXX will make notify process generate an ABORT_XXX event and call the related
+callback, while exception from PRECOMMIT_XXX will not generate ABORT_XXX event. But both of them
+will finally raise a unified CallbackFailure exception to the outside. For the exception triggered
+from other events, like AFTER_XXX and ABORT_XXX there will no exception raised to the outside.
+
 
 Unsubscribing to events
-=======================
+-----------------------
 
 There are a few options to unsubscribe registered callbacks:
 
@@ -298,7 +327,14 @@ The output is:
 
 
 FAQ
-===
+---
+
+Are callbacks a mechanism for remote or local communication (intra vs inter-process)?
+
+   Callbacks as described in this document are a local communication mechanism that
+   allows multiple entities in the same process space to communicate with one another.
+   For Neutron specific remote (IPC) mechanisms, you can see read more in
+   :doc:`RPC API <rpc_api>` or :doc:`Messaging callbacks <rpc_callbacks>`.
 
 Can I use the callbacks registry to subscribe and notify non-core resources and events?
 
@@ -343,6 +379,13 @@ Is the registry thread-safe?
   of the life of the process and that the unsubscriptions (if any) take place at the very end.
   In this case, chances that things do go badly may be pretty slim. Making the registry
   thread-safe will be considered as a future improvement.
+
+What kind of operation I can add into callback?
+
+  For callback function of PRECOMMIT_XXX events, we can't use blocking functions or a function
+  that would take a long time, like communicating to SDN controller over network.
+  Callbacks for PRECOMMIT events are meant to execute DB operations in a transaction context, the
+  errors occured will be taken care by the context manager.
 
 What kind of function can be a callback?
 

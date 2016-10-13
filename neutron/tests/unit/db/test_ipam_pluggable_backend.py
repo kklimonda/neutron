@@ -15,10 +15,9 @@
 
 import mock
 import netaddr
-import webob.exc
-
 from oslo_config import cfg
 from oslo_utils import uuidutils
+import webob.exc
 
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
@@ -294,14 +293,14 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
     @mock.patch('neutron.ipam.driver.Pool')
     def test_create_ipv6_pd_subnet_over_ipam(self, pool_mock):
         mocks = self._prepare_mocks_with_pool_mock(pool_mock)
-        cfg.CONF.set_override('default_ipv6_subnet_pool',
-                              constants.IPV6_PD_POOL_ID)
+        cfg.CONF.set_override('ipv6_pd_enabled', True)
         cidr = constants.PROVISIONAL_IPV6_PD_PREFIX
         allocation_pools = [netaddr.IPRange('::2', '::ffff:ffff:ffff:ffff')]
         with self.subnet(cidr=None, ip_version=6,
+                         subnetpool_id=constants.IPV6_PD_POOL_ID,
                          ipv6_ra_mode=constants.IPV6_SLAAC,
                          ipv6_address_mode=constants.IPV6_SLAAC):
-            pool_mock.get_instance.assert_called_once_with(None, mock.ANY)
+            self.assertEqual(2, pool_mock.get_instance.call_count)
             self.assertTrue(mocks['driver'].allocate_subnet.called)
             request = mocks['driver'].allocate_subnet.call_args[0][0]
             self.assertIsInstance(request, ipam_req.SpecificSubnetRequest)
@@ -468,7 +467,7 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
             with self.port(subnet=subnet) as port:
                 ips = port['port']['fixed_ips']
                 self.assertEqual(1, len(ips))
-                self.assertEqual(ips[0]['ip_address'], auto_ip)
+                self.assertEqual(auto_ip, ips[0]['ip_address'])
                 # Update port with another new ip
                 data = {"port": {"fixed_ips": [{
                         'subnet_id': subnet['subnet']['id'],
@@ -495,7 +494,7 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
             with self.port(subnet=subnet) as port:
                 ips = port['port']['fixed_ips']
                 self.assertEqual(1, len(ips))
-                self.assertEqual(ips[0]['ip_address'], auto_ip)
+                self.assertEqual(auto_ip, ips[0]['ip_address'])
                 req = self.new_delete_request('ports', port['port']['id'])
                 res = req.get_response(self.api)
 
@@ -508,14 +507,14 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
             with self.port(subnet=subnet) as port:
                 ips = port['port']['fixed_ips']
                 self.assertEqual(1, len(ips))
-                self.assertEqual(ips[0]['ip_address'], ip)
+                self.assertEqual(ip, ips[0]['ip_address'])
                 req = self.new_delete_request('ports', port['port']['id'])
                 res = req.get_response(self.api)
                 self.assertEqual(webob.exc.HTTPNoContent.code, res.status_int)
                 with self.port(subnet=subnet, fixed_ips=ips) as port:
                     ips = port['port']['fixed_ips']
                     self.assertEqual(1, len(ips))
-                    self.assertEqual(ips[0]['ip_address'], ip)
+                    self.assertEqual(ip, ips[0]['ip_address'])
 
     @mock.patch('neutron.ipam.driver.Pool')
     def test_update_ips_for_port_passes_port_dict_to_factory(self, pool_mock):

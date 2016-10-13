@@ -17,6 +17,7 @@ import netaddr
 from oslo_log import log as logging
 from sqlalchemy.orm import exc
 
+from neutron._i18n import _, _LW
 from neutron.common import constants as n_const
 from neutron.common import ipv6_utils as ipv6
 from neutron.common import utils
@@ -24,7 +25,6 @@ from neutron.db import allowedaddresspairs_db as addr_pair
 from neutron.db import models_v2
 from neutron.db import securitygroups_db as sg_db
 from neutron.extensions import securitygroup as ext_sg
-from neutron.i18n import _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -375,8 +375,8 @@ class SecurityGroupServerRpcMixin(sg_db.SecurityGroupDbMixin):
         try:
             mac_address = query.one()[0]
         except (exc.NoResultFound, exc.MultipleResultsFound):
-            LOG.warn(_LW('No valid gateway port on subnet %s is '
-                         'found for IPv6 RA'), subnet['id'])
+            LOG.warning(_LW('No valid gateway port on subnet %s is '
+                            'found for IPv6 RA'), subnet['id'])
             return
         lla_ip = str(ipv6.get_ipv6_addr_by_EUI64(
             n_const.IPV6_LLA_PREFIX,
@@ -432,7 +432,7 @@ class SecurityGroupServerRpcMixin(sg_db.SecurityGroupDbMixin):
         for ra_ip in ra_ips:
             ra_rule = {'direction': 'ingress',
                        'ethertype': n_const.IPv6,
-                       'protocol': n_const.PROTO_NAME_ICMP_V6,
+                       'protocol': n_const.PROTO_NAME_IPV6_ICMP,
                        'source_ip_prefix': ra_ip,
                        'source_port_range_min': n_const.ICMPV6_TYPE_RA}
             port['security_group_rules'].append(ra_rule)

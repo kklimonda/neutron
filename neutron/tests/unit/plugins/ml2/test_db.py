@@ -323,7 +323,7 @@ class Ml2DvrDBTestCase(testlib_api.SqlTestCase):
             self.ctx.session, port_id, 'foo_host', router.id)
         expected = (self.ctx.session.query(models.DVRPortBinding).
                     filter_by(port_id=port_id).one())
-        self.assertEqual(expected.port_id, port_id)
+        self.assertEqual(port_id, expected.port_id)
 
     def test_ensure_dvr_port_binding_multiple_bindings(self):
         network_id = 'foo_network_id'
@@ -337,23 +337,6 @@ class Ml2DvrDBTestCase(testlib_api.SqlTestCase):
         bindings = (self.ctx.session.query(models.DVRPortBinding).
                     filter_by(port_id=port_id).all())
         self.assertEqual(2, len(bindings))
-
-    def test_delete_dvr_port_binding(self):
-        network_id = 'foo_network_id'
-        port_id = 'foo_port_id'
-        self._setup_neutron_network(network_id, [port_id])
-        router = self._setup_neutron_router()
-        binding = self._setup_dvr_binding(
-            network_id, port_id, router.id, 'foo_host_id')
-        ml2_db.delete_dvr_port_binding(
-            self.ctx.session, port_id, 'foo_host_id')
-        count = (self.ctx.session.query(models.DVRPortBinding).
-            filter_by(port_id=binding.port_id).count())
-        self.assertFalse(count)
-
-    def test_delete_dvr_port_binding_not_found(self):
-        ml2_db.delete_dvr_port_binding(
-            self.ctx.session, 'foo_port_id', 'foo_host')
 
     def test_delete_dvr_port_binding_if_stale(self):
         network_id = 'foo_network_id'

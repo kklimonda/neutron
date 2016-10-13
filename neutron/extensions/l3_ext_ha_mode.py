@@ -13,6 +13,7 @@
 # under the License.
 #
 
+from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes
 from neutron.common import constants
@@ -29,9 +30,33 @@ EXTENDED_ATTRIBUTES_2_0 = {
 }
 
 
-class DistributedHARouterNotSupported(NotImplementedError):
-    message = _("Currently distributed HA routers are "
+class HAmodeUpdateOfDvrNotSupported(NotImplementedError):
+    message = _("Currently update of HA mode for a distributed router is "
                 "not supported.")
+
+
+class DVRmodeUpdateOfHaNotSupported(NotImplementedError):
+    message = _("Currently update of distributed mode for an HA router is "
+                "not supported.")
+
+
+class HAmodeUpdateOfDvrHaNotSupported(NotImplementedError):
+    message = _("Currently update of HA mode for a DVR/HA router is "
+                "not supported.")
+
+
+class DVRmodeUpdateOfDvrHaNotSupported(NotImplementedError):
+    message = _("Currently update of distributed mode for a DVR/HA router "
+                "is not supported")
+
+
+class UpdateToDvrHamodeNotSupported(NotImplementedError):
+    message = _("Currently updating a router to DVR/HA is not supported.")
+
+
+class UpdateToNonDvrHamodeNotSupported(NotImplementedError):
+    message = _("Currently updating a router from DVR/HA to non-DVR "
+                " non-HA is not supported.")
 
 
 class MaxVRIDAllocationTriesReached(exceptions.NeutronException):
@@ -63,8 +88,8 @@ class HAMaximumAgentsNumberNotValid(exceptions.NeutronException):
 
 class HAMinimumAgentsNumberNotValid(exceptions.NeutronException):
     message = (_("min_l3_agents_per_router config parameter is not valid. "
-                 "It has to be equal to or more than %s for HA.") %
-               constants.MINIMUM_AGENTS_FOR_HA)
+                 "It has to be greater than or equal to %s for HA.") %
+               constants.MINIMUM_MINIMUM_AGENTS_FOR_HA)
 
 
 class L3_ext_ha_mode(extensions.ExtensionDescriptor):

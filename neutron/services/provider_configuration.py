@@ -14,14 +14,16 @@
 #    under the License.
 
 import importlib
+import itertools
 import os
 
 from oslo_config import cfg
 from oslo_log import log as logging
 import stevedore
 
+from neutron._i18n import _, _LW
+from neutron.api.v2 import attributes as attr
 from neutron.common import exceptions as n_exc
-from neutron.i18n import _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -63,18 +65,43 @@ class NeutronModule(object):
     # Return an INI parser for the child module
     def ini(self, neutron_dir=None):
         if self.repo['ini'] is None:
-            try:
-                neutron_dir = neutron_dir or cfg.CONF.config_dir
-            except cfg.NoSuchOptError:
-                pass
-            if neutron_dir is None:
-                neutron_dir = '/etc/neutron'
-
             ini_file = cfg.ConfigOpts()
             ini_file.register_opts(serviceprovider_opts, 'service_providers')
-            ini_path = os.path.join(neutron_dir, '%s.conf' % self.module_name)
-            if os.path.exists(ini_path):
-                ini_file(['--config-file', ini_path])
+
+            if neutron_dir is not None:
+                neutron_dirs = [neutron_dir]
+            else:
+                try:
+                    neutron_dirs = cfg.CONF.config_dirs or ['/etc/neutron']
+                except cfg.NoSuchOptError:
+                    # handle older oslo.config versions (<= 3.8.0) that do not
+                    # support config_dirs property
+                    neutron_dirs = ['/etc/neutron']
+                    try:
+                        config_dir = cfg.CONF.config_dir
+                        if config_dir:
+                            neutron_dirs = [config_dir]
+                    except cfg.NoSuchOptError:
+                        pass
+
+            # load configuration from all matching files to reflect oslo.config
+            # behaviour
+            config_files = []
+            for neutron_dir in neutron_dirs:
+                ini_path = os.path.join(neutron_dir,
+                                        '%s.conf' % self.module_name)
+                if os.path.exists(ini_path):
+                    config_files.append(ini_path)
+
+            # NOTE(ihrachys): we could pass project=self.module_name instead to
+            # rely on oslo.config to find configuration files for us, but:
+            # 1. that would render neutron_dir argument ineffective;
+            # 2. that would break loading configuration file from under
+            # /etc/neutron in case no --config-dir is passed.
+            # That's why we need to explicitly construct CLI here.
+            ini_file(args=list(itertools.chain.from_iterable(
+                ['--config-file', file_] for file_ in config_files
+            )))
             self.repo['ini'] = ini_file
 
         return self.repo['ini']
@@ -133,9 +160,10 @@ def parse_service_provider_opt(service_module='neutron'):
 
     """Parse service definition opts and returns result."""
     def validate_name(name):
-        if len(name) > 255:
+        if len(name) > attr.NAME_MAX_LEN:
             raise n_exc.Invalid(
-                _("Provider name is limited by 255 characters: %s") % name)
+                _("Provider name %(name)s is limited by %(len)s characters")
+                % {'name': name, 'len': attr.NAME_MAX_LEN})
 
     neutron_mod = NeutronModule(service_module)
     svc_providers_opt = neutron_mod.service_providers()
@@ -218,7 +246,7 @@ class ProviderConfiguration(object):
         if provider_type in self.providers:
             msg = (_("Multiple providers specified for service "
                      "%s") % provider['service_type'])
-            LOG.exception(msg)
+            LOG.error(msg)
             raise n_exc.Invalid(msg)
         self.providers[provider_type] = {'driver': provider['driver'],
                                          'default': provider['default']}

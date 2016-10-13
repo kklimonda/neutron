@@ -13,15 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_log import log as logging
 from six import moves
 import sqlalchemy
 from sqlalchemy.orm import properties
 
+from neutron._i18n import _
 from neutron.common import exceptions as n_exc
-
-
-LOG = logging.getLogger(__name__)
 
 
 def paginate_query(query, model, limit, sorts, marker_obj=None):
@@ -69,7 +66,7 @@ def paginate_query(query, model, limit, sorts, marker_obj=None):
             sort_key_attr = getattr(model, sort_key)
         except AttributeError:
             # Extension attribute doesn't support for sorting. Because it
-            # existed in attr_info, it will be catched at here
+            # existed in attr_info, it will be caught here
             msg = _("%s is invalid attribute for sort_key") % sort_key
             raise n_exc.BadRequest(resource=model.__tablename__, msg=msg)
         if isinstance(sort_key_attr.property, properties.RelationshipProperty):

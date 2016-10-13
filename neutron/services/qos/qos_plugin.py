@@ -12,8 +12,6 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-from oslo_log import log as logging
-
 
 from neutron.common import exceptions as n_exc
 from neutron.db import api as db_api
@@ -24,9 +22,6 @@ from neutron.objects.qos import rule as rule_object
 from neutron.objects.qos import rule_type as rule_type_object
 from neutron.services.qos.notification_drivers import manager as driver_mgr
 from neutron.services.qos import qos_consts
-
-
-LOG = logging.getLogger(__name__)
 
 
 class QoSPlugin(qos.QoSPluginBase):
@@ -53,11 +48,14 @@ class QoSPlugin(qos.QoSPluginBase):
 
     @db_base_plugin_common.convert_result_to_dict
     def update_policy(self, context, policy_id, policy):
-        policy = policy_object.QosPolicy(context, **policy['policy'])
-        policy.id = policy_id
-        policy.update()
-        self.notification_driver_manager.update_policy(context, policy)
-        return policy
+        obj = policy_object.QosPolicy(context, id=policy_id)
+        obj.obj_reset_changes()
+        for k, v in policy['policy'].items():
+            if k != 'id':
+                setattr(obj, k, v)
+        obj.update()
+        self.notification_driver_manager.update_policy(context, obj)
+        return obj
 
     def delete_policy(self, context, policy_id):
         policy = policy_object.QosPolicy(context)
@@ -66,7 +64,7 @@ class QoSPlugin(qos.QoSPluginBase):
         policy.delete()
 
     def _get_policy_obj(self, context, policy_id):
-        obj = policy_object.QosPolicy.get_by_id(context, policy_id)
+        obj = policy_object.QosPolicy.get_object(context, id=policy_id)
         if obj is None:
             raise n_exc.QosPolicyNotFound(policy_id=policy_id)
         return obj
@@ -112,8 +110,11 @@ class QoSPlugin(qos.QoSPluginBase):
             # check if the rule belong to the policy
             policy.get_rule_by_id(rule_id)
             rule = rule_object.QosBandwidthLimitRule(
-                context, **bandwidth_limit_rule['bandwidth_limit_rule'])
-            rule.id = rule_id
+                context, id=rule_id)
+            rule.obj_reset_changes()
+            for k, v in bandwidth_limit_rule['bandwidth_limit_rule'].items():
+                if k != 'id':
+                    setattr(rule, k, v)
             rule.update()
             policy.reload_rules()
         self.notification_driver_manager.update_policy(context, policy)
@@ -137,8 +138,8 @@ class QoSPlugin(qos.QoSPluginBase):
         with db_api.autonested_transaction(context.session):
             # first, validate that we have access to the policy
             self._get_policy_obj(context, policy_id)
-            rule = rule_object.QosBandwidthLimitRule.get_by_id(
-                context, rule_id)
+            rule = rule_object.QosBandwidthLimitRule.get_object(
+                context, id=rule_id)
         if not rule:
             raise n_exc.QosRuleNotFound(policy_id=policy_id, rule_id=rule_id)
         return rule

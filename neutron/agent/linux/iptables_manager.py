@@ -31,12 +31,12 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 import six
 
+from neutron._i18n import _, _LE, _LW
 from neutron.agent.common import config
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import utils as linux_utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
-from neutron.i18n import _LE, _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -250,10 +250,10 @@ class IptablesTable(object):
                                                           top, self.wrap_name,
                                                           comment=comment)))
         except ValueError:
-            LOG.warn(_LW('Tried to remove rule that was not there:'
-                         ' %(chain)r %(rule)r %(wrap)r %(top)r'),
-                     {'chain': chain, 'rule': rule,
-                      'top': top, 'wrap': wrap})
+            LOG.warning(_LW('Tried to remove rule that was not there:'
+                            ' %(chain)r %(rule)r %(wrap)r %(top)r'),
+                        {'chain': chain, 'rule': rule,
+                         'top': top, 'wrap': wrap})
 
     def _get_chain_rules(self, chain, wrap):
         chain = get_chain_name(chain, wrap)
@@ -336,6 +336,11 @@ class IptablesManager(object):
             builtin_chains[4].update(
                 {'mangle': ['PREROUTING', 'INPUT', 'FORWARD', 'OUTPUT',
                             'POSTROUTING']})
+            self.ipv6.update(
+                {'mangle': IptablesTable(binary_name=self.wrap_name)})
+            builtin_chains[6].update(
+                {'mangle': ['PREROUTING', 'INPUT', 'FORWARD', 'OUTPUT',
+                            'POSTROUTING']})
             self.ipv4.update(
                 {'nat': IptablesTable(binary_name=self.wrap_name)})
             builtin_chains[4].update({'nat': ['PREROUTING',
@@ -385,9 +390,55 @@ class IptablesManager(object):
             self.ipv4['mangle'].add_chain('mark')
             self.ipv4['mangle'].add_rule('PREROUTING', '-j $mark')
 
+            # Add address scope related chains
+            self.ipv4['mangle'].add_chain('scope')
+            self.ipv6['mangle'].add_chain('scope')
+
+            self.ipv4['mangle'].add_chain('floatingip')
+            self.ipv4['mangle'].add_chain('float-snat')
+
+            self.ipv4['filter'].add_chain('scope')
+            self.ipv6['filter'].add_chain('scope')
+            self.ipv4['filter'].add_rule('FORWARD', '-j $scope')
+            self.ipv6['filter'].add_rule('FORWARD', '-j $scope')
+
+            # Add rules for marking traffic for address scopes
+            mark_new_ingress_address_scope_by_interface = (
+                '-j $scope')
+            copy_address_scope_for_existing = (
+                '-m connmark ! --mark 0x0/0xffff0000 '
+                '-j CONNMARK --restore-mark '
+                '--nfmask 0xffff0000 --ctmask 0xffff0000')
+            mark_new_ingress_address_scope_by_floatingip = (
+                '-j $floatingip')
+            save_mark_to_connmark = (
+                '-m connmark --mark 0x0/0xffff0000 '
+                '-j CONNMARK --save-mark '
+                '--nfmask 0xffff0000 --ctmask 0xffff0000')
+
+            self.ipv4['mangle'].add_rule(
+                'PREROUTING', mark_new_ingress_address_scope_by_interface)
+            self.ipv4['mangle'].add_rule(
+                'PREROUTING', copy_address_scope_for_existing)
+            # The floating ip scope rules must come after the CONNTRACK rules
+            # because the (CONN)MARK targets are non-terminating (this is true
+            # despite them not being documented as such) and the floating ip
+            # rules need to override the mark from CONNMARK to cross scopes.
+            self.ipv4['mangle'].add_rule(
+                'PREROUTING', mark_new_ingress_address_scope_by_floatingip)
+            self.ipv4['mangle'].add_rule(
+                'float-snat', save_mark_to_connmark)
+            self.ipv6['mangle'].add_rule(
+                'PREROUTING', mark_new_ingress_address_scope_by_interface)
+            self.ipv6['mangle'].add_rule(
+                'PREROUTING', copy_address_scope_for_existing)
+
+    def get_tables(self, ip_version):
+        return {4: self.ipv4, 6: self.ipv6}[ip_version]
+
     def get_chain(self, table, chain, ip_version=4, wrap=True):
         try:
-            requested_table = {4: self.ipv4, 6: self.ipv6}[ip_version][table]
+            requested_table = self.get_tables(ip_version)[table]
         except KeyError:
             return []
         return requested_table._get_chain_rules(chain, wrap)
@@ -405,7 +456,7 @@ class IptablesManager(object):
             try:
                 self.defer_apply_off()
             except Exception:
-                msg = _LE('Failure applying iptables rules')
+                msg = _('Failure applying iptables rules')
                 LOG.exception(msg)
                 raise n_exc.IpTablesApplyException(msg)
 
@@ -645,8 +696,8 @@ class IptablesManager(object):
         """Return the sum of the traffic counters of all rules of a chain."""
         cmd_tables = self._get_traffic_counters_cmd_tables(chain, wrap)
         if not cmd_tables:
-            LOG.warn(_LW('Attempted to get traffic counters of chain %s which '
-                         'does not exist'), chain)
+            LOG.warning(_LW('Attempted to get traffic counters of chain %s '
+                            'which does not exist'), chain)
             return
 
         name = get_chain_name(chain, wrap)

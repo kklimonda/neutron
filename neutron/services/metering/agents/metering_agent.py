@@ -13,7 +13,6 @@
 # under the License.
 
 import sys
-import time
 
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -22,7 +21,9 @@ from oslo_service import loopingcall
 from oslo_service import periodic_task
 from oslo_service import service
 from oslo_utils import importutils
+from oslo_utils import timeutils
 
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.common import config
 from neutron.agent import rpc as agent_rpc
 from neutron.common import config as common_config
@@ -31,7 +32,6 @@ from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
 from neutron import context
-from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
 from neutron import service as neutron_service
 
@@ -117,7 +117,7 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
             info['time'] = 0
 
     def _purge_metering_info(self):
-        deadline_timestamp = int(time.time()) - self.conf.report_interval
+        deadline_timestamp = timeutils.utcnow_ts() - self.conf.report_interval
         label_ids = [
             label_id
             for label_id, info in self.metering_infos.items()
@@ -126,7 +126,7 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
             del self.metering_infos[label_id]
 
     def _add_metering_info(self, label_id, pkts, bytes):
-        ts = int(time.time())
+        ts = timeutils.utcnow_ts()
         info = self.metering_infos.get(label_id, {'bytes': 0,
                                                   'pkts': 0,
                                                   'time': 0,
@@ -161,11 +161,11 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
     def _metering_loop(self):
         self._add_metering_infos()
 
-        ts = int(time.time())
+        ts = timeutils.utcnow_ts()
         delta = ts - self.last_report
 
         report_interval = self.conf.report_interval
-        if delta > report_interval:
+        if delta >= report_interval:
             self._metering_notification()
             self._purge_metering_info()
             self.last_report = ts
@@ -248,7 +248,7 @@ class MeteringAgentWithStateReport(MeteringAgent):
     def __init__(self, host, conf=None):
         super(MeteringAgentWithStateReport, self).__init__(host=host,
                                                            conf=conf)
-        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
         self.agent_state = {
             'binary': 'neutron-metering-agent',
             'host': host,
@@ -276,8 +276,8 @@ class MeteringAgentWithStateReport(MeteringAgent):
             self.use_call = False
         except AttributeError:
             # This means the server does not support report_state
-            LOG.warn(_LW("Neutron server does not support state report."
-                         " State report for this agent will be disabled."))
+            LOG.warning(_LW("Neutron server does not support state report. "
+                            "State report for this agent will be disabled."))
             self.heartbeat.stop()
             return
         except Exception:

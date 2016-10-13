@@ -12,65 +12,26 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os.path
 import tempfile
 
 import fixtures
-import six
 
 from neutron.common import constants
+from neutron.plugins.ml2.extensions import qos as qos_ext
 from neutron.tests import base
+from neutron.tests.common import config_fixtures
 from neutron.tests.common import helpers as c_helpers
 from neutron.tests.common import net_helpers
 
 
-class ConfigDict(base.AttributeDict):
-    def update(self, other):
-        self.convert_to_attr_dict(other)
-        super(ConfigDict, self).update(other)
+def _generate_port():
+    """Get a free TCP port from the Operating System and return it.
 
-    def convert_to_attr_dict(self, other):
-        """Convert nested dicts to AttributeDict.
-
-        :param other: dictionary to be directly modified.
-        """
-        for key, value in six.iteritems(other):
-            if isinstance(value, dict):
-                if not isinstance(value, base.AttributeDict):
-                    other[key] = base.AttributeDict(value)
-                self.convert_to_attr_dict(value)
-
-
-class ConfigFileFixture(fixtures.Fixture):
-    """A fixture that knows how to translate configurations to files.
-
-    :param base_filename: the filename to use on disk.
-    :param config: a ConfigDict instance.
-    :param temp_dir: an existing temporary directory to use for storage.
+    This might fail if some other process occupies this port after this
+    function finished but before the neutron-server process started.
     """
-
-    def __init__(self, base_filename, config, temp_dir):
-        super(ConfigFileFixture, self).__init__()
-        self.base_filename = base_filename
-        self.config = config
-        self.temp_dir = temp_dir
-
-    def _setUp(self):
-        config_parser = self.dict_to_config_parser(self.config)
-        # Need to randomly generate a unique folder to put the file in
-        self.filename = os.path.join(self.temp_dir, self.base_filename)
-        with open(self.filename, 'w') as f:
-            config_parser.write(f)
-            f.flush()
-
-    def dict_to_config_parser(self, config_dict):
-        config_parser = six.moves.configparser.SafeConfigParser()
-        for section, section_dict in six.iteritems(config_dict):
-            if section != 'DEFAULT':
-                config_parser.add_section(section)
-            for option, value in six.iteritems(section_dict):
-                config_parser.set(section, option, value)
-        return config_parser
+    return str(net_helpers.get_free_namespace_port(
+        constants.PROTO_NAME_TCP))
 
 
 class ConfigFixture(fixtures.Fixture):
@@ -83,14 +44,14 @@ class ConfigFixture(fixtures.Fixture):
     """
     def __init__(self, env_desc, host_desc, temp_dir, base_filename):
         super(ConfigFixture, self).__init__()
-        self.config = ConfigDict()
+        self.config = config_fixtures.ConfigDict()
         self.env_desc = env_desc
         self.host_desc = host_desc
         self.temp_dir = temp_dir
         self.base_filename = base_filename
 
     def _setUp(self):
-        cfg_fixture = ConfigFileFixture(
+        cfg_fixture = config_fixtures.ConfigFileFixture(
             self.base_filename, self.config, self.temp_dir)
         self.useFixture(cfg_fixture)
         self.filename = cfg_fixture.filename
@@ -112,7 +73,7 @@ class NeutronConfigFixture(ConfigFixture):
                 'host': self._generate_host(),
                 'state_path': self._generate_state_path(self.temp_dir),
                 'lock_path': '$state_path/lock',
-                'bind_port': self._generate_port(),
+                'bind_port': _generate_port(),
                 'api_paste_config': self._generate_api_paste(),
                 'policy_file': self._generate_policy_json(),
                 'core_plugin': 'neutron.plugins.ml2.plugin.Ml2Plugin',
@@ -127,7 +88,7 @@ class NeutronConfigFixture(ConfigFixture):
             'oslo_messaging_rabbit': {
                 'rabbit_userid': rabbitmq_environment.user,
                 'rabbit_password': rabbitmq_environment.password,
-                'rabbit_hosts': '127.0.0.1',
+                'rabbit_hosts': rabbitmq_environment.host,
                 'rabbit_virtual_host': rabbitmq_environment.vhost,
             }
         })
@@ -139,15 +100,6 @@ class NeutronConfigFixture(ConfigFixture):
         # Assume that temp_dir will be removed by the caller
         self.state_path = tempfile.mkdtemp(prefix='state_path', dir=temp_dir)
         return self.state_path
-
-    def _generate_port(self):
-        """Get a free TCP port from the Operating System and return it.
-
-        This might fail if some other process occupies this port after this
-        function finished but before the neutron-server process started.
-        """
-        return str(net_helpers.get_free_namespace_port(
-            constants.PROTO_NAME_TCP))
 
     def _generate_api_paste(self):
         return c_helpers.find_sample_file('api-paste.ini')
@@ -162,7 +114,7 @@ class ML2ConfigFixture(ConfigFixture):
         super(ML2ConfigFixture, self).__init__(
             env_desc, host_desc, temp_dir, base_filename='ml2_conf.ini')
 
-        mechanism_drivers = 'openvswitch'
+        mechanism_drivers = 'openvswitch,linuxbridge'
         if self.env_desc.l2_pop:
             mechanism_drivers += ',l2population'
 
@@ -183,7 +135,8 @@ class ML2ConfigFixture(ConfigFixture):
         })
 
         if env_desc.qos:
-            self.config['ml2']['extension_drivers'] = 'qos'
+            self.config['ml2']['extension_drivers'] =\
+                    qos_ext.QOS_EXT_DRIVER_ALIAS
 
 
 class OVSConfigFixture(ConfigFixture):
@@ -196,9 +149,9 @@ class OVSConfigFixture(ConfigFixture):
         self.tunneling_enabled = self.env_desc.tunneling_enabled
         self.config.update({
             'ovs': {
-                'enable_tunneling': str(self.tunneling_enabled),
                 'local_ip': local_ip,
                 'integration_bridge': self._generate_integration_bridge(),
+                'of_interface': host_desc.of_interface,
             },
             'securitygroup': {
                 'firewall_driver': 'noop',
@@ -207,6 +160,10 @@ class OVSConfigFixture(ConfigFixture):
                 'l2_population': str(self.env_desc.l2_pop),
             }
         })
+
+        if self.config['ovs']['of_interface'] == 'native':
+            self.config['ovs'].update({
+                'of_listen_port': _generate_port()})
 
         if self.tunneling_enabled:
             self.config['agent'].update({
@@ -247,12 +204,65 @@ class OVSConfigFixture(ConfigFixture):
         return self.config.ovs.tunnel_bridge
 
 
+class LinuxBridgeConfigFixture(ConfigFixture):
+
+    def __init__(self, env_desc, host_desc, temp_dir, local_ip,
+                 physical_device_name):
+        super(LinuxBridgeConfigFixture, self).__init__(
+            env_desc, host_desc, temp_dir,
+            base_filename="linuxbridge_agent.ini"
+        )
+        self.config.update({
+            'VXLAN': {
+                'enable_vxlan': str(self.env_desc.tunneling_enabled),
+                'local_ip': local_ip,
+                'l2_population': str(self.env_desc.l2_pop),
+            }
+        })
+        if env_desc.qos:
+            self.config.update({
+                'AGENT': {
+                    'extensions': 'qos'
+                }
+            })
+        if self.env_desc.tunneling_enabled:
+            self.config.update({
+                'LINUX_BRIDGE': {
+                    'bridge_mappings': self._generate_bridge_mappings(
+                        physical_device_name
+                    )
+                }
+            })
+        else:
+            self.config.update({
+                'LINUX_BRIDGE': {
+                    'physical_interface_mappings':
+                        self._generate_bridge_mappings(
+                            physical_device_name
+                        )
+                }
+            })
+
+    def _generate_bridge_mappings(self, device_name):
+        return 'physnet1:%s' % device_name
+
+
 class L3ConfigFixture(ConfigFixture):
 
-    def __init__(self, env_desc, host_desc, temp_dir, integration_bridge):
+    def __init__(self, env_desc, host_desc, temp_dir, integration_bridge=None):
         super(L3ConfigFixture, self).__init__(
             env_desc, host_desc, temp_dir, base_filename='l3_agent.ini')
+        if host_desc.l2_agent_type == constants.AGENT_TYPE_OVS:
+            self._prepare_config_with_ovs_agent(integration_bridge)
+        elif host_desc.l2_agent_type == constants.AGENT_TYPE_LINUXBRIDGE:
+            self._prepare_config_with_linuxbridge_agent()
+        self.config['DEFAULT'].update({
+            'debug': 'True',
+            'verbose': 'True',
+            'test_namespace_suffix': self._generate_namespace_suffix(),
+        })
 
+    def _prepare_config_with_ovs_agent(self, integration_bridge):
         self.config.update({
             'DEFAULT': {
                 'l3_agent_manager': ('neutron.agent.l3_agent.'
@@ -261,9 +271,14 @@ class L3ConfigFixture(ConfigFixture):
                                      'OVSInterfaceDriver'),
                 'ovs_integration_bridge': integration_bridge,
                 'external_network_bridge': self._generate_external_bridge(),
-                'debug': 'True',
-                'verbose': 'True',
-                'test_namespace_suffix': self._generate_namespace_suffix(),
+            }
+        })
+
+    def _prepare_config_with_linuxbridge_agent(self):
+        self.config.update({
+            'DEFAULT': {
+                'interface_driver': ('neutron.agent.linux.interface.'
+                                     'BridgeInterfaceDriver'),
             }
         })
 

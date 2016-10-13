@@ -14,17 +14,14 @@
 #    under the License.
 
 from oslo_config import cfg
-from oslo_log import log as logging
 
+from neutron._i18n import _
 from neutron.agent.linux import external_process
 from neutron.agent.linux import keepalived
 from neutron.agent.linux import utils
 from neutron.tests import base
 from neutron.tests.functional.agent.linux import helpers
 from neutron.tests.unit.agent.linux import test_keepalived
-
-
-LOG = logging.getLogger(__name__)
 
 
 class KeepalivedManagerTestCase(base.BaseTestCase,

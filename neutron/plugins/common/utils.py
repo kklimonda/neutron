@@ -13,14 +13,35 @@
 #    under the License.
 
 """
-Common utilities and helper functions for Openstack Networking Plugins.
+Common utilities and helper functions for OpenStack Networking Plugins.
 """
 
+import hashlib
+
+from oslo_config import cfg
+from oslo_log import log as logging
+import six
 import webob.exc
 
+from neutron._i18n import _, _LI
 from neutron.api.v2 import attributes
+from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron.plugins.common import constants as p_const
+
+INTERFACE_HASH_LEN = 6
+LOG = logging.getLogger(__name__)
+
+
+def get_deployment_physnet_mtu():
+    """Retrieves global physical network MTU setting.
+
+    Plugins should use this function to retrieve the MTU set by the operator
+    that is equal to or less than the MTU of their nodes' physical interfaces.
+    Note that it is the responsibility of the plugin to deduct the value of
+    any encapsulation overhead required before advertising it to VMs.
+    """
+    return cfg.CONF.global_physnet_mtu
 
 
 def is_valid_vlan_tag(vlan):
@@ -138,3 +159,37 @@ def create_port(core_plugin, context, port, check_allow_post=True):
                                 port.get('port', {}),
                                 check_allow_post=check_allow_post)
     return core_plugin.create_port(context, {'port': port_data})
+
+
+def get_interface_name(name, prefix='', max_len=n_const.DEVICE_NAME_MAX_LEN):
+    """Construct an interface name based on the prefix and name.
+
+    The interface name can not exceed the maximum length passed in. Longer
+    names are hashed to help ensure uniqueness.
+    """
+    requested_name = prefix + name
+
+    if len(requested_name) <= max_len:
+        return requested_name
+
+    # We can't just truncate because interfaces may be distinguished
+    # by an ident at the end. A hash over the name should be unique.
+    # Leave part of the interface name on for easier identification
+    if (len(prefix) + INTERFACE_HASH_LEN) > max_len:
+        raise ValueError(_("Too long prefix provided. New name would exceed "
+                           "given length for an interface name."))
+
+    namelen = max_len - len(prefix) - INTERFACE_HASH_LEN
+    if isinstance(name, six.text_type):
+        hashed_name = hashlib.sha1(name.encode('utf-8'))
+    else:
+        hashed_name = hashlib.sha1(name)
+    new_name = ('%(prefix)s%(truncated)s%(hash)s' %
+                {'prefix': prefix, 'truncated': name[0:namelen],
+                 'hash': hashed_name.hexdigest()[0:INTERFACE_HASH_LEN]})
+    LOG.info(_LI("The requested interface name %(requested_name)s exceeds the "
+                 "%(limit)d character limitation. It was shortened to "
+                 "%(new_name)s to fit."),
+             {'requested_name': requested_name,
+              'limit': max_len, 'new_name': new_name})
+    return new_name

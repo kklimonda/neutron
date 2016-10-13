@@ -23,7 +23,7 @@ from oslo_utils import timeutils
 import ryu.app.ofctl.api as ofctl_api
 import ryu.exception as ryu_exc
 
-from neutron.i18n import _LE, _LW
+from neutron._i18n import _LE, _LW
 
 LOG = logging.getLogger(__name__)
 
@@ -135,12 +135,11 @@ class OpenFlowSwitchMixin(object):
         return flows
 
     def cleanup_flows(self):
-        cookies = set([f.cookie for f in self.dump_flows()])
+        cookies = set([f.cookie for f in self.dump_flows()]) - \
+                  self.reserved_cookies
         for c in cookies:
-            if c == self.agent_uuid_stamp:
-                continue
-            LOG.warn(_LW("Deleting flow with cookie 0x%(cookie)x") % {
-                'cookie': c})
+            LOG.warning(_LW("Deleting flow with cookie 0x%(cookie)x"),
+                        {'cookie': c})
             self.delete_flows(cookie=c, cookie_mask=((1 << 64) - 1))
 
     def install_goto_next(self, table_id):
@@ -182,7 +181,7 @@ class OpenFlowSwitchMixin(object):
         match = self._match(ofp, ofpp, match, **match_kwargs)
         msg = ofpp.OFPFlowMod(dp,
                               table_id=table_id,
-                              cookie=self.agent_uuid_stamp,
+                              cookie=self.default_cookie,
                               match=match,
                               priority=priority,
                               instructions=instructions)
