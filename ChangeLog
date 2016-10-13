@@ -1,15 +1,69 @@
 CHANGES
 =======
 
+8.3.0
+-----
+
+* ml2 lb: do not program arp responder when unused
+* New option for num_threads for state change server
+* DVR: Pings to floatingip returns with fixed-ip on same network
+* Install dibbler.filters rootwrap file
+* ml2: allow retry on retriabable db error by precommit
+* Check for StaleData errors in retry decorator
+* Support for MultipleExceptions in db_api decorators
+* Convert multiple exception types in the API
+* Fixes KeyError while updating bgp peer
+* fix port address allocation for auto-addr subnet
+* Pass not IPDevice but port_name into OVSBridge's add_port()
+* Fix wrong HA router state
+* Imported Translations from Zanata
+* Allow SR-IOV agent to start when number of vf is 0
+* Implement check_vlan_transparency to return True in SR-IOV mech driver
+* Updated from global requirements
+* Check target_tenant when create rbac policy
+* DVR: Cleanup the stale snat redirect rules in router namespace
+* Add flush command to iproute in ip_lib
+* DVR: SNAT redirect rules should be removed only on Gateway clear
+* Fix internal server error during updating QoS rule
+* Fixes port device_id/device_owner change in failed operation
+* Refer to correct global_physnet_mtu option instead of segment_mtu
+* L3 DVR: use fanout when sending dvr arp table update
+* Suppresses a warning when no agents are configured
+* Allow auto-addressed ips deletion on port update
+* Set secure fail mode for physical bridges
+* Imported Translations from Zanata
+* Pass timeout in milliseconds to timer_wait
+* Fix code that's trying to read from a stale DB object
+* Handle deleted ports when creating a list of fdb entries
+* L3 agent: check router namespace existence before delete
+* BGP: exclude legacy fip in DVR fip host routes query
+* DVR: Clean stale snat-ns by checking its existence when agent restarts
+* Partial revert "DVR: Fix issue of SNAT rule for DVR with floating ip"
+* Restore old assert_ping behavior
+* Fix for check_vlan_transparency on mech drivers not called
+* DVR: Fix issue of SNAT rule for DVR with floating ip
+* Wait for vswitchd to add interfaces in native ovsdb
+* ovsdb: Don't let block() wait indefinitely
+* Filter HA router without HA port bindings after race conditions
+* Don't load DNS integration in l3_router_plugin
+* Added test cases for DVR L3 schedulers
+* Don't use exponential back-off for report_state
+
 8.2.0
 -----
 
+* Move state reporting initialization to after worker forking
+* Fix broken URL in Mitaka Neutron release note
+* Avoid duplicate ipset processing for security groups
 * Macvtap: Allow noop alias as FW driver
 * Fix of ping usage in net_helpers.async_ping()
 * Lower ML2 message severity
 * Fix OVSBridge.set_protocols arg
 * Allow tox to be run with python 3
 * Fix misuse of assertTrue in L3 DVR test case
+* Fix update of shared QoS policy
+* Add setting default max_burst value if not given by user
+* Check compatibility when auto schedule ha routers
 * Imported Translations from Zanata
 * DVR: handle floating IP reassociation on the same host
 * Not auto schedule router when sync routers from agent
@@ -35,6 +89,7 @@ CHANGES
 * DVR: Fix allowed_address_pair port binding with delayed fip
 * After a migration clean up the floating ip on the source host
 * Updated from global requirements
+* OVS Mech: Set hybrid plug based on agent config
 * Refactor the rpc callback version discovery mechanism
 
 8.1.2
@@ -48,6 +103,7 @@ CHANGES
 * DVR: Fix check multiprefix when delete ipv4 router interface
 * Pass ha_router_port flag for _snat_router_interfaces ports
 * Fixed help messages for path_mtu and global_physnet_mtus options
+* Fix help message for external_network_bridge
 * Fix bgp-speaker-network-remove error
 * Make deepcopy of update body in API layer
 * OVS: compare names when checking devices both added and deleted
@@ -66,6 +122,7 @@ CHANGES
 * Check for existence of snat port before deleting it
 * Define localstatedir for ovs compilation
 * De-dup user-defined SG rules before iptables call
+* Change get_root_helper_child_pid to stop when it finds cmd
 * Add a missing address-scope extension check
 * Skip firewall blink test for ovs-fw
 * Fix regexp for ss output

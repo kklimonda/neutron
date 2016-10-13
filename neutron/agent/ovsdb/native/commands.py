@@ -48,6 +48,8 @@ class BaseCommand(api.Command):
             ", ".join("%s=%s" % (k, v) for k, v in command_info.items()
                       if k not in ['api', 'result']))
 
+    __repr__ = __str__
+
 
 class AddBridgeCommand(BaseCommand):
     def __init__(self, api, name, may_exist, datapath_type):
@@ -301,6 +303,8 @@ class AddPortCommand(BaseCommand):
         br.ports = ports
 
         iface = txn.insert(self.api._tables['Interface'])
+        # NOTE(twilson) The OVS lib's __getattr__ breaks iface.uuid here
+        txn.expected_ifaces.add(iface.__dict__['uuid'])
         iface.name = self.port
         port.verify('interfaces')
         ifaces = getattr(port, 'interfaces', [])

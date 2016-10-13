@@ -29,6 +29,7 @@ Alexander Ignatov <aignatov@mirantis.com>
 Alexander Maretskiy <amaretskiy@mirantis.com>
 Alexei Kornienko <alexei.kornienko@gmail.com>
 Alexey I. Froloff <raorn@raorn.name>
+Aliaksandr Dziarkach <adziarkach@infoblox.com>
 Aman Kumar <amank@hp.com>
 Amir Sadoughi <amir.sadoughi@gmail.com>
 Amit Saha <amsaha@gmail.com>
@@ -68,6 +69,7 @@ Baohua Yang <baohyang@cn.ibm.com>
 Ben Nemec <bnemec@redhat.com>
 Ben Nemec <bnemec@us.ibm.com>
 Benedikt Trefzer <benedikt.trefzer@cirrax.com>
+Bernard Cafarelli <bcafarel@redhat.com>
 Bernhard M. Wiedemann <bwiedemann@suse.de>
 Bertrand Lallau <bertrand.lallau@thalesgroup.com>
 Bhagyashri Shewale <bhagyashri.shewale@nttdata.com>
@@ -151,6 +153,7 @@ DuYaHong <yahongdu@cn.ibm.com>
 Duarte Nunes <duarte@midokura.com>
 Dustin Lundquist <dustin@null-ptr.net>
 Ed Bak <ed.bak2@hp.com>
+Edan David <edand@mellanox.com>
 Edgar Magana <emagana@gmail.com>
 Edgar Magana <eperdomo@cisco.com>
 Einst Crazy <yu.changcai@99cloud.net>
@@ -163,6 +166,7 @@ Eran Gampel <eran@gampel.net>
 Eric Brown <browne@vmware.com>
 Eric Windisch <eric@cloudscaling.com>
 Erik Colnick <erik.colnick@hp.com>
+Erik Colnick <erik.colnick@hpe.com>
 Eugene Nikanorov <enikanorov@mirantis.com>
 Evgeny Fedoruk <evgenyf@radware.com>
 Fawad Khaliq <fawad@plumgrid.com>
@@ -193,6 +197,7 @@ Hareesh Puthalath <hareesh.puthalath@gmail.com>
 Harsh Prasad <prasad.tanay@gmail.com>
 Harshada Mangesh Kakad <harshadak@metsi.co.uk>
 He Jie Xu <xuhj@linux.vnet.ibm.com>
+He Qing <heqing@fiberhome.com>
 He Yongli <yongli.he@intel.com>
 Hemanth Ravi <hemanth.ravi@oneconvergence.com>
 Henry Gessau <gessau@cisco.com>
@@ -698,6 +703,7 @@ ivan-zhu <bozhu@linux.vnet.ibm.com>
 jasonrad <jason.walker@radware.com>
 jingliuqing <lawrancejing@gmail.com>
 joe@midokura.com <ih@ih.defaultdomain>
+john_a_joyce <joycej@cisco.com>
 johndavidge <jodavidg@cisco.com>
 jun xie <easonxie160@163.com>
 jun xie <junxiebj@cn.ibm.com>
@@ -728,6 +734,7 @@ nfedotov <nfedotov@cisco.com>
 niusmallnan <zhangzb@neunn.com>
 nmagnezi <nmagnezi@redhat.com>
 openstack <sylvain.afchain@enovance.com>
+panxia6679sina.com <panxia6679@sina.com>
 rajeev <rajeev.grover@hp.com>
 rajeev <rajeev_grover@hp.com>
 reedip <reedip.banerjee@nectechnologies.in>
@@ -742,6 +749,7 @@ salvatore <>
 salvatore <salv.orlando@gmail.com>
 sanuptpm <sanuptpm@gmail.com>
 shihanzhang <shihanzhang@huawei.com>
+shmcfarl <shmcfarl@gmail.com>
 shu,xinxin <xinxin.shu@intel.com>
 singhannie <aniruddha.gautam@hp.com>
 siyingchun <siyingchun@sina.com>
@@ -755,9 +763,11 @@ steve.ruan <ruansx@cn.ibm.com>
 sukhdev <sukhdev@aristanetworks.com>
 sushma_korati <sushma_korati@persistent.co.in>
 sysnet <sysnet@sysnet28.sysnet>
+tianquan <tianquan@cloudin.cn>
 ting.wang <ting.wang@easystack.cn>
 trinaths <trinath.somanchi@freescale.com>
 venkata anil <anil.venkata@enovance.com>
+venkata anil <anilvenkata@redhat.com>
 venkatamahesh <venkatamaheshkotha@gmail.com>
 vijaychundury <vchundur@redhat.com>
 vikas <vikas.d-m@hp.com>

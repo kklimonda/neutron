@@ -24,6 +24,7 @@ from neutron.agent.l3 import dvr_fip_ns
 from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
+from neutron.agent.linux import iptables_manager
 from neutron.agent.linux import utils
 from neutron.common import constants as l3_constants
 from neutron.extensions import portbindings
@@ -82,6 +83,34 @@ class TestDvrRouter(framework.L3AgentTestFramework):
         self.assertTrue(self._namespace_exists(fip_ns))
         self._assert_dvr_floating_ips(router)
         self._assert_snat_namespace_does_not_exist(router)
+
+    def test_dvr_gateway_move_does_not_remove_redirect_rules(self):
+        """Test to validate snat redirect rules not cleared with snat move."""
+        self.agent.conf.agent_mode = 'dvr_snat'
+        router_info = self.generate_dvr_router_info(enable_snat=True)
+        router_info[l3_constants.FLOATINGIP_KEY] = []
+        router_info[l3_constants.FLOATINGIP_AGENT_INTF_KEY] = []
+        router1 = self.manage_router(self.agent, router_info)
+        router1.router['gw_port_host'] = ""
+        self.agent._process_updated_router(router1.router)
+        router_updated = self.agent.router_info[router1.router['id']]
+        self.assertTrue(self._namespace_exists(router_updated.ns_name))
+        ns_ipr = ip_lib.IPRule(namespace=router1.ns_name)
+        ip4_rules_list = ns_ipr.rule.list_rules(l3_constants.IP_VERSION_4)
+        self.assertEqual(5, len(ip4_rules_list))
+        # IPRule list should have 5 entries.
+        # Three entries from 'default', 'main' and 'local' table.
+        # The remaining 2 is for the two router interfaces(csnat ports).
+        default_rules_list_count = 0
+        interface_rules_list_count = 0
+        for ip_rule in ip4_rules_list:
+            tbl_index = ip_rule['table']
+            if tbl_index in ['local', 'default', 'main']:
+                default_rules_list_count = default_rules_list_count + 1
+            else:
+                interface_rules_list_count = interface_rules_list_count + 1
+        self.assertEqual(3, default_rules_list_count)
+        self.assertEqual(2, interface_rules_list_count)
 
     def test_dvr_router_fips_stale_gw_port(self):
         self.agent.conf.agent_mode = 'dvr'
@@ -145,6 +174,50 @@ class TestDvrRouter(framework.L3AgentTestFramework):
         ext_gateway_port = router_info['gw_port']
         self._delete_router(self.agent, router.router_id)
         self._assert_fip_namespace_deleted(ext_gateway_port)
+
+    def test_dvr_router_gateway_redirect_cleanup_on_agent_restart(self):
+        """Test to validate the router namespace gateway redirect rule cleanup.
+
+        This test checks for the non existence of the gateway redirect
+        rules in the router namespace after the agent restarts while the
+        gateway is removed for the router.
+        """
+        self.agent.conf.agent_mode = 'dvr_snat'
+        router_info = self.generate_dvr_router_info()
+        router1 = self.manage_router(self.agent, router_info)
+        self._assert_snat_namespace_exists(router1)
+        self.assertTrue(self._namespace_exists(router1.ns_name))
+        restarted_agent = neutron_l3_agent.L3NATAgentWithStateReport(
+            self.agent.host, self.agent.conf)
+        router1.router['gw_port'] = ""
+        router1.router['gw_port_host'] = ""
+        router1.router['external_gateway_info'] = ""
+        restarted_router = self.manage_router(restarted_agent, router1.router)
+        self.assertTrue(self._namespace_exists(restarted_router.ns_name))
+        ns_ipr = ip_lib.IPRule(namespace=router1.ns_name)
+        ip4_rules_list = ns_ipr.rule.list_rules(l3_constants.IP_VERSION_4)
+        ip6_rules_list = ns_ipr.rule.list_rules(l3_constants.IP_VERSION_6)
+        # Just make sure the basic set of rules are there in the router
+        # namespace
+        self.assertEqual(3, len(ip4_rules_list))
+        self.assertEqual(2, len(ip6_rules_list))
+
+    def test_dvr_unused_snat_ns_deleted_when_agent_restarts_after_move(self):
+        """Test to validate the stale snat namespace delete with snat move.
+
+        This test validates the stale snat namespace cleanup when
+        the agent restarts after the gateway port has been moved
+        from the agent.
+        """
+        self.agent.conf.agent_mode = 'dvr_snat'
+        router_info = self.generate_dvr_router_info()
+        router1 = self.manage_router(self.agent, router_info)
+        self._assert_snat_namespace_exists(router1)
+        restarted_agent = neutron_l3_agent.L3NATAgentWithStateReport(
+            self.agent.host, self.agent.conf)
+        router1.router['gw_port_host'] = "my-new-host"
+        restarted_router = self.manage_router(restarted_agent, router1.router)
+        self._assert_snat_namespace_does_not_exist(restarted_router)
 
     def test_dvr_router_fips_for_multiple_ext_networks(self):
         agent_mode = 'dvr'
@@ -475,6 +548,15 @@ class TestDvrRouter(framework.L3AgentTestFramework):
             self.assertTrue(ip_lib.device_exists(
                 device_name, namespace=router.ns_name))
 
+        # In the router namespace, check the iptables rules are set correctly
+        for fip in floating_ips:
+            floatingip = fip['floating_ip_address']
+            fixedip = fip['fixed_ip_address']
+            expected_rules = router.floating_forward_rules(floatingip,
+                                                           fixedip)
+            self._assert_iptables_rules_exist(
+                router.iptables_manager, 'nat', expected_rules)
+
     def test_dvr_router_rem_fips_on_restarted_agent(self):
         self.agent.conf.agent_mode = 'dvr_snat'
         router_info = self.generate_dvr_router_info()
@@ -505,6 +587,13 @@ class TestDvrRouter(framework.L3AgentTestFramework):
             router_ns, floating_ips[0]['fixed_ip_address'])
         self.assertNotEqual(fip_rule_prio_1, fip_rule_prio_2)
 
+    def _assert_iptables_rules_exist(
+        self, router_iptables_manager, table_name, expected_rules):
+        rules = router_iptables_manager.get_rules_for_table(table_name)
+        for rule in expected_rules:
+            self.assertIn(
+                str(iptables_manager.IptablesRule(rule[0], rule[1])), rules)
+
     def test_dvr_router_floating_ip_moved(self):
         self.agent.conf.agent_mode = 'dvr'
         router_info = self.generate_dvr_router_info()
@@ -520,6 +609,25 @@ class TestDvrRouter(framework.L3AgentTestFramework):
         self.agent._process_updated_router(router.router)
         self.assertFalse(self._fixed_ip_rule_exists(router_ns, fixed_ip))
         self.assertTrue(self._fixed_ip_rule_exists(router_ns, new_fixed_ip))
+
+    def test_prevent_snat_rule_exist_on_restarted_agent(self):
+        self.agent.conf.agent_mode = 'dvr_snat'
+        router_info = self.generate_dvr_router_info()
+        router = self.manage_router(self.agent, router_info)
+        ext_port = router.get_ex_gw_port()
+        rfp_devicename = router.get_external_device_interface_name(ext_port)
+        prevent_snat_rule = router._prevent_snat_for_internal_traffic_rule(
+            rfp_devicename)
+
+        self._assert_iptables_rules_exist(
+            router.iptables_manager, 'nat', [prevent_snat_rule])
+
+        restarted_agent = neutron_l3_agent.L3NATAgentWithStateReport(
+            self.agent.host, self.agent.conf)
+        restarted_router = self.manage_router(restarted_agent, router_info)
+
+        self._assert_iptables_rules_exist(
+            restarted_router.iptables_manager, 'nat', [prevent_snat_rule])
 
     def _get_fixed_ip_rule_priority(self, namespace, fip):
         iprule = ip_lib.IPRule(namespace)
@@ -949,21 +1057,3 @@ class TestDvrRouter(framework.L3AgentTestFramework):
         # external networks. SNAT will be used. Direct route will not work
         # here.
         src_machine.assert_no_ping(machine_diff_scope.ip)
-
-    def test_connection_from_diff_address_scope_with_fip(self):
-        (machine_same_scope, machine_diff_scope,
-            router) = self._setup_address_scope('scope1', 'scope2', 'scope1')
-        fip = '19.4.4.11'
-        self._add_fip(router, fip,
-                      fixed_address=machine_diff_scope.ip,
-                      host=self.agent.conf.host,
-                      fixed_ip_address_scope='scope2')
-        router.process(self.agent)
-
-        # For the internal networks that are in the same address scope as
-        # external network, they should be able to reach the floating ip
-        net_helpers.assert_ping(machine_same_scope.namespace, fip, 5)
-        # For the port with fip, it should be able to reach the internal
-        # networks that are in the same address scope as external network
-        net_helpers.assert_ping(machine_diff_scope.namespace,
-                                machine_same_scope.ip, 5)

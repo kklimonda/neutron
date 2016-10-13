@@ -273,6 +273,9 @@ class RouterInfo(object):
     def add_floating_ip(self, fip, interface_name, device):
         raise NotImplementedError()
 
+    def gateway_redirect_cleanup(self, rtr_interface):
+        pass
+
     def remove_floating_ip(self, device, ip_cidr):
         device.delete_addr_and_conntrack_state(ip_cidr)
 
@@ -689,6 +692,10 @@ class RouterInfo(object):
         elif not ex_gw_port and self.ex_gw_port:
             self.external_gateway_removed(self.ex_gw_port, interface_name)
             pd.remove_gw_interface(self.router['id'])
+        elif not ex_gw_port and not self.ex_gw_port:
+            for p in self.internal_ports:
+                interface_name = self.get_internal_device_name(p['id'])
+                self.gateway_redirect_cleanup(interface_name)
 
         existing_devices = self._get_existing_devices()
         stale_devs = [dev for dev in existing_devices
@@ -706,12 +713,16 @@ class RouterInfo(object):
         gw_port = self._router.get('gw_port')
         self._handle_router_snat_rules(gw_port, interface_name)
 
-    def external_gateway_nat_fip_rules(self, ex_gw_ip, interface_name):
-        dont_snat_traffic_to_internal_ports_if_not_to_floating_ip = (
+    def _prevent_snat_for_internal_traffic_rule(self, interface_name):
+        return (
             'POSTROUTING', '! -i %(interface_name)s '
                            '! -o %(interface_name)s -m conntrack ! '
                            '--ctstate DNAT -j ACCEPT' %
                            {'interface_name': interface_name})
+
+    def external_gateway_nat_fip_rules(self, ex_gw_ip, interface_name):
+        dont_snat_traffic_to_internal_ports_if_not_to_floating_ip = (
+            self._prevent_snat_for_internal_traffic_rule(interface_name))
         # Makes replies come back through the router to reverse DNAT
         ext_in_mark = self.agent_conf.external_ingress_mark
         snat_internal_traffic_to_floating_ip = (
@@ -955,9 +966,13 @@ class RouterInfo(object):
         :param agent: Passes the agent in order to send RPC messages.
         """
         LOG.debug("process router delete")
-        self._process_internal_ports(agent.pd)
-        agent.pd.sync_router(self.router['id'])
-        self._process_external_on_delete(agent)
+        if self.router_namespace.exists():
+            self._process_internal_ports(agent.pd)
+            agent.pd.sync_router(self.router['id'])
+            self._process_external_on_delete(agent)
+        else:
+            LOG.warning(_LW("Can't gracefully delete the router %s: "
+                            "no router namespace found."), self.router['id'])
 
     @common_utils.exception_logger()
     def process(self, agent):

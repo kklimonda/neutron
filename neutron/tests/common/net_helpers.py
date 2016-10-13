@@ -96,7 +96,15 @@ def set_namespace_gateway(port_dev, gateway_ip):
     port_dev.route.add_gateway(gateway_ip)
 
 
-def assert_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
+def assert_ping(src_namespace, dst_ip, timeout=1, count=1):
+    ipversion = netaddr.IPAddress(dst_ip).version
+    ping_command = 'ping' if ipversion == 4 else 'ping6'
+    ns_ip_wrapper = ip_lib.IPWrapper(src_namespace)
+    ns_ip_wrapper.netns.execute([ping_command, '-c', count, '-W', timeout,
+                                 dst_ip])
+
+
+def assert_async_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
     ipversion = netaddr.IPAddress(dst_ip).version
     ping_command = 'ping' if ipversion == 4 else 'ping6'
     ns_ip_wrapper = ip_lib.IPWrapper(src_namespace)
@@ -117,7 +125,7 @@ def assert_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
 @contextlib.contextmanager
 def async_ping(namespace, ips):
     with futures.ThreadPoolExecutor(max_workers=len(ips)) as executor:
-        fs = [executor.submit(assert_ping, namespace, ip, count=10)
+        fs = [executor.submit(assert_async_ping, namespace, ip, count=10)
               for ip in ips]
         yield lambda: all(f.done() for f in fs)
         futures.wait(fs)
@@ -261,7 +269,7 @@ class RootHelperProcess(subprocess.Popen):
                                 sleep=CHILD_PROCESS_SLEEP):
         def child_is_running():
             child_pid = utils.get_root_helper_child_pid(
-                self.pid, run_as_root=True)
+                self.pid, self.cmd, run_as_root=True)
             if utils.pid_invoked_with_cmdline(child_pid, self.cmd):
                 return True
 
@@ -271,7 +279,7 @@ class RootHelperProcess(subprocess.Popen):
             exception=RuntimeError("Process %s hasn't been spawned "
                                    "in %d seconds" % (self.cmd, timeout)))
         self.child_pid = utils.get_root_helper_child_pid(
-            self.pid, run_as_root=True)
+            self.pid, self.cmd, run_as_root=True)
 
     @property
     def is_running(self):

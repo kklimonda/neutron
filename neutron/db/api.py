@@ -22,6 +22,7 @@ from oslo_db import exception as db_exc
 from oslo_db.sqlalchemy import session
 from oslo_utils import excutils
 from oslo_utils import uuidutils
+from sqlalchemy.orm import exc
 
 from neutron.common import exceptions as n_exc
 from neutron.db import common_db_mixin
@@ -30,12 +31,28 @@ from neutron.db import common_db_mixin
 _FACADE = None
 
 MAX_RETRIES = 10
-is_deadlock = lambda e: isinstance(e, db_exc.DBDeadlock)
+
+
+def is_deadlock(exc):
+    return _is_nested_instance(exc, db_exc.DBDeadlock)
+
+
+def is_retriable(e):
+    return _is_nested_instance(e, (db_exc.DBDeadlock, exc.StaleDataError))
+
+
 retry_db_errors = oslo_db_api.wrap_db_retry(
     max_retries=MAX_RETRIES,
     retry_on_request=True,
-    exception_checker=is_deadlock
+    exception_checker=is_retriable
 )
+
+
+def _is_nested_instance(e, etypes):
+    """Check if exception or its inner excepts are an instance of etypes."""
+    return (isinstance(e, etypes) or
+            isinstance(e, n_exc.MultipleExceptions) and
+            any(_is_nested_instance(i, etypes) for i in e.inner_exceptions))
 
 
 @contextlib.contextmanager
@@ -44,7 +61,7 @@ def exc_to_retry(exceptions):
         yield
     except Exception as e:
         with excutils.save_and_reraise_exception() as ctx:
-            if isinstance(e, exceptions):
+            if _is_nested_instance(e, exceptions):
                 ctx.reraise = False
                 raise db_exc.RetryRequest(e)
 

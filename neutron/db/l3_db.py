@@ -35,6 +35,7 @@ from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import rpc as n_rpc
 from neutron.common import utils
+from neutron.db import api as db_api
 from neutron.db import l3_agentschedulers_db as l3_agt
 from neutron.db import model_base
 from neutron.db import models_v2
@@ -601,16 +602,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             raise n_exc.BadRequest(resource='router', msg=msg)
         return port
 
-    def _add_interface_by_port(self, context, router, port_id, owner):
-        # Update owner before actual process in order to avoid the
-        # case where a port might get attached to a router without the
-        # owner successfully updating due to an unavailable backend.
-        self._check_router_port(context, port_id, '')
-        self._core_plugin.update_port(
-            context, port_id, {'port': {'device_id': router.id,
-                                        'device_owner': owner}})
-
-        with context.session.begin(subtransactions=True):
+    def _validate_router_port_info(self, context, router, port_id):
+        with db_api.autonested_transaction(context.session):
             # check again within transaction to mitigate race
             port = self._check_router_port(context, port_id, router.id)
 
@@ -645,6 +638,23 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                         "IPv4 subnets on router port")
                 raise n_exc.BadRequest(resource='router', msg=msg)
             return port, subnets
+
+    def _add_interface_by_port(self, context, router, port_id, owner):
+        # Update owner before actual process in order to avoid the
+        # case where a port might get attached to a router without the
+        # owner successfully updating due to an unavailable backend.
+        port = self._check_router_port(context, port_id, '')
+        prev_owner = port['device_owner']
+        self._core_plugin.update_port(
+            context, port_id, {'port': {'device_id': router.id,
+                                        'device_owner': owner}})
+        try:
+            return self._validate_router_port_info(context, router, port_id)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                self._core_plugin.update_port(
+                    context, port_id, {'port': {'device_id': '',
+                                                'device_owner': prev_owner}})
 
     def _port_has_ipv6_address(self, port):
         for fixed_ip in port['fixed_ips']:
@@ -1119,7 +1129,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             msg = _("Network %s does not contain any IPv4 subnet") % f_net_id
             raise n_exc.BadRequest(resource='floatingip', msg=msg)
 
-        dns_integration = utils.is_extension_supported(self, 'dns-integration')
+        dns_integration = utils.is_extension_supported(self._core_plugin,
+                                                       'dns-integration')
         with context.session.begin(subtransactions=True):
             # This external port is never exposed to the tenant.
             # it is used purely for internal system and admin use when
@@ -1186,7 +1197,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
 
     def _update_floatingip(self, context, id, floatingip):
         fip = floatingip['floatingip']
-        dns_integration = utils.is_extension_supported(self, 'dns-integration')
+        dns_integration = utils.is_extension_supported(self._core_plugin,
+                                                       'dns-integration')
         with context.session.begin(subtransactions=True):
             floatingip_db = self._get_floatingip(context, id)
             old_floatingip = self._make_floatingip_dict(floatingip_db)
@@ -1225,7 +1237,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
     def _delete_floatingip(self, context, id):
         floatingip = self._get_floatingip(context, id)
         floatingip_dict = self._make_floatingip_dict(floatingip)
-        if utils.is_extension_supported(self, 'dns-integration'):
+        if utils.is_extension_supported(self._core_plugin, 'dns-integration'):
             self._process_dns_floatingip_delete(context, floatingip_dict)
         # Foreign key cascade will take care of the removal of the
         # floating IP record once the port is deleted. We can't start
