@@ -1274,6 +1274,7 @@ releasenotes/notes/deprecated-plugins-and-drivers-292865277ee1d182.yaml
 releasenotes/notes/dvr-ovs-agent-6052a8d60fddde22.yaml
 releasenotes/notes/end-to-end-mtu-00345fc4282cb8fb.yaml
 releasenotes/notes/ipv6-prefix-delegation-a2a342e5e34534c7.yaml
+releasenotes/notes/keepalived-state-change-server-threads-9ed775e7533dd1a0.yaml
 releasenotes/notes/lbaas-v2-1628fe34700148f6.yaml
 releasenotes/notes/linuxbridge_vxlan_arp_responder-e9ea91552e1b62a7.yaml
 releasenotes/notes/macvtap_assigned_vf_check-f4d07660ffd82a24.yaml

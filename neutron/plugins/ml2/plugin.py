@@ -966,19 +966,28 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 if a.port:
                     # calling update_port() for each allocation to remove the
                     # IP from the port and call the MechanismDrivers
-                    data = {attributes.PORT:
-                            {'fixed_ips': [{'subnet_id': ip.subnet_id,
-                                            'ip_address': ip.ip_address}
-                                           for ip in a.port.fixed_ips
-                                           if ip.subnet_id != id]}}
+                    fixed_ips = [{'subnet_id': ip.subnet_id,
+                                  'ip_address': ip.ip_address}
+                                 for ip in a.port.fixed_ips
+                                 if ip.subnet_id != id]
+                    # By default auto-addressed ips are not removed from port
+                    # on port update, so mark subnet with 'delete_subnet' flag
+                    # to force ip deallocation on port update.
+                    if is_auto_addr_subnet:
+                        fixed_ips.append({'subnet_id': id,
+                                          'delete_subnet': True})
+                    data = {attributes.PORT: {'fixed_ips': fixed_ips}}
                     try:
-                        self.update_port(context, a.port_id, data)
+                        # NOTE Don't inline port_id; needed for PortNotFound.
+                        port_id = a.port_id
+                        self.update_port(context, port_id, data)
                     except exc.PortNotFound:
-                        LOG.debug("Port %s deleted concurrently", a.port_id)
+                        # NOTE Attempting to access a.port_id here is an error.
+                        LOG.debug("Port %s deleted concurrently", port_id)
                     except Exception:
                         with excutils.save_and_reraise_exception():
                             LOG.exception(_LE("Exception deleting fixed_ip "
-                                              "from port %s"), a.port_id)
+                                              "from port %s"), port_id)
 
         try:
             self.mechanism_manager.delete_subnet_postcommit(mech_context)

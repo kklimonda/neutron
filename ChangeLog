@@ -1,6 +1,24 @@
 CHANGES
 =======
 
+7.2.0
+-----
+
+* New option for num_threads for state change server
+* Install dibbler.filters rootwrap file
+* DVR: SNAT redirect rules should be removed only on Gateway clear
+* DVR: Cleanup the stale snat redirect rules in router namespace
+* Add flush command to iproute in ip_lib
+* Allow auto-addressed ips deletion on port update
+* Suppresses a warning when no agents are configured
+* Set secure fail mode for physical bridges
+* Fix code that's trying to read from a stale DB object
+* L3 agent: check router namespace existence before delete
+* Handle deleted ports when creating a list of fdb entries
+* DVR: Clean stale snat-ns by checking its existence when agent restarts
+* Restore old assert_ping behavior
+* Don't use exponential back-off for report_state
+
 7.1.2
 -----
 
@@ -51,6 +69,7 @@ CHANGES
 * Fix invalid mock name in test_ovs_neutron_agent
 * Fix keepalived functional tests
 * Avoid testing oslo.service library internals
+* Change get_root_helper_child_pid to stop when it finds cmd
 * Fix regexp for ss output
 * fullstack: Use noop firewall
 * Allow to control to use constraint env for functional jobs
