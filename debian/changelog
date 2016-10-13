@@ -1,4 +1,4 @@
-neutron (2:7.2.0-0ubuntu1~cloud0) UNRELEASED; urgency=medium
+neutron (2:7.2.0-0ubuntu1~cloud0) trusty-liberty; urgency=medium
 
   * New upstream stable point release for OpenStack Liberty (LP: #1619452).
 
