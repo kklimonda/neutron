@@ -1,3 +1,10 @@
+neutron (2:9.0.0-0ubuntu1.16.10.1) UNRELEASED; urgency=medium
+
+  * d/neutron-openvswitch-agent.neutron-ovs-cleanup.service.in: Fix
+    service config typo (LP: #1635369).
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 20 Oct 2016 14:31:33 -0400
+
 neutron (2:9.0.0-0ubuntu1) yakkety; urgency=medium
 
   [ Corey Bryant ]

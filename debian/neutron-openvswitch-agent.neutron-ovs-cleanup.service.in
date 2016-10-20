@@ -2,7 +2,7 @@
 Description=OpenStack Neutron OVS cleanup
 
 [Service]
-type=oneshot
+Type=oneshot
 User=neutron
 Group=neutron
 WorkingDirectory=/var/lib/neutron
