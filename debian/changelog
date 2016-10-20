@@ -1,4 +1,4 @@
-neutron (2:8.3.0-0ubuntu1.1) UNRELEASED; urgency=medium
+neutron (2:8.3.0-0ubuntu1.1) xenial; urgency=medium
 
   * Fix service config typo:
     - debian/neutron-openvswitch-agent.neutron-ovs-cleanup.service.in (LP: #1635369).
