@@ -1,3 +1,11 @@
+neutron (2:8.3.0-0ubuntu1.1) UNRELEASED; urgency=medium
+
+  * Fix service config typo:
+    - debian/neutron-openvswitch-agent.neutron-ovs-cleanup.service.in (LP: #1635369).
+    - debian/neutron-linuxbridge-agent.neutron-linuxbridge-cleanup.service.in (LP: #1606652).
+
+ -- Edward Hope-Morley <edward.hope-morley@canonical.com>  Thu, 20 Oct 2016 17:24:10 +0100
+
 neutron (2:8.3.0-0ubuntu1) xenial; urgency=medium
 
   * New upstream stable point release for OpenStack Mitaka (LP: #1633191).
