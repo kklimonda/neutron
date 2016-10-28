@@ -38,7 +38,7 @@ from neutron import context
 from neutron.db import agents_db
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2 as base_plugin
-from neutron.db import l3_db
+from neutron.db.models import l3 as l3_models
 from neutron.db import models_v2
 from neutron.db import provisioning_blocks
 from neutron.db import segments_db
@@ -798,6 +798,22 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
             with self.port():
                 self.assertTrue(cp.called)
 
+    def test_create_update_get_port_same_fixed_ips_order(self):
+        ctx = context.get_admin_context()
+        plugin = manager.NeutronManager.get_plugin()
+        initial_fixed_ips = [{'ip_address': '10.0.0.5'},
+                             {'ip_address': '10.0.0.7'},
+                             {'ip_address': '10.0.0.6'}]
+        with self.port(fixed_ips=initial_fixed_ips) as port:
+            show = plugin.get_port(ctx, port['port']['id'])
+            self.assertEqual(port['port']['fixed_ips'], show['fixed_ips'])
+            new_fixed_ips = list(reversed(initial_fixed_ips))
+            port['port']['fixed_ips'] = new_fixed_ips
+            updated = plugin.update_port(ctx, port['port']['id'], port)
+            self.assertEqual(show['fixed_ips'], updated['fixed_ips'])
+            updated = plugin.get_port(ctx, port['port']['id'])
+            self.assertEqual(show['fixed_ips'], updated['fixed_ips'])
+
     def test_update_port_fixed_ip_changed(self):
         ctx = context.get_admin_context()
         plugin = manager.NeutronManager.get_plugin()
@@ -1404,7 +1420,7 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
 
         # lie to turn the port into an SNAT interface
         with self.context.session.begin():
-            rp = self.context.session.query(l3_db.RouterPort).filter_by(
+            rp = self.context.session.query(l3_models.RouterPort).filter_by(
                 port_id=p['port_id']).first()
             rp.port_type = constants.DEVICE_OWNER_ROUTER_SNAT
 
@@ -1724,7 +1740,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet1',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
-        self.assertTrue(dynamic_segment[driver_api.SEGMENTATION_ID] > 0)
+        self.assertGreater(dynamic_segment[driver_api.SEGMENTATION_ID], 0)
         segment2 = {driver_api.NETWORK_TYPE: 'vlan',
                     driver_api.SEGMENTATION_ID: 1234,
                     driver_api.PHYSICAL_NETWORK: 'physnet3'}
@@ -1754,7 +1770,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.assertEqual('physnet1',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
         dynamic_segmentation_id = dynamic_segment[driver_api.SEGMENTATION_ID]
-        self.assertTrue(dynamic_segmentation_id > 0)
+        self.assertGreater(dynamic_segmentation_id, 0)
         dynamic_segment1 = segments_db.get_dynamic_segment(
             self.context.session, network_id, 'physnet1')
         dynamic_segment1_id = dynamic_segment1[driver_api.SEGMENTATION_ID]
@@ -1785,7 +1801,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.assertEqual('physnet1',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
         dynamic_segmentation_id = dynamic_segment[driver_api.SEGMENTATION_ID]
-        self.assertTrue(dynamic_segmentation_id > 0)
+        self.assertGreater(dynamic_segmentation_id, 0)
         self.driver.type_manager.release_dynamic_segment(
             self.context.session, dynamic_segment[driver_api.ID])
         self.assertIsNone(segments_db.get_dynamic_segment(
@@ -1921,7 +1937,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet2',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
-        self.assertTrue(dynamic_segment[driver_api.SEGMENTATION_ID] > 0)
+        self.assertGreater(dynamic_segment[driver_api.SEGMENTATION_ID], 0)
 
         with mock.patch.object(type_vlan.VlanTypeDriver,
                                'release_segment') as rs:

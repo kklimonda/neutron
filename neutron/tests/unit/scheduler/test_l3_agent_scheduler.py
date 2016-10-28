@@ -28,14 +28,15 @@ import testscenarios
 import testtools
 
 from neutron import context as n_context
-from neutron.db import agents_db
 from neutron.db import db_base_plugin_v2 as db_v2
-from neutron.db import l3_agentschedulers_db
 from neutron.db import l3_db
 from neutron.db import l3_dvr_ha_scheduler_db
 from neutron.db import l3_dvrscheduler_db
 from neutron.db import l3_hamode_db
 from neutron.db import l3_hascheduler_db
+from neutron.db.models import agent as agent_model
+from neutron.db.models import l3agent as rb_model
+from neutron.db.models import l3ha as l3ha_model
 from neutron.extensions import l3
 from neutron.extensions import l3_ext_ha_mode as l3_ha
 from neutron.extensions import l3agentscheduler as l3agent
@@ -189,7 +190,7 @@ class L3SchedulerBaseTestCase(base.BaseTestCase):
                                '_filter_unscheduled_routers') as mock_filter:
             mock_filter.return_value = expected_routers
             unscheduled_routers = self.scheduler._get_routers_to_schedule(
-                mock.ANY, self.plugin, router_ids)
+                self.plugin, mock.ANY, router_ids)
         mock_filter.assert_called_once_with(
             mock.ANY, self.plugin, expected_routers)
         self.assertEqual(expected_routers, unscheduled_routers)
@@ -202,7 +203,7 @@ class L3SchedulerBaseTestCase(base.BaseTestCase):
                                '_get_unscheduled_routers') as mock_get:
             mock_get.return_value = expected_routers
             unscheduled_routers = self.scheduler._get_routers_to_schedule(
-                mock.ANY, self.plugin)
+                self.plugin, mock.ANY)
         mock_get.assert_called_once_with(mock.ANY, self.plugin)
         self.assertEqual(expected_routers, unscheduled_routers)
 
@@ -217,20 +218,20 @@ class L3SchedulerBaseTestCase(base.BaseTestCase):
                                '_get_unscheduled_routers') as mock_get:
             mock_get.return_value = routers
             unscheduled_routers = self.scheduler._get_routers_to_schedule(
-                mock.ANY, self.plugin)
+                self.plugin, mock.ANY)
         mock_get.assert_called_once_with(mock.ANY, self.plugin)
         self.assertEqual(expected_routers, unscheduled_routers)
 
     def _test__get_routers_can_schedule(self, routers, agent, target_routers):
         self.plugin.get_l3_agent_candidates.return_value = agent
         result = self.scheduler._get_routers_can_schedule(
-            mock.ANY, self.plugin, routers, mock.ANY)
+            self.plugin, mock.ANY, routers, mock.ANY)
         self.assertEqual(target_routers, result)
 
     def _test__filter_unscheduled_routers(self, routers, agents, expected):
         self.plugin.get_l3_agents_hosting_routers.return_value = agents
         unscheduled_routers = self.scheduler._filter_unscheduled_routers(
-            mock.ANY, self.plugin, routers)
+            self.plugin, mock.ANY, routers)
         self.assertEqual(expected, unscheduled_routers)
 
     def test__filter_unscheduled_routers_already_scheduled(self):
@@ -259,7 +260,7 @@ class L3SchedulerBaseTestCase(base.BaseTestCase):
 
     def _test__bind_routers_ha(self, has_binding):
         routers = [{'id': 'foo_router', 'ha': True, 'tenant_id': '42'}]
-        agent = agents_db.Agent(id='foo_agent')
+        agent = agent_model.Agent(id='foo_agent')
         with mock.patch.object(self.scheduler,
                                '_router_has_binding',
                                return_value=has_binding) as mock_has_binding,\
@@ -513,7 +514,7 @@ class L3SchedulerTestBaseMixin(object):
 
     def _prepare_schedule_dvr_tests(self):
         scheduler = l3_agent_scheduler.ChanceScheduler()
-        agent = agents_db.Agent()
+        agent = agent_model.Agent()
         agent.admin_state_up = True
         agent.heartbeat_timestamp = timeutils.utcnow()
         plugin = mock.Mock()
@@ -572,13 +573,13 @@ class L3SchedulerTestBaseMixin(object):
     def _test_schedule_bind_router(self, agent, router):
         ctx = self.adminContext
         session = ctx.session
-        db = l3_agentschedulers_db.RouterL3AgentBinding
+        db = rb_model.RouterL3AgentBinding
         scheduler = l3_agent_scheduler.ChanceScheduler()
 
         rid = router['router']['id']
         scheduler.bind_router(ctx, rid, agent)
         results = (session.query(db).filter_by(router_id=rid).all())
-        self.assertTrue(len(results) > 0)
+        self.assertGreater(len(results), 0)
         self.assertIn(agent.id, [bind.l3_agent_id for bind in results])
 
     def test_bind_new_router(self):
@@ -1412,7 +1413,7 @@ class L3DvrSchedulerTestCase(testlib_api.SqlTestCase):
             self.assertEqual(0, len(sub_ids))
 
     def _prepare_schedule_snat_tests(self):
-        agent = agents_db.Agent()
+        agent = agent_model.Agent()
         agent.admin_state_up = True
         agent.heartbeat_timestamp = timeutils.utcnow()
         router = {
@@ -1457,7 +1458,7 @@ class L3HATestCaseMixin(testlib_api.SqlTestCase,
     @staticmethod
     def get_router_l3_agent_binding(context, router_id, l3_agent_id=None,
                                     binding_index=None):
-        model = l3_agentschedulers_db.RouterL3AgentBinding
+        model = rb_model.RouterL3AgentBinding
         query = context.session.query(model)
         query = query.filter(model.router_id == router_id)
         if l3_agent_id:
@@ -1734,7 +1735,7 @@ class L3AgentSchedulerDbMixinTestCase(L3HATestCaseMixin):
         self.plugin.remove_router_from_l3_agent(
             self.adminContext, agent.id, router['id'])
         session = self.adminContext.session
-        db = l3_hamode_db.L3HARouterAgentPortBinding
+        db = l3ha_model.L3HARouterAgentPortBinding
         results = session.query(db).filter_by(
             router_id=router['id'])
         results = [binding.l3_agent_id for binding in results.all()]

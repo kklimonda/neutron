@@ -33,6 +33,7 @@ from oslo_log import log as logging
 from oslo_rootwrap import client
 from oslo_utils import encodeutils
 from oslo_utils import excutils
+from six import iterbytes
 from six.moves import http_client as httplib
 
 from neutron._i18n import _, _LE
@@ -148,6 +149,10 @@ def execute(cmd, process_input=None, addl_env=None,
     return (_stdout, _stderr) if return_stderr else _stdout
 
 
+@debtcollector.removals.remove(
+    version='Ocata', removal_version='Pike',
+    message="Use 'neutron.agent.linux.ip_lib.get_device_mac' instead."
+)
 def get_interface_mac(interface):
     MAC_START = 18
     MAC_END = 24
@@ -155,8 +160,7 @@ def get_interface_mac(interface):
     dev = interface[:constants.DEVICE_NAME_MAX_LEN]
     dev = encodeutils.to_utf8(dev)
     info = fcntl.ioctl(s.fileno(), 0x8927, struct.pack('256s', dev))
-    return ''.join(['%02x:' % ord(char)
-                    for char in info[MAC_START:MAC_END]])[:-1]
+    return ':'.join(["%02x" % b for b in iterbytes(info[MAC_START:MAC_END])])
 
 
 def find_child_pids(pid):
@@ -350,11 +354,12 @@ class UnixDomainHttpProtocol(eventlet.wsgi.HttpProtocol):
 
 
 class UnixDomainWSGIServer(wsgi.Server):
-    def __init__(self, name):
+    def __init__(self, name, num_threads=None):
         self._socket = None
         self._launcher = None
         self._server = None
-        super(UnixDomainWSGIServer, self).__init__(name, disable_ssl=True)
+        super(UnixDomainWSGIServer, self).__init__(name, disable_ssl=True,
+                                                   num_threads=num_threads)
 
     def start(self, application, file_socket, workers, backlog, mode=None):
         self._socket = eventlet.listen(file_socket,

@@ -1,3 +1,6 @@
+# Copyright 2016 Hewlett-Packard Development Company, L.P.
+# All rights reserved.
+#
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -10,17 +13,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_versionedobjects import base as obj_base
-
-from neutron.db.port_security import models
-from neutron.objects.extensions import port_security as base_ps
+from neutron_lib.db import model_base
+import sqlalchemy as sa
 
 
-@obj_base.VersionedObjectRegistry.register
-class NetworkPortSecurity(base_ps._PortSecurity):
-    # Version 1.0: Initial version
-    VERSION = "1.0"
+class DistributedVirtualRouterMacAddress(model_base.BASEV2):
+    """Represents a v2 neutron distributed virtual router mac address."""
 
-    fields_need_translation = {'id': 'network_id'}
+    __tablename__ = 'dvr_host_macs'
 
-    db_model = models.NetworkSecurityBinding
+    host = sa.Column(sa.String(255), primary_key=True, nullable=False)
+    mac_address = sa.Column(sa.String(32), nullable=False, unique=True)

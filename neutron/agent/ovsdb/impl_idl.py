@@ -64,7 +64,7 @@ class Transaction(api.Transaction):
     def commit(self):
         self.ovsdb_connection.queue_txn(self)
         try:
-            result = self.results.get(self.timeout)
+            result = self.results.get(timeout=self.timeout)
         except Queue.Empty:
             raise api.TimeoutException(
                 _("Commands %(commands)s exceeded timeout %(timeout)d "
@@ -81,7 +81,8 @@ class Transaction(api.Transaction):
         pass
 
     def post_commit(self, txn):
-        pass
+        for command in self.commands:
+            command.post_commit(txn)
 
     def do_commit(self):
         self.start_time = time.time()
@@ -144,6 +145,7 @@ class NeutronOVSDBTransaction(Transaction):
         txn.expected_ifaces = set()
 
     def post_commit(self, txn):
+        super(NeutronOVSDBTransaction, self).post_commit(txn)
         # ovs-vsctl only logs these failures and does not return nonzero
         try:
             self.do_post_commit(txn)
@@ -241,6 +243,9 @@ class OvsdbIdl(api.API):
 
     def db_set(self, table, record, *col_values):
         return cmd.DbSetCommand(self, table, record, *col_values)
+
+    def db_add(self, table, record, column, *values):
+        return cmd.DbAddCommand(self, table, record, column, *values)
 
     def db_clear(self, table, record, column):
         return cmd.DbClearCommand(self, table, record, column)

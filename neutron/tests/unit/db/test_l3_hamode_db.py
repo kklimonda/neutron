@@ -22,6 +22,7 @@ import sqlalchemy as sa
 from sqlalchemy import orm
 import testtools
 
+from neutron.agent.common import utils as agent_utils
 from neutron.api.rpc.handlers import l3_rpc
 from neutron.common import constants as n_const
 from neutron import context
@@ -29,6 +30,7 @@ from neutron.db import agents_db
 from neutron.db import common_db_mixin
 from neutron.db import l3_agentschedulers_db
 from neutron.db import l3_hamode_db
+from neutron.db.models import l3ha as l3ha_model
 from neutron.extensions import external_net
 from neutron.extensions import l3
 from neutron.extensions import l3_ext_ha_mode
@@ -166,8 +168,8 @@ class L3HATestCase(L3HATestFramework):
             router = self._create_router()
 
         res = self.admin_ctx.session.query(
-            l3_hamode_db.L3HARouterAgentPortBinding).filter(
-            l3_hamode_db.L3HARouterAgentPortBinding.router_id == router['id']
+            l3ha_model.L3HARouterAgentPortBinding).filter(
+            l3ha_model.L3HARouterAgentPortBinding.router_id == router['id']
         ).all()
         # Check that agents are None
         self.assertEqual([None, None], [r.agent for r in res])
@@ -179,8 +181,8 @@ class L3HATestCase(L3HATestFramework):
         router = self._create_router(ha=False)
         # Check that there no L3 agents scheduled for this router
         res = self.admin_ctx.session.query(
-            l3_hamode_db.L3HARouterAgentPortBinding).filter(
-            l3_hamode_db.L3HARouterAgentPortBinding.router_id == router['id']
+            l3ha_model.L3HARouterAgentPortBinding).filter(
+            l3ha_model.L3HARouterAgentPortBinding.router_id == router['id']
         ).all()
         self.assertEqual([], [r.agent for r in res])
         bindings = self.plugin.get_l3_bindings_hosting_router_with_ha_states(
@@ -199,7 +201,7 @@ class L3HATestCase(L3HATestFramework):
         router = self._create_router()
         self.plugin.update_routers_states(
             self.admin_ctx, {router['id']: 'active'}, self.agent1['host'])
-        with mock.patch.object(agents_db.AgentDbMixin, 'is_agent_down',
+        with mock.patch.object(agent_utils, 'is_agent_down',
                                return_value=True):
             self._assert_ha_state_for_agent_is_standby(router, self.agent1)
 
@@ -393,6 +395,15 @@ class L3HATestCase(L3HATestFramework):
                           router['id'],
                           ha=True,
                           distributed=True)
+
+    def test_migrate_legacy_router_to_ha_not_enough_agents(self):
+        router = self._create_router(ha=False, distributed=False)
+        self.assertFalse(router['ha'])
+        self.assertFalse(router['distributed'])
+
+        helpers.set_agent_admin_state(self.agent2['id'], admin_state_up=False)
+        self.assertRaises(l3_ext_ha_mode.HANotEnoughAvailableAgents,
+                          self._migrate_router, router['id'], ha=True)
 
     def test_unbind_ha_router(self):
         router = self._create_router()
@@ -605,7 +616,7 @@ class L3HATestCase(L3HATestFramework):
         network = self.plugin.get_ha_network(self.admin_ctx,
                                              router['tenant_id'])
 
-        with mock.patch.object(l3_hamode_db, 'L3HARouterAgentPortBinding',
+        with mock.patch.object(l3ha_model, 'L3HARouterAgentPortBinding',
                                side_effect=ValueError):
             self.assertRaises(ValueError, self.plugin.add_ha_port,
                               self.admin_ctx, router['id'], network.network_id,
@@ -619,8 +630,7 @@ class L3HATestCase(L3HATestFramework):
     def test_create_ha_network_binding_failure_rolls_back_network(self):
         networks_before = self.core_plugin.get_networks(self.admin_ctx)
 
-        with mock.patch.object(l3_hamode_db,
-                               'L3HARouterNetwork',
+        with mock.patch.object(l3ha_model, 'L3HARouterNetwork',
                                side_effect=ValueError):
             self.assertRaises(ValueError, self.plugin._create_ha_network,
                               self.admin_ctx, _uuid())
@@ -732,7 +742,7 @@ class L3HATestCase(L3HATestFramework):
             self.admin_ctx, filters=device_filter)
 
         router_db = self.plugin._get_router(self.admin_ctx, router['id'])
-        with mock.patch.object(l3_hamode_db, 'L3HARouterAgentPortBinding',
+        with mock.patch.object(l3ha_model, 'L3HARouterAgentPortBinding',
                                side_effect=ValueError):
             self.assertRaises(ValueError, self.plugin._create_ha_interfaces,
                               self.admin_ctx, router_db, network)
@@ -1006,7 +1016,7 @@ class L3HATestCase(L3HATestFramework):
         states = {router1['id']: 'active'}
         with mock.patch.object(self.plugin, 'get_ha_router_port_bindings'):
             (self.admin_ctx.session.query(
-                 l3_hamode_db.L3HARouterAgentPortBinding).
+                 l3ha_model.L3HARouterAgentPortBinding).
              filter_by(router_id=router1['id']).delete())
             self.plugin.update_routers_states(
                 self.admin_ctx, states, self.agent1['host'])

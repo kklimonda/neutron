@@ -23,6 +23,7 @@ from oslo_versionedobjects import fields as obj_fields
 import six
 
 from neutron._i18n import _
+from neutron.api.v2 import attributes
 from neutron.db import api as db_api
 from neutron.db import model_base
 from neutron.db import standard_attr
@@ -149,6 +150,10 @@ class NeutronObject(obj_base.VersionedObject,
             # is included in self.items()
             if name in self.fields and name not in self.synthetic_fields:
                 value = self.fields[name].to_primitive(self, name, value)
+            if name == 'tenant_id':
+                if ('project_id' in self.fields and
+                        not self.obj_attr_is_set('project_id')):
+                    continue
             dict_[name] = value
         for field_name, value in self._synthetic_fields_items():
             field = self.fields[field_name]
@@ -159,6 +164,7 @@ class NeutronObject(obj_base.VersionedObject,
                     dict_[field_name].to_dict() if value else None)
             else:
                 dict_[field_name] = field.to_primitive(self, field_name, value)
+        attributes.populate_project_info(dict_)
         return dict_
 
     @classmethod
@@ -219,9 +225,9 @@ class NeutronObject(obj_base.VersionedObject,
         raise NotImplementedError()
 
     @classmethod
-    def count(cls, context, **kwargs):
+    def count(cls, context, validate_filters=True, **kwargs):
         '''Count the number of objects matching filtering criteria.'''
-        return len(cls.get_objects(context, **kwargs))
+        return len(cls.get_objects(context, validate_filters, **kwargs))
 
 
 def _detach_db_obj(func):
@@ -250,7 +256,8 @@ class DeclarativeObject(abc.ABCMeta):
             obj_extra_fields_set = set(cls.obj_extra_fields)
             obj_extra_fields_set.add('tenant_id')
             cls.obj_extra_fields = list(obj_extra_fields_set)
-            setattr(cls, 'tenant_id', property(lambda x: x.project_id))
+            setattr(cls, 'tenant_id',
+                    property(lambda x: x.get('project_id', None)))
 
         fields_no_update_set = set(cls.fields_no_update)
         for base in itertools.chain([cls], bases):
@@ -544,7 +551,7 @@ class NeutronDbObject(NeutronObject):
             else:
                 synth_objs = objclass.get_objects(
                     self.obj_context, **{
-                        k: getattr(self, v)
+                        k: getattr(self, v) if v in self else db_obj.get(v)
                         for k, v in foreign_keys.items()})
             if isinstance(self.fields[field], obj_fields.ObjectField):
                 setattr(self, field, synth_objs[0] if synth_objs else None)
@@ -607,15 +614,18 @@ class NeutronDbObject(NeutronObject):
         self._captured_db_model = None
 
     @classmethod
-    def count(cls, context, **kwargs):
+    def count(cls, context, validate_filters=True, **kwargs):
         """
         Count the number of objects matching filtering criteria.
 
         :param context:
+        :param validate_filters: Raises an error in case of passing an unknown
+                                 filter
         :param kwargs: multiple keys defined by key=value pairs
         :return: number of matching objects
         """
-        cls.validate_filters(**kwargs)
+        if validate_filters:
+            cls.validate_filters(**kwargs)
         return obj_db_api.count(
             context, cls.db_model, **cls.modify_fields_to_db(kwargs)
         )

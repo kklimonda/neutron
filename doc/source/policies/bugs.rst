@@ -399,9 +399,11 @@ more will be added over time if needed.
 +-------------------------------+-----------------------------------------+----------------------+
 | ops_                          | Reported by or affecting operators      | Drivers Team         |
 +-------------------------------+-----------------------------------------+----------------------+
-| oslo_                         | An interop/cross-project issue          | Ihar Hrachyshka      |
+| oslo_                         | An interop/cross-project issue          | Henry Gessau         |
 +-------------------------------+-----------------------------------------+----------------------+
 | ovs_                          | A bug affecting ML2/OVS                 | Kevin Benton         |
++-------------------------------+-----------------------------------------+----------------------+
+| ovs-fw_                       | A bug affecting OVS firewall            | Jakub Libosvar       |
 +-------------------------------+-----------------------------------------+----------------------+
 | ovs-lib_                      | A bug affecting OVS Lib                 | Terry Wilson         |
 +-------------------------------+-----------------------------------------+----------------------+
@@ -409,7 +411,7 @@ more will be added over time if needed.
 +-------------------------------+-----------------------------------------+----------------------+
 | qos_                          | A bug affecting ML2/QoS                 | Miguel Ajo           |
 +-------------------------------+-----------------------------------------+----------------------+
-| release_                      | A request from a subproject             | Ihar Hrachyshka      |
+| release_                      | A request from a subproject             | Darek Smigiel        |
 +-------------------------------+-----------------------------------------+----------------------+
 | rfe_                          | Feature enhancements being screened     | Drivers Team         |
 +-------------------------------+-----------------------------------------+----------------------+
@@ -677,6 +679,14 @@ OVS
 
 * `OVS - All bugs <https://bugs.launchpad.net/neutron/+bugs?field.tag=ovs>`_
 * `OVS - In progress <https://bugs.launchpad.net/neutron/+bugs?field.status%3Alist=INPROGRESS&field.tag=ovs>`_
+
+.. _ovs-fw:
+
+OVS Firewall
+++++++++++++
+
+* `OVS Firewall - All bugs <https://bugs.launchpad.net/neutron/+bugs?field.tag=ovs-fw>`_
+* `OVS Firewall - In progress <https://bugs.launchpad.net/neutron/+bugs?field.status%3Alist=INPROGRESS&field.tag=ovs-fw>`_
 
 .. _ovs-lib:
 

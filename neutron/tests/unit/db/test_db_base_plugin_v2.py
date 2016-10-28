@@ -23,6 +23,7 @@ import mock
 import netaddr
 from neutron_lib import constants
 from neutron_lib import exceptions as lib_exc
+from neutron_lib.utils import helpers
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_utils import importutils
@@ -50,7 +51,7 @@ from neutron import context
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_common
 from neutron.db import ipam_backend_mixin
-from neutron.db import l3_db
+from neutron.db.models import l3 as l3_models
 from neutron.db.models import securitygroup as sg_models
 from neutron.db import models_v2
 from neutron.db import standard_attr
@@ -781,8 +782,8 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
             self.assertIn(k, resource[res_name])
             if isinstance(keys[k], list):
                 self.assertEqual(
-                     sorted(resource[res_name][k], key=utils.safe_sort_key),
-                     sorted(keys[k], key=utils.safe_sort_key))
+                     sorted(resource[res_name][k], key=helpers.safe_sort_key),
+                     sorted(keys[k], key=helpers.safe_sort_key))
             else:
                 self.assertEqual(resource[res_name][k], keys[k])
 
@@ -4363,8 +4364,9 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                                           res['subnet']['id'])
             res = self.deserialize(self.fmt, req.get_response(self.api))
             self.assertEqual(
-                sorted(res['subnet']['host_routes'], key=utils.safe_sort_key),
-                sorted(host_routes, key=utils.safe_sort_key))
+                sorted(res['subnet']['host_routes'],
+                       key=helpers.safe_sort_key),
+                sorted(host_routes, key=helpers.safe_sort_key))
             self.assertEqual(dns_nameservers, res['subnet']['dns_nameservers'])
 
     def _test_subnet_update_ipv4_and_ipv6_pd_subnets(self, ra_addr_mode):
@@ -4474,11 +4476,11 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                     # to make this port belong to a router
                     ctx = context.get_admin_context()
                     with ctx.session.begin():
-                        router = l3_db.Router()
+                        router = l3_models.Router()
                         ctx.session.add(router)
                     with ctx.session.begin():
-                        rp = l3_db.RouterPort(router_id=router.id,
-                                              port_id=port['port']['id'])
+                        rp = l3_models.RouterPort(router_id=router.id,
+                                                  port_id=port['port']['id'])
                         ctx.session.add(rp)
                     data = {'subnet': {'gateway_ip': '10.0.0.99'}}
                     req = self.new_update_request('subnets', data,
@@ -6063,15 +6065,15 @@ class DbModelMixin(object):
 
     def _make_floating_ip(self, ctx, port_id):
         with ctx.session.begin():
-            flip = l3_db.FloatingIP(floating_ip_address='1.2.3.4',
-                                    floating_network_id='somenet',
-                                    floating_port_id=port_id)
+            flip = l3_models.FloatingIP(floating_ip_address='1.2.3.4',
+                                        floating_network_id='somenet',
+                                        floating_port_id=port_id)
             ctx.session.add(flip)
         return flip
 
     def _make_router(self, ctx):
         with ctx.session.begin():
-            router = l3_db.Router()
+            router = l3_models.Router()
             ctx.session.add(router)
         return router
 
@@ -6121,7 +6123,7 @@ class DbModelMixin(object):
         ctx = context.get_admin_context()
         router = self._make_router(ctx)
         self._test_staledata_error_on_concurrent_object_update(
-            l3_db.Router, router['id'])
+            l3_models.Router, router['id'])
 
     def test_staledata_error_on_concurrent_object_update_floatingip(self):
         ctx = context.get_admin_context()
@@ -6129,7 +6131,7 @@ class DbModelMixin(object):
         port = self._make_port(ctx, network.id)
         flip = self._make_floating_ip(ctx, port.id)
         self._test_staledata_error_on_concurrent_object_update(
-            l3_db.FloatingIP, flip['id'])
+            l3_models.FloatingIP, flip['id'])
 
     def test_staledata_error_on_concurrent_object_update_sg(self):
         ctx = context.get_admin_context()

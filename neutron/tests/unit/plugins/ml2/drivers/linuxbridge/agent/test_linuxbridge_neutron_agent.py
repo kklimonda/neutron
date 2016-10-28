@@ -638,7 +638,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                                   "get_interface_details") as if_det_fn,\
                 mock.patch.object(self.lbm,
                                   "update_interface_ip_details") as updif_fn,\
-                mock.patch.object(self.lbm, "delete_interface") as del_interface,\
+                mock.patch.object(self.lbm,
+                                  "delete_interface") as del_interface,\
                 mock.patch.object(bridge_lib, "BridgeDevice",
                                   return_value=bridge_device):
             de_fn.return_value = True
@@ -657,7 +658,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                                   "get_interface_details") as if_det_fn,\
                 mock.patch.object(self.lbm,
                                   "update_interface_ip_details") as updif_fn,\
-                mock.patch.object(self.lbm, "delete_interface") as del_interface,\
+                mock.patch.object(self.lbm,
+                                  "delete_interface") as del_interface,\
                 mock.patch.object(bridge_lib, "BridgeDevice",
                                   return_value=bridge_device):
             de_fn.return_value = True
@@ -693,7 +695,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
         bridge_device = mock.Mock()
         with mock.patch.object(ip_lib, "device_exists") as de_fn,\
                 mock.patch.object(self.lbm, "remove_interface"),\
-                mock.patch.object(self.lbm, "get_interface_details") as if_det_fn,\
+                mock.patch.object(self.lbm,
+                                  "get_interface_details") as if_det_fn,\
                 mock.patch.object(self.lbm, "delete_interface") as del_int,\
                 mock.patch.object(bridge_lib, "BridgeDevice",
                                   return_value=bridge_device):
@@ -738,7 +741,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
 
     def test_delete_interface(self):
         with mock.patch.object(ip_lib.IPDevice, "exists") as de_fn,\
-                mock.patch.object(ip_lib.IpLinkCommand, "set_down") as down_fn,\
+                mock.patch.object(ip_lib.IpLinkCommand,
+                                  "set_down") as down_fn,\
                 mock.patch.object(ip_lib.IpLinkCommand, "delete") as delete_fn:
             de_fn.return_value = False
             self.lbm.delete_interface("eth1.1")
@@ -856,8 +860,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
 
     def test_get_agent_id_bridge_mappings(self):
         lbm = get_linuxbridge_manager(BRIDGE_MAPPINGS, INTERFACE_MAPPINGS)
-        with mock.patch.object(utils,
-                               "get_interface_mac",
+        with mock.patch.object(ip_lib,
+                               "get_device_mac",
                                return_value='16:63:69:10:a0:59') as mock_gim:
 
             agent_id = lbm.get_agent_id()
@@ -877,8 +881,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                               'get_devices',
                               return_value=devices_mock), \
                 mock.patch.object(
-                    utils,
-                    "get_interface_mac",
+                    ip_lib,
+                    "get_device_mac",
                     return_value='16:63:69:10:a0:59') as mock_gim:
 
             agent_id = lbm.get_agent_id()

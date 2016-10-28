@@ -19,21 +19,21 @@ from oslo_config import cfg
 
 import neutron.agent.agent_extensions_manager
 import neutron.agent.common.config
-import neutron.agent.l3.config
-import neutron.agent.l3.ha
 import neutron.agent.linux.interface
 import neutron.agent.linux.pd
 import neutron.agent.linux.ra
 import neutron.agent.metadata.config
 import neutron.agent.ovsdb.api
 import neutron.agent.securitygroups_rpc
-import neutron.common.cache_utils
 import neutron.conf.agent.dhcp
 import neutron.conf.agent.l3.config
+import neutron.conf.agent.l3.ha
 import neutron.conf.agent.ovs_conf
+import neutron.conf.cache_utils
 import neutron.conf.common
 import neutron.conf.extensions.allowedaddresspairs
 import neutron.conf.plugins.ml2.drivers.agent
+import neutron.conf.plugins.ml2.drivers.driver_type
 import neutron.conf.plugins.ml2.drivers.linuxbridge
 import neutron.conf.quota
 import neutron.conf.service
@@ -56,11 +56,6 @@ import neutron.plugins.ml2.drivers.macvtap.agent.config
 import neutron.plugins.ml2.drivers.mech_sriov.agent.common.config
 import neutron.plugins.ml2.drivers.mech_sriov.mech_driver.mech_driver
 import neutron.plugins.ml2.drivers.openvswitch.agent.common.config
-import neutron.plugins.ml2.drivers.type_flat
-import neutron.plugins.ml2.drivers.type_geneve
-import neutron.plugins.ml2.drivers.type_gre
-import neutron.plugins.ml2.drivers.type_vlan
-import neutron.plugins.ml2.drivers.type_vxlan
 import neutron.wsgi
 
 
@@ -202,7 +197,7 @@ def list_l3_agent_opts():
          itertools.chain(
              neutron.conf.agent.l3.config.OPTS,
              neutron.conf.service.service_opts,
-             neutron.agent.l3.ha.OPTS,
+             neutron.conf.agent.l3.ha.OPTS,
              neutron.agent.linux.pd.OPTS,
              neutron.agent.linux.ra.OPTS)
          )
@@ -227,7 +222,7 @@ def list_metadata_agent_opts():
              neutron.agent.metadata.config.SHARED_OPTS,
              neutron.agent.metadata.config.METADATA_PROXY_HANDLER_OPTS,
              neutron.agent.metadata.config.UNIX_DOMAIN_METADATA_PROXY_OPTS,
-             neutron.common.cache_utils.cache_opts)
+             neutron.conf.cache_utils.cache_opts)
          ),
         ('AGENT', neutron.agent.common.config.AGENT_STATE_OPTS)
     ]
@@ -248,15 +243,15 @@ def list_ml2_conf_opts():
         ('ml2',
          neutron.plugins.ml2.config.ml2_opts),
         ('ml2_type_flat',
-         neutron.plugins.ml2.drivers.type_flat.flat_opts),
+         neutron.conf.plugins.ml2.drivers.driver_type.flat_opts),
         ('ml2_type_vlan',
-         neutron.plugins.ml2.drivers.type_vlan.vlan_opts),
+         neutron.conf.plugins.ml2.drivers.driver_type.vlan_opts),
         ('ml2_type_gre',
-         neutron.plugins.ml2.drivers.type_gre.gre_opts),
+         neutron.conf.plugins.ml2.drivers.driver_type.gre_opts),
         ('ml2_type_vxlan',
-         neutron.plugins.ml2.drivers.type_vxlan.vxlan_opts),
+         neutron.conf.plugins.ml2.drivers.driver_type.vxlan_opts),
         ('ml2_type_geneve',
-         neutron.plugins.ml2.drivers.type_geneve.geneve_opts),
+         neutron.conf.plugins.ml2.drivers.driver_type.geneve_opts),
         ('securitygroup',
          neutron.conf.agent.securitygroups_rpc.security_group_opts)
     ]

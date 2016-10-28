@@ -33,16 +33,15 @@ from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
 from neutron.db import db_base_plugin_common
+from neutron.db.models import segment as segment_model
 from neutron.db.models import subnet_service_type as sst_model
 from neutron.db import models_v2
-from neutron.db import segments_db
 from neutron.extensions import ip_allocation as ipa
 from neutron.extensions import portbindings
 from neutron.extensions import segment
 from neutron.ipam import exceptions as ipam_exceptions
 from neutron.ipam import utils as ipam_utils
 from neutron.objects import subnet as subnet_obj
-from neutron.services.segments import db as segment_svc_db
 from neutron.services.segments import exceptions as segment_exc
 
 LOG = logging.getLogger(__name__)
@@ -114,7 +113,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
     def _update_subnet_host_routes(self, context, id, s):
 
         def _combine(ht):
-            return ht['destination'] + "_" + ht['nexthop']
+            return "{}_{}".format(ht['destination'], ht['nexthop'])
 
         old_route_list = self._get_route_by_subnet(context, id)
 
@@ -127,13 +126,14 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         for route_str in old_route_set - new_route_set:
             for route in old_route_list:
                 if _combine(route) == route_str:
-                    context.session.delete(route)
+                    route.delete()
         for route_str in new_route_set - old_route_set:
-            route = models_v2.SubnetRoute(
-                destination=route_str.partition("_")[0],
-                nexthop=route_str.partition("_")[2],
+            route = subnet_obj.Route(context,
+                destination=common_utils.AuthenticIPNetwork(
+                    route_str.partition("_")[0]),
+                nexthop=netaddr.IPAddress(route_str.partition("_")[2]),
                 subnet_id=id)
-            context.session.add(route)
+            route.create()
 
         # Gather host routes for result
         new_routes = []
@@ -335,14 +335,15 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                 network_id=network_id)
 
         if segment_id:
-            query = context.session.query(segments_db.NetworkSegment)
-            query = query.filter(segments_db.NetworkSegment.id == segment_id)
-            segment_model = query.one()
-            if segment_model.network_id != network_id:
+            query = context.session.query(segment_model.NetworkSegment)
+            query = query.filter(
+                segment_model.NetworkSegment.id == segment_id)
+            segment = query.one()
+            if segment.network_id != network_id:
                 raise segment_exc.NetworkIdsDontMatch(
                     subnet_network=network_id,
                     segment_id=segment_id)
-            if segment_model.is_dynamic:
+            if segment.is_dynamic:
                 raise segment_exc.SubnetCantAssociateToDynamicSegment()
 
     def _get_subnet_for_fixed_ip(self, context, fixed, subnets):
@@ -540,11 +541,13 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
 
         if validators.is_attr_set(host_routes):
             for rt in host_routes:
-                route = models_v2.SubnetRoute(
+                route = subnet_obj.Route(
+                    context,
                     subnet_id=subnet.id,
-                    destination=rt['destination'],
-                    nexthop=rt['nexthop'])
-                context.session.add(route)
+                    destination=common_utils.AuthenticIPNetwork(
+                        rt['destination']),
+                    nexthop=netaddr.IPAddress(rt['nexthop']))
+                route.create()
 
         if validators.is_attr_set(service_types):
             for service_type in service_types:
@@ -612,7 +615,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         *cannot* reach are excluded.
         """
         Subnet = models_v2.Subnet
-        SegmentHostMapping = segment_svc_db.SegmentHostMapping
+        SegmentHostMapping = segment_model.SegmentHostMapping
 
         # A host has been provided.  Consider these two scenarios
         # 1. Not a routed network:  subnets are not on segments

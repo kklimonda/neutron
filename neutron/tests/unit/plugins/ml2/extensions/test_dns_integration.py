@@ -21,7 +21,7 @@ from neutron_lib import constants
 import testtools
 
 from neutron import context
-from neutron.db import dns_db
+from neutron.db.models import dns as dns_models
 from neutron.extensions import dns
 from neutron.extensions import providernet as pnet
 from neutron import manager
@@ -96,7 +96,7 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         port = self.deserialize(self.fmt, res)['port']
         ctx = context.get_admin_context()
         dns_data_db = ctx.session.query(
-            dns_db.PortDNS).filter_by(
+            dns_models.PortDNS).filter_by(
             port_id=port['id']).one_or_none()
         return network['network'], port, dns_data_db
 
@@ -138,7 +138,7 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         port = self.deserialize(self.fmt, res)['port']
         ctx = context.get_admin_context()
         dns_data_db = ctx.session.query(
-            dns_db.PortDNS).filter_by(
+            dns_models.PortDNS).filter_by(
             port_id=port['id']).one_or_none()
         return port, dns_data_db
 
@@ -183,13 +183,13 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
                                            V6UUID))
             mock_client.recordsets.create.assert_has_calls(expected,
                                                            any_order=True)
-            self.assertTrue(
-                len(mock_client.recordsets.create.call_args_list) ==
+            self.assertEqual(
+                len(mock_client.recordsets.create.call_args_list),
                 len(expected))
             mock_client.recordsets.delete.assert_has_calls(expected_delete,
                                                            any_order=True)
-            self.assertTrue(
-                len(mock_client.recordsets.delete.call_args_list) ==
+            self.assertEqual(
+                len(mock_client.recordsets.delete.call_args_list),
                 len(expected_delete))
             expected = []
             expected_delete = []
@@ -217,18 +217,18 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
                                                          in_addr_name))
             mock_admin_client.recordsets.create.assert_has_calls(
                 expected, any_order=True)
-            self.assertTrue(
-                len(mock_admin_client.recordsets.create.call_args_list) ==
+            self.assertEqual(
+                len(mock_admin_client.recordsets.create.call_args_list),
                 len(expected))
             mock_admin_client.recordsets.delete.assert_has_calls(
                 expected_delete, any_order=True)
-            self.assertTrue(
-                len(mock_admin_client.recordsets.delete.call_args_list) ==
+            self.assertEqual(
+                len(mock_admin_client.recordsets.delete.call_args_list),
                 len(expected_delete))
         else:
             if not dns_name:
                 self.assertEqual('', port[dns.DNSNAME])
-                self.assertTrue(dns_data_db is None)
+                self.assertIsNone(dns_data_db)
             self.assertFalse(mock_client.recordsets.create.call_args_list)
             self.assertFalse(
                 mock_admin_client.recordsets.create.call_args_list)

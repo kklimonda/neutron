@@ -12,11 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from tempest.lib.common.utils import data_utils
 from tempest.lib.common.utils import test_utils
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 
 from neutron.tests.tempest.api import base
+from neutron.tests.tempest import config
 
 
 def trunks_cleanup(client, trunks):
@@ -97,6 +99,17 @@ class TrunkTestJSON(TrunkTestJSONBase):
         self.assertEqual(parent_port_id, res['trunk']['port_id'])
         self.client.delete_trunk(trunk_id)
         self.assertRaises(lib_exc.NotFound, self._show_trunk, trunk_id)
+
+    @test.idempotent_id('8d83a6ca-662d-45b8-8062-d513077296aa')
+    @test.requires_ext(extension="project-id", service="network")
+    def test_show_trunk_has_project_id(self):
+        trunk = self._create_trunk_with_network_and_parent(None)
+        body = self._show_trunk(trunk['trunk']['id'])
+        show_trunk = body['trunk']
+        self.assertIn('project_id', show_trunk)
+        self.assertIn('tenant_id', show_trunk)
+        self.assertEqual(self.client.tenant_id, show_trunk['project_id'])
+        self.assertEqual(self.client.tenant_id, show_trunk['tenant_id'])
 
     @test.idempotent_id('4ce46c22-a2b6-4659-bc5a-0ef2463cab32')
     def test_create_update_trunk(self):
@@ -204,6 +217,85 @@ class TrunkTestJSON(TrunkTestJSONBase):
         trunk = self.client.get_subports(trunk['trunk']['id'])
         observed_subports = trunk['sub_ports']
         self.assertEqual(1, len(observed_subports))
+
+
+class TrunkTestMtusJSONBase(TrunkTestJSONBase):
+
+    required_extensions = ['provider', 'trunk']
+
+    @classmethod
+    def skip_checks(cls):
+        super(TrunkTestMtusJSONBase, cls).skip_checks()
+        for ext in cls.required_extensions:
+            if not test.is_extension_enabled(ext, 'network'):
+                msg = "%s extension not enabled." % ext
+                raise cls.skipException(msg)
+
+        if any(t
+               not in config.CONF.neutron_plugin_options.available_type_drivers
+               for t in ['gre', 'vxlan']):
+            msg = "Either vxlan or gre type driver not enabled."
+            raise cls.skipException(msg)
+
+    def setUp(self):
+        super(TrunkTestMtusJSONBase, self).setUp()
+
+        # VXLAN autocomputed MTU (1450) is smaller than that of GRE (1458)
+        vxlan_kwargs = {'network_name': data_utils.rand_name('vxlan-net-'),
+                        'provider:network_type': 'vxlan'}
+        self.smaller_mtu_net = self.create_shared_network(**vxlan_kwargs)
+
+        gre_kwargs = {'network_name': data_utils.rand_name('gre-net-'),
+                      'provider:network_type': 'gre'}
+        self.larger_mtu_net = self.create_shared_network(**gre_kwargs)
+
+        self.smaller_mtu_port = self.create_port(self.smaller_mtu_net)
+        self.smaller_mtu_port_2 = self.create_port(self.smaller_mtu_net)
+        self.larger_mtu_port = self.create_port(self.larger_mtu_net)
+
+
+class TrunkTestMtusJSON(TrunkTestMtusJSONBase):
+
+    @test.idempotent_id('0f05d98e-41f5-4629-ac29-9aee269c9602')
+    def test_create_trunk_with_mtu_greater_than_subport(self):
+        subports = [{'port_id': self.smaller_mtu_port['id'],
+                     'segmentation_type': 'vlan',
+                     'segmentation_id': 2}]
+
+        trunk = self.client.create_trunk(self.larger_mtu_port['id'], subports)
+        self.trunks.append(trunk['trunk'])
+
+    @test.idempotent_id('2004c5c6-e557-4c43-8100-c820ad4953e8')
+    def test_add_subport_with_mtu_smaller_than_trunk(self):
+        subports = [{'port_id': self.smaller_mtu_port['id'],
+                     'segmentation_type': 'vlan',
+                     'segmentation_id': 2}]
+
+        trunk = self.client.create_trunk(self.larger_mtu_port['id'], None)
+        self.trunks.append(trunk['trunk'])
+
+        self.client.add_subports(trunk['trunk']['id'], subports)
+
+    @test.idempotent_id('22725101-f4bc-4e00-84ec-4e02cd7e0500')
+    def test_create_trunk_with_mtu_equal_to_subport(self):
+        subports = [{'port_id': self.smaller_mtu_port['id'],
+                     'segmentation_type': 'vlan',
+                     'segmentation_id': 2}]
+
+        trunk = self.client.create_trunk(self.smaller_mtu_port_2['id'],
+                                         subports)
+        self.trunks.append(trunk['trunk'])
+
+    @test.idempotent_id('175b05ae-66ad-44c7-857a-a12d16f1058f')
+    def test_add_subport_with_mtu_equal_to_trunk(self):
+        subports = [{'port_id': self.smaller_mtu_port['id'],
+                     'segmentation_type': 'vlan',
+                     'segmentation_id': 2}]
+
+        trunk = self.client.create_trunk(self.smaller_mtu_port_2['id'], None)
+        self.trunks.append(trunk['trunk'])
+
+        self.client.add_subports(trunk['trunk']['id'], subports)
 
 
 class TrunksSearchCriteriaTest(base.BaseSearchCriteriaTest):

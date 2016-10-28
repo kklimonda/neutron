@@ -19,10 +19,11 @@ from sqlalchemy import sql
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.db import agents_db
 from neutron.db import l3_agentschedulers_db as l3_sch_db
-from neutron.db import l3_attrs_db
-from neutron.db import l3_db
+from neutron.db.models import agent as agent_model
+from neutron.db.models import l3 as l3_models
+from neutron.db.models import l3_attrs
+from neutron.db.models import l3agent as rb_model
 from neutron.extensions import portbindings
 from neutron import manager
 from neutron.plugins.common import constants as service_constants
@@ -39,18 +40,18 @@ class L3_HA_scheduler_db_mixin(l3_sch_db.AZL3AgentSchedulerDbMixin):
         # the group by statement when using an aggregate function.
         # One solution is to generate a subquery and join it with the desired
         # columns.
-        binding_model = l3_sch_db.RouterL3AgentBinding
+        binding_model = rb_model.RouterL3AgentBinding
         sub_query = (context.session.query(
             binding_model.router_id,
             func.count(binding_model.router_id).label('count')).
-            join(l3_attrs_db.RouterExtraAttributes,
+            join(l3_attrs.RouterExtraAttributes,
                  binding_model.router_id ==
-                 l3_attrs_db.RouterExtraAttributes.router_id).
-            join(l3_db.Router).
-            filter(l3_attrs_db.RouterExtraAttributes.ha == sql.true()).
+                 l3_attrs.RouterExtraAttributes.router_id).
+            join(l3_models.Router).
+            filter(l3_attrs.RouterExtraAttributes.ha == sql.true()).
             group_by(binding_model.router_id).subquery())
 
-        query = (context.session.query(l3_db.Router, sub_query.c.count).
+        query = (context.session.query(l3_models.Router, sub_query.c.count).
                  join(sub_query))
 
         return [(self._make_router_dict(router), agent_count)
@@ -59,11 +60,12 @@ class L3_HA_scheduler_db_mixin(l3_sch_db.AZL3AgentSchedulerDbMixin):
     def get_l3_agents_ordered_by_num_routers(self, context, agent_ids):
         if not agent_ids:
             return []
-        query = (context.session.query(agents_db.Agent, func.count(
-            l3_sch_db.RouterL3AgentBinding.router_id).label('count')).
-            outerjoin(l3_sch_db.RouterL3AgentBinding).
-            group_by(agents_db.Agent.id).
-            filter(agents_db.Agent.id.in_(agent_ids)).
+        query = (context.session.query(agent_model.Agent, func.count(
+            rb_model.RouterL3AgentBinding.router_id)
+            .label('count')).
+            outerjoin(rb_model.RouterL3AgentBinding).
+            group_by(agent_model.Agent.id).
+            filter(agent_model.Agent.id.in_(agent_ids)).
             order_by('count'))
 
         return [record[0] for record in query]

@@ -28,11 +28,13 @@ from sqlalchemy import orm
 from sqlalchemy.orm import exc
 
 from neutron._i18n import _, _LE, _LI, _LW
+from neutron.agent.common import utils as agent_utils
 from neutron.common import constants as n_const
 from neutron.common import utils
 from neutron import context as ncontext
 from neutron.db import agents_db
 from neutron.db.availability_zone import network as network_az
+from neutron.db.models import agent as agent_model
 from neutron.db.network_dhcp_agent_binding import models as ndab_model
 from neutron.extensions import agent as ext_agent
 from neutron.extensions import dhcpagentscheduler
@@ -124,7 +126,7 @@ class AgentSchedulerDbMixin(agents_db.AgentDbMixin):
             #                   filter is set, only agents which are 'up'
             #                   (i.e. have a recent heartbeat timestamp)
             #                   are eligible, even if active is False
-            return not agents_db.AgentDbMixin.is_agent_down(
+            return not agent_utils.is_agent_down(
                 agent['heartbeat_timestamp'])
 
     def update_agent(self, context, id, agent):
@@ -381,9 +383,9 @@ class DhcpAgentSchedulerDbMixin(dhcpagentscheduler
         try:
             down_bindings = (
                 context.session.query(ndab_model.NetworkDhcpAgentBinding).
-                join(agents_db.Agent).
-                filter(agents_db.Agent.heartbeat_timestamp < cutoff,
-                       agents_db.Agent.admin_state_up))
+                join(agent_model.Agent).
+                filter(agent_model.Agent.heartbeat_timestamp < cutoff,
+                       agent_model.Agent.admin_state_up))
             dhcp_notifier = self.agent_notifiers.get(constants.AGENT_TYPE_DHCP)
             dead_bindings = [b for b in
                              self._filter_bindings(context, down_bindings)]
@@ -452,9 +454,9 @@ class DhcpAgentSchedulerDbMixin(dhcpagentscheduler
             query = query.filter(
                 ndab_model.NetworkDhcpAgentBinding.network_id.in_(network_ids))
         if hosts:
-            query = query.filter(agents_db.Agent.host.in_(hosts))
+            query = query.filter(agent_model.Agent.host.in_(hosts))
         if admin_state_up is not None:
-            query = query.filter(agents_db.Agent.admin_state_up ==
+            query = query.filter(agent_model.Agent.admin_state_up ==
                                  admin_state_up)
 
         return [binding.dhcp_agent

@@ -48,10 +48,10 @@ class NeutronModule(object):
         }
 
     def _import_or_none(self):
-            try:
-                return importlib.import_module(self.module_name)
-            except ImportError:
-                return None
+        try:
+            return importlib.import_module(self.module_name)
+        except ImportError:
+            return None
 
     def installed(self):
         LOG.debug("NeutronModule installed = %s", self.module_name)
@@ -114,17 +114,19 @@ class NeutronModule(object):
         # necessary, if modules are loaded on the fly (DevStack may
         # be an example)
         if not providers:
-            versionutils.report_deprecated_feature(
-                LOG,
-                _LW('Implicit loading of service providers from '
-                    'neutron_*.conf files is deprecated and will be removed '
-                    'in Ocata release.'))
             providers = self.ini().service_providers.service_provider
+
+            if providers:
+                versionutils.report_deprecated_feature(
+                    LOG,
+                    _LW('Implicit loading of service providers from '
+                        'neutron_*.conf files is deprecated and will be '
+                        'removed in Ocata release.'))
 
         return providers
 
 
-#global scope function that should be used in service APIs
+# global scope function that should be used in service APIs
 def normalize_provider_name(name):
     return name.lower()
 

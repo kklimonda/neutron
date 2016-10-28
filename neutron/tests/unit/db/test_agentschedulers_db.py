@@ -32,7 +32,8 @@ from neutron.common import constants as n_const
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import agentschedulers_db
-from neutron.db import l3_agentschedulers_db
+from neutron.db.models import agent as agent_model
+from neutron.db.models import l3agent as rb_model
 from neutron.extensions import agent
 from neutron.extensions import dhcpagentscheduler
 from neutron.extensions import l3agentscheduler
@@ -667,7 +668,7 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
     def _take_down_agent_and_run_reschedule(self, host):
         # take down the agent on host A and ensure B is alive
         self.adminContext.session.begin(subtransactions=True)
-        query = self.adminContext.session.query(agents_db.Agent)
+        query = self.adminContext.session.query(agent_model.Agent)
         agt = query.filter_by(host=host).first()
         agt.heartbeat_timestamp = (
             agt.heartbeat_timestamp - datetime.timedelta(hours=1))
@@ -680,7 +681,7 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
 
     def _set_agent_admin_state_up(self, host, state):
         self.adminContext.session.begin(subtransactions=True)
-        query = self.adminContext.session.query(agents_db.Agent)
+        query = self.adminContext.session.query(agent_model.Agent)
         agt_db = query.filter_by(host=host).first()
         agt_db.admin_state_up = state
         self.adminContext.session.commit()
@@ -797,7 +798,7 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
 
             # A should still have it even though it was inactive due to the
             # admin_state being down
-            rab = l3_agentschedulers_db.RouterL3AgentBinding
+            rab = rb_model.RouterL3AgentBinding
             binding = (self.adminContext.session.query(rab).
                        filter(rab.router_id == r['router']['id']).first())
             self.assertEqual(binding.l3_agent.host, L3_HOSTA)

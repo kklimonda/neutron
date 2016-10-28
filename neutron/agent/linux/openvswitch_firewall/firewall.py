@@ -250,10 +250,10 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                     'Port', ovs_port.port_name, 'other_config')
                 port_vlan_id = int(other_config['tag'])
             except (KeyError, TypeError):
-                LOG.warning(_LW("Can't get tag for port %(port_id)s from its "
-                                "other_config: %(other_config)s"),
-                            port_id=port_id,
-                            other_config=other_config)
+                LOG.warning(_LW("Cannot get tag for port %(port_id)s from "
+                                "its other_config: %(other_config)s"),
+                            {'port_id': port_id,
+                             'other_config': other_config})
                 port_vlan_id = ovs_consts.DEAD_VLAN_TAG
             of_port = OFPort(port, ovs_port, port_vlan_id)
             self.sg_port_map.create_port(of_port, port)
@@ -483,14 +483,16 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                 ovsfw_consts.REG_PORT,
                 ovs_consts.BASE_INGRESS_TABLE),
         )
-        self._add_flow(
-            table=ovs_consts.ACCEPT_OR_INGRESS_TABLE,
-            priority=90,
-            reg_port=port.ofport,
-            ct_state=ovsfw_consts.OF_STATE_NEW_NOT_ESTABLISHED,
-            actions='ct(commit,zone=NXM_NX_REG{:d}[0..15]),normal'.format(
-                ovsfw_consts.REG_NET)
-        )
+        for ethertype in [constants.ETHERTYPE_IP, constants.ETHERTYPE_IPV6]:
+            self._add_flow(
+                table=ovs_consts.ACCEPT_OR_INGRESS_TABLE,
+                priority=90,
+                dl_type=ethertype,
+                reg_port=port.ofport,
+                ct_state=ovsfw_consts.OF_STATE_NEW_NOT_ESTABLISHED,
+                actions='ct(commit,zone=NXM_NX_REG{:d}[0..15]),normal'.format(
+                    ovsfw_consts.REG_NET)
+            )
         self._add_flow(
             table=ovs_consts.ACCEPT_OR_INGRESS_TABLE,
             priority=80,
@@ -535,16 +537,18 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             ct_state=ovsfw_consts.OF_STATE_NOT_ESTABLISHED,
             actions='drop'
         )
-        self._add_flow(
-            table=ovs_consts.RULES_EGRESS_TABLE,
-            priority=40,
-            reg_port=port.ofport,
-            ct_state=ovsfw_consts.OF_STATE_ESTABLISHED,
-            actions="ct(commit,zone=NXM_NX_REG{:d}[0..15],"
-                    "exec(set_field:{:s}->ct_mark))".format(
-                        ovsfw_consts.REG_NET,
-                        ovsfw_consts.CT_MARK_INVALID)
-        )
+        for ethertype in [constants.ETHERTYPE_IP, constants.ETHERTYPE_IPV6]:
+            self._add_flow(
+                table=ovs_consts.RULES_EGRESS_TABLE,
+                priority=40,
+                dl_type=ethertype,
+                reg_port=port.ofport,
+                ct_state=ovsfw_consts.OF_STATE_ESTABLISHED,
+                actions="ct(commit,zone=NXM_NX_REG{:d}[0..15],"
+                        "exec(set_field:{:s}->ct_mark))".format(
+                            ovsfw_consts.REG_NET,
+                            ovsfw_consts.CT_MARK_INVALID)
+            )
 
     def _initialize_ingress_ipv6_icmp(self, port):
         for icmp_type in firewall.ICMPV6_ALLOWED_TYPES:
@@ -644,16 +648,18 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             ct_state=ovsfw_consts.OF_STATE_NOT_ESTABLISHED,
             actions='drop'
         )
-        self._add_flow(
-            table=ovs_consts.RULES_INGRESS_TABLE,
-            priority=40,
-            reg_port=port.ofport,
-            ct_state=ovsfw_consts.OF_STATE_ESTABLISHED,
-            actions="ct(commit,zone=NXM_NX_REG{:d}[0..15],"
-                    "exec(set_field:{:s}->ct_mark))".format(
-                        ovsfw_consts.REG_NET,
-                        ovsfw_consts.CT_MARK_INVALID)
-        )
+        for ethertype in [constants.ETHERTYPE_IP, constants.ETHERTYPE_IPV6]:
+            self._add_flow(
+                table=ovs_consts.RULES_INGRESS_TABLE,
+                priority=40,
+                dl_type=ethertype,
+                reg_port=port.ofport,
+                ct_state=ovsfw_consts.OF_STATE_ESTABLISHED,
+                actions="ct(commit,zone=NXM_NX_REG{:d}[0..15],"
+                        "exec(set_field:{:s}->ct_mark))".format(
+                            ovsfw_consts.REG_NET,
+                            ovsfw_consts.CT_MARK_INVALID)
+            )
 
     def add_flows_from_rules(self, port):
         self._initialize_tracked_ingress(port)

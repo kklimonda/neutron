@@ -1,5 +1,4 @@
-# Copyright (c) 2015 OpenStack Foundation.
-#
+# Copyright 2013 IBM Corp.
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,13 +13,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-# TODO(asingh): https://review.openstack.org/#/c/338596/ refactors
-# neutron.agent.l3.config to neutron.conf.agent.l3.config.
-# neutron-fwaas/cmd/eventlet/agents/fw.py imports neutron.agent.l3.config
-# This file will be removed when neutron-fwaas imports the updated file
-# https://review.openstack.org/#/c/339177/
+from neutron_lib.db import model_base
+import sqlalchemy as sa
+from sqlalchemy import orm
 
-import neutron.conf.agent.l3.config
+from neutron.db import models_v2
 
 
-OPTS = neutron.conf.agent.l3.config.OPTS
+class PortBindingPort(model_base.BASEV2):
+    port_id = sa.Column(sa.String(36),
+                        sa.ForeignKey('ports.id', ondelete="CASCADE"),
+                        primary_key=True)
+    host = sa.Column(sa.String(255), nullable=False)
+    port = orm.relationship(
+        models_v2.Port,
+        backref=orm.backref("portbinding",
+                            lazy='joined', uselist=False,
+                            cascade='delete'))

@@ -15,6 +15,7 @@
 import collections
 import netaddr
 from neutron_lib import constants as lib_constants
+from neutron_lib.utils import helpers
 from oslo_log import log as logging
 
 from neutron._i18n import _, _LE, _LW
@@ -124,8 +125,8 @@ class RouterInfo(object):
         self._update_routing_table(operation, route, self.ns_name)
 
     def routes_updated(self, old_routes, new_routes):
-        adds, removes = common_utils.diff_list_of_dict(old_routes,
-                                                       new_routes)
+        adds, removes = helpers.diff_list_of_dict(old_routes,
+                                                  new_routes)
         for route in adds:
             LOG.debug("Added route entry is '%s'", route)
             # remove replaced route from deleted route
@@ -449,9 +450,9 @@ class RouterInfo(object):
             current_port = current_ports_dict.get(existing_port['id'])
             if current_port:
                 if (sorted(existing_port['fixed_ips'],
-                           key=common_utils.safe_sort_key) !=
+                           key=helpers.safe_sort_key) !=
                         sorted(current_port['fixed_ips'],
-                               key=common_utils.safe_sort_key)):
+                               key=helpers.safe_sort_key)):
                     updated_ports[current_port['id']] = current_port
         return updated_ports
 
@@ -825,10 +826,10 @@ class RouterInfo(object):
                 ex_gw_port)
             fip_statuses = self.configure_fip_addresses(interface_name)
 
-        except (n_exc.FloatingIpSetupException):
-                # All floating IPs must be put in error state
-                LOG.exception(_LE("Failed to process floating IPs."))
-                fip_statuses = self.put_fips_in_error_state()
+        except n_exc.FloatingIpSetupException:
+            # All floating IPs must be put in error state
+            LOG.exception(_LE("Failed to process floating IPs."))
+            fip_statuses = self.put_fips_in_error_state()
         finally:
             self.update_fip_statuses(agent, fip_statuses)
 

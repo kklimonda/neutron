@@ -34,6 +34,7 @@ from neutron.extensions import ip_allocation
 from neutron.extensions import l2_adjacency
 from neutron.extensions import portbindings
 from neutron.extensions import segment as ext_segment
+from neutron.objects import network
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import config
 from neutron.services.segments import db
@@ -470,10 +471,10 @@ class HostSegmentMappingTestCase(SegmentTestCase):
 
     def _get_segments_for_host(self, host):
         ctx = context.get_admin_context()
-        segments_host_list = ctx.session.query(
-            db.SegmentHostMapping).filter_by(host=host)
+        segment_host_mapping = network.SegmentHostMapping.get_objects(
+            ctx, host=host)
         return {seg_host['segment_id']: seg_host
-                for seg_host in segments_host_list}
+                for seg_host in segment_host_mapping}
 
     def _register_agent(self, host, mappings=None, plugin=None,
                         start_flag=True):
@@ -750,7 +751,7 @@ class TestMl2HostSegmentMappingAgentServerSynch(HostSegmentMappingTestCase):
         physical_network = 'phys_net1'
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=False)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         self.assertEqual(1, mock_function.call_count)
         expected_call = mock.call(mock.ANY, host, set())
         mock_function.assert_has_calls([expected_call])
@@ -761,10 +762,10 @@ class TestMl2HostSegmentMappingAgentServerSynch(HostSegmentMappingTestCase):
         physical_network = 'phys_net1'
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=False)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=True)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         self.assertEqual(2, mock_function.call_count)
         expected_call = mock.call(mock.ANY, host, set())
         mock_function.assert_has_calls([expected_call, expected_call])
@@ -775,23 +776,20 @@ class TestMl2HostSegmentMappingAgentServerSynch(HostSegmentMappingTestCase):
         physical_network = 'phys_net1'
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=False)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         mock_function.reset_mock()
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=False)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         mock_function.assert_not_called()
 
 
 class TestSegmentAwareIpam(SegmentTestCase):
     def _setup_host_mappings(self, mappings=()):
         ctx = context.get_admin_context()
-        with ctx.session.begin(subtransactions=True):
-            for segment_id, host in mappings:
-                record = db.SegmentHostMapping(
-                    segment_id=segment_id,
-                    host=host)
-                ctx.session.add(record)
+        for segment_id, host in mappings:
+            network.SegmentHostMapping(
+                ctx, segment_id=segment_id, host=host).create()
 
     def _create_test_segment_with_subnet(self,
                                          network=None,
