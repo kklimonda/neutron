@@ -6,5 +6,8 @@
    :maxdepth: 1
 
    README.rst
-   liberty
    unreleased
+   newton
+   mitaka
+   liberty
+

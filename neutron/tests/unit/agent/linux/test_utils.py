@@ -135,12 +135,11 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
             self.mock_popen.return_value = [bytes_odata, b'']
             result = utils.execute(['cat'], process_input=str_idata)
             self.mock_popen.assert_called_once_with(bytes_idata)
-            self.assertEqual(str_odata, result)
         else:
             self.mock_popen.return_value = [str_odata, '']
             result = utils.execute(['cat'], process_input=str_idata)
             self.mock_popen.assert_called_once_with(str_idata)
-            self.assertEqual(str_odata, result)
+        self.assertEqual(str_odata, result)
 
     def test_return_str_data(self):
         str_data = "%s\n" % self.test_file
@@ -175,40 +174,11 @@ class AgentUtilsGetInterfaceMAC(base.BaseTestCase):
     def test_get_interface_mac(self):
         expect_val = '01:02:03:04:05:06'
         with mock.patch('fcntl.ioctl') as ioctl:
-            ioctl.return_value = ''.join(['\x00' * 18,
-                                          '\x01\x02\x03\x04\x05\x06',
-                                          '\x00' * 232])
+            ioctl.return_value = b''.join([b'\x00' * 18,
+                                           b'\x01\x02\x03\x04\x05\x06',
+                                           b'\x00' * 232])
             actual_val = utils.get_interface_mac('eth0')
         self.assertEqual(actual_val, expect_val)
-
-
-class AgentUtilsReplaceFile(base.BaseTestCase):
-    def _test_replace_file_helper(self, explicit_perms=None):
-        # make file to replace
-        with mock.patch('tempfile.NamedTemporaryFile') as ntf:
-            ntf.return_value.name = '/baz'
-            with mock.patch('os.chmod') as chmod:
-                with mock.patch('os.rename') as rename:
-                    if explicit_perms is None:
-                        expected_perms = 0o644
-                        utils.replace_file('/foo', 'bar')
-                    else:
-                        expected_perms = explicit_perms
-                        utils.replace_file('/foo', 'bar', explicit_perms)
-
-                    expected = [mock.call('w+', dir='/', delete=False),
-                                mock.call().write('bar'),
-                                mock.call().close()]
-
-                    ntf.assert_has_calls(expected)
-                    chmod.assert_called_once_with('/baz', expected_perms)
-                    rename.assert_called_once_with('/baz', '/foo')
-
-    def test_replace_file_with_default_perms(self):
-        self._test_replace_file_helper()
-
-    def test_replace_file_with_0o600_perms(self):
-        self._test_replace_file_helper(0o600)
 
 
 class TestFindChildPids(base.BaseTestCase):

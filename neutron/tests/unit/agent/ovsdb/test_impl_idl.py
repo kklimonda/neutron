@@ -13,15 +13,7 @@
 #    under the License.
 
 import mock
-from six.moves import queue
 import testtools
-import unittest2
-
-try:
-    from ovs.db import idl  # noqa
-except ImportError:
-    raise unittest2.SkipTest(
-        "Skip test since ovs requirement for PY3 doesn't support yet.")
 
 from neutron.agent.ovsdb import api
 from neutron.agent.ovsdb import impl_idl
@@ -30,10 +22,9 @@ from neutron.tests import base
 
 class TransactionTestCase(base.BaseTestCase):
     def test_commit_raises_exception_on_timeout(self):
-        with mock.patch.object(queue, 'Queue') as mock_queue:
-            transaction = impl_idl.NeutronOVSDBTransaction(mock.sentinel,
-                                                           mock.Mock(), 0)
-            mock_queue.return_value.get.side_effect = queue.Empty
+        transaction = impl_idl.NeutronOVSDBTransaction(mock.sentinel,
+                                                       mock.Mock(), 1)
+        with self.assert_max_execution_time(10):
             with testtools.ExpectedException(api.TimeoutException):
                 transaction.commit()
 

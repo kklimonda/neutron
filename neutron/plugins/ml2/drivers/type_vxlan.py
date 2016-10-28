@@ -13,67 +13,30 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log
-import sqlalchemy as sa
-from sqlalchemy import sql
 
-from neutron._i18n import _, _LE
-from neutron.common import exceptions as n_exc
-from neutron.db import model_base
+from neutron._i18n import _LE
+from neutron.common import _deprecate
+from neutron.conf.plugins.ml2.drivers import driver_type
+from neutron.db.models.plugins.ml2 import vxlanallocation as vxlan_model
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers import type_tunnel
 
 LOG = log.getLogger(__name__)
 
-vxlan_opts = [
-    cfg.ListOpt('vni_ranges',
-                default=[],
-                help=_("Comma-separated list of <vni_min>:<vni_max> tuples "
-                       "enumerating ranges of VXLAN VNI IDs that are "
-                       "available for tenant network allocation")),
-    cfg.StrOpt('vxlan_group',
-               help=_("Multicast group for VXLAN. When configured, will "
-                      "enable sending all broadcast traffic to this multicast "
-                      "group. When left unconfigured, will disable multicast "
-                      "VXLAN mode.")),
-]
+_deprecate._moved_global('VxlanAllocation', new_module=vxlan_model)
+_deprecate._moved_global('VxlanEndpoints', new_module=vxlan_model)
 
-cfg.CONF.register_opts(vxlan_opts, "ml2_type_vxlan")
-
-
-class VxlanAllocation(model_base.BASEV2):
-
-    __tablename__ = 'ml2_vxlan_allocations'
-
-    vxlan_vni = sa.Column(sa.Integer, nullable=False, primary_key=True,
-                          autoincrement=False)
-    allocated = sa.Column(sa.Boolean, nullable=False, default=False,
-                          server_default=sql.false(), index=True)
-
-
-class VxlanEndpoints(model_base.BASEV2):
-    """Represents tunnel endpoint in RPC mode."""
-
-    __tablename__ = 'ml2_vxlan_endpoints'
-    __table_args__ = (
-        sa.UniqueConstraint('host',
-                            name='unique_ml2_vxlan_endpoints0host'),
-        model_base.BASEV2.__table_args__
-    )
-    ip_address = sa.Column(sa.String(64), primary_key=True)
-    udp_port = sa.Column(sa.Integer, nullable=False)
-    host = sa.Column(sa.String(255), nullable=True)
-
-    def __repr__(self):
-        return "<VxlanTunnelEndpoint(%s)>" % self.ip_address
+driver_type.register_ml2_drivers_vxlan_opts()
 
 
 class VxlanTypeDriver(type_tunnel.EndpointTunnelTypeDriver):
 
     def __init__(self):
         super(VxlanTypeDriver, self).__init__(
-            VxlanAllocation, VxlanEndpoints)
+            vxlan_model.VxlanAllocation, vxlan_model.VxlanEndpoints)
 
     def get_type(self):
         return p_const.TYPE_VXLAN
@@ -100,3 +63,5 @@ class VxlanTypeDriver(type_tunnel.EndpointTunnelTypeDriver):
     def get_mtu(self, physical_network=None):
         mtu = super(VxlanTypeDriver, self).get_mtu()
         return mtu - p_const.VXLAN_ENCAP_OVERHEAD if mtu else 0
+
+_deprecate._MovedGlobals()

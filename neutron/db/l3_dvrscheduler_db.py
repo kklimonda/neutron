@@ -13,17 +13,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants as n_const
 from oslo_log import log as logging
 from sqlalchemy import or_
 
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants as n_const
 from neutron.common import utils as n_utils
 
 from neutron.db import agentschedulers_db
 from neutron.db import l3_agentschedulers_db as l3agent_sch_db
+from neutron.db.models import l3agent as rb_model
 from neutron.db import models_v2
 from neutron.extensions import portbindings
 from neutron import manager
@@ -165,7 +166,7 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
         removed_router_info = []
         for router_id in router_ids:
             snat_binding = context.session.query(
-                l3agent_sch_db.RouterL3AgentBinding).filter_by(
+                rb_model.RouterL3AgentBinding).filter_by(
                     router_id=router_id).filter_by(
                         l3_agent_id=agent.id).first()
             if snat_binding:
@@ -183,9 +184,8 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
                 admin_context, filters=filter_rtr)
             for port in int_ports:
                 dvr_binding = (ml2_db.
-                               get_dvr_port_binding_by_host(context.session,
-                                                            port['id'],
-                                                            port_host))
+                               get_distributed_port_binding_by_host(
+                                   context.session, port['id'], port_host))
                 if dvr_binding:
                     # unbind this port from router
                     dvr_binding['router_id'] = None

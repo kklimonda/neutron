@@ -13,10 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from neutron_lib.api import validators
 from oslo_config import cfg
 from webob import exc as web_exc
 
-from neutron.api.v2 import attributes as attr
 from neutron.db import allowedaddresspairs_db as addr_pair_db
 from neutron.db import db_base_plugin_v2
 from neutron.db import portsecurity_db
@@ -58,7 +58,7 @@ class AllowedAddressPairTestPlugin(portsecurity_db.PortSecurityDbMixin,
             neutron_db = super(AllowedAddressPairTestPlugin, self).create_port(
                 context, port)
             p.update(neutron_db)
-            if attr.is_attr_set(p.get(addr_pair.ADDRESS_PAIRS)):
+            if validators.is_attr_set(p.get(addr_pair.ADDRESS_PAIRS)):
                 self._process_create_allowed_address_pairs(
                     context, p,
                     p[addr_pair.ADDRESS_PAIRS])
@@ -230,6 +230,11 @@ class TestAllowedAddressPairs(AllowedAddressPairDBTestCase):
                           'icbb': 'agreed'}]
         self._create_port_with_address_pairs(address_pairs, 400)
 
+    def test_create_port_with_unexpected_address_pairs_format(self):
+        address_pairs = {'mac_address': '00:00:00:00:00:01',
+                         'ip_address': '10.0.0.1'}
+        self._create_port_with_address_pairs(address_pairs, 400)
+
     def _create_port_with_address_pairs(self, address_pairs, ret_code):
         with self.network() as net:
             res = self._create_port(self.fmt, net['network']['id'],
@@ -254,6 +259,19 @@ class TestAllowedAddressPairs(AllowedAddressPairDBTestCase):
             self.assertEqual(port['port'][addr_pair.ADDRESS_PAIRS],
                              address_pairs)
             self._delete('ports', port['port']['id'])
+
+    def test_update_add_address_pairs_with_unexpected_format(self):
+        with self.network() as net:
+            res = self._create_port(self.fmt, net['network']['id'])
+            port = self.deserialize(self.fmt, res)
+            address_pairs = {'mac_address': '00:00:00:00:00:01',
+                             'ip_address': '10.0.0.1'}
+            update_port = {'port': {addr_pair.ADDRESS_PAIRS:
+                                    address_pairs}}
+            req = self.new_update_request('ports', update_port,
+                                          port['port']['id'])
+            res = req.get_response(self.api)
+            self.assertEqual(400, res.status_int)
 
     def test_create_address_gets_port_mac(self):
         with self.network() as net:

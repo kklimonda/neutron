@@ -16,9 +16,9 @@ import os
 import shutil
 
 import mock
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 
-from neutron.common import exceptions as n_exc
 from neutron import manager
 from neutron.plugins.common import constants
 from neutron.services import provider_configuration as provconf
@@ -70,7 +70,7 @@ class ParseServiceProviderConfigurationTestCase(base.BaseTestCase):
         res = provconf.parse_service_provider_opt()
         # This parsing crosses repos if additional projects are installed,
         # so check that at least what we expect is there; there may be more.
-        self.assertTrue(len(res) >= 3)
+        self.assertGreaterEqual(len(res), 3)
 
     def test_parse_service_provider_invalid_format(self):
         self._set_override([constants.LOADBALANCER +
@@ -269,3 +269,13 @@ class NeutronModuleMultiConfigFileTestCase(base.BaseTestCase):
         mod = provconf.NeutronModule('neutron_test')
         mod.ini()
         self.assertEqual(['zzz', 'foo', 'bar'], mod.service_providers())
+
+
+class NeutronModuleConfigNotParsedTestCase(base.DietTestCase):
+
+    def setup_config(self):
+        pass
+
+    def test_ini_no_crash_if_config_files_not_parsed(self):
+        mod = provconf.NeutronModule('neutron_test')
+        mod.ini()

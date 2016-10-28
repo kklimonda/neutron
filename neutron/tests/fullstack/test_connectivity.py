@@ -12,19 +12,24 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants
 from oslo_utils import uuidutils
 import testscenarios
 
-from neutron.common import constants
 from neutron.tests.fullstack import base
 from neutron.tests.fullstack.resources import environment
 from neutron.tests.fullstack.resources import machine
+from neutron.tests.fullstack import utils
+from neutron.tests.unit import testlib_api
 
-
-load_tests = testscenarios.load_tests_apply_scenarios
+load_tests = testlib_api.module_load_tests
 
 
 class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
+
+    of_interface = None
+    ovsdb_interface = None
+    arp_responder = False
 
     def setUp(self):
         host_descriptions = [
@@ -34,11 +39,13 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
             environment.HostDescription(
                 l3_agent=self.l2_pop,
                 of_interface=self.of_interface,
+                ovsdb_interface=self.ovsdb_interface,
                 l2_agent_type=self.l2_agent_type) for _ in range(3)]
         env = environment.Environment(
             environment.EnvironmentDescription(
                 network_type=self.network_type,
-                l2_pop=self.l2_pop),
+                l2_pop=self.l2_pop,
+                arp_responder=self.arp_responder),
             host_descriptions)
         super(BaseConnectivitySameNetworkTest, self).setUp(env)
 
@@ -49,21 +56,17 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
         self.safe_client.create_subnet(
             tenant_uuid, network['id'], '20.0.0.0/24')
 
-        vms = [
+        vms = machine.FakeFullstackMachinesList([
             self.useFixture(
                 machine.FakeFullstackMachine(
                     self.environment.hosts[i],
                     network['id'],
                     tenant_uuid,
                     self.safe_client))
-            for i in range(3)]
+            for i in range(3)])
 
-        for vm in vms:
-            vm.block_until_boot()
-
-        vms[0].block_until_ping(vms[1].ip)
-        vms[0].block_until_ping(vms[2].ip)
-        vms[1].block_until_ping(vms[2].ip)
+        vms.block_until_all_boot()
+        vms.ping_all()
 
 
 class TestOvsConnectivitySameNetwork(BaseConnectivitySameNetworkTest):
@@ -72,15 +75,13 @@ class TestOvsConnectivitySameNetwork(BaseConnectivitySameNetworkTest):
     network_scenarios = [
         ('VXLAN', {'network_type': 'vxlan',
                    'l2_pop': False}),
-        ('GRE and l2pop', {'network_type': 'gre',
-                           'l2_pop': True}),
+        ('GRE-l2pop-arp_responder', {'network_type': 'gre',
+                                     'l2_pop': True,
+                                     'arp_responder': True}),
         ('VLANs', {'network_type': 'vlan',
                    'l2_pop': False})]
-    interface_scenarios = [
-        ('Ofctl', {'of_interface': 'ovs-ofctl'}),
-        ('Native', {'of_interface': 'native'})]
     scenarios = testscenarios.multiply_scenarios(
-        network_scenarios, interface_scenarios)
+        network_scenarios, utils.get_ovs_interface_scenarios())
 
     def test_connectivity(self):
         self._test_connectivity()
@@ -97,7 +98,6 @@ class TestLinuxBridgeConnectivitySameNetwork(BaseConnectivitySameNetworkTest):
         ('VXLAN and l2pop', {'network_type': 'vxlan',
                              'l2_pop': True})
     ]
-    of_interface = None
 
     def test_connectivity(self):
         self._test_connectivity()

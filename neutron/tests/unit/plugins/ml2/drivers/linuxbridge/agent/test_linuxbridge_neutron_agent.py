@@ -16,12 +16,12 @@ import collections
 import sys
 
 import mock
+from neutron_lib import constants
 from oslo_config import cfg
 
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.common import constants
 from neutron.common import exceptions
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
@@ -175,10 +175,29 @@ class TestLinuxBridgeManager(base.BaseTestCase):
         nw_id = ""
         self.assertEqual("brq", self.lbm.get_bridge_name(nw_id))
 
-    def test_get_subinterface_name(self):
-        self.assertEqual("eth0.0",
-                         self.lbm.get_subinterface_name("eth0", "0"))
-        self.assertEqual("eth0.", self.lbm.get_subinterface_name("eth0", ""))
+    def test_get_subinterface_name_backwards_compatibility(self):
+        self.assertEqual("abcdefghijklm.1",
+                         self.lbm.get_subinterface_name("abcdefghijklm", "1"))
+        self.assertEqual("abcdefghijkl.11",
+                         self.lbm.get_subinterface_name("abcdefghijkl", "11"))
+        self.assertEqual("abcdefghij.1111",
+                         self.lbm.get_subinterface_name("abcdefghij",
+                                                        "1111"))
+
+    def test_get_subinterface_name_advanced(self):
+        """Ensure the same hash is used for long interface names.
+
+        If the generated vlan device name would be too long, make sure that
+        everything before the '.' is equal. This might be helpful when
+        debugging problems.
+        """
+
+        max_device_name = "abcdefghijklmno"
+        vlan_dev_name1 = self.lbm.get_subinterface_name(max_device_name, "1")
+        vlan_dev_name2 = self.lbm.get_subinterface_name(max_device_name,
+                                                        "1111")
+        self.assertEqual(vlan_dev_name1.partition(".")[0],
+                         vlan_dev_name2.partition(".")[0])
 
     def test_get_tap_device_name(self):
         if_id = "123456789101112"
@@ -619,7 +638,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                                   "get_interface_details") as if_det_fn,\
                 mock.patch.object(self.lbm,
                                   "update_interface_ip_details") as updif_fn,\
-                mock.patch.object(self.lbm, "delete_interface") as del_interface,\
+                mock.patch.object(self.lbm,
+                                  "delete_interface") as del_interface,\
                 mock.patch.object(bridge_lib, "BridgeDevice",
                                   return_value=bridge_device):
             de_fn.return_value = True
@@ -638,7 +658,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                                   "get_interface_details") as if_det_fn,\
                 mock.patch.object(self.lbm,
                                   "update_interface_ip_details") as updif_fn,\
-                mock.patch.object(self.lbm, "delete_interface") as del_interface,\
+                mock.patch.object(self.lbm,
+                                  "delete_interface") as del_interface,\
                 mock.patch.object(bridge_lib, "BridgeDevice",
                                   return_value=bridge_device):
             de_fn.return_value = True
@@ -674,7 +695,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
         bridge_device = mock.Mock()
         with mock.patch.object(ip_lib, "device_exists") as de_fn,\
                 mock.patch.object(self.lbm, "remove_interface"),\
-                mock.patch.object(self.lbm, "get_interface_details") as if_det_fn,\
+                mock.patch.object(self.lbm,
+                                  "get_interface_details") as if_det_fn,\
                 mock.patch.object(self.lbm, "delete_interface") as del_int,\
                 mock.patch.object(bridge_lib, "BridgeDevice",
                                   return_value=bridge_device):
@@ -687,28 +709,40 @@ class TestLinuxBridgeManager(base.BaseTestCase):
 
     def test_remove_interface(self):
         with mock.patch.object(ip_lib.IPDevice, "exists") as de_fn,\
-                mock.patch.object(bridge_lib,
-                                  'is_bridged_interface') as isdev_fn,\
+                mock.patch.object(bridge_lib.BridgeDevice,
+                                  'owns_interface') as owns_fn,\
                 mock.patch.object(bridge_lib.BridgeDevice,
                                   "delif") as delif_fn:
             de_fn.return_value = False
             self.assertFalse(self.lbm.remove_interface("br0", "eth0"))
-            self.assertFalse(isdev_fn.called)
+            self.assertFalse(owns_fn.called)
 
             de_fn.return_value = True
-            isdev_fn.return_value = False
+            owns_fn.return_value = False
             self.assertTrue(self.lbm.remove_interface("br0", "eth0"))
-
-            isdev_fn.return_value = True
-            delif_fn.return_value = True
-            self.assertFalse(self.lbm.remove_interface("br0", "eth0"))
 
             delif_fn.return_value = False
             self.assertTrue(self.lbm.remove_interface("br0", "eth0"))
 
+    def test_remove_interface_not_on_bridge(self):
+        bridge_device = mock.Mock()
+        with mock.patch.object(bridge_lib, "BridgeDevice",
+                               return_value=bridge_device):
+            bridge_device.exists.return_value = True
+            bridge_device.delif.side_effect = RuntimeError
+
+            bridge_device.owns_interface.side_effect = [True, False]
+            self.lbm.remove_interface("br0", 'tap0')
+            self.assertEqual(2, bridge_device.owns_interface.call_count)
+
+            bridge_device.owns_interface.side_effect = [True, True]
+            self.assertRaises(RuntimeError,
+                              self.lbm.remove_interface, "br0", 'tap0')
+
     def test_delete_interface(self):
         with mock.patch.object(ip_lib.IPDevice, "exists") as de_fn,\
-                mock.patch.object(ip_lib.IpLinkCommand, "set_down") as down_fn,\
+                mock.patch.object(ip_lib.IpLinkCommand,
+                                  "set_down") as down_fn,\
                 mock.patch.object(ip_lib.IpLinkCommand, "delete") as delete_fn:
             de_fn.return_value = False
             self.lbm.delete_interface("eth1.1")
@@ -826,8 +860,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
 
     def test_get_agent_id_bridge_mappings(self):
         lbm = get_linuxbridge_manager(BRIDGE_MAPPINGS, INTERFACE_MAPPINGS)
-        with mock.patch.object(utils,
-                               "get_interface_mac",
+        with mock.patch.object(ip_lib,
+                               "get_device_mac",
                                return_value='16:63:69:10:a0:59') as mock_gim:
 
             agent_id = lbm.get_agent_id()
@@ -847,8 +881,8 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                               'get_devices',
                               return_value=devices_mock), \
                 mock.patch.object(
-                    utils,
-                    "get_interface_mac",
+                    ip_lib,
+                    "get_device_mac",
                     return_value='16:63:69:10:a0:59') as mock_gim:
 
             agent_id = lbm.get_agent_id()
@@ -1005,12 +1039,12 @@ class TestLinuxBridgeRpcCallbacks(base.BaseTestCase):
             self.lb_rpc.fdb_remove(None, fdb_entries)
 
             expected = [
-                mock.call(['bridge', 'fdb', 'del',
+                mock.call(['bridge', 'fdb', 'delete',
                            constants.FLOODING_ENTRY[0],
                            'dev', 'vxlan-1', 'dst', 'agent_ip'],
                           run_as_root=True,
                           check_exit_code=False),
-                mock.call(['bridge', 'fdb', 'del', 'port_mac',
+                mock.call(['bridge', 'fdb', 'delete', 'port_mac',
                            'dev', 'vxlan-1', 'dst', 'agent_ip'],
                           run_as_root=True,
                           check_exit_code=False),

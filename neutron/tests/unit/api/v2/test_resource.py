@@ -14,13 +14,14 @@
 #    under the License.
 
 import mock
+from neutron_lib import exceptions as n_exc
 import oslo_i18n
 from webob import exc
 import webtest
 
 from neutron._i18n import _
 from neutron.api.v2 import resource as wsgi_resource
-from neutron.common import exceptions as n_exc
+from neutron.common import utils
 from neutron import context
 from neutron.tests import base
 from neutron import wsgi
@@ -40,6 +41,12 @@ class RequestTestCase(base.BaseTestCase):
         request = wsgi.Request.blank('/tests/123')
         request.headers["Content-Type"] = "application/json; charset=UTF-8"
         result = request.get_content_type()
+        self.assertEqual("application/json", result)
+
+    def test_content_type_with_partial_matched_string(self):
+        request = wsgi.Request.blank('/tests/123')
+        request.headers["Content-Type"] = "application/j"
+        result = request.best_match_content_type()
         self.assertEqual("application/json", result)
 
     def test_content_type_from_accept(self):
@@ -92,7 +99,7 @@ class RequestTestCase(base.BaseTestCase):
 
     def test_request_context_elevated(self):
         user_context = context.Context(
-            'fake_user', 'fake_project', admin=False)
+            'fake_user', 'fake_project', is_admin=False)
         self.assertFalse(user_context.is_admin)
         admin_context = user_context.elevated()
         self.assertFalse(user_context.is_admin)
@@ -279,6 +286,21 @@ class ResourceTestCase(base.BaseTestCase):
         environ = {'wsgiorg.routing_args': (None, {'action': 'test'})}
         res = resource.get('', extra_environ=environ)
         self.assertEqual(200, res.status_int)
+
+    def _test_unhandled_error_logs_details(self, e, expected_details):
+        with mock.patch.object(wsgi_resource.LOG, 'exception') as log:
+            self._make_request_with_side_effect(side_effect=e)
+        log.assert_called_with(
+            mock.ANY, {'action': mock.ANY, 'details': expected_details})
+
+    def test_unhandled_error_logs_attached_details(self):
+        e = Exception()
+        utils.attach_exc_details(e, 'attached_details')
+        self._test_unhandled_error_logs_details(e, 'attached_details')
+
+    def test_unhandled_error_logs_no_attached_details(self):
+        e = Exception()
+        self._test_unhandled_error_logs_details(e, 'No details.')
 
     def test_status_204(self):
         controller = mock.MagicMock()

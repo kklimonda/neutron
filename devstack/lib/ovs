@@ -12,7 +12,7 @@
 
 OVS_REPO=${OVS_REPO:-https://github.com/openvswitch/ovs.git}
 OVS_REPO_NAME=$(basename ${OVS_REPO} | cut -f1 -d'.')
-OVS_BRANCH=${OVS_BRANCH:-origin/master}
+OVS_BRANCH=${OVS_BRANCH:-master}
 
 # Functions
 
@@ -29,6 +29,24 @@ function load_module {
     else
         sudo modprobe $module || (echo "FAILED TO LOAD vport_geneve" && dmesg)
     fi
+}
+
+# is_kernel_supported_for_ovs25() - compilation of openvswitch 2.5 kernel module
+#                                   supports only kernels up to 4.3.x, function
+#                                   determines whether compilation from source
+#                                   will succeed on this machine
+function is_kernel_supported_for_ovs25 {
+    major=$(uname -r | cut -d\. -f 1)
+    minor=$(uname -r | cut -d\. -f 2)
+    if [ $major -le 3 ]; then
+        # All 3.x branches and lesser are supported
+        return 0
+    elif [ $major -eq 4 -a $minor -le 3 ]; then
+        # If it's version 4, minor must not be higher than 3
+        return 0
+    fi
+
+    return 1
 }
 
 # compile_ovs() - Compile OVS from source and load needed modules.
@@ -51,13 +69,17 @@ function compile_ovs {
         localstatedir="--localstatedir=$localstatedir"
     fi
 
-    cd $DEST
-    if [ ! -d $OVS_REPO_NAME ] ; then
-        git clone $OVS_REPO
-        cd $OVS_REPO_NAME
+    OVS_DIR=$DEST/$OVS_REPO_NAME
+    if [ ! -d $OVS_DIR ] ; then
+        # We can't use git_clone here because we want to ignore ERROR_ON_CLONE
+        git_timed clone $OVS_REPO $OVS_DIR
+        cd $OVS_DIR
         git checkout $OVS_BRANCH
     else
-        cd $OVS_REPO_NAME
+        # Even though the directory already exists, call git_clone to update it
+        # if needed based on the RECLONE option
+        git_clone $OVS_REPO $OVS_DIR $OVS_BRANCH
+        cd $OVS_DIR
     fi
 
     # TODO: Can you create package list files like you can inside devstack?
@@ -65,7 +87,15 @@ function compile_ovs {
 
     if is_fedora ; then
         # is_fedora covers Fedora, RHEL, CentOS, etc...
-        install_package kernel-devel
+        echo NOTE: if kernel-devel-$(uname -r) or kernel-headers-$(uname -r) installation
+        echo failed, please, provide a repository with the package, or yum update / reboot
+        echo your machine to get the latest kernel.
+
+        install_package kernel-devel-$(uname -r)
+        install_package kernel-headers-$(uname -r)
+
+    elif is_ubuntu ; then
+        install_package linux-headers-$(uname -r)
     fi
 
     if [ ! -f configure ] ; then
@@ -94,6 +124,15 @@ function compile_ovs {
 
 # start_new_ovs() - removes old ovs database, creates a new one and starts ovs
 function start_new_ovs () {
-    rm -f /etc/openvswitch/conf.db /etc/openvswitch/.conf.db~lock~
+    sudo rm -f /etc/openvswitch/conf.db /etc/openvswitch/.conf.db~lock~
     sudo /usr/share/openvswitch/scripts/ovs-ctl start
+}
+
+# remove_ovs_packages() - removes old ovs packages from the system
+function remove_ovs_packages() {
+    for package in openvswitch openvswitch-switch openvswitch-common; do
+        if is_package_installed $package; then
+            uninstall_package $package
+        fi
+    done
 }

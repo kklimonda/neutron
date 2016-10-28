@@ -15,29 +15,31 @@
 
 import datetime
 
+import debtcollector
 from eventlet import greenthread
+from neutron_lib.api import converters
+from neutron_lib import constants
 from oslo_config import cfg
-from oslo_db import exception as db_exc
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_serialization import jsonutils
 from oslo_utils import importutils
 from oslo_utils import timeutils
 import six
-import sqlalchemy as sa
 from sqlalchemy.orm import exc
 from sqlalchemy import sql
 
 from neutron._i18n import _, _LE, _LI, _LW
+from neutron.agent.common import utils
 from neutron.api.rpc.callbacks import version_manager
-from neutron.api.v2 import attributes
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants
+from neutron.common import _deprecate
+from neutron.common import constants as n_const
 from neutron import context
 from neutron.db import api as db_api
-from neutron.db import model_base
+from neutron.db.models import agent as agent_model
 from neutron.extensions import agent as ext_agent
 from neutron.extensions import availability_zone as az_ext
 from neutron import manager
@@ -45,10 +47,6 @@ from neutron import manager
 LOG = logging.getLogger(__name__)
 
 AGENT_OPTS = [
-    cfg.IntOpt('agent_down_time', default=75,
-               help=_("Seconds to regard the agent is down; should be at "
-                      "least twice report_interval, to be sure the "
-                      "agent is down for good.")),
     cfg.StrOpt('dhcp_load_type', default='networks',
                choices=['networks', 'subnets', 'ports'],
                help=_('Representing the resource type whose load is being '
@@ -80,45 +78,7 @@ cfg.CONF.register_opts(AGENT_OPTS)
 DOWNTIME_VERSIONS_RATIO = 2
 
 
-class Agent(model_base.BASEV2, model_base.HasId):
-    """Represents agents running in neutron deployments."""
-
-    __table_args__ = (
-        sa.UniqueConstraint('agent_type', 'host',
-                            name='uniq_agents0agent_type0host'),
-        model_base.BASEV2.__table_args__
-    )
-
-    # L3 agent, DHCP agent, OVS agent, LinuxBridge
-    agent_type = sa.Column(sa.String(255), nullable=False)
-    binary = sa.Column(sa.String(255), nullable=False)
-    # TOPIC is a fanout exchange topic
-    topic = sa.Column(sa.String(255), nullable=False)
-    # TOPIC.host is a target topic
-    host = sa.Column(sa.String(255), nullable=False)
-    availability_zone = sa.Column(sa.String(255))
-    admin_state_up = sa.Column(sa.Boolean, default=True,
-                               server_default=sql.true(), nullable=False)
-    # the time when first report came from agents
-    created_at = sa.Column(sa.DateTime, nullable=False)
-    # the time when first report came after agents start
-    started_at = sa.Column(sa.DateTime, nullable=False)
-    # updated when agents report
-    heartbeat_timestamp = sa.Column(sa.DateTime, nullable=False)
-    # description is note for admin user
-    description = sa.Column(sa.String(attributes.DESCRIPTION_MAX_LEN))
-    # configurations: a json dict string, I think 4095 is enough
-    configurations = sa.Column(sa.String(4095), nullable=False)
-    # resource_versions: json dict, 8191 allows for ~256 resource versions
-    #                    assuming ~32byte length "'name': 'ver',"
-    #                    the whole row limit is 65535 bytes in mysql
-    resource_versions = sa.Column(sa.String(8191))
-    # load - number of resources hosted by the agent
-    load = sa.Column(sa.Integer, server_default='0', nullable=False)
-
-    @property
-    def is_active(self):
-        return not AgentDbMixin.is_agent_down(self.heartbeat_timestamp)
+_deprecate._moved_global('Agent', new_module=agent_model)
 
 
 class AgentAvailabilityZoneMixin(az_ext.AvailabilityZonePluginBase):
@@ -126,10 +86,12 @@ class AgentAvailabilityZoneMixin(az_ext.AvailabilityZonePluginBase):
 
     def _list_availability_zones(self, context, filters=None):
         result = {}
-        query = self._get_collection_query(context, Agent, filters=filters)
-        for agent in query.group_by(Agent.admin_state_up,
-                                    Agent.availability_zone,
-                                    Agent.agent_type):
+        query = self._get_collection_query(context, agent_model.Agent,
+                                           filters=filters)
+        columns = (agent_model.Agent.admin_state_up,
+                   agent_model.Agent.availability_zone,
+                   agent_model.Agent.agent_type)
+        for agent in query.with_entities(*columns).group_by(*columns):
             if not agent.availability_zone:
                 continue
             if agent.agent_type == constants.AGENT_TYPE_DHCP:
@@ -142,6 +104,7 @@ class AgentAvailabilityZoneMixin(az_ext.AvailabilityZonePluginBase):
             result[key] = agent.admin_state_up or result.get(key, False)
         return result
 
+    @db_api.retry_if_session_inactive()
     def get_availability_zones(self, context, filters=None, fields=None,
                                sorts=None, limit=None, marker=None,
                                page_reverse=False):
@@ -154,6 +117,7 @@ class AgentAvailabilityZoneMixin(az_ext.AvailabilityZonePluginBase):
                 for k, v in six.iteritems(self._list_availability_zones(
                                            context, filters))]
 
+    @db_api.retry_if_session_inactive()
     def validate_availability_zones(self, context, resource_type,
                                     availability_zones):
         """Verify that the availability zones exist."""
@@ -165,9 +129,12 @@ class AgentAvailabilityZoneMixin(az_ext.AvailabilityZonePluginBase):
             agent_type = constants.AGENT_TYPE_L3
         else:
             return
-        query = context.session.query(Agent.availability_zone).filter_by(
-                    agent_type=agent_type).group_by(Agent.availability_zone)
-        query = query.filter(Agent.availability_zone.in_(availability_zones))
+        query = context.session.query(
+            agent_model.Agent.availability_zone).filter_by(
+            agent_type=agent_type).group_by(
+            agent_model.Agent.availability_zone)
+        query = query.filter(
+            agent_model.Agent.availability_zone.in_(availability_zones))
         azs = [item[0] for item in query]
         diff = set(availability_zones) - set(azs)
         if diff:
@@ -179,32 +146,39 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
 
     def _get_agent(self, context, id):
         try:
-            agent = self._get_by_id(context, Agent, id)
+            agent = self._get_by_id(context, agent_model.Agent, id)
         except exc.NoResultFound:
             raise ext_agent.AgentNotFound(id=id)
         return agent
 
+    @db_api.retry_if_session_inactive()
     def get_enabled_agent_on_host(self, context, agent_type, host):
         """Return agent of agent_type for the specified host."""
-        query = context.session.query(Agent)
-        query = query.filter(Agent.agent_type == agent_type,
-                             Agent.host == host,
-                             Agent.admin_state_up == sql.true())
+        query = context.session.query(agent_model.Agent)
+        query = query.filter(agent_model.Agent.agent_type == agent_type,
+                             agent_model.Agent.host == host,
+                             agent_model.Agent.admin_state_up == sql.true())
         try:
             agent = query.one()
         except exc.NoResultFound:
             LOG.debug('No enabled %(agent_type)s agent on host '
                       '%(host)s', {'agent_type': agent_type, 'host': host})
             return
-        if self.is_agent_down(agent.heartbeat_timestamp):
+
+        if utils.is_agent_down(agent.heartbeat_timestamp):
             LOG.warning(_LW('%(agent_type)s agent %(agent_id)s is not active'),
                         {'agent_type': agent_type, 'agent_id': agent.id})
         return agent
 
+    @debtcollector.removals.remove(
+        message="This will be removed in the future. "
+                "Please use 'neutron.agent.common.utils.is_agent_down' "
+                "instead.",
+        version='ocata'
+    )
     @staticmethod
     def is_agent_down(heart_beat_time):
-        return timeutils.is_older_than(heart_beat_time,
-                                       cfg.CONF.agent_down_time)
+        return utils.is_agent_down(heart_beat_time)
 
     @staticmethod
     def is_agent_considered_for_versions(agent_dict):
@@ -245,13 +219,16 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
             ext_agent.RESOURCE_NAME + 's')
         res = dict((k, agent[k]) for k in attr
                    if k not in ['alive', 'configurations'])
-        res['alive'] = not self.is_agent_down(res['heartbeat_timestamp'])
+        res['alive'] = not utils.is_agent_down(
+            res['heartbeat_timestamp']
+        )
         res['configurations'] = self._get_dict(agent, 'configurations')
         res['resource_versions'] = self._get_dict(agent, 'resource_versions',
                                                   ignore_missing=True)
         res['availability_zone'] = agent['availability_zone']
         return self._fields(res, fields)
 
+    @db_api.retry_if_session_inactive()
     def delete_agent(self, context, id):
         agent = self._get_agent(context, id)
         registry.notify(resources.AGENT, events.BEFORE_DELETE, self,
@@ -259,6 +236,7 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
         with context.session.begin(subtransactions=True):
             context.session.delete(agent)
 
+    @db_api.retry_if_session_inactive()
     def update_agent(self, context, id, agent):
         agent_data = agent['agent']
         with context.session.begin(subtransactions=True):
@@ -266,20 +244,25 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
             agent.update(agent_data)
         return self._make_agent_dict(agent)
 
+    @db_api.retry_if_session_inactive()
     def get_agents_db(self, context, filters=None):
-        query = self._get_collection_query(context, Agent, filters=filters)
+        query = self._get_collection_query(context,
+                                           agent_model.Agent,
+                                           filters=filters)
         return query.all()
 
+    @db_api.retry_if_session_inactive()
     def get_agents(self, context, filters=None, fields=None):
-        agents = self._get_collection(context, Agent,
+        agents = self._get_collection(context, agent_model.Agent,
                                       self._make_agent_dict,
                                       filters=filters, fields=fields)
         alive = filters and filters.get('alive', None)
         if alive:
-            alive = attributes.convert_to_boolean(alive[0])
+            alive = converters.convert_to_boolean(alive[0])
             agents = [agent for agent in agents if agent['alive'] == alive]
         return agents
 
+    @db_api.retry_db_errors
     def agent_health_check(self):
         """Scan agents and log if some are considered dead."""
         agents = self.get_agents(context.get_admin_context(),
@@ -301,10 +284,10 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                       len(agents))
 
     def _get_agent_by_type_and_host(self, context, agent_type, host):
-        query = self._model_query(context, Agent)
+        query = self._model_query(context, agent_model.Agent)
         try:
-            agent_db = query.filter(Agent.agent_type == agent_type,
-                                    Agent.host == host).one()
+            agent_db = query.filter(agent_model.Agent.agent_type == agent_type,
+                                    agent_model.Agent.host == host).one()
             return agent_db
         except exc.NoResultFound:
             raise ext_agent.AgentNotFoundByTypeHost(agent_type=agent_type,
@@ -313,9 +296,23 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
             raise ext_agent.MultipleAgentFoundByTypeHost(agent_type=agent_type,
                                                          host=host)
 
+    @db_api.retry_if_session_inactive()
     def get_agent(self, context, id, fields=None):
         agent = self._get_agent(context, id)
         return self._make_agent_dict(agent, fields)
+
+    @db_api.retry_if_session_inactive()
+    def filter_hosts_with_network_access(
+            self, context, network_id, candidate_hosts):
+        """Filter hosts with access to network_id.
+
+        This method returns a subset of candidate_hosts with the ones with
+        network access to network_id.
+
+        A plugin can overload this method to define its own host network_id
+        based filter.
+        """
+        return candidate_hosts
 
     def _log_heartbeat(self, state, agent_db, agent_conf):
         if agent_conf.get('log_agent_heartbeats'):
@@ -327,13 +324,15 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                       'uuid': state.get('uuid'),
                       'delta': delta})
 
-    def _create_or_update_agent(self, context, agent_state):
+    @db_api.retry_if_session_inactive()
+    def create_or_update_agent(self, context, agent_state):
         """Registers new agent in the database or updates existing.
 
-        Returns agent status from server point of view: alive, new or revived.
+        Returns tuple of agent status and state.
+        Status is from server point of view: alive, new or revived.
         It could be used by agent to do some sync with the server if needed.
         """
-        status = constants.AGENT_ALIVE
+        status = n_const.AGENT_ALIVE
         with context.session.begin(subtransactions=True):
             res_keys = ['agent_type', 'binary', 'host', 'topic']
             res = dict((k, agent_state[k]) for k in res_keys)
@@ -351,7 +350,7 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                 agent_db = self._get_agent_by_type_and_host(
                     context, agent_state['agent_type'], agent_state['host'])
                 if not agent_db.is_active:
-                    status = constants.AGENT_REVIVED
+                    status = n_const.AGENT_REVIVED
                     if 'resource_versions' not in agent_state:
                         # updating agent_state with resource_versions taken
                         # from db so that
@@ -365,38 +364,25 @@ class AgentDbMixin(ext_agent.AgentPluginBase, AgentAvailabilityZoneMixin):
                 greenthread.sleep(0)
                 self._log_heartbeat(agent_state, agent_db, configurations_dict)
                 agent_db.update(res)
+                event_type = events.AFTER_UPDATE
             except ext_agent.AgentNotFoundByTypeHost:
                 greenthread.sleep(0)
                 res['created_at'] = current_time
                 res['started_at'] = current_time
                 res['heartbeat_timestamp'] = current_time
                 res['admin_state_up'] = cfg.CONF.enable_new_agents
-                agent_db = Agent(**res)
+                agent_db = agent_model.Agent(**res)
                 greenthread.sleep(0)
                 context.session.add(agent_db)
+                event_type = events.AFTER_CREATE
                 self._log_heartbeat(agent_state, agent_db, configurations_dict)
-                status = constants.AGENT_NEW
+                status = n_const.AGENT_NEW
             greenthread.sleep(0)
-        return status
 
-    def create_or_update_agent(self, context, agent):
-        """Create or update agent according to report."""
-        try:
-            return self._create_or_update_agent(context, agent)
-        except db_exc.DBDuplicateEntry:
-            # It might happen that two or more concurrent transactions
-            # are trying to insert new rows having the same value of
-            # (agent_type, host) pair at the same time (if there has
-            # been no such entry in the table and multiple agent status
-            # updates are being processed at the moment). In this case
-            # having a unique constraint on (agent_type, host) columns
-            # guarantees that only one transaction will succeed and
-            # insert a new agent entry, others will fail and be rolled
-            # back. That means we must retry them one more time: no
-            # INSERTs will be issued, because
-            # _get_agent_by_type_and_host() will return the existing
-            # agent entry, which will be updated multiple times
-            return self._create_or_update_agent(context, agent)
+        registry.notify(resources.AGENT, event_type, self, context=context,
+                        host=agent_state['host'], plugin=self,
+                        agent=agent_state)
+        return status, agent_state
 
     def _get_agents_considered_for_versions(self):
         up_agents = self.get_agents(context.get_admin_context(),
@@ -436,7 +422,7 @@ class AgentExtRpcCallback(object):
     """
 
     target = oslo_messaging.Target(version='1.1',
-                                   namespace=constants.RPC_NAMESPACE_STATE)
+                                   namespace=n_const.RPC_NAMESPACE_STATE)
     START_TIME = timeutils.utcnow()
 
     def __init__(self, plugin=None):
@@ -449,7 +435,7 @@ class AgentExtRpcCallback(object):
         # Initialize RPC api directed to other neutron-servers
         self.server_versions_rpc = resources_rpc.ResourcesPushToServersRpcApi()
 
-    @db_api.retry_db_errors
+    @db_api.retry_if_session_inactive()
     def report_state(self, context, **kwargs):
         """Report state from agent to server.
 
@@ -469,7 +455,8 @@ class AgentExtRpcCallback(object):
             return
         if not self.plugin:
             self.plugin = manager.NeutronManager.get_plugin()
-        agent_status = self.plugin.create_or_update_agent(context, agent_state)
+        agent_status, agent_state = self.plugin.create_or_update_agent(
+            context, agent_state)
         self._update_local_agent_resource_versions(context, agent_state)
         return agent_status
 
@@ -515,3 +502,6 @@ class AgentExtRpcCallback(object):
                               "%(diff)s seconds, which is more than the "
                               "threshold agent down"
                               "time: %(threshold)s."), log_dict)
+
+
+_deprecate._MovedGlobals()

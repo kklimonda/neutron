@@ -13,15 +13,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from collections import defaultdict
 import weakref
 
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import periodic_task
+from oslo_utils import excutils
+from osprofiler import profiler
 import six
 
-from neutron._i18n import _, _LI
+from neutron._i18n import _, _LE, _LI
 from neutron.common import utils
 from neutron.plugins.common import constants
 
@@ -31,7 +34,13 @@ LOG = logging.getLogger(__name__)
 CORE_PLUGINS_NAMESPACE = 'neutron.core_plugins'
 
 
+class ManagerMeta(profiler.TracedMeta, type(periodic_task.PeriodicTasks)):
+    pass
+
+
+@six.add_metaclass(ManagerMeta)
 class Manager(periodic_task.PeriodicTasks):
+    __trace_args__ = {"name": "rpc"}
 
     # Set RPC API version to 1.0 by default.
     target = oslo_messaging.Target(version='1.0')
@@ -86,6 +95,7 @@ def validate_pre_plugin_load():
         return msg
 
 
+@six.add_metaclass(profiler.TracedMeta)
 class NeutronManager(object):
     """Neutron's Manager class.
 
@@ -95,6 +105,7 @@ class NeutronManager(object):
     The caller should make sure that NeutronManager is a singleton.
     """
     _instance = None
+    __trace_args__ = {"name": "rpc"}
 
     def __init__(self, options=None, config_file=None):
         # If no options have been provided, create an empty dict
@@ -128,6 +139,7 @@ class NeutronManager(object):
         # Used by pecan WSGI
         self.resource_plugin_mappings = {}
         self.resource_controller_mappings = {}
+        self.path_prefix_resource_mappings = defaultdict(list)
 
     @staticmethod
     def load_class_for_provider(namespace, plugin_provider):
@@ -142,7 +154,8 @@ class NeutronManager(object):
             return utils.load_class_by_alias_or_classname(namespace,
                     plugin_provider)
         except ImportError:
-            raise ImportError(_("Plugin '%s' not found.") % plugin_provider)
+            with excutils.save_and_reraise_exception():
+                LOG.error(_LE("Plugin '%s' not found."), plugin_provider)
 
     def _get_plugin_instance(self, namespace, plugin_provider):
         plugin_class = self.load_class_for_provider(namespace, plugin_provider)
@@ -258,6 +271,7 @@ class NeutronManager(object):
 
     @classmethod
     def get_controller_for_resource(cls, resource):
+        resource = resource.replace('_', '-')
         res_ctrl_mappings = cls.get_instance().resource_controller_mappings
         # If no controller is found for resource, try replacing dashes with
         # underscores
@@ -265,6 +279,8 @@ class NeutronManager(object):
             resource,
             res_ctrl_mappings.get(resource.replace('-', '_')))
 
+    # TODO(blogan): This isn't used by anything else other than tests and
+    # probably should be removed
     @classmethod
     def get_service_plugin_by_path_prefix(cls, path_prefix):
         service_plugins = cls.get_unique_service_plugins()
@@ -272,3 +288,13 @@ class NeutronManager(object):
             plugin_path_prefix = getattr(service_plugin, 'path_prefix', None)
             if plugin_path_prefix and plugin_path_prefix == path_prefix:
                 return service_plugin
+
+    @classmethod
+    def add_resource_for_path_prefix(cls, resource, path_prefix):
+        resources = cls.get_instance().path_prefix_resource_mappings[
+            path_prefix].append(resource)
+        return resources
+
+    @classmethod
+    def get_resources_for_path_prefix(cls, path_prefix):
+        return cls.get_instance().path_prefix_resource_mappings[path_prefix]

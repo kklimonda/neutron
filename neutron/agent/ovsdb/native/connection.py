@@ -18,8 +18,8 @@ import traceback
 
 from ovs.db import idl
 from ovs import poller
-import retrying
 from six.moves import queue as Queue
+import tenacity
 
 from neutron.agent.ovsdb.native import helpers
 from neutron.agent.ovsdb.native import idlutils
@@ -29,8 +29,10 @@ class TransactionQueue(Queue.Queue, object):
     def __init__(self, *args, **kwargs):
         super(TransactionQueue, self).__init__(*args, **kwargs)
         alertpipe = os.pipe()
-        self.alertin = os.fdopen(alertpipe[0], 'r', 0)
-        self.alertout = os.fdopen(alertpipe[1], 'w', 0)
+        # NOTE(ivasilevskaya) python 3 doesn't allow unbuffered I/O. Will get
+        # around this constraint by using binary mode.
+        self.alertin = os.fdopen(alertpipe[0], 'rb', 0)
+        self.alertout = os.fdopen(alertpipe[1], 'wb', 0)
 
     def get_nowait(self, *args, **kwargs):
         try:
@@ -51,41 +53,65 @@ class TransactionQueue(Queue.Queue, object):
 
 
 class Connection(object):
-    def __init__(self, connection, timeout, schema_name):
+    def __init__(self, connection, timeout, schema_name, idl_class=None):
         self.idl = None
         self.connection = connection
         self.timeout = timeout
         self.txns = TransactionQueue(1)
         self.lock = threading.Lock()
         self.schema_name = schema_name
+        self.idl_class = idl_class or idl.Idl
+        self._schema_filter = None
 
-    def start(self):
+    def start(self, table_name_list=None):
+        """
+        :param table_name_list: A list of table names for schema_helper to
+                register. When this parameter is given, schema_helper will only
+                register tables which name are in list. Otherwise,
+                schema_helper will register all tables for given schema_name as
+                default.
+        """
+        self._schema_filter = table_name_list
         with self.lock:
             if self.idl is not None:
                 return
 
-            try:
-                helper = idlutils.get_schema_helper(self.connection,
-                                                    self.schema_name)
-            except Exception:
-                # We may have failed do to set-manager not being called
-                helpers.enable_connection_uri(self.connection)
+            helper = self.get_schema_helper()
+            self.update_schema_helper(helper)
 
-                # There is a small window for a race, so retry up to a second
-                @retrying.retry(wait_exponential_multiplier=10,
-                                stop_max_delay=1000)
-                def do_get_schema_helper():
-                    return idlutils.get_schema_helper(self.connection,
-                                                      self.schema_name)
-                helper = do_get_schema_helper()
-
-            helper.register_all()
-            self.idl = idl.Idl(self.connection, helper)
+            self.idl = self.idl_class(self.connection, helper)
             idlutils.wait_for_change(self.idl, self.timeout)
             self.poller = poller.Poller()
             self.thread = threading.Thread(target=self.run)
             self.thread.setDaemon(True)
             self.thread.start()
+
+    def get_schema_helper(self):
+        """Retrieve the schema helper object from OVSDB"""
+        try:
+            helper = idlutils.get_schema_helper(self.connection,
+                                                self.schema_name)
+        except Exception:
+            # We may have failed do to set-manager not being called
+            helpers.enable_connection_uri(self.connection)
+
+            # There is a small window for a race, so retry up to a second
+            @tenacity.retry(wait=tenacity.wait_exponential(multiplier=0.01),
+                            stop=tenacity.stop_after_delay(1),
+                            reraise=True)
+            def do_get_schema_helper():
+                return idlutils.get_schema_helper(self.connection,
+                                                  self.schema_name)
+            helper = do_get_schema_helper()
+
+        return helper
+
+    def update_schema_helper(self, helper):
+        if self._schema_filter:
+            for table_name in self._schema_filter:
+                helper.register_table(table_name)
+        else:
+            helper.register_all()
 
     def run(self):
         while True:

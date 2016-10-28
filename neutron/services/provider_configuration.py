@@ -17,26 +17,24 @@ import importlib
 import itertools
 import os
 
+from neutron.conf.services import provider_configuration as prov_config
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_log import versionutils
 import stevedore
 
 from neutron._i18n import _, _LW
 from neutron.api.v2 import attributes as attr
-from neutron.common import exceptions as n_exc
 
 LOG = logging.getLogger(__name__)
 
 SERVICE_PROVIDERS = 'neutron.service_providers'
 
-serviceprovider_opts = [
-    cfg.MultiStrOpt('service_provider', default=[],
-                    help=_('Defines providers for advanced services '
-                           'using the format: '
-                           '<service_type>:<name>:<driver>[:default]'))
-]
+# TODO(HenryG): use MovedGlobals to deprecate this.
+serviceprovider_opts = prov_config.serviceprovider_opts
 
-cfg.CONF.register_opts(serviceprovider_opts, 'service_providers')
+prov_config.register_service_provider_opts()
 
 
 class NeutronModule(object):
@@ -50,10 +48,10 @@ class NeutronModule(object):
         }
 
     def _import_or_none(self):
-            try:
-                return importlib.import_module(self.module_name)
-            except ImportError:
-                return None
+        try:
+            return importlib.import_module(self.module_name)
+        except ImportError:
+            return None
 
     def installed(self):
         LOG.debug("NeutronModule installed = %s", self.module_name)
@@ -66,23 +64,17 @@ class NeutronModule(object):
     def ini(self, neutron_dir=None):
         if self.repo['ini'] is None:
             ini_file = cfg.ConfigOpts()
-            ini_file.register_opts(serviceprovider_opts, 'service_providers')
+            prov_config.register_service_provider_opts(ini_file)
 
             if neutron_dir is not None:
                 neutron_dirs = [neutron_dir]
             else:
                 try:
-                    neutron_dirs = cfg.CONF.config_dirs or ['/etc/neutron']
+                    neutron_dirs = cfg.CONF.config_dirs
                 except cfg.NoSuchOptError:
-                    # handle older oslo.config versions (<= 3.8.0) that do not
-                    # support config_dirs property
+                    neutron_dirs = None
+                if not neutron_dirs:
                     neutron_dirs = ['/etc/neutron']
-                    try:
-                        config_dir = cfg.CONF.config_dir
-                        if config_dir:
-                            neutron_dirs = [config_dir]
-                    except cfg.NoSuchOptError:
-                        pass
 
             # load configuration from all matching files to reflect oslo.config
             # behaviour
@@ -124,10 +116,17 @@ class NeutronModule(object):
         if not providers:
             providers = self.ini().service_providers.service_provider
 
+            if providers:
+                versionutils.report_deprecated_feature(
+                    LOG,
+                    _LW('Implicit loading of service providers from '
+                        'neutron_*.conf files is deprecated and will be '
+                        'removed in Ocata release.'))
+
         return providers
 
 
-#global scope function that should be used in service APIs
+# global scope function that should be used in service APIs
 def normalize_provider_name(name):
     return name.lower()
 

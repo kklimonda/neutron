@@ -16,10 +16,12 @@ import hashlib
 import hmac
 
 import httplib2
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import loopingcall
+from oslo_utils import encodeutils
 import six
 import six.moves.urllib.parse as urlparse
 import webob
@@ -28,12 +30,11 @@ from neutron._i18n import _, _LE, _LW
 from neutron.agent.linux import utils as agent_utils
 from neutron.agent.metadata import config
 from neutron.agent import rpc as agent_rpc
+from neutron.common import cache_utils as cache
 from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
-from neutron.common import utils
 from neutron import context
-from neutron.openstack.common.cache import cache
 
 LOG = logging.getLogger(__name__)
 
@@ -74,10 +75,7 @@ class MetadataProxyHandler(object):
 
     def __init__(self, conf):
         self.conf = conf
-        if self.conf.cache_url:
-            self._cache = cache.get_cache(self.conf.cache_url)
-        else:
-            self._cache = False
+        self._cache = cache.get_cache(self.conf)
 
         self.plugin_rpc = MetadataPluginAPI(topics.PLUGIN)
         self.context = context.get_admin_context_without_session()
@@ -111,7 +109,7 @@ class MetadataProxyHandler(object):
         filters = {}
         if router_id:
             filters['device_id'] = [router_id]
-            filters['device_owner'] = n_const.ROUTER_INTERFACE_OWNERS
+            filters['device_owner'] = constants.ROUTER_INTERFACE_OWNERS
         if ip_address:
             filters['fixed_ips'] = {'ip_address': [ip_address]}
         if networks:
@@ -119,13 +117,13 @@ class MetadataProxyHandler(object):
 
         return filters
 
-    @utils.cache_method_results
+    @cache.cache_method_results
     def _get_router_networks(self, router_id):
         """Find all networks connected to given router."""
         internal_ports = self._get_ports_from_server(router_id=router_id)
         return tuple(p['network_id'] for p in internal_ports)
 
-    @utils.cache_method_results
+    @cache.cache_method_results
     def _get_ports_for_remote_address(self, remote_address, networks):
         """Get list of ports that has given ip address and are part of
         given networks.
@@ -223,10 +221,8 @@ class MetadataProxyHandler(object):
 
     def _sign_instance_id(self, instance_id):
         secret = self.conf.metadata_proxy_shared_secret
-        if isinstance(secret, six.text_type):
-            secret = secret.encode('utf-8')
-        if isinstance(instance_id, six.text_type):
-            instance_id = instance_id.encode('utf-8')
+        secret = encodeutils.to_utf8(secret)
+        instance_id = encodeutils.to_utf8(instance_id)
         return hmac.new(secret, instance_id, hashlib.sha256).hexdigest()
 
 
@@ -251,7 +247,7 @@ class UnixDomainMetadataProxy(object):
                 'log_agent_heartbeats': cfg.CONF.AGENT.log_agent_heartbeats,
             },
             'start_flag': True,
-            'agent_type': n_const.AGENT_TYPE_METADATA}
+            'agent_type': constants.AGENT_TYPE_METADATA}
         report_interval = cfg.CONF.AGENT.report_interval
         if report_interval:
             self.heartbeat = loopingcall.FixedIntervalLoopingCall(

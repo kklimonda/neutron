@@ -18,17 +18,23 @@ IPv6-related utilities and helper functions.
 """
 import os
 
+from debtcollector import moves
+from debtcollector import removals
 import netaddr
+from neutron_lib import constants as const
 from oslo_log import log
 
 from neutron._i18n import _, _LI
-from neutron.common import constants
 
 
 LOG = log.getLogger(__name__)
 _IS_IPV6_ENABLED = None
 
 
+@removals.remove(
+    message="use get_ipv6_addr_by_EUI64 from oslo_utils.netutils",
+    version="Newton",
+    removal_version="Ocata")
 def get_ipv6_addr_by_EUI64(prefix, mac):
     # Check if the prefix is IPv4 address
     isIPv4 = netaddr.valid_ipv4(prefix)
@@ -48,7 +54,10 @@ def get_ipv6_addr_by_EUI64(prefix, mac):
                           'EUI-64: %s') % prefix)
 
 
-def is_enabled():
+def is_enabled_and_bind_by_default():
+    """Check if host has the IPv6 support and is configured to bind IPv6
+    address to new interfaces by default.
+    """
     global _IS_IPV6_ENABLED
 
     if _IS_IPV6_ENABLED is None:
@@ -60,13 +69,21 @@ def is_enabled():
         else:
             _IS_IPV6_ENABLED = False
         if not _IS_IPV6_ENABLED:
-            LOG.info(_LI("IPv6 is not enabled on this system."))
+            LOG.info(_LI("IPv6 not present or configured not to bind to new "
+                         "interfaces on this system. Please ensure IPv6 is "
+                         "enabled and /proc/sys/net/ipv6/conf/default/"
+                         "disable_ipv6 is set to 1 to enable IPv6."))
     return _IS_IPV6_ENABLED
+
+
+is_enabled = moves.moved_function(is_enabled_and_bind_by_default,
+                                  'is_enabled', __name__, version='Ocata',
+                                  removal_version='Pike')
 
 
 def is_auto_address_subnet(subnet):
     """Check if subnet is an auto address subnet."""
-    modes = [constants.IPV6_SLAAC, constants.DHCPV6_STATELESS]
+    modes = [const.IPV6_SLAAC, const.DHCPV6_STATELESS]
     return (subnet['ipv6_address_mode'] in modes
             or subnet['ipv6_ra_mode'] in modes)
 
@@ -83,4 +100,4 @@ def is_ipv6_pd_enabled(subnet):
     """Returns True if the subnetpool_id of the given subnet is equal to
        constants.IPV6_PD_POOL_ID
     """
-    return subnet.get('subnetpool_id') == constants.IPV6_PD_POOL_ID
+    return subnet.get('subnetpool_id') == const.IPV6_PD_POOL_ID

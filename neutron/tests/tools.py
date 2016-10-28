@@ -13,21 +13,28 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import importlib
+import copy
 import os
 import platform
 import random
 import string
-import sys
 import time
 import warnings
 
+from debtcollector import moves
 import fixtures
 import mock
+import netaddr
+from neutron_lib import constants
+from neutron_lib.utils import helpers
+from oslo_utils import netutils
 import six
+import unittest2
 
-import neutron
 from neutron.api.v2 import attributes
+from neutron.common import constants as n_const
+from neutron.common import utils
+from neutron.db import common_db_mixin
 
 
 class AttributeMapMemento(fixtures.Fixture):
@@ -114,9 +121,15 @@ class SafeCleanupFixture(fixtures.Fixture):
         self.addCleanup(cleanUp)
 
 
-import unittest
+class CommonDbMixinHooksFixture(fixtures.Fixture):
+    def _setUp(self):
+        self.original_hooks = common_db_mixin.CommonDbMixin._model_query_hooks
+        self.addCleanup(self.restore_hooks)
+        common_db_mixin.CommonDbMixin._model_query_hooks = copy.deepcopy(
+            common_db_mixin.CommonDbMixin._model_query_hooks)
 
-from neutron.common import utils
+    def restore_hooks(self):
+        common_db_mixin.CommonDbMixin._model_query_hooks = self.original_hooks
 
 
 def setup_mock_calls(mocked_call, expected_calls_and_values):
@@ -172,7 +185,7 @@ def fail(msg=None):
     This method is equivalent to TestCase.fail without requiring a
     testcase instance (usefully for reducing coupling).
     """
-    raise unittest.TestCase.failureException(msg)
+    raise unittest2.TestCase.failureException(msg)
 
 
 class UnorderedList(list):
@@ -181,45 +194,19 @@ class UnorderedList(list):
     def __eq__(self, other):
         if not isinstance(other, list):
             return False
-        return (sorted(self, key=utils.safe_sort_key) ==
-                sorted(other, key=utils.safe_sort_key))
+        return (sorted(self, key=helpers.safe_sort_key) ==
+                sorted(other, key=helpers.safe_sort_key))
 
     def __neq__(self, other):
         return not self == other
 
 
-def import_modules_recursively(topdir):
-    '''Import and return all modules below the topdir directory.'''
-    modules = []
-    for root, dirs, files in os.walk(topdir):
-        for file_ in files:
-            if file_[-3:] != '.py':
-                continue
-
-            module = file_[:-3]
-            if module == '__init__':
-                continue
-
-            import_base = root.replace('/', '.')
-
-            # NOTE(ihrachys): in Python3, or when we are not located in the
-            # directory containing neutron code, __file__ is absolute, so we
-            # should truncate it to exclude PYTHONPATH prefix
-            prefixlen = len(os.path.dirname(neutron.__file__))
-            import_base = 'neutron' + import_base[prefixlen:]
-
-            module = '.'.join([import_base, module])
-            if module not in sys.modules:
-                importlib.import_module(module)
-            modules.append(module)
-
-        for dir_ in dirs:
-            modules.extend(import_modules_recursively(dir_))
-    return modules
-
-
 def get_random_string(n=10):
     return ''.join(random.choice(string.ascii_lowercase) for _ in range(n))
+
+
+def get_random_string_list(i=3, n=5):
+    return [get_random_string(n) for _ in range(0, i)]
 
 
 def get_random_boolean():
@@ -230,12 +217,27 @@ def get_random_integer(range_begin=0, range_end=1000):
     return random.randint(range_begin, range_end)
 
 
+def get_random_prefixlen(version=4):
+    maxlen = constants.IPv4_BITS
+    if version == 6:
+        maxlen = constants.IPv6_BITS
+    return random.randint(0, maxlen)
+
+
+def get_random_port():
+    return random.randint(n_const.PORT_RANGE_MIN, n_const.PORT_RANGE_MAX)
+
+
+def get_random_ip_version():
+    return random.choice(n_const.IP_ALLOWED_VERSIONS)
+
+
 def get_random_cidr(version=4):
     if version == 4:
         return '10.%d.%d.0/%d' % (random.randint(3, 254),
                                   random.randint(3, 254),
                                   24)
-    return '2001:db8:%x::/&d' % (random.getrandbits(16), 64)
+    return '2001:db8:%x::/%d' % (random.getrandbits(16), 64)
 
 
 def get_random_mac():
@@ -245,6 +247,38 @@ def get_random_mac():
         random.randint(0x00, 0xff),
         random.randint(0x00, 0xff)]
     return ':'.join(map(lambda x: "%02x" % x, mac))
+
+
+def get_random_EUI():
+    return netaddr.EUI(get_random_mac())
+
+
+def get_random_ip_network(version=4):
+    return netaddr.IPNetwork(get_random_cidr(version=version))
+
+
+def get_random_ip_address(version=4):
+    if version == 4:
+        ip_string = '10.%d.%d.%d' % (random.randint(3, 254),
+                                     random.randint(3, 254),
+                                     random.randint(3, 254))
+        return netaddr.IPAddress(ip_string)
+    else:
+        ip = netutils.get_ipv6_addr_by_EUI64('2001:db8::/64',
+                                             get_random_mac())
+        return ip
+
+
+def get_random_flow_direction():
+    return random.choice(n_const.VALID_DIRECTIONS)
+
+
+def get_random_ether_type():
+    return random.choice(n_const.VALID_ETHERTYPES)
+
+
+def get_random_ip_protocol():
+    return random.choice(list(constants.IP_PROTOCOL_MAP.keys()))
 
 
 def is_bsd():
@@ -266,3 +300,12 @@ def reset_random_seed():
     # at the same time get the same values from RNG
     seed = time.time() + os.getpid()
     random.seed(seed)
+
+
+def get_random_ipv6_mode():
+    return random.choice(constants.IPV6_MODES)
+
+
+import_modules_recursively = moves.moved_function(
+    utils.import_modules_recursively, 'import_modules_recursively', __name__,
+    version='Newton', removal_version='Ocata')

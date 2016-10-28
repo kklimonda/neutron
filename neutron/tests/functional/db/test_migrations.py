@@ -12,26 +12,52 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import collections
+
+from alembic.ddl import base as alembic_ddl
 from alembic import script as alembic_script
 from contextlib import contextmanager
 from oslo_config import cfg
 from oslo_config import fixture as config_fixture
-from oslo_db.sqlalchemy import test_base
 from oslo_db.sqlalchemy import test_migrations
+from oslotest import base as oslotest_base
 import six
 import sqlalchemy
 from sqlalchemy import event
-import sqlalchemy.types as types
+from sqlalchemy.sql import ddl as sqla_ddl
+import subprocess
 
-import neutron.db.migration as migration_help
 from neutron.db.migration.alembic_migrations import external
 from neutron.db.migration import cli as migration
 from neutron.db.migration.models import head as head_models
-from neutron.tests.common import base
+from neutron.tests import base as test_base
+from neutron.tests.unit import testlib_api
 
-cfg.CONF.import_opt('core_plugin', 'neutron.common.config')
+cfg.CONF.import_opt('core_plugin', 'neutron.conf.common')
 
-CORE_PLUGIN = 'neutron.plugins.ml2.plugin.Ml2Plugin'
+CREATION_OPERATIONS = {
+    'sqla': (sqla_ddl.CreateIndex,
+             sqla_ddl.CreateTable,
+             sqla_ddl.CreateColumn,
+             ),
+    'alembic': (alembic_ddl.AddColumn,
+                )
+}
+
+DROP_OPERATIONS = {
+    'sqla': (sqla_ddl.DropConstraint,
+             sqla_ddl.DropIndex,
+             sqla_ddl.DropTable,
+             ),
+    'alembic': (alembic_ddl.DropColumn,
+                )
+}
+
+
+def upgrade(engine, alembic_config, branch_name='heads'):
+    cfg.CONF.set_override('connection', engine.url, group='database')
+    migration.do_alembic_command(alembic_config, 'upgrade',
+                                 branch_name)
 
 
 class _TestModelsMigrations(test_migrations.ModelsMigrationsSync):
@@ -97,18 +123,27 @@ class _TestModelsMigrations(test_migrations.ModelsMigrationsSync):
         - existing correct column parameters,
         - right value,
         - wrong value.
+
+    This class also contains tests for branches, like that correct operations
+    are used in contract and expand branches.
+
     '''
+
+    BUILD_SCHEMA = False
+    TIMEOUT_SCALING_FACTOR = 4
 
     def setUp(self):
         super(_TestModelsMigrations, self).setUp()
         self.cfg = self.useFixture(config_fixture.Config())
-        self.cfg.config(core_plugin=CORE_PLUGIN)
+        self.cfg.config(core_plugin='ml2')
         self.alembic_config = migration.get_neutron_config()
         self.alembic_config.neutron_config = cfg.CONF
 
+        # Migration tests can take a long time
+        self.useFixture(test_base.Timeout(scaling=self.TIMEOUT_SCALING_FACTOR))
+
     def db_sync(self, engine):
-        cfg.CONF.set_override('connection', engine.url, group='database')
-        migration.do_alembic_command(self.alembic_config, 'upgrade', 'heads')
+        upgrade(engine, self.alembic_config)
 
     def get_engine(self):
         return self.engine
@@ -126,24 +161,6 @@ class _TestModelsMigrations(test_migrations.ModelsMigrationsSync):
 
     def filter_metadata_diff(self, diff):
         return list(filter(self.remove_unrelated_errors, diff))
-
-    # TODO(akamyshikova): remove this method as soon as comparison with Variant
-    # will be implemented in oslo.db or alembic
-    def compare_type(self, ctxt, insp_col, meta_col, insp_type, meta_type):
-        if isinstance(meta_type, types.Variant):
-            orig_type = meta_col.type
-            meta_col.type = meta_type.impl
-            try:
-                return self.compare_type(ctxt, insp_col, meta_col, insp_type,
-                                         meta_type.impl)
-            finally:
-                meta_col.type = orig_type
-        else:
-            ret = super(_TestModelsMigrations, self).compare_type(
-                ctxt, insp_col, meta_col, insp_type, meta_type)
-            if ret is not None:
-                return ret
-            return ctxt.impl.compare_type(insp_col, meta_col)
 
     # Remove some difference that are not mistakes just specific of
     # dialects, etc
@@ -170,9 +187,18 @@ class _TestModelsMigrations(test_migrations.ModelsMigrationsSync):
                         return False
         return True
 
+    def test_upgrade_expand_branch(self):
+        # Verify that "command neutron-db-manage upgrade --expand" works
+        #  without errors. Check this for both MySQL and PostgreSQL.
+        upgrade(self.engine, self.alembic_config,
+                branch_name='%s@head' % migration.EXPAND_BRANCH)
 
-class TestModelsMigrationsMysql(_TestModelsMigrations,
-                                base.MySQLTestCase):
+    def test_upgrade_contract_branch(self):
+        # Verify that "command neutron-db-manage upgrade --contract" works
+        # without errors. Check this for both MySQL and PostgreSQL.
+        upgrade(self.engine, self.alembic_config,
+                branch_name='%s@head' % migration.CONTRACT_BRANCH)
+
     @contextmanager
     def _listener(self, engine, listener_func):
         try:
@@ -182,68 +208,87 @@ class TestModelsMigrationsMysql(_TestModelsMigrations,
             event.remove(engine, 'before_execute',
                          listener_func)
 
-    # There is no use to run this against both dialects, so add this test just
-    # for MySQL tests
-    def test_external_tables_not_changed(self):
-
-        def block_external_tables(conn, clauseelement, multiparams, params):
-            if isinstance(clauseelement, sqlalchemy.sql.selectable.Select):
-                return
-
-            if (isinstance(clauseelement, six.string_types) and
-                    any(name in clauseelement for name in external.TABLES)):
-                self.fail("External table referenced by neutron core "
-                          "migration.")
-
-            if hasattr(clauseelement, 'element'):
-                element = clauseelement.element
-                if (element.name in external.TABLES or
-                        (hasattr(clauseelement, 'table') and
-                            element.table.name in external.TABLES)):
-                    # Table 'nsxv_vdr_dhcp_bindings' was created in liberty,
-                    # before NSXV has moved to separate repo.
-                    if ((isinstance(clauseelement,
-                                    sqlalchemy.sql.ddl.CreateTable) and
-                            element.name == 'nsxv_vdr_dhcp_bindings')):
-                        return
-                    self.fail("External table referenced by neutron core "
-                              "migration.")
-
-        engine = self.get_engine()
-        cfg.CONF.set_override('connection', engine.url, group='database')
-        with engine.begin() as connection:
-            self.alembic_config.attributes['connection'] = connection
-            migration.do_alembic_command(self.alembic_config, 'upgrade',
-                                         'kilo')
-
-            with self._listener(engine,
-                                block_external_tables):
-                migration.do_alembic_command(self.alembic_config, 'upgrade',
-                                             'heads')
-
     def test_branches(self):
 
+        drop_exceptions = collections.defaultdict(list)
+        creation_exceptions = collections.defaultdict(list)
+
+        def find_migration_exceptions():
+            # Due to some misunderstandings and some conscious decisions,
+            # there may be some expand migrations which drop elements and
+            # some contract migrations which create elements. These excepted
+            # elements must be returned by a method in the script itself.
+            # The names of the method must be 'contract_creation_exceptions'
+            # or 'expand_drop_exceptions'. The methods must have a docstring
+            # explaining the reason for the exception.
+            #
+            # Here we build lists of the excepted elements and verify that
+            # they are documented.
+            script = alembic_script.ScriptDirectory.from_config(
+                self.alembic_config)
+            for m in list(script.walk_revisions(base='base', head='heads')):
+                branches = m.branch_labels or []
+                if migration.CONTRACT_BRANCH in branches:
+                    method_name = 'contract_creation_exceptions'
+                    exceptions_dict = creation_exceptions
+                elif migration.EXPAND_BRANCH in branches:
+                    method_name = 'expand_drop_exceptions'
+                    exceptions_dict = drop_exceptions
+                else:
+                    continue
+                get_excepted_elements = getattr(m.module, method_name, None)
+                if not get_excepted_elements:
+                    continue
+                explanation = getattr(get_excepted_elements, '__doc__', "")
+                if len(explanation) < 1:
+                    self.fail("%s() requires docstring with explanation" %
+                              '.'.join([m.module.__name__,
+                                        get_excepted_elements.__name__]))
+                for sa_type, elements in get_excepted_elements().items():
+                    exceptions_dict[sa_type].extend(elements)
+
+        def is_excepted_sqla(clauseelement, exceptions):
+            """Identify excepted operations that are allowed for the branch."""
+            element = clauseelement.element
+            element_name = element.name
+            if isinstance(element, sqlalchemy.Index):
+                element_name = element.table.name
+            for sa_type_, excepted_names in exceptions.items():
+                if isinstance(element, sa_type_):
+                    if element_name in excepted_names:
+                        return True
+
+        def is_excepted_alembic(clauseelement, exceptions):
+            """Identify excepted operations that are allowed for the branch."""
+            # For alembic the clause is AddColumn or DropColumn
+            column = clauseelement.column.name
+            table = clauseelement.column.table.name
+            element_name = '.'.join([table, column])
+            for alembic_type, excepted_names in exceptions.items():
+                if alembic_type == sqlalchemy.Column:
+                    if element_name in excepted_names:
+                        return True
+
+        def is_allowed(clauseelement, exceptions, disallowed_ops):
+            if (isinstance(clauseelement, disallowed_ops['sqla']) and
+                    hasattr(clauseelement, 'element')):
+                return is_excepted_sqla(clauseelement, exceptions)
+            if isinstance(clauseelement, disallowed_ops['alembic']):
+                return is_excepted_alembic(clauseelement, exceptions)
+            return True
+
         def check_expand_branch(conn, clauseelement, multiparams, params):
-            if isinstance(clauseelement, migration_help.DROP_OPERATIONS):
-                self.fail("Migration from expand branch contains drop command")
+            if not is_allowed(clauseelement, drop_exceptions, DROP_OPERATIONS):
+                self.fail("Migration in expand branch contains drop command")
 
         def check_contract_branch(conn, clauseelement, multiparams, params):
-            if isinstance(clauseelement, migration_help.CREATION_OPERATIONS):
-                # Skip tables that were created by mistake in contract branch
-                if hasattr(clauseelement, 'element'):
-                    element = clauseelement.element
-                    if any([
-                        isinstance(element, sqlalchemy.Table) and
-                        element.name in ['ml2_geneve_allocations',
-                                         'ml2_geneve_endpoints'],
-                        isinstance(element, sqlalchemy.Index) and
-                        element.table.name == 'ml2_geneve_allocations'
-                    ]):
-                        return
-                self.fail("Migration from contract branch contains create "
+            if not is_allowed(clauseelement, creation_exceptions,
+                              CREATION_OPERATIONS):
+                self.fail("Migration in contract branch contains create "
                           "command")
 
-        engine = self.get_engine()
+        find_migration_exceptions()
+        engine = self.engine
         cfg.CONF.set_override('connection', engine.url, group='database')
         with engine.begin() as connection:
             self.alembic_config.attributes['connection'] = connection
@@ -260,23 +305,6 @@ class TestModelsMigrationsMysql(_TestModelsMigrations,
                     self.alembic_config, 'upgrade',
                     '%s@head' % migration.CONTRACT_BRANCH)
 
-    def test_check_mysql_engine(self):
-        engine = self.get_engine()
-        cfg.CONF.set_override('connection', engine.url, group='database')
-        with engine.begin() as connection:
-            self.alembic_config.attributes['connection'] = connection
-            migration.do_alembic_command(self.alembic_config, 'upgrade',
-                                         'heads')
-            insp = sqlalchemy.engine.reflection.Inspector.from_engine(engine)
-            # Test that table creation on MySQL only builds InnoDB tables
-            tables = insp.get_table_names()
-            self.assertTrue(len(tables) > 0,
-                            "No tables found. Wrong schema?")
-            res = [table for table in tables if
-                   insp.get_table_options(table)['mysql_engine'] != 'InnoDB'
-                   and table != 'alembic_version']
-            self.assertEqual(0, len(res), "%s non InnoDB tables created" % res)
-
     def _test_has_offline_migrations(self, revision, expected):
         engine = self.get_engine()
         cfg.CONF.set_override('connection', engine.url, group='database')
@@ -292,17 +320,45 @@ class TestModelsMigrationsMysql(_TestModelsMigrations,
         self._test_has_offline_migrations('heads', False)
 
 
-class TestModelsMigrationsPsql(_TestModelsMigrations,
-                               base.PostgreSQLTestCase):
+class TestModelsMigrationsMysql(testlib_api.MySQLTestCaseMixin,
+                                _TestModelsMigrations,
+                                testlib_api.SqlTestCaseLight):
+
+    def test_check_mysql_engine(self):
+        engine = self.get_engine()
+        cfg.CONF.set_override('connection', engine.url, group='database')
+        with engine.begin() as connection:
+            self.alembic_config.attributes['connection'] = connection
+            migration.do_alembic_command(self.alembic_config, 'upgrade',
+                                         'heads')
+            insp = sqlalchemy.engine.reflection.Inspector.from_engine(engine)
+            # Test that table creation on MySQL only builds InnoDB tables
+            tables = insp.get_table_names()
+            self.assertGreater(len(tables), 0,
+                               "No tables found. Wrong schema?")
+            res = [table for table in tables if
+                   insp.get_table_options(table)['mysql_engine'] != 'InnoDB'
+                   and table != 'alembic_version']
+            self.assertEqual(0, len(res), "%s non InnoDB tables created" % res)
+
+
+class TestModelsMigrationsPsql(testlib_api.PostgreSQLTestCaseMixin,
+                               _TestModelsMigrations,
+                               testlib_api.SqlTestCaseLight):
     pass
 
 
-class TestSanityCheck(test_base.DbTestCase):
+class TestSanityCheck(testlib_api.SqlTestCaseLight):
+    BUILD_SCHEMA = False
 
     def setUp(self):
         super(TestSanityCheck, self).setUp()
         self.alembic_config = migration.get_neutron_config()
         self.alembic_config.neutron_config = cfg.CONF
+
+    def _drop_table(self, table):
+        with self.engine.begin() as conn:
+            table.drop(conn)
 
     def test_check_sanity_1df244e556f5(self):
         ha_router_agent_port_bindings = sqlalchemy.Table(
@@ -313,6 +369,7 @@ class TestSanityCheck(test_base.DbTestCase):
 
         with self.engine.connect() as conn:
             ha_router_agent_port_bindings.create(conn)
+            self.addCleanup(self._drop_table, ha_router_agent_port_bindings)
             conn.execute(ha_router_agent_port_bindings.insert(), [
                 {'port_id': '1234', 'router_id': '12345',
                  'l3_agent_id': '123'},
@@ -325,11 +382,80 @@ class TestSanityCheck(test_base.DbTestCase):
             self.assertRaises(script.DuplicateL3HARouterAgentPortBinding,
                               script.check_sanity, conn)
 
+    def test_check_sanity_030a959ceafa(self):
+        routerports = sqlalchemy.Table(
+            'routerports', sqlalchemy.MetaData(),
+            sqlalchemy.Column('router_id', sqlalchemy.String(36)),
+            sqlalchemy.Column('port_id', sqlalchemy.String(36)),
+            sqlalchemy.Column('port_type', sqlalchemy.String(255)))
 
-class TestWalkMigrations(test_base.DbTestCase):
+        with self.engine.connect() as conn:
+            routerports.create(conn)
+            self.addCleanup(self._drop_table, routerports)
+            conn.execute(routerports.insert(), [
+                {'router_id': '1234', 'port_id': '12345',
+                 'port_type': '123'},
+                {'router_id': '12343', 'port_id': '12345',
+                 'port_type': '1232'}
+            ])
+            script_dir = alembic_script.ScriptDirectory.from_config(
+                self.alembic_config)
+            script = script_dir.get_revision("030a959ceafa").module
+            self.assertRaises(script.DuplicatePortRecordinRouterPortdatabase,
+                              script.check_sanity, conn)
+
+    def test_check_sanity_6b461a21bcfc_dup_on_fixed_ip(self):
+        floatingips = sqlalchemy.Table(
+            'floatingips', sqlalchemy.MetaData(),
+            sqlalchemy.Column('floating_network_id', sqlalchemy.String(36)),
+            sqlalchemy.Column('fixed_port_id', sqlalchemy.String(36)),
+            sqlalchemy.Column('fixed_ip_address', sqlalchemy.String(64)))
+
+        with self.engine.connect() as conn:
+            floatingips.create(conn)
+            self.addCleanup(self._drop_table, floatingips)
+            conn.execute(floatingips.insert(), [
+                {'floating_network_id': '12345',
+                 'fixed_port_id': '1234567',
+                 'fixed_ip_address': '12345678'},
+                {'floating_network_id': '12345',
+                 'fixed_port_id': '1234567',
+                 'fixed_ip_address': '12345678'}
+            ])
+            script_dir = alembic_script.ScriptDirectory.from_config(
+                self.alembic_config)
+            script = script_dir.get_revision("6b461a21bcfc").module
+            self.assertRaises(script.DuplicateFloatingIPforOneFixedIP,
+                              script.check_sanity, conn)
+
+    def test_check_sanity_6b461a21bcfc_dup_on_no_fixed_ip(self):
+        floatingips = sqlalchemy.Table(
+            'floatingips', sqlalchemy.MetaData(),
+            sqlalchemy.Column('floating_network_id', sqlalchemy.String(36)),
+            sqlalchemy.Column('fixed_port_id', sqlalchemy.String(36)),
+            sqlalchemy.Column('fixed_ip_address', sqlalchemy.String(64)))
+
+        with self.engine.connect() as conn:
+            floatingips.create(conn)
+            self.addCleanup(self._drop_table, floatingips)
+            conn.execute(floatingips.insert(), [
+                {'floating_network_id': '12345',
+                 'fixed_port_id': '1234567',
+                 'fixed_ip_address': None},
+                {'floating_network_id': '12345',
+                 'fixed_port_id': '1234567',
+                 'fixed_ip_address': None}
+            ])
+            script_dir = alembic_script.ScriptDirectory.from_config(
+                self.alembic_config)
+            script = script_dir.get_revision("6b461a21bcfc").module
+            self.assertIsNone(script.check_sanity(conn))
+
+
+class TestWalkDowngrade(oslotest_base.BaseTestCase):
 
     def setUp(self):
-        super(TestWalkMigrations, self).setUp()
+        super(TestWalkDowngrade, self).setUp()
         self.alembic_config = migration.get_neutron_config()
         self.alembic_config.neutron_config = cfg.CONF
 
@@ -345,3 +471,77 @@ class TestWalkMigrations(test_base.DbTestCase):
 
         if failed_revisions:
             self.fail('Migrations %s have downgrade' % failed_revisions)
+            return True
+
+
+class _TestWalkMigrations(object):
+    '''This will add framework for testing schema migarations
+       for different backends.
+
+    '''
+
+    BUILD_SCHEMA = False
+
+    def execute_cmd(self, cmd=None):
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, shell=True)
+        output = proc.communicate()[0]
+        self.assertEqual(0, proc.returncode, 'Command failed with '
+                         'output:\n%s' % output)
+
+    def _get_alembic_config(self, uri):
+        db_config = migration.get_neutron_config()
+        self.script_dir = alembic_script.ScriptDirectory.from_config(db_config)
+        db_config.neutron_config = cfg.CONF
+        db_config.neutron_config.set_override('connection',
+                                              six.text_type(uri),
+                                              group='database')
+        return db_config
+
+    def _revisions(self):
+        """Provides revisions and its parent revisions.
+
+        :return: List of tuples. Every tuple contains revision and its parent
+        revision.
+        """
+        revisions = list(self.script_dir.walk_revisions("base", "heads"))
+        revisions = list(reversed(revisions))
+
+        for rev in revisions:
+            # Destination, current
+            yield rev.revision, rev.down_revision
+
+    def _migrate_up(self, config, engine, dest, curr, with_data=False):
+        if with_data:
+            data = None
+            pre_upgrade = getattr(
+                self, "_pre_upgrade_%s" % dest, None)
+            if pre_upgrade:
+                data = pre_upgrade(engine)
+        migration.do_alembic_command(config, 'upgrade', dest)
+        if with_data:
+            check = getattr(self, "_check_%s" % dest, None)
+            if check and data:
+                check(engine, data)
+
+    def test_walk_versions(self):
+        """Test migrations ability to upgrade and downgrade.
+
+        """
+        engine = self.engine
+        config = self._get_alembic_config(engine.url)
+        revisions = self._revisions()
+        for dest, curr in revisions:
+            self._migrate_up(config, engine, dest, curr, with_data=True)
+
+
+class TestWalkMigrationsMysql(testlib_api.MySQLTestCaseMixin,
+                              _TestWalkMigrations,
+                              testlib_api.SqlTestCaseLight):
+    pass
+
+
+class TestWalkMigrationsPsql(testlib_api.PostgreSQLTestCaseMixin,
+                             _TestWalkMigrations,
+                             testlib_api.SqlTestCaseLight):
+    pass

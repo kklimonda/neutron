@@ -42,8 +42,10 @@ EXT_TO_SERVICE_MAPPING = {
 DEFAULT_SERVICE_PLUGINS = {
     'auto_allocate': 'auto-allocated-topology',
     'tag': 'tag',
-    'timestamp_core': 'timestamp_core',
-    'network_ip_availability': 'network-ip-availability'
+    'timestamp': 'timestamp',
+    'network_ip_availability': 'network-ip-availability',
+    'flavors': 'flavors',
+    'revisions': 'revisions',
 }
 
 # Service operation status constants
@@ -90,7 +92,13 @@ MIN_VXLAN_VNI = 1
 MAX_VXLAN_VNI = 2 ** 24 - 1
 VXLAN_UDP_PORT = 4789
 
-# Network Type MTU overhead
-GENEVE_ENCAP_MIN_OVERHEAD = 50
-GRE_ENCAP_OVERHEAD = 42
-VXLAN_ENCAP_OVERHEAD = 50
+# Overlay (tunnel) protocol overhead
+GENEVE_ENCAP_MIN_OVERHEAD = 30
+GRE_ENCAP_OVERHEAD = 22
+VXLAN_ENCAP_OVERHEAD = 30
+
+# IP header length
+IP_HEADER_LENGTH = {
+    4: 20,
+    6: 40,
+}

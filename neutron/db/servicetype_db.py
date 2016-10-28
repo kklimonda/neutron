@@ -16,21 +16,14 @@
 from itertools import chain
 
 from oslo_log import log as logging
-import sqlalchemy as sa
 
-from neutron.api.v2 import attributes as attr
-from neutron.db import model_base
+from neutron.common import _deprecate
+from neutron.db.models import servicetype as st_model
 from neutron.services import provider_configuration as pconf
 
 LOG = logging.getLogger(__name__)
 
-
-class ProviderResourceAssociation(model_base.BASEV2):
-    provider_name = sa.Column(sa.String(attr.NAME_MAX_LEN),
-                              nullable=False, primary_key=True)
-    # should be manually deleted on resource deletion
-    resource_id = sa.Column(sa.String(36), nullable=False, primary_key=True,
-                            unique=True)
+_deprecate._moved_global('ProviderResourceAssociation', new_module=st_model)
 
 
 class ServiceTypeManager(object):
@@ -78,6 +71,13 @@ class ServiceTypeManager(object):
             )
         return providers[0]
 
+    def get_provider_names_by_resource_ids(self, context, resource_ids):
+        query = (
+            context.session.query(st_model.ProviderResourceAssociation).
+            filter(st_model.ProviderResourceAssociation.resource_id.in_(
+                resource_ids)))
+        return {rec.resource_id: rec.provider_name for rec in query}
+
     def add_resource_association(self, context, service_type, provider_name,
                                  resource_id):
         r = self.get_service_providers(context,
@@ -90,8 +90,8 @@ class ServiceTypeManager(object):
             # we don't actually need service type for association.
             # resource_id is unique and belongs to specific service
             # which knows its type
-            assoc = ProviderResourceAssociation(provider_name=provider_name,
-                                                resource_id=resource_id)
+            assoc = st_model.ProviderResourceAssociation(
+                provider_name=provider_name, resource_id=resource_id)
             context.session.add(assoc)
         # NOTE(blogan): the ProviderResourceAssociation relationship will not
         # be populated if a resource was created before this.  The expire_all
@@ -106,7 +106,11 @@ class ServiceTypeManager(object):
         if not resource_ids:
             return
         with context.session.begin(subtransactions=True):
-            (context.session.query(ProviderResourceAssociation).
+            (context.session.query(st_model.ProviderResourceAssociation).
              filter(
-                 ProviderResourceAssociation.resource_id.in_(resource_ids)).
+                 st_model.ProviderResourceAssociation.resource_id.in_(
+                     resource_ids)).
              delete(synchronize_session='fetch'))
+
+
+_deprecate._MovedGlobals()

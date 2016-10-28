@@ -15,18 +15,21 @@
 
 
 import collections
-import heapq
 
+from neutron_lib import constants
+from operator import itemgetter
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from sqlalchemy import sql
 
 from neutron._i18n import _LI, _LW
-from neutron.common import constants
-from neutron.db import agents_db
-from neutron.db import agentschedulers_db
+from neutron.agent.common import utils as agent_utils
+from neutron.db import api as db_api
+from neutron.db.models import agent as agent_model
+from neutron.db.network_dhcp_agent_binding import models as ndab_model
 from neutron.extensions import availability_zone as az_ext
+from neutron.objects import network
 from neutron.scheduler import base_resource_filter
 from neutron.scheduler import base_scheduler
 
@@ -43,30 +46,47 @@ class AutoScheduler(object):
         # a list of (agent, net_ids) tuples
         bindings_to_add = []
         with context.session.begin(subtransactions=True):
-            fields = ['network_id', 'enable_dhcp']
+            fields = ['network_id', 'enable_dhcp', 'segment_id']
             subnets = plugin.get_subnets(context, fields=fields)
-            net_ids = set(s['network_id'] for s in subnets
-                          if s['enable_dhcp'])
+            net_ids = {}
+            net_segment_ids = collections.defaultdict(set)
+            for s in subnets:
+                if s['enable_dhcp']:
+                    net_segment_ids[s['network_id']].add(s.get('segment_id'))
+            for network_id, segment_ids in net_segment_ids.items():
+                is_routed_network = any(segment_ids)
+                net_ids[network_id] = is_routed_network
             if not net_ids:
                 LOG.debug('No non-hosted networks')
                 return False
-            query = context.session.query(agents_db.Agent)
-            query = query.filter(agents_db.Agent.agent_type ==
-                                 constants.AGENT_TYPE_DHCP,
-                                 agents_db.Agent.host == host,
-                                 agents_db.Agent.admin_state_up == sql.true())
+            query = context.session.query(agent_model.Agent)
+            query = query.filter(
+                agent_model.Agent.agent_type == constants.AGENT_TYPE_DHCP,
+                agent_model.Agent.host == host,
+                agent_model.Agent.admin_state_up == sql.true())
             dhcp_agents = query.all()
+
+            segment_host_mapping = network.SegmentHostMapping.get_objects(
+                context, host=host)
+
+            segments_on_host = {s.segment_id for s in segment_host_mapping}
+
             for dhcp_agent in dhcp_agents:
-                if agents_db.AgentDbMixin.is_agent_down(
+                if agent_utils.is_agent_down(
                     dhcp_agent.heartbeat_timestamp):
                     LOG.warning(_LW('DHCP agent %s is not active'),
                                 dhcp_agent.id)
                     continue
-                for net_id in net_ids:
+                for net_id, is_routed_network in net_ids.items():
                     agents = plugin.get_dhcp_agents_hosting_networks(
                         context, [net_id])
-                    if len(agents) >= agents_per_network:
-                        continue
+                    segments_on_network = net_segment_ids[net_id]
+                    if is_routed_network:
+                        if len(segments_on_network & segments_on_host) == 0:
+                            continue
+                    else:
+                        if len(agents) >= agents_per_network:
+                            continue
                     if any(dhcp_agent.id == agent.id for agent in agents):
                         continue
                     net = plugin.get_network(context, net_id)
@@ -103,11 +123,27 @@ class AZAwareWeightScheduler(WeightScheduler):
            If the network has multiple AZs, agents are scheduled as
            follows:
            - select AZ with least agents scheduled for the network
-             (nondeterministic for AZs with same amount of agents scheduled)
+           - for AZs with same amount of scheduled agents, the AZ which
+             contains least weight agent will be used first
            - choose agent in the AZ with WeightScheduler
         """
+        # The dict to record the agents in each AZ, the record will be sorted
+        # according to the weight of agent. So that the agent with less weight
+        # will be used first.
         hostable_az_agents = collections.defaultdict(list)
-        num_az_agents = {}
+        # The dict to record the number of agents in each AZ. When the number
+        # of agents in each AZ is the same and num_agents_needed is less than
+        # the number of AZs, we want to select agents with less weight.
+        # Use an OrderedDict here, so that the AZ with least weight agent
+        # will be recorded first in the case described above. And, as a result,
+        # the agent with least weight will be used first.
+        num_az_agents = collections.OrderedDict()
+        # resource_hostable_agents should be a list with agents in the order of
+        # their weight.
+        resource_hostable_agents = (
+            super(AZAwareWeightScheduler, self).select(
+                plugin, context, resource_hostable_agents,
+                resource_hosted_agents, len(resource_hostable_agents)))
         for agent in resource_hostable_agents:
             az_agent = agent['availability_zone']
             hostable_az_agents[az_agent].append(agent)
@@ -120,17 +156,19 @@ class AZAwareWeightScheduler(WeightScheduler):
             if az_agent in num_az_agents:
                 num_az_agents[az_agent] += 1
 
-        num_az_q = [(value, key) for key, value in num_az_agents.items()]
-        heapq.heapify(num_az_q)
         chosen_agents = []
         while num_agents_needed > 0:
-            num, select_az = heapq.heappop(num_az_q)
-            select_agent = super(AZAwareWeightScheduler, self).select(
-                plugin, context, hostable_az_agents[select_az], [], 1)
-            chosen_agents.append(select_agent[0])
-            hostable_az_agents[select_az].remove(select_agent[0])
-            if hostable_az_agents[select_az]:
-                heapq.heappush(num_az_q, (num + 1, select_az))
+            # 'min' will stably output the first min value in the list.
+            select_az = min(num_az_agents.items(), key=itemgetter(1))[0]
+            # Select the agent in AZ with least weight.
+            select_agent = hostable_az_agents[select_az][0]
+            chosen_agents.append(select_agent)
+            # Update the AZ-agents records.
+            del hostable_az_agents[select_az][0]
+            if not hostable_az_agents[select_az]:
+                del num_az_agents[select_az]
+            else:
+                num_az_agents[select_az] += 1
             num_agents_needed -= 1
         return chosen_agents
 
@@ -142,21 +180,19 @@ class DhcpFilter(base_resource_filter.BaseResourceFilter):
         # customize the bind logic
         bound_agents = agents[:]
         for agent in agents:
-            context.session.begin(subtransactions=True)
             # saving agent_id to use it after rollback to avoid
             # DetachedInstanceError
             agent_id = agent.id
-            binding = agentschedulers_db.NetworkDhcpAgentBinding()
+            binding = ndab_model.NetworkDhcpAgentBinding()
             binding.dhcp_agent_id = agent_id
             binding.network_id = network_id
             try:
-                context.session.add(binding)
-                # try to actually write the changes and catch integrity
-                # DBDuplicateEntry
-                context.session.commit()
+                with db_api.autonested_transaction(context.session):
+                    context.session.add(binding)
+                    # try to actually write the changes and catch integrity
+                    # DBDuplicateEntry
             except db_exc.DBDuplicateEntry:
                 # it's totally ok, someone just did our job!
-                context.session.rollback()
                 bound_agents.remove(agent)
                 LOG.info(_LI('Agent %s already present'), agent_id)
             LOG.debug('Network %(network_id)s is scheduled to be '
@@ -182,6 +218,18 @@ class DhcpFilter(base_resource_filter.BaseResourceFilter):
                     'hosted_agents': agents_dict['hosted_agents']}
         return agents_dict
 
+    def _filter_agents_with_network_access(self, plugin, context,
+                                           network, hostable_agents):
+        if 'candidate_hosts' in network:
+            hostable_dhcp_hosts = network['candidate_hosts']
+        else:
+            hostable_dhcp_hosts = plugin.filter_hosts_with_network_access(
+                context, network['id'],
+                [agent['host'] for agent in hostable_agents])
+        reachable_agents = [agent for agent in hostable_agents
+                            if agent['host'] in hostable_dhcp_hosts]
+        return reachable_agents
+
     def _get_dhcp_agents_hosting_network(self, plugin, context, network):
         """Return dhcp agents hosting the given network or None if a given
            network is already hosted by enough number of agents.
@@ -191,7 +239,7 @@ class DhcpFilter(base_resource_filter.BaseResourceFilter):
         # subnets whose enable_dhcp is false
         with context.session.begin(subtransactions=True):
             network_hosted_agents = plugin.get_dhcp_agents_hosting_networks(
-                context, [network['id']])
+                context, [network['id']], hosts=network.get('candidate_hosts'))
             if len(network_hosted_agents) >= agents_per_network:
                 LOG.debug('Network %s is already hosted by enough agents.',
                           network['id'])
@@ -235,6 +283,9 @@ class DhcpFilter(base_resource_filter.BaseResourceFilter):
             if agent not in hosted_agents and plugin.is_eligible_agent(
                 context, True, agent)
         ]
+
+        hostable_dhcp_agents = self._filter_agents_with_network_access(
+            plugin, context, network, hostable_dhcp_agents)
 
         if not hostable_dhcp_agents:
             return {'n_agents': 0, 'hostable_agents': [],

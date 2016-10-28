@@ -20,9 +20,27 @@ from oslo_db import exception as db_exc
 
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import config as config
+from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import managers
 from neutron.tests import base
 from neutron.tests.unit.plugins.ml2.drivers import mechanism_test
+
+
+class TestManagers(base.BaseTestCase):
+
+    def test__check_driver_to_bind(self):
+        manager = managers.MechanismManager()
+        bindinglevel = mock.Mock()
+        bindinglevel.driver = 'fake_driver'
+        bindinglevel.segment_id = 'fake_seg_id'
+        binding_levels = [bindinglevel]
+        segments_to_bind = [{api.SEGMENTATION_ID: 'fake_seg_id'}]
+        self.assertFalse(manager._check_driver_to_bind(
+            'fake_driver', segments_to_bind, binding_levels))
+
+        bindinglevel.segment_id = 'fake_seg_id1'
+        self.assertTrue(manager._check_driver_to_bind(
+            'fake_driver', segments_to_bind, binding_levels))
 
 
 class TestMechManager(base.BaseTestCase):

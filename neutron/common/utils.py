@@ -18,179 +18,45 @@
 
 """Utilities and helper functions."""
 
-import collections
-import datetime
 import decimal
 import errno
 import functools
-import hashlib
-import math
-import multiprocessing
+import importlib
 import os
+import os.path
 import random
 import signal
-import socket
 import sys
 import tempfile
 import time
 import uuid
 
-import debtcollector
+from debtcollector import removals
+import eventlet
 from eventlet.green import subprocess
 import netaddr
+from neutron_lib import constants as n_const
+from neutron_lib.utils import helpers
+from neutron_lib.utils import host
+from neutron_lib.utils import net
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import importutils
-from oslo_utils import reflection
 import six
 from stevedore import driver
 
+import neutron
 from neutron._i18n import _, _LE
-from neutron.common import constants as n_const
 from neutron.db import api as db_api
 
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 LOG = logging.getLogger(__name__)
 SYNCHRONIZED_PREFIX = 'neutron-'
-# Unsigned 16 bit MAX.
-MAX_UINT16 = 0xffff
 
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
-
-
-class cache_method_results(object):
-    """This decorator is intended for object methods only."""
-
-    def __init__(self, func):
-        self.func = func
-        functools.update_wrapper(self, func)
-        self._first_call = True
-        self._not_cached = object()
-
-    def _get_from_cache(self, target_self, *args, **kwargs):
-        target_self_cls_name = reflection.get_class_name(target_self,
-                                                         fully_qualified=False)
-        func_name = "%(module)s.%(class)s.%(func_name)s" % {
-            'module': target_self.__module__,
-            'class': target_self_cls_name,
-            'func_name': self.func.__name__,
-        }
-        key = (func_name,) + args
-        if kwargs:
-            key += dict2tuple(kwargs)
-        try:
-            item = target_self._cache.get(key, self._not_cached)
-        except TypeError:
-            LOG.debug("Method %(func_name)s cannot be cached due to "
-                      "unhashable parameters: args: %(args)s, kwargs: "
-                      "%(kwargs)s",
-                      {'func_name': func_name,
-                       'args': args,
-                       'kwargs': kwargs})
-            return self.func(target_self, *args, **kwargs)
-
-        if item is self._not_cached:
-            item = self.func(target_self, *args, **kwargs)
-            target_self._cache.set(key, item, None)
-
-        return item
-
-    def __call__(self, target_self, *args, **kwargs):
-        target_self_cls_name = reflection.get_class_name(target_self,
-                                                         fully_qualified=False)
-        if not hasattr(target_self, '_cache'):
-            raise NotImplementedError(
-                _("Instance of class %(module)s.%(class)s must contain _cache "
-                  "attribute") % {
-                    'module': target_self.__module__,
-                    'class': target_self_cls_name})
-        if not target_self._cache:
-            if self._first_call:
-                LOG.debug("Instance of class %(module)s.%(class)s doesn't "
-                          "contain attribute _cache therefore results "
-                          "cannot be cached for %(func_name)s.",
-                          {'module': target_self.__module__,
-                           'class': target_self_cls_name,
-                           'func_name': self.func.__name__})
-                self._first_call = False
-            return self.func(target_self, *args, **kwargs)
-        return self._get_from_cache(target_self, *args, **kwargs)
-
-    def __get__(self, obj, objtype):
-        return functools.partial(self.__call__, obj)
-
-
-@debtcollector.removals.remove(message="This will removed in the N cycle.")
-def read_cached_file(filename, cache_info, reload_func=None):
-    """Read from a file if it has been modified.
-
-    :param cache_info: dictionary to hold opaque cache.
-    :param reload_func: optional function to be called with data when
-                        file is reloaded due to a modification.
-
-    :returns: data from file
-
-    """
-    mtime = os.path.getmtime(filename)
-    if not cache_info or mtime != cache_info.get('mtime'):
-        LOG.debug("Reloading cached file %s", filename)
-        with open(filename) as fap:
-            cache_info['data'] = fap.read()
-        cache_info['mtime'] = mtime
-        if reload_func:
-            reload_func(cache_info['data'])
-    return cache_info['data']
-
-
-@debtcollector.removals.remove(message="This will removed in the N cycle.")
-def find_config_file(options, config_file):
-    """Return the first config file found.
-
-    We search for the paste config file in the following order:
-    * If --config-file option is used, use that
-    * Search for the configuration files via common cfg directories
-    :retval Full path to config file, or None if no config file found
-    """
-    fix_path = lambda p: os.path.abspath(os.path.expanduser(p))
-    if options.get('config_file'):
-        if os.path.exists(options['config_file']):
-            return fix_path(options['config_file'])
-
-    dir_to_common = os.path.dirname(os.path.abspath(__file__))
-    root = os.path.join(dir_to_common, '..', '..', '..', '..')
-    # Handle standard directory search for the config file
-    config_file_dirs = [fix_path(os.path.join(os.getcwd(), 'etc')),
-                        fix_path(os.path.join('~', '.neutron-venv', 'etc',
-                                              'neutron')),
-                        fix_path('~'),
-                        os.path.join(cfg.CONF.state_path, 'etc'),
-                        os.path.join(cfg.CONF.state_path, 'etc', 'neutron'),
-                        fix_path(os.path.join('~', '.local',
-                                              'etc', 'neutron')),
-                        '/usr/etc/neutron',
-                        '/usr/local/etc/neutron',
-                        '/etc/neutron/',
-                        '/etc']
-
-    if 'plugin' in options:
-        config_file_dirs = [
-            os.path.join(x, 'neutron', 'plugins', options['plugin'])
-            for x in config_file_dirs
-        ]
-
-    if os.path.exists(os.path.join(root, 'plugins')):
-        plugins = [fix_path(os.path.join(root, 'plugins', p, 'etc'))
-                   for p in os.listdir(os.path.join(root, 'plugins'))]
-        plugins = [p for p in plugins if os.path.isdir(p)]
-        config_file_dirs.extend(plugins)
-
-    for cfg_dir in config_file_dirs:
-        cfg_file = os.path.join(cfg_dir, config_file)
-        if os.path.exists(cfg_file):
-            return cfg_file
 
 
 def ensure_dir(dir_path):
@@ -217,98 +83,73 @@ def subprocess_popen(args, stdin=None, stdout=None, stderr=None, shell=False,
                             close_fds=close_fds, env=env)
 
 
+@removals.remove(
+    message="Use parse_mappings from neutron_lib.utils.helpers",
+    version="Ocata",
+    removal_version="Pike")
 def parse_mappings(mapping_list, unique_values=True, unique_keys=True):
-    """Parse a list of mapping strings into a dictionary.
-
-    :param mapping_list: a list of strings of the form '<key>:<value>'
-    :param unique_values: values must be unique if True
-    :param unique_keys: keys must be unique if True, else implies that keys
-    and values are not unique
-    :returns: a dict mapping keys to values or to list of values
-    """
-    mappings = {}
-    for mapping in mapping_list:
-        mapping = mapping.strip()
-        if not mapping:
-            continue
-        split_result = mapping.split(':')
-        if len(split_result) != 2:
-            raise ValueError(_("Invalid mapping: '%s'") % mapping)
-        key = split_result[0].strip()
-        if not key:
-            raise ValueError(_("Missing key in mapping: '%s'") % mapping)
-        value = split_result[1].strip()
-        if not value:
-            raise ValueError(_("Missing value in mapping: '%s'") % mapping)
-        if unique_keys:
-            if key in mappings:
-                raise ValueError(_("Key %(key)s in mapping: '%(mapping)s' not "
-                                   "unique") % {'key': key,
-                                                'mapping': mapping})
-            if unique_values and value in mappings.values():
-                raise ValueError(_("Value %(value)s in mapping: '%(mapping)s' "
-                                   "not unique") % {'value': value,
-                                                    'mapping': mapping})
-            mappings[key] = value
-        else:
-            mappings.setdefault(key, [])
-            if value not in mappings[key]:
-                mappings[key].append(value)
-    return mappings
+    return helpers.parse_mappings(mapping_list, unique_values=unique_values,
+                                  unique_keys=unique_keys)
 
 
+@removals.remove(
+    message="Use get_hostname from neutron_lib.utils.net",
+    version="Ocata",
+    removal_version="Pike")
 def get_hostname():
-    return socket.gethostname()
+    return net.get_hostname()
 
 
 def get_first_host_ip(net, ip_version):
     return str(netaddr.IPAddress(net.first + 1, ip_version))
 
 
+@removals.remove(
+    message="Use compare_elements from neutron_lib.utils.helpers",
+    version="Ocata",
+    removal_version="Pike")
 def compare_elements(a, b):
-    """Compare elements if a and b have same elements.
-
-    This method doesn't consider ordering
-    """
-    if a is None:
-        a = []
-    if b is None:
-        b = []
-    return set(a) == set(b)
+    return helpers.compare_elements(a, b)
 
 
+@removals.remove(
+    message="Use safe_sort_key from neutron_lib.utils.helpers",
+    version="Ocata",
+    removal_version="Pike")
 def safe_sort_key(value):
-    """Return value hash or build one for dictionaries."""
-    if isinstance(value, collections.Mapping):
-        return sorted(value.items())
-    return value
+    return helpers.safe_sort_key(value)
 
 
+@removals.remove(
+    message="Use dict2str from neutron_lib.utils.helpers",
+    version="Ocata",
+    removal_version="Pike")
 def dict2str(dic):
-    return ','.join("%s=%s" % (key, val)
-                    for key, val in sorted(six.iteritems(dic)))
+    return helpers.dict2str(dic)
 
 
+@removals.remove(
+    message="Use str2dict from neutron_lib.utils.helpers",
+    version="Ocata",
+    removal_version="Pike")
 def str2dict(string):
-    res_dict = {}
-    for keyvalue in string.split(','):
-        (key, value) = keyvalue.split('=', 1)
-        res_dict[key] = value
-    return res_dict
+    return helpers.str2dict(string)
 
 
+@removals.remove(
+    message="Use dict2tuple from neutron_lib.utils.helpers",
+    version="Ocata",
+    removal_version="Pike")
 def dict2tuple(d):
-    items = list(d.items())
-    items.sort()
-    return tuple(items)
+    return helpers.dict2tuple(d)
 
 
+@removals.remove(
+    message="Use diff_list_of_dict from neutron_lib.utils.helpers",
+    version="Ocata",
+    removal_version="Pike")
 def diff_list_of_dict(old_list, new_list):
-    new_set = set([dict2str(l) for l in new_list])
-    old_set = set([dict2str(l) for l in old_list])
-    added = new_set - old_set
-    removed = old_set - new_set
-    return [str2dict(a) for a in added], [str2dict(r) for r in removed]
+    return helpers.diff_list_of_dict(old_list, new_list)
 
 
 def is_extension_supported(plugin, ext_alias):
@@ -331,17 +172,9 @@ def get_random_mac(base_mac):
 
 def get_random_string(length):
     """Get a random hex string of the specified length.
-
-    based on Cinder library
-      cinder/transfer/api.py
     """
-    rndstr = ""
-    random.seed(datetime.datetime.now().microsecond)
-    while len(rndstr) < length:
-        base_str = str(random.random()).encode('utf-8')
-        rndstr += hashlib.sha224(base_str).hexdigest()
 
-    return rndstr[0:length]
+    return "{0:0{1}x}".format(random.getrandbits(length * 4), length)
 
 
 def get_dhcp_agent_device_id(network_id, host):
@@ -353,11 +186,12 @@ def get_dhcp_agent_device_id(network_id, host):
     return 'dhcp%s-%s' % (host_uuid, network_id)
 
 
+@removals.remove(
+    message="Use cpu_count from neutron_lib.utils.host",
+    version="Ocata",
+    removal_version="Pike")
 def cpu_count():
-    try:
-        return multiprocessing.cpu_count()
-    except NotImplementedError:
-        return 1
+    return host.cpu_count()
 
 
 class exception_logger(object):
@@ -425,19 +259,6 @@ def is_dvr_serviced(device_owner):
             device_owner in get_other_dvr_serviced_device_owners())
 
 
-@debtcollector.removals.remove(message="This will removed in the N cycle.")
-def get_keystone_url(conf):
-    if conf.auth_uri:
-        auth_uri = conf.auth_uri.rstrip('/')
-    else:
-        auth_uri = ('%(protocol)s://%(host)s:%(port)s' %
-            {'protocol': conf.auth_protocol,
-             'host': conf.auth_host,
-             'port': conf.auth_port})
-    # NOTE(ihrachys): all existing consumers assume version 2.0
-    return '%s/v2.0/' % auth_uri
-
-
 def ip_to_cidr(ip, prefix=None):
     """Convert an ip with no prefix to cidr notation
 
@@ -470,7 +291,7 @@ def is_cidr_host(cidr):
         plain IP addresses specifically to avoid ambiguity.
     """
     if '/' not in str(cidr):
-        raise ValueError("cidr doesn't contain a '/'")
+        raise ValueError(_("cidr doesn't contain a '/'"))
     net = netaddr.IPNetwork(cidr)
     if net.version == 4:
         return net.prefixlen == n_const.IPv4_BITS
@@ -575,106 +396,247 @@ def safe_decode_utf8(s):
     return s
 
 
-#TODO(jlibosva): Move this to neutron-lib and reuse in networking-ovs-dpdk
-def _create_mask(lsb_mask):
-    return (MAX_UINT16 << int(math.floor(math.log(lsb_mask, 2)))) \
-           & MAX_UINT16
+def _hex_format(port, mask=0):
+
+    def hex_str(num):
+        return format(num, '#06x')
+    if mask > 0:
+        return "%s/%s" % (hex_str(port), hex_str(0xffff & ~mask))
+    return hex_str(port)
 
 
-def _reduce_mask(mask, step=1):
-    mask <<= step
-    return mask & MAX_UINT16
+def _gen_rules_port_min(port_min, top_bit):
+    """
+    Encode a port range range(port_min, (port_min | (top_bit - 1)) + 1) into
+    a set of bit value/masks.
+    """
+    # Processing starts with setting up mask and top_bit variables to their
+    # maximum. Top_bit has the form (1000000) with '1' pointing to the register
+    # being processed, while mask has the form (0111111) with '1' showing
+    # possible range to be covered.
 
+    # With each rule generation cycle, mask and top_bit are bit shifted to the
+    # right. When top_bit reaches 0 it means that last register was processed.
 
-def _increase_mask(mask, step=1):
-    for index in range(step):
+    # Let port_min be n bits long, top_bit = 1 << k, 0<=k<=n-1.
+
+    # Each cycle step checks the following conditions:
+
+    #     1). port & mask == 0
+    #     This means that remaining bits k..1 are equal to '0' and can be
+    #     covered by a single port/mask rule.
+
+    #     If condition 1 doesn't fit, then both top_bit and mask are bit
+    #     shifted to the right and condition 2 is checked:
+
+    #     2). port & top_bit == 0
+    #     This means that kth port bit is equal to '0'. By setting it to '1'
+    #     and masking other (k-1) bits all ports in range
+    #     [P, P + 2^(k-1)-1] are guaranteed to be covered.
+    #     Let p_k be equal to port first (n-k) bits with rest set to 0.
+    #     Then P = p_k | top_bit.
+
+    # Correctness proof:
+    # The remaining range to be encoded in a cycle is calculated as follows:
+    # R = [port_min, port_min | mask].
+    # If condition 1 holds, then a rule that covers R is generated and the job
+    # is done.
+    # If condition 2 holds, then the rule emitted will cover 2^(k-1) values
+    # from the range. Remaining range R will shrink by 2^(k-1).
+    # If condition 2 doesn't hold, then even after top_bit/mask shift in next
+    # iteration the value of R won't change.
+
+    # Full cycle example for range [40, 64):
+    # port=0101000, top_bit=1000000, k=6
+    # * step 1, k=6, R=[40, 63]
+    #   top_bit=1000000, mask=0111111 -> condition 1 doesn't hold, shifting
+    #                                    mask/top_bit
+    #   top_bit=0100000, mask=0011111 -> condition 2 doesn't hold
+
+    # * step 2, k=5, R=[40, 63]
+    #   top_bit=0100000, mask=0011111 -> condition 1 doesn't hold, shifting
+    #                                    mask/top_bit
+    #   top_bit=0010000, mask=0001111 -> condition 2 holds -> 011xxxx or
+    #                                                         0x0030/fff0
+    # * step 3, k=4, R=[40, 47]
+    #   top_bit=0010000, mask=0001111 -> condition 1 doesn't hold, shifting
+    #                                    mask/top_bit
+    #   top_bit=0001000, mask=0000111 -> condition 2 doesn't hold
+
+    # * step 4, k=3, R=[40, 47]
+    #   top_bit=0001000, mask=0000111 -> condition 1 holds -> 0101xxx or
+    #                                                         0x0028/fff8
+
+    #   rules=[0x0030/fff0, 0x0028/fff8]
+
+    rules = []
+    mask = top_bit - 1
+
+    while True:
+        if (port_min & mask) == 0:
+            # greedy matched a streak of '0' in port_min
+            rules.append(_hex_format(port_min, mask))
+            break
+        top_bit >>= 1
         mask >>= 1
-        mask |= 0x8000
-    return mask
+        if (port_min & top_bit) == 0:
+            # matched next '0' in port_min to substitute for '1' in resulting
+            # rule
+            rules.append(_hex_format(port_min & ~mask | top_bit, mask))
+    return rules
 
 
-def _hex_format(number):
-    return format(number, '#06x')
+def _gen_rules_port_max(port_max, top_bit):
+    """
+    Encode a port range range(port_max & ~(top_bit - 1), port_max + 1) into
+    a set of bit value/masks.
+    """
+    # Processing starts with setting up mask and top_bit variables to their
+    # maximum. Top_bit has the form (1000000) with '1' pointing to the register
+    # being processed, while mask has the form (0111111) with '1' showing
+    # possible range to be covered.
+
+    # With each rule generation cycle, mask and top_bit are bit shifted to the
+    # right. When top_bit reaches 0 it means that last register was processed.
+
+    # Let port_max be n bits long, top_bit = 1 << k, 0<=k<=n-1.
+
+    # Each cycle step checks the following conditions:
+
+    #     1). port & mask == mask
+    #     This means that remaining bits k..1 are equal to '1' and can be
+    #     covered by a single port/mask rule.
+
+    #     If condition 1 doesn't fit, then both top_bit and mask are bit
+    #     shifted to the right and condition 2 is checked:
+
+    #     2). port & top_bit == top_bit
+    #     This means that kth port bit is equal to '1'. By setting it to '0'
+    #     and masking other (k-1) bits all ports in range
+    #     [P, P + 2^(k-1)-1] are guaranteed to be covered.
+    #     Let p_k be equal to port first (n-k) bits with rest set to 0.
+    #     Then P = p_k | ~top_bit.
+
+    # Correctness proof:
+    # The remaining range to be encoded in a cycle is calculated as follows:
+    # R = [port_max & ~mask, port_max].
+    # If condition 1 holds, then a rule that covers R is generated and the job
+    # is done.
+    # If condition 2 holds, then the rule emitted will cover 2^(k-1) values
+    # from the range. Remaining range R will shrink by 2^(k-1).
+    # If condition 2 doesn't hold, then even after top_bit/mask shift in next
+    # iteration the value of R won't change.
+
+    # Full cycle example for range [64, 105]:
+    # port=1101001, top_bit=1000000, k=6
+    # * step 1, k=6, R=[64, 105]
+    #   top_bit=1000000, mask=0111111 -> condition 1 doesn't hold, shifting
+    #                                    mask/top_bit
+    #   top_bit=0100000, mask=0011111 -> condition 2 holds -> 10xxxxx or
+    #                                                         0x0040/ffe0
+    # * step 2, k=5, R=[96, 105]
+    #   top_bit=0100000, mask=0011111 -> condition 1 doesn't hold, shifting
+    #                                    mask/top_bit
+    #   top_bit=0010000, mask=0001111 -> condition 2 doesn't hold
+
+    # * step 3, k=4, R=[96, 105]
+    #   top_bit=0010000, mask=0001111 -> condition 1 doesn't hold, shifting
+    #                                    mask/top_bit
+    #   top_bit=0001000, mask=0000111 -> condition 2 holds -> 1100xxx or
+    #                                                         0x0060/fff8
+    # * step 4, k=3, R=[104, 105]
+    #   top_bit=0001000, mask=0000111 -> condition 1 doesn't hold, shifting
+    #                                    mask/top_bit
+    #   top_bit=0000100, mask=0000011 -> condition 2 doesn't hold
+
+    # * step 5, k=2, R=[104, 105]
+    #   top_bit=0000100, mask=0000011 -> condition 1 doesn't hold, shifting
+    #                                    mask/top_bit
+    #   top_bit=0000010, mask=0000001 -> condition 2 doesn't hold
+
+    # * step 6, k=1, R=[104, 105]
+    #   top_bit=0000010, mask=0000001 -> condition 1 holds -> 1101001 or
+    #                                                         0x0068
+
+    #   rules=[0x0040/ffe0, 0x0060/fff8, 0x0068]
+
+    rules = []
+    mask = top_bit - 1
+
+    while True:
+        if (port_max & mask) == mask:
+            # greedy matched a streak of '1' in port_max
+            rules.append(_hex_format(port_max & ~mask, mask))
+            break
+        top_bit >>= 1
+        mask >>= 1
+        if (port_max & top_bit) == top_bit:
+            # matched next '1' in port_max to substitute for '0' in resulting
+            # rule
+            rules.append(_hex_format(port_max & ~mask & ~top_bit, mask))
+    return rules
 
 
 def port_rule_masking(port_min, port_max):
+    """Translate a range [port_min, port_max] into a set of bitwise matches.
+
+    Each match has the form 'port/mask'. The port and mask are 16-bit numbers
+    written in hexadecimal prefixed by 0x. Each 1-bit in mask requires that
+    the corresponding bit in port must match. Each 0-bit in mask causes the
+    corresponding bit to be ignored.
+    """
+
+    # Let binary representation of port_min and port_max be n bits long and
+    # have first m bits in common, 0 <= m <= n.
+
+    # If remaining (n - m) bits of given ports define 2^(n-m) values, then
+    # [port_min, port_max] range is covered by a single rule.
+    # For example:
+    # n = 6
+    # port_min = 16 (binary 010000)
+    # port_max = 23 (binary 010111)
+    # Ports have m=3 bits in common with the remaining (n-m)=3 bits
+    # covering range [0, 2^3), which equals to a single 010xxx rule. The algo
+    # will return [0x0010/fff8].
+
+    # Else [port_min, port_max] range will be split into 2: range [port_min, T)
+    # and [T, port_max]. Let p_m be the common part of port_min and port_max
+    # with other (n-m) bits set to 0. Then T = p_m | 1 << (n-m-1).
+    # For example:
+    # n = 7
+    # port_min = 40  (binary 0101000)
+    # port_max = 105 (binary 1101001)
+    # Ports have m=0 bits in common, p_m=000000. Then T=1000000 and the
+    # initial range [40, 105] is divided into [40, 64) and [64, 105].
+    # Each of the ranges will be processed separately, then the generated rules
+    # will be merged.
+
     # Check port_max >= port_min.
     if port_max < port_min:
         raise ValueError(_("'port_max' is smaller than 'port_min'"))
 
-    # Rules to be added to OVS.
+    bitdiff = port_min ^ port_max
+    if bitdiff == 0:
+        # port_min == port_max
+        return [_hex_format(port_min)]
+    # for python3.x, bit_length could be used here
+    top_bit = 1
+    while top_bit <= bitdiff:
+        top_bit <<= 1
+    if (port_min & (top_bit - 1) == 0 and
+            port_max & (top_bit - 1) == top_bit - 1):
+        # special case, range of 2^k ports is covered
+        return [_hex_format(port_min, top_bit - 1)]
+
+    top_bit >>= 1
     rules = []
-
-    # Loop from the lower part. Increment port_min.
-    bit_right = 1
-    mask = MAX_UINT16
-    t_port_min = port_min
-    while True:
-        # Obtain last significative bit.
-        bit_min = port_min & bit_right
-        # Take care of first bit.
-        if bit_right == 1:
-            if bit_min > 0:
-                rules.append("%s" % (_hex_format(t_port_min)))
-            else:
-                mask = _create_mask(2)
-                rules.append("%s/%s" % (_hex_format(t_port_min & mask),
-                                        _hex_format(mask)))
-        elif bit_min == 0:
-            mask = _create_mask(bit_right)
-            t_port_min += bit_right
-            # If the temporal variable we are using exceeds the
-            # port_max value, exit the loop.
-            if t_port_min > port_max:
-                break
-            rules.append("%s/%s" % (_hex_format(t_port_min & mask),
-                                    _hex_format(mask)))
-
-        # If the temporal variable we are using exceeds the
-        # port_max value, exit the loop.
-        if t_port_min > port_max:
-            break
-        bit_right <<= 1
-
-    # Loop from the higher part.
-    bit_position = int(round(math.log(port_max, 2)))
-    bit_left = 1 << bit_position
-    mask = MAX_UINT16
-    mask = _reduce_mask(mask, bit_position)
-    # Find the most significative bit of port_max, higher
-    # than the most significative bit of port_min.
-    while mask < MAX_UINT16:
-        bit_max = port_max & bit_left
-        bit_min = port_min & bit_left
-        if bit_max > bit_min:
-            # Difference found.
-            break
-        # Rotate bit_left to the right and increase mask.
-        bit_left >>= 1
-        mask = _increase_mask(mask)
-
-    while bit_left > 1:
-        # Obtain next most significative bit.
-        bit_left >>= 1
-        bit_max = port_max & bit_left
-        if bit_left == 1:
-            if bit_max == 0:
-                rules.append("%s" % (_hex_format(port_max)))
-            else:
-                mask = _create_mask(2)
-                rules.append("%s/%s" % (_hex_format(port_max & mask),
-                                        _hex_format(mask)))
-        elif bit_max > 0:
-            t_port_max = port_max - bit_max
-            mask = _create_mask(bit_left)
-            rules.append("%s/%s" % (_hex_format(t_port_max),
-                                    _hex_format(mask)))
-
+    rules.extend(_gen_rules_port_min(port_min, top_bit))
+    rules.extend(_gen_rules_port_max(port_max, top_bit))
     return rules
 
 
 def create_object_with_dependency(creator, dep_getter, dep_creator,
-                                  dep_id_attr):
+                                  dep_id_attr, dep_deleter):
     """Creates an object that binds to a dependency while handling races.
 
     creator is a function that expected to take the result of either
@@ -684,11 +646,14 @@ def create_object_with_dependency(creator, dep_getter, dep_creator,
     dep_id_attr be used to determine if the dependency changed during object
     creation.
 
-    dep_getter should return None if the dependency does not exist
+    dep_deleter will be called with a the result of dep_creator if the creator
+    function fails due to a non-dependency reason or the retries are exceeded.
+
+    dep_getter should return None if the dependency does not exist.
 
     dep_creator can raise a DBDuplicateEntry to indicate that a concurrent
-    create of the dependency occured and the process will restart to get the
-    concurrently created one
+    create of the dependency occurred and the process will restart to get the
+    concurrently created one.
 
     This function will return both the created object and the dependency it
     used/created.
@@ -698,17 +663,16 @@ def create_object_with_dependency(creator, dep_getter, dep_creator,
     process of creating the dependency if one no longer exists. It will
     give up after neutron.db.api.MAX_RETRIES and raise the exception it
     encounters after that.
-
-    TODO(kevinbenton): currently this does not try to delete the dependency
-    it created. This matches the semantics of the HA network logic it is used
-    for but it should be modified to cleanup in the future.
     """
-    result, dependency, dep_id = None, None, None
+    result, dependency, dep_id, made_locally = None, None, None, False
     for attempts in range(1, db_api.MAX_RETRIES + 1):
         # we go to max + 1 here so the exception handlers can raise their
         # errors at the end
         try:
-            dependency = dep_getter() or dep_creator()
+            dependency = dep_getter()
+            if not dependency:
+                dependency = dep_creator()
+                made_locally = True
             dep_id = getattr(dependency, dep_id_attr)
         except db_exc.DBDuplicateEntry:
             # dependency was concurrently created.
@@ -732,6 +696,16 @@ def create_object_with_dependency(creator, dep_getter, dep_creator,
                     if not dependency or dep_id != getattr(dependency,
                                                            dep_id_attr):
                         ctx.reraise = False
+                        continue
+                # we have exceeded retries or have encountered a non-dependency
+                # related failure so we try to clean up the dependency if we
+                # created it before re-raising
+                if made_locally and dependency:
+                    try:
+                        dep_deleter(dependency)
+                    except Exception:
+                        LOG.exception(_LE("Failed cleaning up dependency %s"),
+                                      dep_id)
     return result, dependency
 
 
@@ -751,8 +725,157 @@ def transaction_guard(f):
     """
     @functools.wraps(f)
     def inner(self, context, *args, **kwargs):
-        if context.session.is_active:
-            raise RuntimeError(_("Method cannot be called within a "
-                                 "transaction."))
+        # FIXME(kevinbenton): get rid of all uses of this flag
+        if (context.session.is_active and
+                getattr(context, 'GUARD_TRANSACTION', True)):
+            raise RuntimeError(_("Method %s cannot be called within a "
+                                 "transaction.") % f)
         return f(self, context, *args, **kwargs)
     return inner
+
+
+def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
+    """
+    Wait until callable predicate is evaluated as True
+
+    :param predicate: Callable deciding whether waiting should continue.
+    Best practice is to instantiate predicate with functools.partial()
+    :param timeout: Timeout in seconds how long should function wait.
+    :param sleep: Polling interval for results in seconds.
+    :param exception: Exception class for eventlet.Timeout.
+    (see doc for eventlet.Timeout for more information)
+    """
+    with eventlet.timeout.Timeout(timeout, exception):
+        while not predicate():
+            eventlet.sleep(sleep)
+
+
+class _AuthenticBase(object):
+    def __init__(self, addr, **kwargs):
+        super(_AuthenticBase, self).__init__(addr, **kwargs)
+        self._initial_value = addr
+
+    def __str__(self):
+        if isinstance(self._initial_value, six.string_types):
+            return self._initial_value
+        return super(_AuthenticBase, self).__str__()
+
+    # NOTE(ihrachys): override deepcopy because netaddr.* classes are
+    # slot-based and hence would not copy _initial_value
+    def __deepcopy__(self, memo):
+        return self.__class__(self._initial_value)
+
+
+class AuthenticEUI(_AuthenticBase, netaddr.EUI):
+    '''
+    This class retains the format of the MAC address string passed during
+    initialization.
+
+    This is useful when we want to make sure that we retain the format passed
+    by a user through API.
+    '''
+
+
+class AuthenticIPNetwork(_AuthenticBase, netaddr.IPNetwork):
+    '''
+    This class retains the format of the IP network string passed during
+    initialization.
+
+    This is useful when we want to make sure that we retain the format passed
+    by a user through API.
+    '''
+
+
+class classproperty(object):
+    def __init__(self, f):
+        self.func = f
+
+    def __get__(self, obj, owner):
+        return self.func(owner)
+
+
+_NO_ARGS_MARKER = object()
+
+
+def attach_exc_details(e, msg, args=_NO_ARGS_MARKER):
+    e._error_context_msg = msg
+    e._error_context_args = args
+
+
+def extract_exc_details(e):
+    for attr in ('_error_context_msg', '_error_context_args'):
+        if not hasattr(e, attr):
+            return _LE('No details.')
+    details = e._error_context_msg
+    args = e._error_context_args
+    if args is _NO_ARGS_MARKER:
+        return details
+    return details % args
+
+
+def import_modules_recursively(topdir):
+    '''Import and return all modules below the topdir directory.'''
+    modules = []
+    for root, dirs, files in os.walk(topdir):
+        for file_ in files:
+            if file_[-3:] != '.py':
+                continue
+
+            module = file_[:-3]
+            if module == '__init__':
+                continue
+
+            import_base = root.replace('/', '.')
+
+            # NOTE(ihrachys): in Python3, or when we are not located in the
+            # directory containing neutron code, __file__ is absolute, so we
+            # should truncate it to exclude PYTHONPATH prefix
+            prefixlen = len(os.path.dirname(neutron.__file__))
+            import_base = 'neutron' + import_base[prefixlen:]
+
+            module = '.'.join([import_base, module])
+            if module not in sys.modules:
+                importlib.import_module(module)
+            modules.append(module)
+
+    return modules
+
+
+def get_rand_name(max_length=None, prefix='test'):
+    """Return a random string.
+
+    The string will start with 'prefix' and will be exactly 'max_length'.
+    If 'max_length' is None, then exactly 8 random characters, each
+    hexadecimal, will be added. In case len(prefix) <= len(max_length),
+    ValueError will be raised to indicate the problem.
+    """
+    return get_related_rand_names([prefix], max_length)[0]
+
+
+def get_rand_device_name(prefix='test'):
+    return get_rand_name(
+        max_length=n_const.DEVICE_NAME_MAX_LEN, prefix=prefix)
+
+
+def get_related_rand_names(prefixes, max_length=None):
+    """Returns a list of the prefixes with the same random characters appended
+
+    :param prefixes: A list of prefix strings
+    :param max_length: The maximum length of each returned string
+    :returns: A list with each prefix appended with the same random characters
+    """
+
+    if max_length:
+        length = max_length - max(len(p) for p in prefixes)
+        if length <= 0:
+            raise ValueError(
+                _("'max_length' must be longer than all prefixes"))
+    else:
+        length = 8
+    rndchrs = get_random_string(length)
+    return [p + rndchrs for p in prefixes]
+
+
+def get_related_rand_device_names(prefixes):
+    return get_related_rand_names(prefixes,
+                                  max_length=n_const.DEVICE_NAME_MAX_LEN)

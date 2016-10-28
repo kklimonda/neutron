@@ -15,14 +15,19 @@
 
 import functools
 
+import netaddr
+from neutron_lib import exceptions
 from oslo_config import cfg
+import oslo_i18n
 from oslo_log import log as logging
+from oslo_policy import policy as oslo_policy
+from oslo_serialization import jsonutils
 from six.moves.urllib import parse
 from webob import exc
 
 from neutron._i18n import _, _LW
 from neutron.common import constants
-from neutron.common import exceptions
+from neutron import wsgi
 
 
 LOG = logging.getLogger(__name__)
@@ -179,6 +184,18 @@ def get_pagination_links(request, items, limit,
     return links
 
 
+def is_native_pagination_supported(plugin):
+    native_pagination_attr_name = ("_%s__native_pagination_support"
+                                   % plugin.__class__.__name__)
+    return getattr(plugin, native_pagination_attr_name, False)
+
+
+def is_native_sorting_supported(plugin):
+    native_sorting_attr_name = ("_%s__native_sorting_support"
+                                % plugin.__class__.__name__)
+    return getattr(plugin, native_sorting_attr_name, False)
+
+
 class PaginationHelper(object):
 
     def __init__(self, request, primary_key='id'):
@@ -215,15 +232,31 @@ class PaginationEmulatedHelper(PaginationHelper):
     def paginate(self, items):
         if not self.limit:
             return items
-        i = -1
+
+        if not items:
+            return []
+
+        # first, calculate the base index for pagination
         if self.marker:
+            i = 0
             for item in items:
-                i = i + 1
                 if item[self.primary_key] == self.marker:
                     break
+                i += 1
+            else:
+                # if marker is not found, return nothing
+                return []
+        else:
+            i = len(items) if self.page_reverse else 0
+
         if self.page_reverse:
-            return items[i - self.limit:i]
-        return items[i + 1:i + self.limit + 1]
+            # don't wrap
+            return items[max(i - self.limit, 0):i]
+        else:
+            if self.marker:
+                # skip the matched marker
+                i += 1
+            return items[i:i + self.limit]
 
     def get_links(self, items):
         return get_pagination_links(
@@ -309,38 +342,112 @@ class NoSortingHelper(SortingHelper):
     pass
 
 
-class NeutronController(object):
-    """Base controller class for Neutron API."""
-    # _resource_name will be redefined in sub concrete controller
-    _resource_name = None
+def convert_exception_to_http_exc(e, faults, language):
+    serializer = wsgi.JSONDictSerializer()
+    if isinstance(e, exceptions.MultipleExceptions):
+        converted_exceptions = [
+            convert_exception_to_http_exc(inner, faults, language)
+            for inner in e.inner_exceptions]
+        # if no internal exceptions, will be handled as single exception
+        if converted_exceptions:
+            codes = {c.code for c in converted_exceptions}
+            if len(codes) == 1:
+                # all error codes are the same so we can maintain the code
+                # and just concatenate the bodies
+                joined_msg = "\n".join(
+                    (jsonutils.loads(c.body)['NeutronError']['message']
+                     for c in converted_exceptions))
+                new_body = jsonutils.loads(converted_exceptions[0].body)
+                new_body['NeutronError']['message'] = joined_msg
+                converted_exceptions[0].body = serializer.serialize(new_body)
+                return converted_exceptions[0]
+            else:
+                # multiple error types so we turn it into a Conflict with the
+                # inner codes and bodies packed in
+                new_exception = exceptions.Conflict()
+                inner_error_strings = []
+                for c in converted_exceptions:
+                    c_body = jsonutils.loads(c.body)
+                    err = ('HTTP %s %s: %s' % (
+                           c.code, c_body['NeutronError']['type'],
+                           c_body['NeutronError']['message']))
+                    inner_error_strings.append(err)
+                new_exception.msg = "\n".join(inner_error_strings)
+                return convert_exception_to_http_exc(
+                    new_exception, faults, language)
 
-    def __init__(self, plugin):
-        self._plugin = plugin
-        super(NeutronController, self).__init__()
+    e = translate(e, language)
+    body = serializer.serialize(
+        {'NeutronError': get_exception_data(e)})
+    kwargs = {'body': body, 'content_type': 'application/json'}
+    if isinstance(e, exc.HTTPException):
+        # already an HTTP error, just update with content type and body
+        e.body = body
+        e.content_type = kwargs['content_type']
+        return e
+    if isinstance(e, (exceptions.NeutronException, netaddr.AddrFormatError,
+                      oslo_policy.PolicyNotAuthorized)):
+        for fault in faults:
+            if isinstance(e, fault):
+                mapped_exc = faults[fault]
+                break
+        else:
+            mapped_exc = exc.HTTPInternalServerError
+        return mapped_exc(**kwargs)
+    if isinstance(e, NotImplementedError):
+        # NOTE(armando-migliaccio): from a client standpoint
+        # it makes sense to receive these errors, because
+        # extensions may or may not be implemented by
+        # the underlying plugin. So if something goes south,
+        # because a plugin does not implement a feature,
+        # returning 500 is definitely confusing.
+        kwargs['body'] = serializer.serialize(
+            {'NotImplementedError': get_exception_data(e)})
+        return exc.HTTPNotImplemented(**kwargs)
+    # NOTE(jkoelker) Everything else is 500
+    # Do not expose details of 500 error to clients.
+    msg = _('Request Failed: internal server error while '
+            'processing your request.')
+    msg = translate(msg, language)
+    kwargs['body'] = serializer.serialize(
+        {'NeutronError': get_exception_data(exc.HTTPInternalServerError(msg))})
+    return exc.HTTPInternalServerError(**kwargs)
 
-    def _prepare_request_body(self, body, params):
-        """Verifies required parameters are in request body.
 
-        Sets default value for missing optional parameters.
-        Body argument must be the deserialized body.
-        """
-        try:
-            if body is None:
-                # Initialize empty resource for setting default value
-                body = {self._resource_name: {}}
-            data = body[self._resource_name]
-        except KeyError:
-            # raise if _resource_name is not in req body.
-            raise exc.HTTPBadRequest(_("Unable to find '%s' in request body") %
-                                     self._resource_name)
-        for param in params:
-            param_name = param['param-name']
-            param_value = data.get(param_name)
-            # If the parameter wasn't found and it was required, return 400
-            if param_value is None and param['required']:
-                msg = (_("Failed to parse request. "
-                         "Parameter '%s' not specified") % param_name)
-                LOG.error(msg)
-                raise exc.HTTPBadRequest(msg)
-            data[param_name] = param_value or param.get('default-value')
-        return body
+def get_exception_data(e):
+    """Extract the information about an exception.
+
+    Neutron client for the v2 API expects exceptions to have 'type', 'message'
+    and 'detail' attributes.This information is extracted and converted into a
+    dictionary.
+
+    :param e: the exception to be reraised
+    :returns: a structured dict with the exception data
+    """
+    err_data = {'type': e.__class__.__name__,
+                'message': e, 'detail': ''}
+    return err_data
+
+
+def translate(translatable, locale):
+    """Translates the object to the given locale.
+
+    If the object is an exception its translatable elements are translated
+    in place, if the object is a translatable string it is translated and
+    returned. Otherwise, the object is returned as-is.
+
+    :param translatable: the object to be translated
+    :param locale: the locale to translate to
+    :returns: the translated object, or the object as-is if it
+              was not translated
+    """
+    localize = oslo_i18n.translate
+    if isinstance(translatable, exceptions.NeutronException):
+        translatable.msg = localize(translatable.msg, locale)
+    elif isinstance(translatable, exc.HTTPError):
+        translatable.detail = localize(translatable.detail, locale)
+    elif isinstance(translatable, Exception):
+        translatable.message = localize(translatable, locale)
+    else:
+        return localize(translatable, locale)
+    return translatable

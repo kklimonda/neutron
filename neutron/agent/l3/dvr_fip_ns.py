@@ -21,6 +21,7 @@ from neutron.agent.l3 import link_local_allocator as lla
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
+from neutron.common import constants
 from neutron.common import utils as common_utils
 from neutron.ipam import utils as ipam_utils
 
@@ -32,7 +33,6 @@ FIP_2_ROUTER_DEV_PREFIX = 'fpr-'
 ROUTER_2_FIP_DEV_PREFIX = namespaces.ROUTER_2_FIP_DEV_PREFIX
 # Route Table index for FIPs
 FIP_RT_TBL = 16
-FIP_LL_SUBNET = '169.254.64.0/18'
 # Rule priority range for FIPs
 FIP_PR_START = 32768
 FIP_PR_END = FIP_PR_START + 40000
@@ -59,7 +59,8 @@ class FipNamespace(namespaces.Namespace):
             namespace=self.get_name(),
             use_ipv6=self.use_ipv6)
         path = os.path.join(agent_conf.state_path, 'fip-linklocal-networks')
-        self.local_subnets = lla.LinkLocalAllocator(path, FIP_LL_SUBNET)
+        self.local_subnets = lla.LinkLocalAllocator(
+            path, constants.DVR_FIP_LL_CIDR)
         self.destroyed = False
 
     @classmethod
@@ -131,13 +132,13 @@ class FipNamespace(namespaces.Namespace):
         ip_wrapper.netns.execute(cmd, check_exit_code=False)
 
     def create(self):
-        # TODO(Carl) Get this functionality from mlavelle's namespace baseclass
         LOG.debug("DVR: add fip namespace: %s", self.name)
-        ip_wrapper_root = ip_lib.IPWrapper()
-        ip_wrapper = ip_wrapper_root.ensure_namespace(self.get_name())
+        # parent class will ensure the namespace exists and turn-on forwarding
+        super(FipNamespace, self).create()
         # Somewhere in the 3.19 kernel timeframe ip_nonlocal_bind was
         # changed to be a per-namespace attribute.  To be backwards
         # compatible we need to try both if at first we fail.
+        ip_wrapper = ip_lib.IPWrapper(namespace=self.name)
         try:
             ip_wrapper.netns.execute(['sysctl',
                                       '-w',
@@ -148,15 +149,10 @@ class FipNamespace(namespaces.Namespace):
             LOG.debug('DVR: fip namespace (%s) does not support setting '
                       'net.ipv4.ip_nonlocal_bind, trying in root namespace',
                       self.name)
-            ip_wrapper_root.netns.execute(['sysctl',
-                                           '-w',
-                                           'net.ipv4.ip_nonlocal_bind=1'],
-                                          run_as_root=True)
-
-        ip_wrapper.netns.execute(['sysctl', '-w', 'net.ipv4.ip_forward=1'])
-        if self.use_ipv6:
-            ip_wrapper.netns.execute(['sysctl', '-w',
-                                      'net.ipv6.conf.all.forwarding=1'])
+            self.ip_wrapper_root.netns.execute(['sysctl',
+                                                '-w',
+                                                'net.ipv4.ip_nonlocal_bind=1'],
+                                               run_as_root=True)
 
         # no connection tracking needed in fip namespace
         self._iptables_manager.ipv4['raw'].add_rule('PREROUTING',
@@ -241,6 +237,10 @@ class FipNamespace(namespaces.Namespace):
                 if is_gateway_not_in_subnet:
                     ipd.route.add_route(gw_ip, scope='link')
                 ipd.route.add_gateway(gw_ip)
+            else:
+                current_gateway = ipd.route.get_gateway()
+                if current_gateway and current_gateway.get('gateway'):
+                    ipd.route.delete_gateway(current_gateway.get('gateway'))
 
     def _add_cidr_to_device(self, device, ip_cidr):
         if not device.addr.list(to=ip_cidr):
@@ -265,8 +265,7 @@ class FipNamespace(namespaces.Namespace):
             rtr_2_fip_dev, fip_2_rtr_dev = ip_wrapper.add_veth(rtr_2_fip_name,
                                                                fip_2_rtr_name,
                                                                fip_ns_name)
-            mtu = (self.agent_conf.network_device_mtu or
-                   ri.get_ex_gw_port().get('mtu'))
+            mtu = ri.get_ex_gw_port().get('mtu')
             if mtu:
                 rtr_2_fip_dev.link.set_mtu(mtu)
                 fip_2_rtr_dev.link.set_mtu(mtu)

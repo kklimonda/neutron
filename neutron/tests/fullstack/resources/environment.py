@@ -12,19 +12,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import random
-
 import fixtures
-import netaddr
+from neutron_lib import constants
 from neutronclient.common import exceptions as nc_exc
 from oslo_config import cfg
 
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import utils
-from neutron.common import constants
 from neutron.common import utils as common_utils
 from neutron.plugins.ml2.drivers.linuxbridge.agent import \
     linuxbridge_neutron_agent as lb_agent
+from neutron.tests.common.exclusive_resources import ip_address
+from neutron.tests.common.exclusive_resources import ip_network
 from neutron.tests.common import net_helpers
 from neutron.tests.fullstack.resources import config
 from neutron.tests.fullstack.resources import process
@@ -35,11 +33,14 @@ class EnvironmentDescription(object):
 
     Does the setup, as a whole, support tunneling? How about l2pop?
     """
-    def __init__(self, network_type='vxlan', l2_pop=True, qos=False):
+    def __init__(self, network_type='vxlan', l2_pop=True, qos=False,
+                 mech_drivers='openvswitch,linuxbridge', arp_responder=False):
         self.network_type = network_type
         self.l2_pop = l2_pop
         self.qos = qos
         self.network_range = None
+        self.mech_drivers = mech_drivers
+        self.arp_responder = arp_responder
 
     @property
     def tunneling_enabled(self):
@@ -53,10 +54,14 @@ class HostDescription(object):
     under?
     """
     def __init__(self, l3_agent=False, of_interface='ovs-ofctl',
-                 l2_agent_type=constants.AGENT_TYPE_OVS):
+                 ovsdb_interface='vsctl',
+                 l2_agent_type=constants.AGENT_TYPE_OVS,
+                 firewall_driver='noop'):
         self.l2_agent_type = l2_agent_type
         self.l3_agent = l3_agent
         self.of_interface = of_interface
+        self.ovsdb_interface = ovsdb_interface
+        self.firewall_driver = firewall_driver
 
 
 class Host(fixtures.Fixture):
@@ -81,8 +86,6 @@ class Host(fixtures.Fixture):
         self.host_desc = host_desc
         self.test_name = test_name
         self.neutron_config = neutron_config
-        # Use reserved class E addresses
-        self.local_ip = self.allocate_local_ip()
         self.central_data_bridge = central_data_bridge
         self.central_external_bridge = central_external_bridge
         self.host_namespace = None
@@ -92,6 +95,8 @@ class Host(fixtures.Fixture):
         self.network_bridges = {}
 
     def _setUp(self):
+        self.local_ip = self.allocate_local_ip()
+
         if self.host_desc.l2_agent_type == constants.AGENT_TYPE_OVS:
             self.setup_host_with_ovs_agent()
         elif self.host_desc.l2_agent_type == constants.AGENT_TYPE_LINUXBRIDGE:
@@ -207,11 +212,13 @@ class Host(fixtures.Fixture):
 
     def allocate_local_ip(self):
         if not self.env_desc.network_range:
-            return self.get_random_ip('240.0.0.1', '240.255.255.254')
-        return self.get_random_ip(
-            str(self.env_desc.network_range[2]),
-            str(self.env_desc.network_range[-1])
-        )
+            return str(self.useFixture(
+                ip_address.ExclusiveIPAddress(
+                    '240.0.0.1', '240.255.255.254')).address)
+        return str(self.useFixture(
+            ip_address.ExclusiveIPAddress(
+                str(self.env_desc.network_range[2]),
+                str(self.env_desc.network_range[-2]))).address)
 
     def get_bridge(self, network_id):
         if "ovs" in self.agents.keys():
@@ -228,11 +235,6 @@ class Host(fixtures.Fixture):
                         prefix_is_full_name=True)).bridge
                 self.network_bridges[network_id] = bridge
         return bridge
-
-    @staticmethod
-    def get_random_ip(low, high):
-        parent_range = netaddr.IPRange(low, high)
-        return str(random.choice(parent_range))
 
     @property
     def hostname(self):
@@ -284,7 +286,7 @@ class Environment(fixtures.Fixture):
         self.hosts = []
 
     def wait_until_env_is_up(self):
-        utils.wait_until_true(self._processes_are_ready)
+        common_utils.wait_until_true(self._processes_are_ready)
 
     def _processes_are_ready(self):
         try:
@@ -361,10 +363,6 @@ class Environment(fixtures.Fixture):
         # address is fine for them
         for desc in self.hosts_desc:
             if desc.l2_agent_type == constants.AGENT_TYPE_LINUXBRIDGE:
-                return self.get_random_network(
-                    "240.0.0.0", "240.255.255.255", "24")
-
-    @staticmethod
-    def get_random_network(low, high, netmask):
-        ip = Host.get_random_ip(low, high)
-        return netaddr.IPNetwork("%s/%s" % (ip, netmask))
+                return self.useFixture(
+                    ip_network.ExclusiveIPNetwork(
+                        "240.0.0.0", "240.255.255.255", "24")).network

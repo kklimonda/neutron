@@ -24,7 +24,8 @@ from webob import exc
 from neutron.api.v2 import attributes as attr
 from neutron import context
 from neutron.db import api as dbapi
-from neutron.db import flavors_db
+from neutron.db.models import flavor as flavor_models
+from neutron.db.models import l3 as l3_models
 from neutron.db import servicetype_db
 from neutron.extensions import flavors
 from neutron.plugins.common import constants
@@ -61,6 +62,7 @@ class FlavorExtensionTestCase(extension.ExtensionTestCase):
                            'service_type': constants.FLAVORS,
                            'description': 'the best flavor',
                            'tenant_id': tenant_id,
+                           'project_id': tenant_id,
                            'enabled': True}}
 
         expected = copy.deepcopy(data)
@@ -227,6 +229,7 @@ class FlavorExtensionTestCase(extension.ExtensionTestCase):
         expected = {'service_profile': {'description': 'the best sp',
                                         'driver': '',
                                         'tenant_id': tenant_id,
+                                        'project_id': tenant_id,
                                         'enabled': True,
                                         'metainfo': '{"data": "value"}'}}
 
@@ -373,7 +376,8 @@ class FlavorExtensionTestCase(extension.ExtensionTestCase):
     def test_associate_service_profile_with_flavor(self):
         tenant_id = uuidutils.generate_uuid()
         expected = {'service_profile': {'id': _uuid(),
-                                        'tenant_id': tenant_id}}
+                                        'tenant_id': tenant_id,
+                                        'project_id': tenant_id}}
         instance = self.plugin.return_value
         instance.create_flavor_service_profile.return_value = (
             expected['service_profile'])
@@ -414,7 +418,8 @@ class DummyServicePlugin(object):
     def driver_loaded(self, driver, service_profile):
         pass
 
-    def get_plugin_type(self):
+    @classmethod
+    def get_plugin_type(cls):
         return constants.DUMMY
 
     def get_plugin_description(self):
@@ -460,7 +465,7 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
             self.service_manager.add_provider_configuration(
                 provider.split(':')[0], provconf.ProviderConfiguration())
 
-        dbapi.get_engine()
+        dbapi.context_manager.get_legacy_facade().get_engine()
 
     def _create_flavor(self, description=None):
         flavor = {'flavor': {'name': 'GOLD',
@@ -471,7 +476,7 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
 
     def test_create_flavor(self):
         self._create_flavor()
-        res = self.ctx.session.query(flavors_db.Flavor).all()
+        res = self.ctx.session.query(flavor_models.Flavor).all()
         self.assertEqual(1, len(res))
         self.assertEqual('GOLD', res[0]['name'])
         self.assertEqual(constants.DUMMY, res[0]['service_type'])
@@ -481,7 +486,7 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
         flavor = {'flavor': {'name': 'Silver',
                              'enabled': False}}
         self.plugin.update_flavor(self.ctx, fl['id'], flavor)
-        res = (self.ctx.session.query(flavors_db.Flavor).
+        res = (self.ctx.session.query(flavor_models.Flavor).
                filter_by(id=fl['id']).one())
         self.assertEqual('Silver', res['name'])
         self.assertFalse(res['enabled'])
@@ -489,7 +494,7 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
     def test_delete_flavor(self):
         fl, data = self._create_flavor()
         self.plugin.delete_flavor(self.ctx, fl['id'])
-        res = (self.ctx.session.query(flavors_db.Flavor).all())
+        res = (self.ctx.session.query(flavor_models.Flavor).all())
         self.assertFalse(res)
 
     def test_show_flavor(self):
@@ -516,7 +521,7 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
 
     def test_create_service_profile(self):
         sp, data = self._create_service_profile()
-        res = (self.ctx.session.query(flavors_db.ServiceProfile).
+        res = (self.ctx.session.query(flavor_models.ServiceProfile).
                filter_by(id=sp['id']).one())
         self.assertEqual(data['service_profile']['driver'], res['driver'])
         self.assertEqual(data['service_profile']['metainfo'], res['metainfo'])
@@ -529,7 +534,7 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
                  'metainfo': '{"data": "value"}'}}
         sp = self.plugin.create_service_profile(self.ctx,
                                                 data)
-        res = (self.ctx.session.query(flavors_db.ServiceProfile).
+        res = (self.ctx.session.query(flavor_models.ServiceProfile).
                filter_by(id=sp['id']).one())
         self.assertEqual(data['service_profile']['driver'], res['driver'])
         self.assertEqual(data['service_profile']['metainfo'], res['metainfo'])
@@ -561,14 +566,14 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
         data['service_profile']['metainfo'] = '{"data": "value1"}'
         sp = self.plugin.update_service_profile(self.ctx, sp['id'],
                                                 data)
-        res = (self.ctx.session.query(flavors_db.ServiceProfile).
+        res = (self.ctx.session.query(flavor_models.ServiceProfile).
                filter_by(id=sp['id']).one())
         self.assertEqual(data['service_profile']['metainfo'], res['metainfo'])
 
     def test_delete_service_profile(self):
         sp, data = self._create_service_profile()
         self.plugin.delete_service_profile(self.ctx, sp['id'])
-        res = self.ctx.session.query(flavors_db.ServiceProfile).all()
+        res = self.ctx.session.query(flavor_models.ServiceProfile).all()
         self.assertFalse(res)
 
     def test_show_service_profile(self):
@@ -589,7 +594,7 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
             {'service_profile': {'id': sp['id']}},
             fl['id'])
         binding = (
-            self.ctx.session.query(flavors_db.FlavorServiceProfileBinding).
+            self.ctx.session.query(flavor_models.FlavorServiceProfileBinding).
             first())
         self.assertEqual(fl['id'], binding['flavor_id'])
         self.assertEqual(sp['id'], binding['service_profile_id'])
@@ -611,7 +616,7 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
             fl['id'])
         self.plugin.delete_flavor(self.ctx, fl['id'])
         binding = (
-            self.ctx.session.query(flavors_db.FlavorServiceProfileBinding).
+            self.ctx.session.query(flavor_models.FlavorServiceProfileBinding).
             first())
         self.assertIsNone(binding)
 
@@ -638,7 +643,7 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
         self.plugin.delete_flavor_service_profile(
             self.ctx, sp['id'], fl['id'])
         binding = (
-            self.ctx.session.query(flavors_db.FlavorServiceProfileBinding).
+            self.ctx.session.query(flavor_models.FlavorServiceProfileBinding).
             first())
         self.assertIsNone(binding)
 
@@ -659,6 +664,17 @@ class FlavorPluginTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
             self.plugin.delete_service_profile,
             self.ctx,
             sp['id'])
+
+    def test_delete_flavor_in_use(self):
+        # make use of router since it has a flavor id
+        fl, data = self._create_flavor()
+        with self.ctx.session.begin():
+            self.ctx.session.add(l3_models.Router(flavor_id=fl['id']))
+        self.assertRaises(
+            flavors.FlavorInUse,
+            self.plugin.delete_flavor,
+            self.ctx,
+            fl['id'])
 
     def test_get_flavor_next_provider_no_binding(self):
         fl, data = self._create_flavor()

@@ -15,13 +15,15 @@
 import collections
 
 import mock
+from neutron_lib import exceptions
 from oslo_serialization import jsonutils
 from oslo_utils import uuidutils
+import tenacity
 import testtools
 
+from neutron.agent.common import config
 from neutron.agent.common import ovs_lib
 from neutron.agent.common import utils
-from neutron.common import exceptions
 from neutron.plugins.common import constants
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants as p_const
@@ -59,6 +61,16 @@ class OFCTLParamListMatcher(object):
     __repr__ = __str__
 
 
+def vsctl_only(f):
+    # NOTE(ivasilevskaya) as long as some tests rely heavily on mocking
+    # direct vsctl commands, need to ensure that ovsdb_interface = 'vsctl'
+    # TODO(ivasilevskaya) introduce alternative tests for native interface?
+    def wrapper(*args, **kwargs):
+        config.cfg.CONF.set_override("ovsdb_interface", "vsctl", group="OVS")
+        return f(*args, **kwargs)
+    return wrapper
+
+
 class OVS_Lib_Test(base.BaseTestCase):
     """A test suite to exercise the OVS libraries shared by Neutron agents.
 
@@ -66,6 +78,7 @@ class OVS_Lib_Test(base.BaseTestCase):
     can run on any system.  That does, however, limit their scope.
     """
 
+    @vsctl_only
     def setUp(self):
         super(OVS_Lib_Test, self).setUp()
         self.BR_NAME = "br-int"
@@ -793,6 +806,20 @@ class OVS_Lib_Test(base.BaseTestCase):
             'tap99id', data, extra_calls_and_values=extra_calls_and_values)
         self._assert_vif_port(vif_port, ofport=1337, mac="de:ad:be:ef:13:37")
 
+    def test_get_port_ofport_retry(self):
+        with mock.patch.object(
+                self.br, 'db_get_val',
+                side_effect=[[], [], [], [], 1]):
+            self.assertEqual(1, self.br._get_port_ofport('1'))
+
+    def test_get_port_ofport_retry_fails(self):
+        # after 16 calls the retry will timeout and raise
+        with mock.patch.object(
+                self.br, 'db_get_val',
+                side_effect=[[] for _ in range(16)]):
+            self.assertRaises(tenacity.RetryError,
+                              self.br._get_port_ofport, '1')
+
 
 class TestDeferredOVSBridge(base.BaseTestCase):
 
@@ -906,11 +933,13 @@ class TestDeferredOVSBridge(base.BaseTestCase):
         with ovs_lib.DeferredOVSBridge(self.br) as deferred_br:
             self.assertRaises(AttributeError, getattr, deferred_br, 'failure')
 
+    @vsctl_only
     def test_default_cookie(self):
         self.br = ovs_lib.OVSBridge("br-tun")
         uuid_stamp1 = self.br.default_cookie
         self.assertEqual(uuid_stamp1, self.br.default_cookie)
 
+    @vsctl_only
     def test_cookie_passed_to_addmod(self):
         self.br = ovs_lib.OVSBridge("br-tun")
         stamp = str(self.br.default_cookie)

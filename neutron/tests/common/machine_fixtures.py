@@ -18,8 +18,12 @@ import functools
 import fixtures
 
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import utils
+from neutron.common import utils
 from neutron.tests.common import net_helpers
+
+
+class FakeMachineException(Exception):
+    pass
 
 
 class FakeMachineBase(fixtures.Fixture):
@@ -60,7 +64,20 @@ class FakeMachineBase(fixtures.Fixture):
 
     def block_until_ping(self, dst_ip):
         predicate = functools.partial(self.ping_predicate, dst_ip)
-        utils.wait_until_true(predicate)
+        utils.wait_until_true(
+            predicate,
+            exception=FakeMachineException(
+                "No ICMP reply obtained from IP address %s" % dst_ip)
+        )
+
+    def block_until_no_ping(self, dst_ip):
+        predicate = functools.partial(
+            lambda ip: not self.ping_predicate(ip), dst_ip)
+        utils.wait_until_true(
+            predicate,
+            exception=FakeMachineException(
+                "ICMP packets still pass to %s IP address." % dst_ip)
+        )
 
     def assert_ping(self, dst_ip):
         net_helpers.assert_ping(self.namespace, dst_ip)

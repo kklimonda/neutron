@@ -14,15 +14,16 @@
 #    under the License.
 
 import netaddr
+from neutron_lib import constants as lib_const
+from neutron_lib import exceptions
 from oslo_log import log as logging
+from oslo_utils import netutils
 
 from neutron._i18n import _, _LE, _LW
 from neutron.agent import firewall
 from neutron.agent.linux.openvswitch_firewall import constants as ovsfw_consts
 from neutron.agent.linux.openvswitch_firewall import rules
 from neutron.common import constants
-from neutron.common import exceptions
-from neutron.common import ipv6_utils
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants \
         as ovs_consts
 
@@ -85,8 +86,8 @@ class OFPort(object):
         self.id = port_dict['device']
         self.vlan_tag = vlan_tag
         self.mac = ovs_port.vif_mac
-        self.lla_address = str(ipv6_utils.get_ipv6_addr_by_EUI64(
-            constants.IPV6_LLA_PREFIX, self.mac))
+        self.lla_address = str(netutils.get_ipv6_addr_by_EUI64(
+            lib_const.IPv6_LLA_PREFIX, self.mac))
         self.ofport = ovs_port.ofport
         self.sec_groups = list()
         self.fixed_ips = port_dict.get('fixed_ips', [])
@@ -249,10 +250,10 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                     'Port', ovs_port.port_name, 'other_config')
                 port_vlan_id = int(other_config['tag'])
             except (KeyError, TypeError):
-                LOG.warning(_LW("Can't get tag for port %(port_id)s from its "
-                                "other_config: %(other_config)s"),
-                            port_id=port_id,
-                            other_config=other_config)
+                LOG.warning(_LW("Cannot get tag for port %(port_id)s from "
+                                "its other_config: %(other_config)s"),
+                            {'port_id': port_id,
+                             'other_config': other_config})
                 port_vlan_id = ovs_consts.DEAD_VLAN_TAG
             of_port = OFPort(port, ovs_port, port_vlan_id)
             self.sg_port_map.create_port(of_port, port)
@@ -367,14 +368,14 @@ class OVSFirewallDriver(firewall.FirewallDriver):
         self._initialize_ingress(port)
 
     def _initialize_egress_ipv6_icmp(self, port):
-        for icmp_type in constants.ICMPV6_ALLOWED_TYPES:
+        for icmp_type in firewall.ICMPV6_ALLOWED_TYPES:
             self._add_flow(
                 table=ovs_consts.BASE_EGRESS_TABLE,
                 priority=95,
                 in_port=port.ofport,
                 reg_port=port.ofport,
                 dl_type=constants.ETHERTYPE_IPV6,
-                nw_proto=constants.PROTO_NUM_IPV6_ICMP,
+                nw_proto=lib_const.PROTO_NUM_IPV6_ICMP,
                 icmp_type=icmp_type,
                 actions='normal'
             )
@@ -439,7 +440,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                 reg_port=port.ofport,
                 in_port=port.ofport,
                 dl_type=dl_type,
-                nw_proto=constants.PROTO_NUM_UDP,
+                nw_proto=lib_const.PROTO_NUM_UDP,
                 tp_src=src_port,
                 tp_dst=dst_port,
                 actions='resubmit(,{:d})'.format(
@@ -455,7 +456,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                 in_port=port.ofport,
                 reg_port=port.ofport,
                 dl_type=dl_type,
-                nw_proto=constants.PROTO_NUM_UDP,
+                nw_proto=lib_const.PROTO_NUM_UDP,
                 tp_src=src_port,
                 tp_dst=dst_port,
                 actions='drop'
@@ -482,14 +483,16 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                 ovsfw_consts.REG_PORT,
                 ovs_consts.BASE_INGRESS_TABLE),
         )
-        self._add_flow(
-            table=ovs_consts.ACCEPT_OR_INGRESS_TABLE,
-            priority=90,
-            reg_port=port.ofport,
-            ct_state=ovsfw_consts.OF_STATE_NEW_NOT_ESTABLISHED,
-            actions='ct(commit,zone=NXM_NX_REG{:d}[0..15]),normal'.format(
-                ovsfw_consts.REG_NET)
-        )
+        for ethertype in [constants.ETHERTYPE_IP, constants.ETHERTYPE_IPV6]:
+            self._add_flow(
+                table=ovs_consts.ACCEPT_OR_INGRESS_TABLE,
+                priority=90,
+                dl_type=ethertype,
+                reg_port=port.ofport,
+                ct_state=ovsfw_consts.OF_STATE_NEW_NOT_ESTABLISHED,
+                actions='ct(commit,zone=NXM_NX_REG{:d}[0..15]),normal'.format(
+                    ovsfw_consts.REG_NET)
+            )
         self._add_flow(
             table=ovs_consts.ACCEPT_OR_INGRESS_TABLE,
             priority=80,
@@ -534,26 +537,28 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             ct_state=ovsfw_consts.OF_STATE_NOT_ESTABLISHED,
             actions='drop'
         )
-        self._add_flow(
-            table=ovs_consts.RULES_EGRESS_TABLE,
-            priority=40,
-            reg_port=port.ofport,
-            ct_state=ovsfw_consts.OF_STATE_ESTABLISHED,
-            actions="ct(commit,zone=NXM_NX_REG{:d}[0..15],"
-                    "exec(set_field:{:s}->ct_mark))".format(
-                        ovsfw_consts.REG_NET,
-                        ovsfw_consts.CT_MARK_INVALID)
-        )
+        for ethertype in [constants.ETHERTYPE_IP, constants.ETHERTYPE_IPV6]:
+            self._add_flow(
+                table=ovs_consts.RULES_EGRESS_TABLE,
+                priority=40,
+                dl_type=ethertype,
+                reg_port=port.ofport,
+                ct_state=ovsfw_consts.OF_STATE_ESTABLISHED,
+                actions="ct(commit,zone=NXM_NX_REG{:d}[0..15],"
+                        "exec(set_field:{:s}->ct_mark))".format(
+                            ovsfw_consts.REG_NET,
+                            ovsfw_consts.CT_MARK_INVALID)
+            )
 
     def _initialize_ingress_ipv6_icmp(self, port):
-        for icmp_type in constants.ICMPV6_ALLOWED_TYPES:
+        for icmp_type in firewall.ICMPV6_ALLOWED_TYPES:
             self._add_flow(
                 table=ovs_consts.BASE_INGRESS_TABLE,
                 priority=100,
                 reg_port=port.ofport,
                 dl_dst=port.mac,
                 dl_type=constants.ETHERTYPE_IPV6,
-                nw_proto=constants.PROTO_NUM_IPV6_ICMP,
+                nw_proto=lib_const.PROTO_NUM_IPV6_ICMP,
                 icmp_type=icmp_type,
                 actions='strip_vlan,output:{:d}'.format(port.ofport),
             )
@@ -579,7 +584,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                 priority=95,
                 reg_port=port.ofport,
                 dl_type=dl_type,
-                nw_proto=constants.PROTO_NUM_UDP,
+                nw_proto=lib_const.PROTO_NUM_UDP,
                 tp_src=src_port,
                 tp_dst=dst_port,
                 actions='strip_vlan,output:{:d}'.format(port.ofport),
@@ -643,16 +648,18 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             ct_state=ovsfw_consts.OF_STATE_NOT_ESTABLISHED,
             actions='drop'
         )
-        self._add_flow(
-            table=ovs_consts.RULES_INGRESS_TABLE,
-            priority=40,
-            reg_port=port.ofport,
-            ct_state=ovsfw_consts.OF_STATE_ESTABLISHED,
-            actions="ct(commit,zone=NXM_NX_REG{:d}[0..15],"
-                    "exec(set_field:{:s}->ct_mark))".format(
-                        ovsfw_consts.REG_NET,
-                        ovsfw_consts.CT_MARK_INVALID)
-        )
+        for ethertype in [constants.ETHERTYPE_IP, constants.ETHERTYPE_IPV6]:
+            self._add_flow(
+                table=ovs_consts.RULES_INGRESS_TABLE,
+                priority=40,
+                dl_type=ethertype,
+                reg_port=port.ofport,
+                ct_state=ovsfw_consts.OF_STATE_ESTABLISHED,
+                actions="ct(commit,zone=NXM_NX_REG{:d}[0..15],"
+                        "exec(set_field:{:s}->ct_mark))".format(
+                            ovsfw_consts.REG_NET,
+                            ovsfw_consts.CT_MARK_INVALID)
+            )
 
     def add_flows_from_rules(self, port):
         self._initialize_tracked_ingress(port)

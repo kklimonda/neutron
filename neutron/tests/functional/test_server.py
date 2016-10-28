@@ -24,10 +24,10 @@ import mock
 from oslo_config import cfg
 import psutil
 
-from neutron.agent.linux import utils
+from neutron.common import utils
 from neutron import service
 from neutron.tests import base
-from neutron import worker
+from neutron import worker as neutron_worker
 from neutron import wsgi
 
 
@@ -35,7 +35,7 @@ CONF = cfg.CONF
 
 # This message will be written to temporary file each time
 # start method is called.
-FAKE_START_MSG = "start".encode("utf-8")
+FAKE_START_MSG = b"start"
 
 TARGET_PLUGIN = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 
@@ -223,7 +223,7 @@ class TestRPCServer(TestNeutronServer):
 
     def setUp(self):
         super(TestRPCServer, self).setUp()
-        self.setup_coreplugin(TARGET_PLUGIN)
+        self.setup_coreplugin('ml2')
         self._plugin_patcher = mock.patch(TARGET_PLUGIN, autospec=True)
         self.plugin = self._plugin_patcher.start()
         self.plugin.return_value.rpc_workers_supported = True
@@ -244,8 +244,8 @@ class TestRPCServer(TestNeutronServer):
                 # not interested in state report workers specifically
                 CONF.set_override("rpc_state_report_workers", 0)
 
-                launcher = service.serve_rpc()
-                launcher.wait()
+                rpc_workers_launcher = service.start_rpc_workers()
+                rpc_workers_launcher.wait()
 
     def test_restart_rpc_on_sighup_multiple_workers(self):
         self._test_restart_service_on_sighup(service=self._serve_rpc,
@@ -257,19 +257,18 @@ class TestPluginWorker(TestNeutronServer):
 
     def setUp(self):
         super(TestPluginWorker, self).setUp()
-        self.setup_coreplugin(TARGET_PLUGIN)
+        self.setup_coreplugin('ml2')
         self._plugin_patcher = mock.patch(TARGET_PLUGIN, autospec=True)
         self.plugin = self._plugin_patcher.start()
 
     def _start_plugin(self, workers=1):
         with mock.patch('neutron.manager.NeutronManager.get_plugin') as gp:
             gp.return_value = self.plugin
-            launchers = service.start_plugin_workers()
-            for launcher in launchers:
-                launcher.wait()
+            plugin_workers_launcher = service.start_plugins_workers()
+            plugin_workers_launcher.wait()
 
     def test_start(self):
-        class FakeWorker(worker.NeutronWorker):
+        class FakeWorker(neutron_worker.NeutronWorker):
             def start(self):
                 pass
 

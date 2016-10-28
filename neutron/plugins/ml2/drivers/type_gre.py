@@ -13,61 +13,31 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log
-import sqlalchemy as sa
-from sqlalchemy import sql
 
-from neutron._i18n import _, _LE
-from neutron.common import exceptions as n_exc
-from neutron.db import model_base
+from neutron._i18n import _LE
+from neutron.common import _deprecate
+from neutron.conf.plugins.ml2.drivers import driver_type
+from neutron.db.models.plugins.ml2 import gre_allocation_endpoints as gre_model
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers import type_tunnel
 
 LOG = log.getLogger(__name__)
 
-gre_opts = [
-    cfg.ListOpt('tunnel_id_ranges',
-                default=[],
-                help=_("Comma-separated list of <tun_min>:<tun_max> tuples "
-                       "enumerating ranges of GRE tunnel IDs that are "
-                       "available for tenant network allocation"))
-]
-
-cfg.CONF.register_opts(gre_opts, "ml2_type_gre")
+driver_type.register_ml2_drivers_gre_opts()
 
 
-class GreAllocation(model_base.BASEV2):
-
-    __tablename__ = 'ml2_gre_allocations'
-
-    gre_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
-                       autoincrement=False)
-    allocated = sa.Column(sa.Boolean, nullable=False, default=False,
-                          server_default=sql.false(), index=True)
-
-
-class GreEndpoints(model_base.BASEV2):
-    """Represents tunnel endpoint in RPC mode."""
-
-    __tablename__ = 'ml2_gre_endpoints'
-    __table_args__ = (
-        sa.UniqueConstraint('host',
-                            name='unique_ml2_gre_endpoints0host'),
-        model_base.BASEV2.__table_args__
-    )
-    ip_address = sa.Column(sa.String(64), primary_key=True)
-    host = sa.Column(sa.String(255), nullable=True)
-
-    def __repr__(self):
-        return "<GreTunnelEndpoint(%s)>" % self.ip_address
+_deprecate._moved_global('GreAllocation', new_module=gre_model)
+_deprecate._moved_global('GreEndpoints', new_module=gre_model)
 
 
 class GreTypeDriver(type_tunnel.EndpointTunnelTypeDriver):
 
     def __init__(self):
         super(GreTypeDriver, self).__init__(
-            GreAllocation, GreEndpoints)
+            gre_model.GreAllocation, gre_model.GreEndpoints)
 
     def get_type(self):
         return p_const.TYPE_GRE
@@ -93,3 +63,6 @@ class GreTypeDriver(type_tunnel.EndpointTunnelTypeDriver):
     def get_mtu(self, physical_network=None):
         mtu = super(GreTypeDriver, self).get_mtu(physical_network)
         return mtu - p_const.GRE_ENCAP_OVERHEAD if mtu else 0
+
+
+_deprecate._MovedGlobals()
