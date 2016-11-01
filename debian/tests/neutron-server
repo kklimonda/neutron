@@ -30,6 +30,7 @@ for daemon in "${DAEMONS[@]}"; do
 
     if [ "$TIMEOUT" -le 0 ]; then
         echo "ERROR: ${daemon} IS NOT RUNNING"
+        cat /var/log/neutron/neutron-server.log
         exit 1
     fi
 done
