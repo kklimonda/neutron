@@ -348,6 +348,7 @@ neutron/core_extensions/__init__.py
 neutron/core_extensions/base.py
 neutron/core_extensions/qos.py
 neutron/db/__init__.py
+neutron/db/_utils.py
 neutron/db/address_scope_db.py
 neutron/db/agents_db.py
 neutron/db/agentschedulers_db.py

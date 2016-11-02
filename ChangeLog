@@ -1,8 +1,17 @@
 CHANGES
 =======
 
+* Update Lieutenant table with new entries
+* Don't depend on translated strings for error check
+* Simplify resources module in RPC callbacks
+* SR-IOV: Remove deprecated supported_pci_vendor_devs option
+* Fix specs broken link
+* Make README less verbose and to the point
+* Make crystal clear how to contribute/approach the neutron community
+* Refactor/prepare db common utils for neutron-lib
 * Updated from global requirements
 * Rename ipv6_utils.is_enabled()
+* [TrivialFix] Replace 'assertTrue(a in b)' with 'assertIn(a, b)'
 * Correcting a spelling in README
 * Refactoring config options for cache_utils opts
 * Updated from global requirements
@@ -17,6 +26,8 @@ CHANGES
 * ovsfw: Add a dl_type match for action=ct flows
 * OVO for Router Extra Attributes
 * Validate type of allowed_address_pairs
+* Pecan: Fix internal server error on QoS rule PUT
+* Pecan: Don't prefetch resource fields on DELETE
 * Generate OVSDB schema helper in a separate method
 * objects: Remove tenant_id from to_dict() when project_id is not set
 * Updated from global requirements
@@ -39,6 +50,7 @@ CHANGES
 * neutron-lib: use dict methods from helpers
 * neutron-lib: use get_hostname
 * neutron-lib: use cpu_count
+* Pecan: add http_proxy_to_wsgi middleware
 * Use BaseDbObjectTestCase in AddressScope UT
 * Devref: fix repeated 'testing documentation' text
 * Removes remaining Hyper-V plugin
@@ -68,6 +80,7 @@ CHANGES
 * Deterministic ordering of fixed_ips
 * Account for Py2/Py3 differences in fcntl.ioctl return value
 * Enable release notes translation
+* Handle label_id's DBReferenceError when creating label-rule
 * Add required extension to trunk_details descriptor
 * Relocate Segment DB Models
 * Make Jakub Libosvar contact for ovs-fw tag
@@ -130,6 +143,7 @@ CHANGES
 * tests: Move testtools to 3rd party libraries section
 * Fix pep8 E501 line too long
 * Fix dhcp_release6 error when not supported
+* XenAPI: add support for conntrack with XenServer
 * Fix ML2 revision_number handling in port updates
 * Fix ML2 test extension driver API test cases
 * Relocate PortBindingPort DB Model
@@ -300,6 +314,7 @@ CHANGES
 * ovsfw: fix troublesome port_rule_masking
 * Check MTU sanity of trunk port subports
 * QOS-DB: remove deprecation warning
+* Skip setup_port_filters for skipped_devices
 * Disallow specifying too long description for meter-label
 * Use bridge_lib's FdbInterface calls instead of execute util
 * Expose revision_number to trunk API
