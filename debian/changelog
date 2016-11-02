@@ -1,10 +1,12 @@
-neutron (2:9.0.0.0rc2~dev362-1ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.0.0.0rc2~dev391-1ubuntu1) UNRELEASED; urgency=medium
 
   * New upstream version.
-  * debian/control: Add python-tenacity 
+  * debian/control: 
+    - Add python-tenacity.
+    - Bump version dependencies.
   * debian/tests/neutron-server: Append log file for better debugining.
-
- -- Chuck Short <zulcss@ubuntu.com>  Fri, 28 Oct 2016 09:11:55 -0400
+  * New upstream version. 
+ -- Chuck Short <zulcss@ubuntu.com>  Wed, 02 Nov 2016 09:46:26 -0400
 
 neutron (2:9.0.0-0ubuntu2) zesty; urgency=medium
 
