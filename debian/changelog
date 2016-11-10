@@ -1,4 +1,4 @@
-neutron (2:9.0.0-0ubuntu1.16.10.2) UNRELEASED; urgency=medium
+neutron (2:9.0.0-0ubuntu1.16.10.2) yakkety; urgency=medium
 
   * d/p/check-namespace-before-getting-devices.patch: Cherry-pick patch
     from upstream stable/newton branch to check if router namespace exists
