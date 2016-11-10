@@ -1,4 +1,4 @@
-neutron (2:9.0.0-0ubuntu2.1) UNRELEASED; urgency=medium
+neutron (2:9.0.0-0ubuntu2.1) zesty; urgency=medium
 
   * d/p/check-namespace-before-getting-devices.patch: Cherry-pick patch
     from upstream master branch to check if router namespace exists before
