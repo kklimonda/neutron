@@ -1,2 +1,3 @@
+check-namespace-before-getting-devices.patch
 skip-iptest.patch
 flake8-legacy.patch
