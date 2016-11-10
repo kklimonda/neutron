@@ -1,3 +1,11 @@
+neutron (2:9.0.0-0ubuntu2.1) UNRELEASED; urgency=medium
+
+  * d/p/check-namespace-before-getting-devices.patch: Cherry-pick patch
+    from upstream master branch to check if router namespace exists before
+    getting devices (LP: #1573073).
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 10 Nov 2016 13:50:40 -0500
+
 neutron (2:9.0.0-0ubuntu2) zesty; urgency=medium
 
   * d/neutron-openvswitch-agent.neutron-ovs-cleanup.service.in: Fix
