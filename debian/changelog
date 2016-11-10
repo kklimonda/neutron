@@ -1,3 +1,11 @@
+neutron (2:9.0.0-0ubuntu3.1) UNRELEASED; urgency=medium
+
+  * d/p/check-namespace-before-getting-devices.patch: Cherry-pick patch
+    from upstream master branch to check if router namespace exists before
+    getting devices (LP: #1573073).
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 10 Nov 2016 17:01:15 -0500
+
 neutron (2:9.0.0-0ubuntu3) zesty; urgency=medium
 
   * debian/tests/neutron-server: Add debug statemens for better 
