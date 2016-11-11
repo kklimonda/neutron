@@ -91,7 +91,8 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
             'neutron.agent.linux.ip_lib.device_exists')
         self.device_exists = self.device_exists_p.start()
 
-        self.ensure_dir = mock.patch('neutron.common.utils.ensure_dir').start()
+        self.ensure_dir = mock.patch(
+            'oslo_utils.fileutils.ensure_tree').start()
 
         mock.patch('neutron.agent.linux.keepalived.KeepalivedManager'
                    '.get_full_config_file_path').start()
@@ -101,7 +102,7 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
         self.utils_exec = self.utils_exec_p.start()
 
         self.utils_replace_file_p = mock.patch(
-            'neutron.common.utils.replace_file')
+            'neutron_lib.utils.file.replace_file')
         self.utils_replace_file = self.utils_replace_file_p.start()
 
         self.external_process_p = mock.patch(
@@ -191,7 +192,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
     def test_init_ha_conf(self):
         with mock.patch('os.path.dirname', return_value='/etc/ha/'):
             l3_agent.L3NATAgent(HOSTNAME, self.conf)
-            self.ensure_dir.assert_called_once_with('/etc/ha/')
+            self.ensure_dir.assert_called_once_with('/etc/ha/', mode=0o755)
 
     def test_enqueue_state_change_router_not_found(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)

@@ -125,12 +125,21 @@ class IPWrapper(SubProcessBase):
             # we call out manually because in order to avoid screen scraping
             # iproute2 we use find to see what is in the sysfs directory, as
             # suggested by Stephen Hemminger (iproute2 dev).
-            output = utils.execute(['ip', 'netns', 'exec', self.namespace,
-                                    'find', SYS_NET_PATH, '-maxdepth', '1',
-                                    '-type', 'l', '-printf', '%f '],
-                                   run_as_root=True,
-                                   log_fail_as_error=self.log_fail_as_error
-                                   ).split()
+            try:
+                cmd = ['ip', 'netns', 'exec', self.namespace,
+                       'find', SYS_NET_PATH, '-maxdepth', '1',
+                       '-type', 'l', '-printf', '%f ']
+                output = utils.execute(
+                    cmd,
+                    run_as_root=True,
+                    log_fail_as_error=self.log_fail_as_error).split()
+            except RuntimeError:
+                # We could be racing with a cron job deleting namespaces.
+                # Just return a empty list if the namespace is deleted.
+                with excutils.save_and_reraise_exception() as ctx:
+                    if not self.netns.exists(self.namespace):
+                        ctx.reraise = False
+                        return []
         else:
             output = (
                 i for i in os.listdir(SYS_NET_PATH)
@@ -1013,7 +1022,7 @@ def _arping(ns_name, iface_name, address, count):
                             'ns': ns_name})
 
 
-def send_ip_addr_adv_notif(ns_name, iface_name, address, config):
+def send_ip_addr_adv_notif(ns_name, iface_name, address, count=3):
     """Send advance notification of an IP address assignment.
 
     If the address is in the IPv4 family, send gratuitous ARP.
@@ -1023,9 +1032,12 @@ def send_ip_addr_adv_notif(ns_name, iface_name, address, config):
     Address Discovery (DAD), and (for stateless addresses) router
     advertisements (RAs) are sufficient for address resolution and
     duplicate address detection.
-    """
-    count = config.send_arp_for_ha
 
+    :param ns_name: Namespace name which GARPs are gonna be sent from.
+    :param iface_name: Name of interface which GARPs are gonna be sent from.
+    :param address: Advertised IP address.
+    :param count: (Optional) How many GARPs are gonna be sent. Default is 3.
+    """
     def arping():
         _arping(ns_name, iface_name, address, count)
 

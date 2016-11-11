@@ -1,7 +1,6 @@
 pbr>=1.6
 Paste
 PasteDeploy>=1.5.0
-Routes!=2.0,!=2.1,!=2.3.0,>=1.12.3
 debtcollector>=1.2.0
 eventlet!=0.18.3,>=0.18.2
 pecan!=1.0.2,!=1.0.3,!=1.0.4,!=1.2,>=1.0.0
@@ -12,9 +11,9 @@ Jinja2>=2.8
 keystonemiddleware!=4.5.0,>=4.2.0
 netaddr!=0.7.16,>=0.7.13
 netifaces>=0.10.4
-neutron-lib>=0.4.0
+neutron-lib>=1.0.0
 python-neutronclient>=5.1.0
-tenacity>=3.1.1
+tenacity>=3.2.1
 ryu!=4.1,!=4.2,!=4.2.1,!=4.4,>=3.30
 SQLAlchemy<1.1.0,>=1.0.10
 WebOb>=1.6.0
@@ -36,12 +35,15 @@ oslo.reports>=0.6.0
 oslo.rootwrap>=5.0.0
 oslo.serialization>=1.10.0
 oslo.service>=1.10.0
-oslo.utils>=3.17.0
+oslo.utils>=3.18.0
 oslo.versionedobjects>=1.13.0
 osprofiler>=1.4.0
-ovs>=2.6.0
+ovs>=2.6.1
 python-novaclient!=2.33.0,>=2.29.0
 python-designateclient>=1.5.0
 
 [:(python_version!='2.7')]
 Routes!=2.0,!=2.3.0,>=1.12.3
+
+[:(python_version=='2.7')]
+Routes!=2.0,!=2.1,!=2.3.0,>=1.12.3
