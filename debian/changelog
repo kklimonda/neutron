@@ -11,6 +11,7 @@ neutron (2:9.0.0.0rc2~dev461-0ubuntu1) UNRELEASED; urgency=medium
   [ David Della Vecchia ]
   * New upstream version.
   * d/p/check-namespace-before-getting-devices.patch: Dropped. Fixed upstream.
+  * d/p/flake8-legacy.patch: Rebased.
 
  -- David Della Vecchia <ddv@canonical.com>  Fri, 11 Nov 2016 07:34:20 -0500
 
