@@ -283,6 +283,24 @@ class TestIpWrapper(base.BaseTestCase):
         self.assertEqual(retval, [ip_lib.IPDevice('lo', namespace='foo')])
 
     @mock.patch('neutron.agent.common.utils.execute')
+    def test_get_devices_namespaces_ns_not_exists(self, mocked_execute):
+        mocked_execute.side_effect = RuntimeError(
+            "Cannot open network namespace")
+        with mock.patch.object(ip_lib.IpNetnsCommand, 'exists',
+                               return_value=False):
+            retval = ip_lib.IPWrapper(namespace='foo').get_devices()
+            self.assertEqual([], retval)
+
+    @mock.patch('neutron.agent.common.utils.execute')
+    def test_get_devices_namespaces_ns_exists(self, mocked_execute):
+        mocked_execute.side_effect = RuntimeError(
+            "Cannot open network namespace")
+        with mock.patch.object(ip_lib.IpNetnsCommand, 'exists',
+                               return_value=True):
+            self.assertRaises(RuntimeError,
+                              ip_lib.IPWrapper(namespace='foo').get_devices)
+
+    @mock.patch('neutron.agent.common.utils.execute')
     def test_get_devices_exclude_loopback_and_gre(self, mocked_execute):
         device_name = 'somedevice'
         mocked_execute.return_value = 'lo gre0 gretap0 ' + device_name
@@ -1322,12 +1340,10 @@ class TestArpPing(TestIPCmdBase):
         spawn_n.side_effect = lambda f: f()
         ARPING_COUNT = 3
         address = '20.0.0.1'
-        config = mock.Mock()
-        config.send_arp_for_ha = ARPING_COUNT
         ip_lib.send_ip_addr_adv_notif(mock.sentinel.ns_name,
                                       mock.sentinel.iface_name,
                                       address,
-                                      config)
+                                      ARPING_COUNT)
 
         self.assertTrue(spawn_n.called)
         mIPWrapper.assert_called_once_with(namespace=mock.sentinel.ns_name)
@@ -1346,12 +1362,10 @@ class TestArpPing(TestIPCmdBase):
     @mock.patch('eventlet.spawn_n')
     def test_no_ipv6_addr_notif(self, spawn_n):
         ipv6_addr = 'fd00::1'
-        config = mock.Mock()
-        config.send_arp_for_ha = 3
         ip_lib.send_ip_addr_adv_notif(mock.sentinel.ns_name,
                                       mock.sentinel.iface_name,
                                       ipv6_addr,
-                                      config)
+                                      3)
         self.assertFalse(spawn_n.called)
 
 

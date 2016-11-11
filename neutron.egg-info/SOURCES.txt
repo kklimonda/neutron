@@ -29,6 +29,7 @@ devstack/lib/macvtap_agent
 devstack/lib/ml2
 devstack/lib/ovs
 devstack/lib/qos
+devstack/lib/rally
 devstack/lib/trunk
 devstack/lib/ml2_drivers/sriovnicswitch
 doc/Makefile
@@ -391,7 +392,6 @@ neutron/db/securitygroups_rpc_base.py
 neutron/db/segments_db.py
 neutron/db/servicetype_db.py
 neutron/db/sqlalchemytypes.py
-neutron/db/sqlalchemyutils.py
 neutron/db/standard_attr.py
 neutron/db/standardattrdescription_db.py
 neutron/db/subnet_service_type_db_models.py
@@ -644,6 +644,7 @@ neutron/objects/__init__.py
 neutron/objects/address_scope.py
 neutron/objects/base.py
 neutron/objects/common_types.py
+neutron/objects/floatingip.py
 neutron/objects/network.py
 neutron/objects/ports.py
 neutron/objects/rbac_db.py
@@ -1332,6 +1333,7 @@ neutron/tests/unit/objects/__init__.py
 neutron/tests/unit/objects/test_address_scope.py
 neutron/tests/unit/objects/test_base.py
 neutron/tests/unit/objects/test_common_types.py
+neutron/tests/unit/objects/test_floatingip.py
 neutron/tests/unit/objects/test_network.py
 neutron/tests/unit/objects/test_objects.py
 neutron/tests/unit/objects/test_ports.py
@@ -1518,6 +1520,7 @@ neutron/tests/var/privatekey.key
 rally-jobs/README.rst
 rally-jobs/neutron-neutron.yaml
 rally-jobs/extra/README.rst
+rally-jobs/extra/trunk_scenario.setup
 rally-jobs/plugins/README.rst
 rally-jobs/plugins/__init__.py
 releasenotes/notes/.placeholder
@@ -1560,6 +1563,7 @@ releasenotes/notes/deprecate-implicit-service-providers-loading-703f984b90351bf0
 releasenotes/notes/deprecate-min-l3-agents-per-router-15ddaa4c178b23df.yaml
 releasenotes/notes/deprecate-network-device-mtu-59b78264c9974808.yaml
 releasenotes/notes/deprecate-router_id-34aca9ea5ee9e789.yaml
+releasenotes/notes/deprecate-send_arp_for_ha-0281853632f58e8d.yaml
 releasenotes/notes/deprecate-supported_pci_vendor_devs-12279b70a1f1fe8e.yaml
 releasenotes/notes/deprecate_max_fixed_ips_per_port-5e80518cbf25cfd6.yaml
 releasenotes/notes/deprecate_neutron_debug-a578e0adfc9cff4c.yaml

@@ -23,10 +23,12 @@ import time
 import netaddr
 from neutron_lib import constants
 from neutron_lib import exceptions
+from neutron_lib.utils import file as file_utils
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
+from oslo_utils import fileutils
 from oslo_utils import uuidutils
 import six
 
@@ -183,7 +185,7 @@ class DhcpLocalProcess(DhcpBase):
                                                version, plugin)
         self.confs_dir = self.get_confs_dir(conf)
         self.network_conf_dir = os.path.join(self.confs_dir, network.id)
-        common_utils.ensure_dir(self.network_conf_dir)
+        fileutils.ensure_tree(self.network_conf_dir, mode=0o755)
 
     @staticmethod
     def get_confs_dir(conf):
@@ -208,7 +210,7 @@ class DhcpLocalProcess(DhcpBase):
         if self.active:
             self.restart()
         elif self._enable_dhcp():
-            common_utils.ensure_dir(self.network_conf_dir)
+            fileutils.ensure_tree(self.network_conf_dir, mode=0o755)
             interface_name = self.device_manager.setup(self.network)
             self.interface_name = interface_name
             self.spawn_process()
@@ -271,7 +273,7 @@ class DhcpLocalProcess(DhcpBase):
     @interface_name.setter
     def interface_name(self, value):
         interface_file_path = self.get_conf_file_name('interface')
-        common_utils.replace_file(interface_file_path, value)
+        file_utils.replace_file(interface_file_path, value)
 
     @property
     def active(self):
@@ -637,7 +639,7 @@ class Dnsmasq(DhcpLocalProcess):
             buf.write('%s %s %s * *\n' %
                       (timestamp, port.mac_address, ip_address))
         contents = buf.getvalue()
-        common_utils.replace_file(filename, contents)
+        file_utils.replace_file(filename, contents)
         LOG.debug('Done building initial lease file %s with contents:\n%s',
                   filename, contents)
         return filename
@@ -707,7 +709,7 @@ class Dnsmasq(DhcpLocalProcess):
                 buf.write('%s,%s,%s\n' %
                           (port.mac_address, name, ip_address))
 
-        common_utils.replace_file(filename, buf.getvalue())
+        file_utils.replace_file(filename, buf.getvalue())
         LOG.debug('Done building host file %s', filename)
         return filename
 
@@ -846,7 +848,7 @@ class Dnsmasq(DhcpLocalProcess):
             if alloc:
                 buf.write('%s\t%s %s\n' % (alloc.ip_address, fqdn, hostname))
         addn_hosts = self.get_conf_file_name('addn_hosts')
-        common_utils.replace_file(addn_hosts, buf.getvalue())
+        file_utils.replace_file(addn_hosts, buf.getvalue())
         return addn_hosts
 
     def _output_opts_file(self):
@@ -855,7 +857,7 @@ class Dnsmasq(DhcpLocalProcess):
         options += self._generate_opts_per_port(subnet_index_map)
 
         name = self.get_conf_file_name('opts')
-        common_utils.replace_file(name, '\n'.join(options))
+        file_utils.replace_file(name, '\n'.join(options))
         return name
 
     def _generate_opts_per_subnet(self):
@@ -1068,7 +1070,9 @@ class Dnsmasq(DhcpLocalProcess):
         with 3rd party backends.
         """
         if conf.force_metadata:
-            return True
+            # Only ipv4 subnet, with dhcp enabled, will use metadata proxy.
+            return any(s for s in network.subnets
+                       if s.ip_version == 4 and s.enable_dhcp)
 
         if conf.enable_metadata_network and conf.enable_isolated_metadata:
             # check if the network has a metadata subnet
@@ -1081,7 +1085,10 @@ class Dnsmasq(DhcpLocalProcess):
             return False
 
         isolated_subnets = cls.get_isolated_subnets(network)
-        return any(isolated_subnets[subnet.id] for subnet in network.subnets)
+        # Only ipv4 isolated subnet, which has dhcp enabled, will use
+        # metadata proxy.
+        return any(isolated_subnets[s.id] for s in network.subnets
+                   if s.ip_version == 4 and s.enable_dhcp)
 
 
 class DeviceManager(object):
