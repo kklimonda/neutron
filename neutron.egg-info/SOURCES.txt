@@ -29,6 +29,7 @@ devstack/lib/macvtap_agent
 devstack/lib/ml2
 devstack/lib/ovs
 devstack/lib/qos
+devstack/lib/rally
 devstack/lib/trunk
 devstack/lib/ml2_drivers/sriovnicswitch
 doc/Makefile
@@ -231,6 +232,7 @@ neutron/agent/ovsdb/native/commands.py
 neutron/agent/ovsdb/native/connection.py
 neutron/agent/ovsdb/native/helpers.py
 neutron/agent/ovsdb/native/idlutils.py
+neutron/agent/ovsdb/native/vlog.py
 neutron/agent/windows/__init__.py
 neutron/agent/windows/ip_lib.py
 neutron/agent/windows/polling.py
@@ -391,7 +393,6 @@ neutron/db/securitygroups_rpc_base.py
 neutron/db/segments_db.py
 neutron/db/servicetype_db.py
 neutron/db/sqlalchemytypes.py
-neutron/db/sqlalchemyutils.py
 neutron/db/standard_attr.py
 neutron/db/standardattrdescription_db.py
 neutron/db/subnet_service_type_db_models.py
@@ -644,6 +645,8 @@ neutron/objects/__init__.py
 neutron/objects/address_scope.py
 neutron/objects/base.py
 neutron/objects/common_types.py
+neutron/objects/exceptions.py
+neutron/objects/floatingip.py
 neutron/objects/network.py
 neutron/objects/ports.py
 neutron/objects/rbac_db.py
@@ -1332,6 +1335,7 @@ neutron/tests/unit/objects/__init__.py
 neutron/tests/unit/objects/test_address_scope.py
 neutron/tests/unit/objects/test_base.py
 neutron/tests/unit/objects/test_common_types.py
+neutron/tests/unit/objects/test_floatingip.py
 neutron/tests/unit/objects/test_network.py
 neutron/tests/unit/objects/test_objects.py
 neutron/tests/unit/objects/test_ports.py
@@ -1518,8 +1522,10 @@ neutron/tests/var/privatekey.key
 rally-jobs/README.rst
 rally-jobs/neutron-neutron.yaml
 rally-jobs/extra/README.rst
+rally-jobs/extra/trunk_scenario.setup
 rally-jobs/plugins/README.rst
 rally-jobs/plugins/__init__.py
+rally-jobs/plugins/trunk_scenario.py
 releasenotes/notes/.placeholder
 releasenotes/notes/1500-default-mtu-b0d6e4ab193b62a4.yaml
 releasenotes/notes/1500-default-segment-mtu-54e2cf6aea9602d5.yaml
@@ -1553,6 +1559,7 @@ releasenotes/notes/config-wsgi-pool-size-a4c06753b79fee6d.yaml
 releasenotes/notes/correlate-address-scope-with-network-ea16e16b0154ac21.yaml
 releasenotes/notes/default-local-dns-a1c3fa1451f228fa.yaml
 releasenotes/notes/default-subnetpool-semantics-1cdc5cdde2be88c2.yaml
+releasenotes/notes/deprecate-SRIOV-physical_deivce_mappings-67dd3317181eb513.yaml
 releasenotes/notes/deprecate-advertise-mtu-51e3f78475a14efc.yaml
 releasenotes/notes/deprecate-allow-sorting-allow-pagination-4549c92a74cfe15d.yaml
 releasenotes/notes/deprecate-force_gateway_on_subnet-376855c4e66f4e11.yaml
@@ -1560,6 +1567,7 @@ releasenotes/notes/deprecate-implicit-service-providers-loading-703f984b90351bf0
 releasenotes/notes/deprecate-min-l3-agents-per-router-15ddaa4c178b23df.yaml
 releasenotes/notes/deprecate-network-device-mtu-59b78264c9974808.yaml
 releasenotes/notes/deprecate-router_id-34aca9ea5ee9e789.yaml
+releasenotes/notes/deprecate-send_arp_for_ha-0281853632f58e8d.yaml
 releasenotes/notes/deprecate-supported_pci_vendor_devs-12279b70a1f1fe8e.yaml
 releasenotes/notes/deprecate_max_fixed_ips_per_port-5e80518cbf25cfd6.yaml
 releasenotes/notes/deprecate_neutron_debug-a578e0adfc9cff4c.yaml
@@ -1613,6 +1621,7 @@ releasenotes/notes/remove-subnetpool-config-b15dbe59237aee7e.yaml
 releasenotes/notes/rename-tenant-to-project-b19a4068f8625969.yaml
 releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml
 releasenotes/notes/segment_mtu_to_global_physnet_mtu-9cee5ff09557edeb.yaml
+releasenotes/notes/sending-garp-for-l3-ha-c118871833ad8743.yaml
 releasenotes/notes/set-of-default-qos-burst-value-0790773703fa08fc.yaml
 releasenotes/notes/sorting-pagination-extensions-e66e99e2a8f5e563.yaml
 releasenotes/notes/sriov-agent-num-vf-0-0c06424247e7efe0.yaml
@@ -1639,7 +1648,6 @@ tools/generate_config_file_samples.sh
 tools/install_venv.py
 tools/install_venv_common.py
 tools/list_moved_globals.py
-tools/milestone-review-dash.py
 tools/misc-sanity-checks.sh
 tools/ostestr_compat_shim.sh
 tools/split.sh

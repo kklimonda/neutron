@@ -283,6 +283,24 @@ class TestIpWrapper(base.BaseTestCase):
         self.assertEqual(retval, [ip_lib.IPDevice('lo', namespace='foo')])
 
     @mock.patch('neutron.agent.common.utils.execute')
+    def test_get_devices_namespaces_ns_not_exists(self, mocked_execute):
+        mocked_execute.side_effect = RuntimeError(
+            "Cannot open network namespace")
+        with mock.patch.object(ip_lib.IpNetnsCommand, 'exists',
+                               return_value=False):
+            retval = ip_lib.IPWrapper(namespace='foo').get_devices()
+            self.assertEqual([], retval)
+
+    @mock.patch('neutron.agent.common.utils.execute')
+    def test_get_devices_namespaces_ns_exists(self, mocked_execute):
+        mocked_execute.side_effect = RuntimeError(
+            "Cannot open network namespace")
+        with mock.patch.object(ip_lib.IpNetnsCommand, 'exists',
+                               return_value=True):
+            self.assertRaises(RuntimeError,
+                              ip_lib.IPWrapper(namespace='foo').get_devices)
+
+    @mock.patch('neutron.agent.common.utils.execute')
     def test_get_devices_exclude_loopback_and_gre(self, mocked_execute):
         device_name = 'somedevice'
         mocked_execute.return_value = 'lo gre0 gretap0 ' + device_name
@@ -1288,6 +1306,57 @@ class TestDeviceExists(base.BaseTestCase):
             self.assertFalse(ip_lib.ensure_device_is_ready("eth0"))
 
 
+class TestGetRoutingTable(base.BaseTestCase):
+    @mock.patch.object(ip_lib, 'IPWrapper')
+    def _test_get_routing_table(self, version, ip_route_output, expected,
+                                mock_ipwrapper):
+        instance = mock_ipwrapper.return_value
+        mock_netns = instance.netns
+        mock_execute = mock_netns.execute
+        mock_execute.return_value = ip_route_output
+        self.assertEqual(expected, ip_lib.get_routing_table(version))
+
+    def test_get_routing_table_4(self):
+        ip_route_output = ("""
+default via 192.168.3.120 dev wlp3s0  proto static  metric 1024
+10.0.0.0/8 dev tun0  proto static  scope link  metric 1024
+10.0.1.0/8 dev tun1  proto static  scope link  metric 1024 linkdown
+""")
+        expected = [{'destination': 'default',
+                     'nexthop': '192.168.3.120',
+                     'device': 'wlp3s0',
+                     'scope': None},
+                    {'destination': '10.0.0.0/8',
+                     'nexthop': None,
+                     'device': 'tun0',
+                     'scope': 'link'},
+                    {'destination': '10.0.1.0/8',
+                     'nexthop': None,
+                     'device': 'tun1',
+                     'scope': 'link'}]
+        self._test_get_routing_table(4, ip_route_output, expected)
+
+    def test_get_routing_table_6(self):
+        ip_route_output = ("""
+2001:db8:0:f101::/64 dev tap-1  proto kernel  metric 256  pref medium
+2001:db8:0:f102::/64 dev tap-2  proto kernel  metric 256  pref medium linkdown
+default via 2001:db8:0:f101::4 dev tap-1  metric 1024  pref medium
+""")
+        expected = [{'destination': '2001:db8:0:f101::/64',
+                     'nexthop': None,
+                     'device': 'tap-1',
+                     'scope': None},
+                    {'destination': '2001:db8:0:f102::/64',
+                     'nexthop': None,
+                     'device': 'tap-2',
+                     'scope': None},
+                    {'destination': 'default',
+                     'nexthop': '2001:db8:0:f101::4',
+                     'device': 'tap-1',
+                     'scope': None}]
+        self._test_get_routing_table(6, ip_route_output, expected)
+
+
 class TestIpNeighCommand(TestIPCmdBase):
     def setUp(self):
         super(TestIpNeighCommand, self).setUp()
@@ -1322,12 +1391,10 @@ class TestArpPing(TestIPCmdBase):
         spawn_n.side_effect = lambda f: f()
         ARPING_COUNT = 3
         address = '20.0.0.1'
-        config = mock.Mock()
-        config.send_arp_for_ha = ARPING_COUNT
         ip_lib.send_ip_addr_adv_notif(mock.sentinel.ns_name,
                                       mock.sentinel.iface_name,
                                       address,
-                                      config)
+                                      ARPING_COUNT)
 
         self.assertTrue(spawn_n.called)
         mIPWrapper.assert_called_once_with(namespace=mock.sentinel.ns_name)
@@ -1341,17 +1408,15 @@ class TestArpPing(TestIPCmdBase):
                       '-w', mock.ANY,
                       address]
         ip_wrapper.netns.execute.assert_any_call(arping_cmd,
-                                                 check_exit_code=True)
+                                                 extra_ok_codes=[1])
 
     @mock.patch('eventlet.spawn_n')
     def test_no_ipv6_addr_notif(self, spawn_n):
         ipv6_addr = 'fd00::1'
-        config = mock.Mock()
-        config.send_arp_for_ha = 3
         ip_lib.send_ip_addr_adv_notif(mock.sentinel.ns_name,
                                       mock.sentinel.iface_name,
                                       ipv6_addr,
-                                      config)
+                                      3)
         self.assertFalse(spawn_n.called)
 
 
@@ -1364,3 +1429,11 @@ class TestAddNamespaceToCmd(base.BaseTestCase):
     def test_add_namespace_to_cmd_without_namespace(self):
         cmd = ['ping', '8.8.8.8']
         self.assertEqual(cmd, ip_lib.add_namespace_to_cmd(cmd, None))
+
+
+class TestSetIpNonlocalBindForHaNamespace(base.BaseTestCase):
+    def test_setting_failure(self):
+        """Make sure message is formatted correctly."""
+        with mock.patch.object(
+                ip_lib, 'set_ip_nonlocal_bind', side_effect=RuntimeError):
+            ip_lib.set_ip_nonlocal_bind_for_namespace('foo')

@@ -1,14 +1,68 @@
 CHANGES
 =======
 
+10.0.0.0b1
+----------
+
+* Parse the output of ip route more robustly
+* Add L3 HA test with linux bridge
+* Fix "failed unplugging ha interface" error when deleting router
+* Add a trunk rally test
+* Updated from global requirements
+* Use new enginefacade for servicetype_db
+* Change import statement to not rename the module
+* Add unit tests for ip_lib.get_routing_table
+* Changing arping command execute to accept 1 as extra OK code
+* l3-ha: Send gratuitous ARP when new floating IP is added
+* Make OVO exception NeutronDbObjectDuplicateEntry retriable
+* Move OVO exceptions to neutron/objects/exceptions
+* neutron-lib: complete usage of helpers
+* Add rally hook to neutron devstack plugin
+* Retire deprecations for constants, exceptions, attributes
+* Truncate IPDevice's name to interface max size
+* DHCP: Add missing path for marking ports as ready
+* Register osprofiler options before setting engine hook
+* Don't pass config object to send_ip_addr_adv_notif()
+* Deprecate SR-IOV 'physical_device_mappings' config option
+* Removed deprecation warning for waiting_until_true
+* Removed deprecated function import_modules_recursively
+* Switch to new hacking 0.12
+* Introduce context in methods for Router Extra Attributes OVO usage
+* Removed dispose_pool() from db/api
+* Removed deprecation warning for converters and validators
+* Removed get_engine() from db/api
+* Removed paginate_query and sqlalchemyutils module
+* Deprecate send_arp_for_ha option
+* Change IPAM DB API to use context instead of session object
+* Add fullstack test for check DSCP marks outbounds
+* L3-HA: remove unused deprecated code
+* neutron-lib: use replace_file from neutron lib
+* Remove unused configuration variable
+* Migrate to neutron-lib released API definition for trunk APIs
+* Updated from global requirements
+* Reduce rally executions of create_and_list_ports
+* Use ensure_tree from oslo_utils.fileutils
+* Remove last vestiges of oslo-incubator
+* Updated from global requirements
+* Updated from global requirements
+* IP Conntrack Manager changes for FWaaS v2
+* Only mark ports ready on synced networks
+* Fix modify_fields_from_db for vif_details empty str
+* Check if namespace exists before getting devices
+* Use new enginefacade for address_scope_db
+* Replace a test with use of network object
+* Add 'to_primitive' for MACAddress and IPNetwork
 * Update Lieutenant table with new entries
+* Usage of new enginefacade for flavor db
 * Don't depend on translated strings for error check
 * Simplify resources module in RPC callbacks
 * SR-IOV: Remove deprecated supported_pci_vendor_devs option
+* ipv6_utils: delete get_ipv6_addr_by_EUI64
 * Fix specs broken link
 * Make README less verbose and to the point
 * Make crystal clear how to contribute/approach the neutron community
 * Refactor/prepare db common utils for neutron-lib
+* Add OVO for dns Objects
 * Updated from global requirements
 * Rename ipv6_utils.is_enabled()
 * [TrivialFix] Replace 'assertTrue(a in b)' with 'assertIn(a, b)'
@@ -18,12 +72,14 @@ CHANGES
 * OVO for SegmentHostMapping
 * Updated from global requirements
 * Pecan: Bulk create with one item returns plural
+* Log OVS IDL library errors to neutron logs
 * Replace retrying with tenacity
 * Removes the superfluous 'that'
 * Add functional tests for OVSDB Connection
 * Removed unnecessary file(openstack/common) in run_stack.sh
 * objects: add validate_filters option for count() method
 * ovsfw: Add a dl_type match for action=ct flows
+* Update metadata proxy when subnet add/delete
 * OVO for Router Extra Attributes
 * Validate type of allowed_address_pairs
 * Pecan: Fix internal server error on QoS rule PUT
@@ -107,6 +163,7 @@ CHANGES
 * Fix misleading error trace in trunk fullstack life cycle test
 * Relocate Geneve DB models
 * TestSanityCheck: drop test tables during cleanup
+* Removed is_deadlock from db/api
 * Relocate external network db models
 * fullstack: VLAN aware VMs test
 * Introduce ovo objects for networks
@@ -301,11 +358,13 @@ CHANGES
 * Include timestamps in trunk API test comparisions
 * Except if tracked resource registered as countable
 * Convert OVO fields to primitives for to_dict()
+* Add link to review dashboard in the effective guide
 * Fix wrong HA router state
 * Config: change deprecation for max_fixed_ips_per_port to Ocata
 * Only schedule routers from drivers that need it
 * Remove FWaaS policy.json entries
 * Update L3 agent extensions devref
+* Remove duplicated tool
 * Remove availability range code and model
 * tests: refactor objects test cases to use db models instead of dicts
 * gate_hook: Compile ovs only with supported kernels
@@ -430,6 +489,7 @@ CHANGES
 * Update README to reflect ML2 Exception in Dir Tree
 * Revert "Fix NoSuchOptError on identity config option lookup"
 * Use row.uuid as getattr works for inserted row
+* fullstack: test for IPv6 north-south traffic
 * Add mechanism driver error details to MechanismDriverError
 * Make auto allocate cleanup retry
 * Updated from global requirements

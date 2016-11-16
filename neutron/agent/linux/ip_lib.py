@@ -25,7 +25,7 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 import six
 
-from neutron._i18n import _, _LE
+from neutron._i18n import _, _LE, _LW
 from neutron.agent.common import utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils as common_utils
@@ -38,6 +38,7 @@ OPTS = [
                 help=_('Force ip_lib calls to use the root helper')),
 ]
 
+IP_NONLOCAL_BIND = 'net.ipv4.ip_nonlocal_bind'
 
 LOOPBACK_DEVNAME = 'lo'
 GRE_TUNNEL_DEVICE_NAMES = ['gre0', 'gretap0']
@@ -125,12 +126,21 @@ class IPWrapper(SubProcessBase):
             # we call out manually because in order to avoid screen scraping
             # iproute2 we use find to see what is in the sysfs directory, as
             # suggested by Stephen Hemminger (iproute2 dev).
-            output = utils.execute(['ip', 'netns', 'exec', self.namespace,
-                                    'find', SYS_NET_PATH, '-maxdepth', '1',
-                                    '-type', 'l', '-printf', '%f '],
-                                   run_as_root=True,
-                                   log_fail_as_error=self.log_fail_as_error
-                                   ).split()
+            try:
+                cmd = ['ip', 'netns', 'exec', self.namespace,
+                       'find', SYS_NET_PATH, '-maxdepth', '1',
+                       '-type', 'l', '-printf', '%f ']
+                output = utils.execute(
+                    cmd,
+                    run_as_root=True,
+                    log_fail_as_error=self.log_fail_as_error).split()
+            except RuntimeError:
+                # We could be racing with a cron job deleting namespaces.
+                # Just return a empty list if the namespace is deleted.
+                with excutils.save_and_reraise_exception() as ctx:
+                    if not self.netns.exists(self.namespace):
+                        ctx.reraise = False
+                        return []
         else:
             output = (
                 i for i in os.listdir(SYS_NET_PATH)
@@ -258,7 +268,7 @@ class IPWrapper(SubProcessBase):
 class IPDevice(SubProcessBase):
     def __init__(self, name, namespace=None):
         super(IPDevice, self).__init__(namespace=namespace)
-        self.name = name
+        self._name = name
         self.link = IpLinkCommand(self)
         self.addr = IpAddrCommand(self)
         self.route = IpRouteCommand(self)
@@ -349,6 +359,16 @@ class IPDevice(SubProcessBase):
         sysctl_name = re.sub(r'\.', '/', self.name)
         cmd = 'net.ipv6.conf.%s.disable_ipv6=1' % sysctl_name
         return self._sysctl([cmd])
+
+    @property
+    def name(self):
+        if self._name:
+            return self._name[:constants.DEVICE_NAME_MAX_LEN]
+        return self._name
+
+    @name.setter
+    def name(self, name):
+        self._name = name
 
 
 class IpCommandBase(object):
@@ -938,8 +958,42 @@ def device_exists_with_ips_and_mac(device_name, ip_cidrs, mac, namespace=None):
 
 def get_device_mac(device_name, namespace=None):
     """Return the MAC address of the device."""
-    dev = device_name[:constants.DEVICE_NAME_MAX_LEN]
-    return IPDevice(dev, namespace=namespace).link.address
+    return IPDevice(device_name, namespace=namespace).link.address
+
+
+_IP_ROUTE_PARSE_KEYS = {
+    'via': 'nexthop',
+    'dev': 'device',
+    'scope': 'scope'
+}
+
+
+def _parse_ip_route_line(line):
+    """Parse a line output from ip route.
+    Example for output from 'ip route':
+    default via 192.168.3.120 dev wlp3s0  proto static  metric 1024
+    10.0.0.0/8 dev tun0  proto static  scope link  metric 1024
+    10.0.1.0/8 dev tun1  proto static  scope link  metric 1024 linkdown
+    The first column is the destination, followed by key/value pairs and flags.
+    @param line A line output from ip route
+    @return: a dictionary representing a route.
+    """
+    line = line.split()
+    result = {
+        'destination': line[0],
+        'nexthop': None,
+        'device': None,
+        'scope': None
+    }
+    idx = 1
+    while idx < len(line):
+        field = _IP_ROUTE_PARSE_KEYS.get(line[idx])
+        if not field:
+            idx = idx + 1
+        else:
+            result[field] = line[idx + 1]
+            idx = idx + 2
+    return result
 
 
 def get_routing_table(ip_version, namespace=None):
@@ -959,24 +1013,8 @@ def get_routing_table(ip_version, namespace=None):
         ['ip', '-%s' % ip_version, 'route'],
         check_exit_code=True)
 
-    routes = []
-    # Example for route_lines:
-    # default via 192.168.3.120 dev wlp3s0  proto static  metric 1024
-    # 10.0.0.0/8 dev tun0  proto static  scope link  metric 1024
-    # The first column is the destination, followed by key/value pairs.
-    # The generator splits the routing table by newline, then strips and splits
-    # each individual line.
-    route_lines = (line.split() for line in table.split('\n') if line.strip())
-    for route in route_lines:
-        network = route[0]
-        # Create a dict of key/value pairs (For example - 'dev': 'tun0')
-        # excluding the first column.
-        data = dict(route[i:i + 2] for i in range(1, len(route), 2))
-        routes.append({'destination': network,
-                       'nexthop': data.get('via'),
-                       'device': data.get('dev'),
-                       'scope': data.get('scope')})
-    return routes
+    return [_parse_ip_route_line(line)
+            for line in table.split('\n') if line.strip()]
 
 
 def ensure_device_is_ready(device_name, namespace=None):
@@ -998,22 +1036,30 @@ def iproute_arg_supported(command, arg):
     return any(arg in line for line in stderr.split('\n'))
 
 
-def _arping(ns_name, iface_name, address, count):
+def _arping(ns_name, iface_name, address, count, log_exception):
     # Pass -w to set timeout to ensure exit if interface removed while running
     arping_cmd = ['arping', '-A', '-I', iface_name, '-c', count,
                   '-w', 1.5 * count, address]
     try:
         ip_wrapper = IPWrapper(namespace=ns_name)
-        ip_wrapper.netns.execute(arping_cmd, check_exit_code=True)
-    except Exception:
-        msg = _LE("Failed sending gratuitous ARP "
-                  "to %(addr)s on %(iface)s in namespace %(ns)s")
-        LOG.exception(msg, {'addr': address,
+        # Since arping is used to send gratuitous ARP, a response is not
+        # expected. In some cases (no response) and with some platforms
+        # (>=Ubuntu 14.04), arping exit code can be 1.
+        ip_wrapper.netns.execute(arping_cmd, extra_ok_codes=[1])
+    except Exception as exc:
+        msg = _("Failed sending gratuitous ARP "
+                "to %(addr)s on %(iface)s in namespace %(ns)s: %(err)s")
+        logger_method = LOG.exception
+        if not log_exception:
+            logger_method = LOG.warning
+        logger_method(msg, {'addr': address,
                             'iface': iface_name,
-                            'ns': ns_name})
+                            'ns': ns_name,
+                            'err': exc})
 
 
-def send_ip_addr_adv_notif(ns_name, iface_name, address, config):
+def send_ip_addr_adv_notif(
+        ns_name, iface_name, address, count=3, log_exception=True):
     """Send advance notification of an IP address assignment.
 
     If the address is in the IPv4 family, send gratuitous ARP.
@@ -1023,11 +1069,17 @@ def send_ip_addr_adv_notif(ns_name, iface_name, address, config):
     Address Discovery (DAD), and (for stateless addresses) router
     advertisements (RAs) are sufficient for address resolution and
     duplicate address detection.
-    """
-    count = config.send_arp_for_ha
 
+    :param ns_name: Namespace name which GARPs are gonna be sent from.
+    :param iface_name: Name of interface which GARPs are gonna be sent from.
+    :param address: Advertised IP address.
+    :param count: (Optional) How many GARPs are gonna be sent. Default is 3.
+    :param log_exception: (Optional) True if possible failures should be logged
+                          on exception level. Otherwise they are logged on
+                          WARNING level. Default is True.
+    """
     def arping():
-        _arping(ns_name, iface_name, address, count)
+        _arping(ns_name, iface_name, address, count, log_exception)
 
     if count > 0 and netaddr.IPAddress(address).version == 4:
         eventlet.spawn_n(arping)
@@ -1045,3 +1097,36 @@ def get_ip_version(ip_or_cidr):
 
 def get_ipv6_lladdr(mac_addr):
     return '%s/64' % netaddr.EUI(mac_addr).ipv6_link_local()
+
+
+def get_ip_nonlocal_bind(namespace=None):
+    """Get kernel option value of ip_nonlocal_bind in given namespace."""
+    cmd = ['sysctl', '-bn', IP_NONLOCAL_BIND]
+    ip_wrapper = IPWrapper(namespace)
+    return int(ip_wrapper.netns.execute(cmd, run_as_root=True))
+
+
+def set_ip_nonlocal_bind(value, namespace=None, log_fail_as_error=True):
+    """Set sysctl knob of ip_nonlocal_bind to given value."""
+    cmd = ['sysctl', '-w', '%s=%d' % (IP_NONLOCAL_BIND, value)]
+    ip_wrapper = IPWrapper(namespace)
+    ip_wrapper.netns.execute(
+        cmd, run_as_root=True, log_fail_as_error=log_fail_as_error)
+
+
+def set_ip_nonlocal_bind_for_namespace(namespace):
+    """Set ip_nonlocal_bind but don't raise exception on failure."""
+    try:
+        set_ip_nonlocal_bind(
+            value=0, namespace=namespace, log_fail_as_error=False)
+    except RuntimeError as rte:
+        LOG.warning(
+            _LW("Setting %(knob)s=0 in namespace %(ns)s failed: %(err)s. It "
+                "will not be set to 0 in the root namespace in order to not "
+                "break DVR, which requires this value be set to 1. This "
+                "may introduce a race between moving a floating IP to a "
+                "different network node, and the peer side getting a "
+                "populated ARP cache for a given floating IP address."),
+            {'knob': IP_NONLOCAL_BIND,
+             'ns': namespace,
+             'err': rte})

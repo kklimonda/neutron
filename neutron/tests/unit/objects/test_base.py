@@ -32,12 +32,14 @@ from neutron.common import utils
 from neutron import context
 from neutron.db import db_base_plugin_v2
 from neutron.db import model_base
+from neutron.db.models import external_net as ext_net_model
 from neutron.db.models import l3 as l3_model
 from neutron.db.models import segment as segments_model
 from neutron import objects
 from neutron.objects import base
 from neutron.objects import common_types
 from neutron.objects.db import api as obj_db_api
+from neutron.objects import exceptions as o_exc
 from neutron.objects import network as net_obj
 from neutron.objects import ports
 from neutron.objects import rbac_db
@@ -597,7 +599,7 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
                                  self._test_class.unique_keys)))
         obj_keys = self.generate_object_keys(self._test_class,
                                              non_unique_fields)
-        self.assertRaises(base.NeutronPrimaryKeyMissing,
+        self.assertRaises(o_exc.NeutronPrimaryKeyMissing,
                           self._test_class.get_object,
                           self.context, **obj_keys)
 
@@ -677,7 +679,7 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
 
         with mock.patch.object(obj_db_api, 'get_objects',
                                return_value=self.db_objs):
-            self.assertRaises(base.exceptions.InvalidInput,
+            self.assertRaises(n_exc.InvalidInput,
                               self._test_class.get_objects, self.context,
                               **filters)
 
@@ -693,14 +695,14 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
 
         with mock.patch.object(obj_db_api, 'get_objects',
                                side_effect=self.fake_get_objects):
-            self.assertRaises(base.exceptions.InvalidInput,
+            self.assertRaises(n_exc.InvalidInput,
                               self._test_class.get_objects, self.context,
                               **{synthetic_fields.pop(): 'xxx'})
 
     def test_get_objects_invalid_fields(self):
         with mock.patch.object(obj_db_api, 'get_objects',
                                side_effect=self.fake_get_objects):
-            self.assertRaises(base.exceptions.InvalidInput,
+            self.assertRaises(n_exc.InvalidInput,
                               self._test_class.get_objects, self.context,
                               fake_field='xxx')
 
@@ -724,7 +726,7 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
             self.assertEqual(expected, self._test_class.count(self.context))
 
     def test_count_invalid_fields(self):
-            self.assertRaises(base.exceptions.InvalidInput,
+            self.assertRaises(n_exc.InvalidInput,
                               self._test_class.count, self.context,
                               fake_field='xxx')
 
@@ -767,7 +769,7 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
         with mock.patch.object(obj_db_api, 'create_object',
                                side_effect=obj_exc.DBDuplicateEntry):
             obj = self._test_class(self.context, **self.obj_fields[0])
-            self.assertRaises(base.NeutronDbObjectDuplicateEntry, obj.create)
+            self.assertRaises(o_exc.NeutronDbObjectDuplicateEntry, obj.create)
 
     def test_update_fields(self):
         if not self._test_class.primary_keys:
@@ -870,7 +872,7 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
             new_callable=mock.PropertyMock(return_value=['a', 'c']),
             create=True):
             obj = self._test_class(self.context, **self.obj_fields[0])
-            self.assertRaises(base.NeutronObjectUpdateForbidden, obj.update)
+            self.assertRaises(o_exc.NeutronObjectUpdateForbidden, obj.update)
 
     def test_update_updates_from_db_object(self):
         with mock.patch.object(obj_db_api, 'update_object',
@@ -922,7 +924,7 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
             if key in self._test_class.primary_keys:
                 setattr(obj, key, val)
 
-        self.assertRaises(base.NeutronObjectUpdateForbidden, obj.update)
+        self.assertRaises(o_exc.NeutronObjectUpdateForbidden, obj.update)
 
     def test_to_dict_synthetic_fields(self):
         cls_ = self._test_class
@@ -1048,7 +1050,7 @@ class BaseDbObjectMultipleForeignKeysTestCase(_BaseObjectTestCase,
 
     def test_load_synthetic_db_fields_with_multiple_foreign_keys(self):
         obj = self._test_class(self.context, **self.obj_fields[0])
-        self.assertRaises(base.NeutronSyntheticFieldMultipleForeignKeys,
+        self.assertRaises(o_exc.NeutronSyntheticFieldMultipleForeignKeys,
                           obj.load_synthetic_db_fields)
 
 
@@ -1059,7 +1061,7 @@ class BaseDbObjectForeignKeysNotFoundTestCase(_BaseObjectTestCase,
 
     def test_load_foreign_keys_not_belong_class(self):
         obj = self._test_class(self.context, **self.obj_fields[0])
-        self.assertRaises(base.NeutronSyntheticFieldsForeignKeysNotFound,
+        self.assertRaises(o_exc.NeutronSyntheticFieldsForeignKeysNotFound,
                           obj.load_synthetic_db_fields)
 
 
@@ -1120,6 +1122,29 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
                                    name=name)
         _network.create()
         return _network
+
+    def _create_external_network(self):
+        test_network = self._create_network()
+        # TODO(manjeets) replace this with ext_net ovo
+        # once it is implemented
+        return obj_db_api.create_object(
+            self.context,
+            ext_net_model.ExternalNetwork,
+            {'network_id': test_network['id']})
+
+    def _create_test_fip(self):
+        fake_fip = '172.23.3.0'
+        ext_net = self._create_external_network()
+        test_port = self._create_port(
+            network_id=ext_net['network_id'])
+        # TODO(manjeets) replace this with fip ovo
+        # once it is implemented
+        return obj_db_api.create_object(
+            self.context,
+            l3_model.FloatingIP,
+            {'floating_ip_address': fake_fip,
+             'floating_network_id': ext_net['network_id'],
+             'floating_port_id': test_port['id']})
 
     def _create_test_subnet(self, network):
         test_subnet = {
@@ -1419,7 +1444,7 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
     def test_count_invalid_filters(self):
         for fields in self.obj_fields:
             self._make_object(fields).create()
-        self.assertRaises(base.exceptions.InvalidInput,
+        self.assertRaises(n_exc.InvalidInput,
                           self._test_class.count, self.context,
                           fake_field='xxx')
 
@@ -1468,7 +1493,7 @@ class GetObjectClassByModelTestCase(UniqueObjectBase):
         self.assertIs(self.registered_object, found_obj)
 
     def test_not_registed_object_raises_exception(self):
-        with testtools.ExpectedException(base.NeutronDbObjectNotFoundByModel):
+        with testtools.ExpectedException(o_exc.NeutronDbObjectNotFoundByModel):
             base.get_object_class_by_model(self.not_registered_object.db_model)
 
 

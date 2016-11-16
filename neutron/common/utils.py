@@ -18,8 +18,6 @@
 
 """Utilities and helper functions."""
 
-import decimal
-import errno
 import functools
 import importlib
 import os
@@ -27,7 +25,6 @@ import os.path
 import random
 import signal
 import sys
-import tempfile
 import time
 import uuid
 
@@ -36,6 +33,7 @@ import eventlet
 from eventlet.green import subprocess
 import netaddr
 from neutron_lib import constants as n_const
+from neutron_lib.utils import file as file_utils
 from neutron_lib.utils import helpers
 from neutron_lib.utils import host
 from neutron_lib.utils import net
@@ -44,6 +42,7 @@ from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from oslo_utils import excutils
+from oslo_utils import fileutils
 from oslo_utils import importutils
 import six
 from stevedore import driver
@@ -59,14 +58,11 @@ SYNCHRONIZED_PREFIX = 'neutron-'
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
 
 
+@removals.remove(
+    message="Use ensure_tree(path, 0o755) from oslo_utils.fileutils")
 def ensure_dir(dir_path):
     """Ensure a directory with 755 permissions mode."""
-    try:
-        os.makedirs(dir_path, 0o755)
-    except OSError as e:
-        # If the directory already existed, don't raise the error.
-        if e.errno != errno.EEXIST:
-            raise
+    fileutils.ensure_tree(dir_path, mode=0o755)
 
 
 def _subprocess_setup():
@@ -170,11 +166,10 @@ def get_random_mac(base_mac):
     return ':'.join(["%02x" % x for x in mac])
 
 
+@removals.remove(
+    message="Use get_random_string from neutron_lib.utils.helpers")
 def get_random_string(length):
-    """Get a random hex string of the specified length.
-    """
-
-    return "{0:0{1}x}".format(random.getrandbits(length * 4), length)
+    return helpers.get_random_string(length)
 
 
 def get_dhcp_agent_device_id(network_id, host):
@@ -332,33 +327,22 @@ class DelayedStringRenderer(object):
         return str(self.function(*self.args, **self.kwargs))
 
 
+@removals.remove(
+    message="Use camelize from neutron_lib.utils.helpers")
 def camelize(s):
-    return ''.join(s.replace('_', ' ').title().split())
+    return helpers.camelize(s)
 
 
+@removals.remove(
+    message="Use round_val from neutron_lib.utils.helpers")
 def round_val(val):
-    # we rely on decimal module since it behaves consistently across Python
-    # versions (2.x vs. 3.x)
-    return int(decimal.Decimal(val).quantize(decimal.Decimal('1'),
-                                             rounding=decimal.ROUND_HALF_UP))
+    return helpers.round_val(val)
 
 
+@removals.remove(
+    message="Use replace_file from neutron_lib.utils")
 def replace_file(file_name, data, file_mode=0o644):
-    """Replaces the contents of file_name with data in a safe manner.
-
-    First write to a temp file and then rename. Since POSIX renames are
-    atomic, the file is unlikely to be corrupted by competing writes.
-
-    We create the tempfile on the same device to ensure that it can be renamed.
-    """
-
-    base_dir = os.path.dirname(os.path.abspath(file_name))
-    with tempfile.NamedTemporaryFile('w+',
-                                     dir=base_dir,
-                                     delete=False) as tmp_file:
-        tmp_file.write(data)
-    os.chmod(tmp_file.name, file_mode)
-    os.rename(tmp_file.name, file_name)
+    file_utils.replace_file(file_name, data, file_mode=file_mode)
 
 
 def load_class_by_alias_or_classname(namespace, name):
@@ -390,10 +374,10 @@ def load_class_by_alias_or_classname(namespace, name):
     return class_to_load
 
 
+@removals.remove(
+    message="Use safe_decode_utf8 from neutron_lib.utils.helpers")
 def safe_decode_utf8(s):
-    if six.PY3 and isinstance(s, bytes):
-        return s.decode('utf-8', 'surrogateescape')
-    return s
+    return helpers.safe_decode_utf8(s)
 
 
 def _hex_format(port, mask=0):
@@ -872,7 +856,7 @@ def get_related_rand_names(prefixes, max_length=None):
                 _("'max_length' must be longer than all prefixes"))
     else:
         length = 8
-    rndchrs = get_random_string(length)
+    rndchrs = helpers.get_random_string(length)
     return [p + rndchrs for p in prefixes]
 
 

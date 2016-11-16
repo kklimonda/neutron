@@ -57,7 +57,7 @@ class RouterInfo(object):
         # Invoke the setter for establishing initial SNAT action
         self.router = router
         self.use_ipv6 = use_ipv6
-        ns = namespaces.RouterNamespace(
+        ns = self.create_router_namespace_object(
             router_id, agent_conf, interface_driver, use_ipv6)
         self.router_namespace = ns
         self.ns_name = ns.name
@@ -93,6 +93,11 @@ class RouterInfo(object):
                                       self.agent_conf)
 
         self.router_namespace.create()
+
+    def create_router_namespace_object(
+            self, router_id, agent_conf, iface_driver, use_ipv6):
+        return namespaces.RouterNamespace(
+            router_id, agent_conf, iface_driver, use_ipv6)
 
     @property
     def router(self):
@@ -410,7 +415,7 @@ class RouterInfo(object):
             ip_lib.send_ip_addr_adv_notif(ns_name,
                                           interface_name,
                                           fixed_ip['ip_address'],
-                                          self.agent_conf)
+                                          self.agent_conf.send_arp_for_ha)
 
     def internal_network_added(self, port):
         network_id = port['network_id']
@@ -663,7 +668,7 @@ class RouterInfo(object):
             ip_lib.send_ip_addr_adv_notif(ns_name,
                                           interface_name,
                                           fixed_ip['ip_address'],
-                                          self.agent_conf)
+                                          self.agent_conf.send_arp_for_ha)
 
     def is_v6_gateway_set(self, gateway_ips):
         """Check to see if list of gateway_ips has an IPv6 gateway.

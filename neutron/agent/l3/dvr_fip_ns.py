@@ -138,21 +138,14 @@ class FipNamespace(namespaces.Namespace):
         # Somewhere in the 3.19 kernel timeframe ip_nonlocal_bind was
         # changed to be a per-namespace attribute.  To be backwards
         # compatible we need to try both if at first we fail.
-        ip_wrapper = ip_lib.IPWrapper(namespace=self.name)
         try:
-            ip_wrapper.netns.execute(['sysctl',
-                                      '-w',
-                                      'net.ipv4.ip_nonlocal_bind=1'],
-                                     log_fail_as_error=False,
-                                     run_as_root=True)
+            ip_lib.set_ip_nonlocal_bind(
+                value=1, namespace=self.name, log_fail_as_error=False)
         except RuntimeError:
             LOG.debug('DVR: fip namespace (%s) does not support setting '
                       'net.ipv4.ip_nonlocal_bind, trying in root namespace',
                       self.name)
-            self.ip_wrapper_root.netns.execute(['sysctl',
-                                                '-w',
-                                                'net.ipv4.ip_nonlocal_bind=1'],
-                                               run_as_root=True)
+            ip_lib.set_ip_nonlocal_bind(value=1)
 
         # no connection tracking needed in fip namespace
         self._iptables_manager.ipv4['raw'].add_rule('PREROUTING',
@@ -226,7 +219,7 @@ class FipNamespace(namespaces.Namespace):
             ip_lib.send_ip_addr_adv_notif(ns_name,
                                           interface_name,
                                           fixed_ip['ip_address'],
-                                          self.agent_conf)
+                                          self.agent_conf.send_arp_for_ha)
 
         ipd = ip_lib.IPDevice(interface_name, namespace=ns_name)
         for subnet in agent_gateway_port['subnets']:
