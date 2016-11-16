@@ -1,4 +1,4 @@
-neutron (2:10.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:10.0.0~b1-0ubuntu1) zesty; urgency=medium
 
   [ Chuck Short ]
   * New upstream version.
