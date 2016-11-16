@@ -1,4 +1,4 @@
-neutron (2:9.0.0.0rc2~dev461-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:10.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Chuck Short ]
   * New upstream version.
@@ -14,8 +14,9 @@ neutron (2:9.0.0.0rc2~dev461-0ubuntu1) UNRELEASED; urgency=medium
   * d/p/flake8-legacy.patch: Rebased.
   * d/control: Align (build-)depends with upstream.
   * d/rules: Add PBR_VERSION to set correct distro version for package build.
+  * New upstream beta release for OpenStack Ocata.
 
- -- David Della Vecchia <ddv@canonical.com>  Fri, 11 Nov 2016 07:34:20 -0500
+ -- David Della Vecchia <ddv@canonical.com>  Wed, 16 Nov 2016 15:42:28 -0500
 
 neutron (2:9.0.0-0ubuntu3.1) zesty; urgency=medium
 
