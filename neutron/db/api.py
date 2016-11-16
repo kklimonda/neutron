@@ -23,6 +23,7 @@ from oslo_db import exception as db_exc
 from oslo_db.sqlalchemy import enginefacade
 from oslo_log import log as logging
 from oslo_utils import excutils
+from osprofiler import opts as profiler_opts
 import osprofiler.sqlalchemy
 from pecan import util as p_util
 import six
@@ -31,6 +32,7 @@ from sqlalchemy.orm import exc
 import traceback
 
 from neutron._i18n import _LE
+from neutron.objects import exceptions as obj_exc
 
 
 def set_hook(engine):
@@ -41,6 +43,12 @@ def set_hook(engine):
 context_manager = enginefacade.transaction_context()
 
 context_manager.configure(sqlite_fk=True)
+
+# TODO(ihrachys) the hook assumes options defined by osprofiler, and the only
+# public function that is provided by osprofiler that will register them is
+# set_defaults, that's why we call it here even though we don't need to change
+# defaults
+profiler_opts.set_defaults(cfg.CONF)
 context_manager.append_on_engine_create(set_hook)
 
 
@@ -53,7 +61,8 @@ def is_retriable(e):
         return False
     if _is_nested_instance(e, (db_exc.DBDeadlock, exc.StaleDataError,
                                db_exc.DBConnectionError,
-                               db_exc.DBDuplicateEntry, db_exc.RetryRequest)):
+                               db_exc.DBDuplicateEntry, db_exc.RetryRequest,
+                               obj_exc.NeutronDbObjectDuplicateEntry)):
         return True
     # looking savepoints mangled by deadlocks. see bug/1590298 for details.
     return _is_nested_instance(e, db_exc.DBError) and '1305' in str(e)
