@@ -2,3 +2,4 @@ fix-test-treat-devices-added-updated-no-local-interface.patch
 fix-neutron-configuration.patch
 skip-iptest.patch
 drop-ryu-dep.patch
+ns-exists-before-get-devices.patch

@@ -1,0 +1,82 @@
+commit 83c6ace58571f97b4da560c545800eb4d144308b
+Author: Saverio Proto <saverio.proto@switch.ch>
+Date:   Thu Apr 21 16:50:07 2016 +0200
+
+    Check if namespace exists before getting devices
+    
+    If a neutron router has no ports defined, its namespace is deleted
+    by the cronjob /etc/cron.d/neutron-l3-agent-netns-cleanup.
+    It is required to check if the namespace exists before calling
+    iproute2 commands against the namespace.
+    It is not enough for the string of the namespace uuid to be defined,
+    the namespace must really exist on the network node.
+    This patch checks if the namespace exists when calling get_devices().
+    Otherwise the agent log file will be flooded with messages like
+    Cannot open network namespace "qrouter-<uuid>": No such file or directory
+    Failed to process compatible router '<uuid>'
+    
+    Related-bug: 1573073
+    
+    Change-Id: I744ef11529f9da5cbfdb812de0b35b95f9d078bb
+
+diff --git a/neutron/agent/linux/ip_lib.py b/neutron/agent/linux/ip_lib.py
+index 115686f..a4bb9a2 100644
+--- a/neutron/agent/linux/ip_lib.py
++++ b/neutron/agent/linux/ip_lib.py
+@@ -118,12 +118,21 @@ class IPWrapper(SubProcessBase):
+             # we call out manually because in order to avoid screen scraping
+             # iproute2 we use find to see what is in the sysfs directory, as
+             # suggested by Stephen Hemminger (iproute2 dev).
+-            output = utils.execute(['ip', 'netns', 'exec', self.namespace,
+-                                    'find', SYS_NET_PATH, '-maxdepth', '1',
+-                                    '-type', 'l', '-printf', '%f '],
+-                                   run_as_root=True,
+-                                   log_fail_as_error=self.log_fail_as_error
+-                                   ).split()
++            try:
++                cmd = ['ip', 'netns', 'exec', self.namespace,
++                       'find', SYS_NET_PATH, '-maxdepth', '1',
++                       '-type', 'l', '-printf', '%f ']
++                output = utils.execute(
++                    cmd,
++                    run_as_root=True,
++                    log_fail_as_error=self.log_fail_as_error).split()
++            except RuntimeError:
++                # We could be racing with a cron job deleting namespaces.
++                # Just return a empty list if the namespace is deleted.
++                with excutils.save_and_reraise_exception() as ctx:
++                    if not self.netns.exists(self.namespace):
++                        ctx.reraise = False
++                        return []
+         else:
+             output = (
+                 i for i in os.listdir(SYS_NET_PATH)
+diff --git a/neutron/tests/unit/agent/linux/test_ip_lib.py b/neutron/tests/unit/agent/linux/test_ip_lib.py
+index a33f36e..e462962 100644
+--- a/neutron/tests/unit/agent/linux/test_ip_lib.py
++++ b/neutron/tests/unit/agent/linux/test_ip_lib.py
+@@ -281,6 +281,24 @@ class TestIpWrapper(base.BaseTestCase):
+         self.assertTrue(fake_str.split.called)
+         self.assertEqual(retval, [ip_lib.IPDevice('lo', namespace='foo')])
+ 
++    @mock.patch('neutron.agent.common.utils.execute')
++    def test_get_devices_namespaces_ns_not_exists(self, mocked_execute):
++        mocked_execute.side_effect = RuntimeError(
++            "Cannot open network namespace")
++        with mock.patch.object(ip_lib.IpNetnsCommand, 'exists',
++                               return_value=False):
++            retval = ip_lib.IPWrapper(namespace='foo').get_devices()
++            self.assertEqual([], retval)
++
++    @mock.patch('neutron.agent.common.utils.execute')
++    def test_get_devices_namespaces_ns_exists(self, mocked_execute):
++        mocked_execute.side_effect = RuntimeError(
++            "Cannot open network namespace")
++        with mock.patch.object(ip_lib.IpNetnsCommand, 'exists',
++                               return_value=True):
++            self.assertRaises(RuntimeError,
++                              ip_lib.IPWrapper(namespace='foo').get_devices)
++
+     def test_get_namespaces(self):
+         self.execute.return_value = '\n'.join(NETNS_SAMPLE)
+         retval = ip_lib.IPWrapper.get_namespaces()
