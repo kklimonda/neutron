@@ -1,4 +1,4 @@
-neutron (2:7.2.0-0ubuntu1~cloud1) UNRELEASED; urgency=medium
+neutron (2:7.2.0-0ubuntu1~cloud1) trusty-liberty; urgency=medium
 
   * Fix router namespace cleanup (LP: #1573073)
     - d/p/ns-exists-before-get-devices.patch
