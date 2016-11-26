@@ -1,3 +1,10 @@
+neutron (2:9.0.0-0ubuntu1.16.10.3) UNRELEASED; urgency=medium
+
+  * debian/patches/check-namespace-before-getting-devices.patch: Dropped
+    no longer needed, merged into stable/newton. 
+
+ -- Chuck Short <zulcss@ubuntu.com>  Sat, 26 Nov 2016 16:54:17 -0500
+
 neutron (2:9.0.0-0ubuntu1.16.10.2) yakkety; urgency=medium
 
   * d/p/check-namespace-before-getting-devices.patch: Cherry-pick patch
