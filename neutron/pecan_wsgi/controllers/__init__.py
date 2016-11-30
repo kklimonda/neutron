@@ -12,7 +12,9 @@
 
 from neutron.pecan_wsgi.controllers import quota
 from neutron.pecan_wsgi.controllers import resource
+from neutron.pecan_wsgi.controllers import router
 
 
 CollectionsController = resource.CollectionsController
 QuotasController = quota.QuotasController
+RoutersController = router.RoutersController

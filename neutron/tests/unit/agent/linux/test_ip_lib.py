@@ -15,12 +15,11 @@
 
 import mock
 import netaddr
-from neutron_lib import exceptions
 import testtools
 
 from neutron.agent.common import utils  # noqa
 from neutron.agent.linux import ip_lib
-from neutron.common import exceptions as n_exc
+from neutron.common import exceptions
 from neutron.tests import base
 
 NETNS_SAMPLE = [
@@ -300,18 +299,7 @@ class TestIpWrapper(base.BaseTestCase):
             self.assertRaises(RuntimeError,
                               ip_lib.IPWrapper(namespace='foo').get_devices)
 
-    @mock.patch('neutron.agent.common.utils.execute')
-    def test_get_devices_exclude_loopback_and_gre(self, mocked_execute):
-        device_name = 'somedevice'
-        mocked_execute.return_value = 'lo gre0 gretap0 ' + device_name
-        devices = ip_lib.IPWrapper(namespace='foo').get_devices(
-            exclude_loopback=True, exclude_gre_devices=True)
-        somedevice = devices.pop()
-        self.assertEqual(device_name, somedevice.name)
-        self.assertFalse(devices)
-
-    def test_get_namespaces_non_root(self):
-        self.config(group='AGENT', use_helper_for_ns_read=False)
+    def test_get_namespaces(self):
         self.execute.return_value = '\n'.join(NETNS_SAMPLE)
         retval = ip_lib.IPWrapper.get_namespaces()
         self.assertEqual(retval,
@@ -319,11 +307,9 @@ class TestIpWrapper(base.BaseTestCase):
                           'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
                           'cccccccc-cccc-cccc-cccc-cccccccccccc'])
 
-        self.execute.assert_called_once_with([], 'netns', ('list',),
-                                             run_as_root=False)
+        self.execute.assert_called_once_with([], 'netns', ('list',))
 
-    def test_get_namespaces_iproute2_4_root(self):
-        self.config(group='AGENT', use_helper_for_ns_read=True)
+    def test_get_namespaces_iproute2_4(self):
         self.execute.return_value = '\n'.join(NETNS_SAMPLE_IPROUTE2_4)
         retval = ip_lib.IPWrapper.get_namespaces()
         self.assertEqual(retval,
@@ -331,8 +317,7 @@ class TestIpWrapper(base.BaseTestCase):
                           'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
                           'cccccccc-cccc-cccc-cccc-cccccccccccc'])
 
-        self.execute.assert_called_once_with([], 'netns', ('list',),
-                                             run_as_root=True)
+        self.execute.assert_called_once_with([], 'netns', ('list',))
 
     def test_add_tuntap(self):
         ip_lib.IPWrapper().add_tuntap('tap0')
@@ -417,7 +402,7 @@ class TestIpWrapper(base.BaseTestCase):
             get_devices.return_value = []
 
             self.assertTrue(ip.namespace_is_empty())
-            self.assertTrue(get_devices.called)
+            get_devices.assert_called_once_with(exclude_loopback=True)
 
     def test_namespace_is_empty(self):
         ip = ip_lib.IPWrapper(namespace='ns')
@@ -425,7 +410,7 @@ class TestIpWrapper(base.BaseTestCase):
             get_devices.return_value = [mock.Mock()]
 
             self.assertFalse(ip.namespace_is_empty())
-            self.assertTrue(get_devices.called)
+            get_devices.assert_called_once_with(exclude_loopback=True)
 
     def test_garbage_collect_namespace_does_not_exist(self):
         with mock.patch.object(ip_lib, 'IpNetnsCommand') as ip_ns_cmd_cls:
@@ -509,7 +494,7 @@ class TestIpWrapper(base.BaseTestCase):
 
     def test_add_vxlan_invalid_port_length(self):
         wrapper = ip_lib.IPWrapper()
-        self.assertRaises(n_exc.NetworkVxlanPortRangeError,
+        self.assertRaises(exceptions.NetworkVxlanPortRangeError,
                           wrapper.add_vxlan, 'vxlan0', 'vni0', group='group0',
                           dev='dev0', ttl='ttl0', tos='tos0',
                           local='local0', proxy=True,
@@ -999,6 +984,42 @@ class TestIpRouteCommand(TestIPCmdBase):
             self.assertEqual(self.route_cmd.get_gateway(),
                              test_case['expected'])
 
+    def test_pullup_route(self):
+        # NOTE(brian-haley) Currently we do not have any IPv6-specific usecase
+        # for pullup_route, hence skipping. Revisit, if required, in future.
+        if self.ip_version == 6:
+            return
+        # interface is not the first in the list - requires
+        # deleting and creating existing entries
+        output = [DEVICE_ROUTE_SAMPLE, SUBNET_SAMPLE1]
+
+        def pullup_side_effect(self, *args):
+            result = output.pop(0)
+            return result
+
+        self.parent._run = mock.Mock(side_effect=pullup_side_effect)
+        self.route_cmd.pullup_route('tap1d7888a7-10', ip_version=4)
+        self._assert_sudo([4], ('del', '10.0.0.0/24', 'dev', 'qr-23380d11-d2'))
+        self._assert_sudo([4], ('append', '10.0.0.0/24', 'proto', 'kernel',
+                                'src', '10.0.0.1', 'dev', 'qr-23380d11-d2'))
+
+    def test_pullup_route_first(self):
+        # NOTE(brian-haley) Currently we do not have any IPv6-specific usecase
+        # for pullup_route, hence skipping. Revisit, if required, in future.
+        if self.ip_version == 6:
+            return
+        # interface is first in the list - no changes
+        output = [DEVICE_ROUTE_SAMPLE, SUBNET_SAMPLE2]
+
+        def pullup_side_effect(self, *args):
+            result = output.pop(0)
+            return result
+
+        self.parent._run = mock.Mock(side_effect=pullup_side_effect)
+        self.route_cmd.pullup_route('tap1d7888a7-10', ip_version=4)
+        # Check two calls - device get and subnet get
+        self.assertEqual(len(self.parent._run.mock_calls), 2)
+
     def test_flush_route_table(self):
         self.route_cmd.flush(self.ip_version, self.table)
         self._assert_sudo([self.ip_version], ('flush', 'table', self.table))
@@ -1186,6 +1207,12 @@ class TestIPRoute(TestIpRouteCommand):
             args = self._remove_dev_args(args)
         super(TestIPRoute, self)._assert_sudo(options, args)
 
+    def test_pullup_route(self):
+        # This method gets the interface name passed to it as an argument.  So,
+        # don't remove it from the expected arguments.
+        self.check_dev_args = True
+        super(TestIPRoute, self).test_pullup_route()
+
     def test_del_gateway_cannot_find_device(self):
         # This test doesn't make sense for this case since dev won't be passed
         pass
@@ -1306,57 +1333,6 @@ class TestDeviceExists(base.BaseTestCase):
             self.assertFalse(ip_lib.ensure_device_is_ready("eth0"))
 
 
-class TestGetRoutingTable(base.BaseTestCase):
-    @mock.patch.object(ip_lib, 'IPWrapper')
-    def _test_get_routing_table(self, version, ip_route_output, expected,
-                                mock_ipwrapper):
-        instance = mock_ipwrapper.return_value
-        mock_netns = instance.netns
-        mock_execute = mock_netns.execute
-        mock_execute.return_value = ip_route_output
-        self.assertEqual(expected, ip_lib.get_routing_table(version))
-
-    def test_get_routing_table_4(self):
-        ip_route_output = ("""
-default via 192.168.3.120 dev wlp3s0  proto static  metric 1024
-10.0.0.0/8 dev tun0  proto static  scope link  metric 1024
-10.0.1.0/8 dev tun1  proto static  scope link  metric 1024 linkdown
-""")
-        expected = [{'destination': 'default',
-                     'nexthop': '192.168.3.120',
-                     'device': 'wlp3s0',
-                     'scope': None},
-                    {'destination': '10.0.0.0/8',
-                     'nexthop': None,
-                     'device': 'tun0',
-                     'scope': 'link'},
-                    {'destination': '10.0.1.0/8',
-                     'nexthop': None,
-                     'device': 'tun1',
-                     'scope': 'link'}]
-        self._test_get_routing_table(4, ip_route_output, expected)
-
-    def test_get_routing_table_6(self):
-        ip_route_output = ("""
-2001:db8:0:f101::/64 dev tap-1  proto kernel  metric 256  pref medium
-2001:db8:0:f102::/64 dev tap-2  proto kernel  metric 256  pref medium linkdown
-default via 2001:db8:0:f101::4 dev tap-1  metric 1024  pref medium
-""")
-        expected = [{'destination': '2001:db8:0:f101::/64',
-                     'nexthop': None,
-                     'device': 'tap-1',
-                     'scope': None},
-                    {'destination': '2001:db8:0:f102::/64',
-                     'nexthop': None,
-                     'device': 'tap-2',
-                     'scope': None},
-                    {'destination': 'default',
-                     'nexthop': '2001:db8:0:f101::4',
-                     'device': 'tap-1',
-                     'scope': None}]
-        self._test_get_routing_table(6, ip_route_output, expected)
-
-
 class TestIpNeighCommand(TestIPCmdBase):
     def setUp(self):
         super(TestIpNeighCommand, self).setUp()
@@ -1391,10 +1367,12 @@ class TestArpPing(TestIPCmdBase):
         spawn_n.side_effect = lambda f: f()
         ARPING_COUNT = 3
         address = '20.0.0.1'
+        config = mock.Mock()
+        config.send_arp_for_ha = ARPING_COUNT
         ip_lib.send_ip_addr_adv_notif(mock.sentinel.ns_name,
                                       mock.sentinel.iface_name,
                                       address,
-                                      ARPING_COUNT)
+                                      config)
 
         self.assertTrue(spawn_n.called)
         mIPWrapper.assert_called_once_with(namespace=mock.sentinel.ns_name)
@@ -1413,10 +1391,12 @@ class TestArpPing(TestIPCmdBase):
     @mock.patch('eventlet.spawn_n')
     def test_no_ipv6_addr_notif(self, spawn_n):
         ipv6_addr = 'fd00::1'
+        config = mock.Mock()
+        config.send_arp_for_ha = 3
         ip_lib.send_ip_addr_adv_notif(mock.sentinel.ns_name,
                                       mock.sentinel.iface_name,
                                       ipv6_addr,
-                                      3)
+                                      config)
         self.assertFalse(spawn_n.called)
 
 
@@ -1434,5 +1414,6 @@ class TestAddNamespaceToCmd(base.BaseTestCase):
 class TestSetIpNonlocalBindForHaNamespace(base.BaseTestCase):
     def test_setting_failure(self):
         """Make sure message is formatted correctly."""
-        with mock.patch.object(ip_lib, 'set_ip_nonlocal_bind', return_value=1):
+        with mock.patch.object(
+                ip_lib, 'set_ip_nonlocal_bind', side_effect=RuntimeError):
             ip_lib.set_ip_nonlocal_bind_for_namespace('foo')

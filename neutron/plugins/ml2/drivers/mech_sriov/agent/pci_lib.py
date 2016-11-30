@@ -138,14 +138,13 @@ class PciDeviceIPWrapper(ip_lib.IPWrapper):
         setting = "on" if enabled else "off"
         self._set_feature(vf_index, "spoofchk", setting)
 
-    def set_vf_rate(self, vf_index, rate_type, rate_value):
-        """sets vf rate.
+    def set_vf_max_rate(self, vf_index, max_tx_rate):
+        """sets vf max rate.
 
         @param vf_index: vf index
-        @param rate_type: vf rate type ('rate', 'min_tx_rate')
-        @param rate_value: vf rate in Mbps
+        @param max_tx_rate: vf max tx rate in Mbps
         """
-        self._set_feature(vf_index, rate_type, str(rate_value))
+        self._set_feature(vf_index, "rate", str(max_tx_rate))
 
     def _get_vf_link_show(self, vf_list, link_show_out):
         """Get link show output for VFs

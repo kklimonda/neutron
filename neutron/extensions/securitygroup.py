@@ -16,11 +16,7 @@
 import abc
 
 import netaddr
-from neutron_lib.api import validators
-from neutron_lib import constants as const
-from neutron_lib import exceptions as nexception
-from neutron_lib.plugins import directory
-from oslo_utils import netutils
+from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
 
@@ -28,8 +24,9 @@ from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
-from neutron.common import exceptions
-from neutron.conf import quota
+from neutron.common import constants as const
+from neutron.common import exceptions as nexception
+from neutron import manager
 from neutron.quota import resource_registry
 
 
@@ -176,9 +173,13 @@ def convert_ethertype_to_case_insensitive(value):
 def convert_validate_port_value(port):
     if port is None:
         return port
+    try:
+        val = int(port)
+    except (ValueError, TypeError):
+        raise SecurityGroupInvalidPortValue(port=port)
 
-    if netutils.is_valid_port(port):
-        return int(port)
+    if val >= 0 and val <= 65535:
+        return val
     else:
         raise SecurityGroupInvalidPortValue(port=port)
 
@@ -200,16 +201,22 @@ def convert_ip_prefix_to_cidr(ip_prefix):
         cidr = netaddr.IPNetwork(ip_prefix)
         return str(cidr)
     except (ValueError, TypeError, netaddr.AddrFormatError):
-        raise exceptions.InvalidCIDR(input=ip_prefix)
+        raise nexception.InvalidCIDR(input=ip_prefix)
 
 
 def _validate_name_not_default(data, valid_values=None):
     if data.lower() == "default":
         raise SecurityGroupDefaultAlreadyExists()
 
-validators.add_validator('name_not_default', _validate_name_not_default)
 
-sg_supported_protocols = ([None] + list(const.IP_PROTOCOL_MAP.keys()))
+attr.validators['type:name_not_default'] = _validate_name_not_default
+
+# TODO(amotoki): const.IP_PROTOCOL_MAP now comes from neutron-lib,
+# so we cannot add PROTO_NAME_IPV6_ICMP_LEGACY to const.IP_PROTOCOL_MAP
+# in neutron.common.constants. IP_PROTOCOL_MAP in neutron-lib should
+# be updated and neutron should consume it once Mitaka backport is done.
+sg_supported_protocols = ([None] + list(const.IP_PROTOCOL_MAP.keys()) +
+                          list(const.IP_PROTOCOL_NAME_ALIASES.keys()))
 sg_supported_ethertypes = ['IPv4', 'IPv6']
 SECURITYGROUPS = 'security_groups'
 SECURITYGROUPRULES = 'security_group_rules'
@@ -275,10 +282,18 @@ EXTENDED_ATTRIBUTES_2_0 = {
                                'allow_put': True,
                                'is_visible': True,
                                'convert_to': convert_to_uuid_list_or_none,
-                               'default': const.ATTR_NOT_SPECIFIED}}}
-
-# Register the configuration options
-quota.register_quota_opts(quota.security_group_quota_opts)
+                               'default': attr.ATTR_NOT_SPECIFIED}}}
+security_group_quota_opts = [
+    cfg.IntOpt('quota_security_group',
+               default=10,
+               help=_('Number of security groups allowed per tenant. '
+                      'A negative value means unlimited.')),
+    cfg.IntOpt('quota_security_group_rule',
+               default=100,
+               help=_('Number of security rules allowed per tenant. '
+                      'A negative value means unlimited.')),
+]
+cfg.CONF.register_opts(security_group_quota_opts, 'QUOTAS')
 
 
 class Securitygroup(extensions.ExtensionDescriptor):
@@ -306,7 +321,7 @@ class Securitygroup(extensions.ExtensionDescriptor):
         my_plurals = [(key, key[:-1]) for key in RESOURCE_ATTRIBUTE_MAP.keys()]
         attr.PLURALS.update(dict(my_plurals))
         exts = []
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         for resource_name in ['security_group', 'security_group_rule']:
             collection_name = resource_name.replace('_', '-') + "s"
             params = RESOURCE_ATTRIBUTE_MAP.get(resource_name + "s", dict())

@@ -13,16 +13,16 @@
 # under the License.
 
 import mock
-from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
 
 from neutron.api.v2 import attributes as attr
 from neutron import context
-from neutron.db import api as db_api
+from neutron.db import agents_db
+from neutron.db import l3_agentschedulers_db
 from neutron.db.metering import metering_rpc
-from neutron.db.models import agent as agent_model
 from neutron.extensions import l3 as ext_l3
 from neutron.extensions import metering as ext_metering
+from neutron import manager
 from neutron.plugins.common import constants
 from neutron.tests.common import helpers
 from neutron.tests import tools
@@ -57,20 +57,6 @@ class MeteringTestExtensionManager(object):
         return []
 
 
-# TODO(akamyshnikova):we need this temporary FakeContext class while Context
-# checking for existence of session attribute.
-class FakeContext(context.ContextBaseWithSession):
-    def __init__(self, *args, **kwargs):
-        super(FakeContext, self).__init__(*args, **kwargs)
-        self._session = None
-
-    @property
-    def session(self):
-        if self._session is None:
-            self._session = db_api.get_session()
-        return self._session
-
-
 class TestMeteringPlugin(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
                          test_l3.L3NatTestCaseMixin,
                          test_metering_db.MeteringPluginDbTestCaseMixin):
@@ -95,7 +81,7 @@ class TestMeteringPlugin(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
         self.mock_uuid = self.uuid_patch.start()
 
         self.tenant_id = 'a7e61382-47b8-4d40-bae3-f95981b5637b'
-        self.ctx = FakeContext('', self.tenant_id, is_admin=True)
+        self.ctx = context.Context('', self.tenant_id, is_admin=True)
         self.context_patch = mock.patch('neutron.context.Context',
                                         return_value=self.ctx)
         self.mock_context = self.context_patch.start()
@@ -289,6 +275,7 @@ class TestMeteringPlugin(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
 
 
 class TestMeteringPluginL3AgentScheduler(
+        l3_agentschedulers_db.L3AgentSchedulerDbMixin,
         test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
         test_l3.L3NatTestCaseMixin,
         test_metering_db.MeteringPluginDbTestCaseMixin):
@@ -322,7 +309,7 @@ class TestMeteringPluginL3AgentScheduler(
         self.mock_uuid = self.uuid_patch.start()
 
         self.tenant_id = 'a7e61382-47b8-4d40-bae3-f95981b5637b'
-        self.ctx = FakeContext('', self.tenant_id, is_admin=True)
+        self.ctx = context.Context('', self.tenant_id, is_admin=True)
         self.context_patch = mock.patch('neutron.context.Context',
                                         return_value=self.ctx)
         self.mock_context = self.context_patch.start()
@@ -367,8 +354,8 @@ class TestMeteringPluginL3AgentScheduler(
                      'id': second_uuid}]
 
         # bind each router to a specific agent
-        agent1 = agent_model.Agent(host='agent1')
-        agent2 = agent_model.Agent(host='agent2')
+        agent1 = agents_db.Agent(host='agent1')
+        agent2 = agents_db.Agent(host='agent2')
 
         agents = {self.uuid: agent1,
                   second_uuid: agent2}
@@ -433,7 +420,8 @@ class TestMeteringPluginRpcFromL3Agent(
               self).setUp(plugin=plugin, service_plugins=service_plugins,
                           ext_mgr=ext_mgr)
 
-        self.meter_plugin = directory.get_plugin(constants.METERING)
+        self.meter_plugin = manager.NeutronManager.get_service_plugins().get(
+            constants.METERING)
 
         self.tenant_id = 'admin_tenant_id'
         self.tenant_id_1 = 'tenant_id_1'
@@ -489,53 +477,3 @@ class TestMeteringPluginRpcFromL3Agent(
                     routers = [router['name'] for router in data]
 
                     self.assertEqual([], routers)
-
-    def test_get_sync_data_metering_with_unscheduled_router(self):
-        with self.subnet() as subnet:
-            s = subnet['subnet']
-            self._set_net_external(s['network_id'])
-            with self.router(
-                name='router1', tenant_id=self.tenant_id
-            ) as router1:
-                self._add_external_gateway_to_router(
-                    router1['router']['id'], s['network_id'])
-                with self.router(name='router2', tenant_id=self.tenant_id):
-                    with self.metering_label(tenant_id=self.tenant_id):
-                        callbacks = metering_rpc.MeteringRpcCallbacks(
-                            self.meter_plugin)
-                        data = callbacks.get_sync_data_metering(
-                            self.adminContext, host='agent1')
-                        self.assertEqual(
-                            set(['router1']), set([r['name'] for r in data]))
-
-                self._remove_external_gateway_from_router(
-                    router1['router']['id'], s['network_id'])
-
-    def test_get_sync_data_metering_with_inactive_router(self):
-        with self.subnet() as subnet:
-            s = subnet['subnet']
-            self._set_net_external(s['network_id'])
-            with self.router(
-                name='router1', tenant_id=self.tenant_id
-            ) as router1:
-                self._add_external_gateway_to_router(
-                    router1['router']['id'], s['network_id'])
-                with self.router(
-                    name='router2', tenant_id=self.tenant_id,
-                    admin_state_up=False
-                ) as router2:
-                    self._add_external_gateway_to_router(
-                        router2['router']['id'], s['network_id'])
-                    with self.metering_label(tenant_id=self.tenant_id):
-                        callbacks = metering_rpc.MeteringRpcCallbacks(
-                            self.meter_plugin)
-                        data = callbacks.get_sync_data_metering(
-                            self.adminContext, host='agent1')
-                        self.assertEqual(
-                            set(['router1']), set([r['name'] for r in data]))
-
-                    self._remove_external_gateway_from_router(
-                        router2['router']['id'], s['network_id'])
-
-                self._remove_external_gateway_from_router(
-                    router1['router']['id'], s['network_id'])

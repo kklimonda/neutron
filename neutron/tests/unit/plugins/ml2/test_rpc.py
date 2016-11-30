@@ -20,17 +20,15 @@ Unit Tests for ml2 rpc
 import collections
 
 import mock
-from neutron_lib import constants
-from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_context import context as oslo_context
 import oslo_messaging
 from sqlalchemy.orm import exc
 
 from neutron.agent import rpc as agent_rpc
-from neutron.callbacks import resources
+from neutron.common import constants
+from neutron.common import exceptions
 from neutron.common import topics
-from neutron.db import provisioning_blocks
 from neutron.plugins.ml2.drivers import type_tunnel
 from neutron.plugins.ml2 import managers
 from neutron.plugins.ml2 import rpc as plugin_rpc
@@ -49,31 +47,34 @@ class RpcCallbacksTestCase(base.BaseTestCase):
         self.notifier = plugin_rpc.AgentNotifierApi(topics.AGENT)
         self.callbacks = plugin_rpc.RpcCallbacks(self.notifier,
                                                  self.type_manager)
-        self.plugin = mock.MagicMock()
-        directory.add_plugin(constants.CORE, self.plugin)
+        self.manager = mock.patch.object(
+            plugin_rpc.manager, 'NeutronManager').start()
+        self.plugin = self.manager.get_plugin()
 
-    def _test_update_device_up(self, host=None):
+    def _test_update_device_up(self):
         kwargs = {
             'agent_id': 'foo_agent',
-            'device': 'foo_device',
-            'host': host
+            'device': 'foo_device'
         }
         with mock.patch('neutron.plugins.ml2.plugin.Ml2Plugin'
-                        '._device_to_port_id'),\
-            mock.patch.object(self.callbacks, 'notify_ha_port_status'):
-            with mock.patch('neutron.db.provisioning_blocks.'
-                            'provisioning_complete') as pc:
+                        '._device_to_port_id'):
+            with mock.patch('neutron.callbacks.registry.notify') as notify,\
+                 mock.patch.object(self.callbacks, 'notify_ha_port_status'):
                 self.callbacks.update_device_up(mock.Mock(), **kwargs)
-                return pc
+                return notify
 
     def test_update_device_up_notify(self):
         notify = self._test_update_device_up()
-        notify.assert_called_once_with(mock.ANY, mock.ANY, resources.PORT,
-                                       provisioning_blocks.L2_AGENT_ENTITY)
+        kwargs = {
+            'context': mock.ANY, 'port': mock.ANY, 'update_device_up': True
+        }
+        notify.assert_called_once_with(
+            'port', 'after_update', self.plugin, **kwargs)
 
     def test_update_device_up_notify_not_sent_with_port_not_found(self):
-        self.plugin.port_bound_to_host.return_value = False
-        notify = self._test_update_device_up('host')
+        self.plugin._get_port.side_effect = (
+            exceptions.PortNotFound(port_id='foo_port_id'))
+        notify = self._test_update_device_up()
         self.assertFalse(notify.call_count)
 
     def test_get_device_details_without_port_context(self):
@@ -93,7 +94,7 @@ class RpcCallbacksTestCase(base.BaseTestCase):
     def test_get_device_details_port_status_equal_new_status(self):
         port = collections.defaultdict(lambda: 'fake')
         self.plugin.get_bound_port_context().current = port
-        self.plugin.port_bound_to_host = port
+        self.plugin.port_bound_to_host = mock.MagicMock(return_value=True)
         for admin_state_up in (True, False):
             new_status = (constants.PORT_STATUS_BUILD if admin_state_up
                           else constants.PORT_STATUS_DOWN)
@@ -224,9 +225,6 @@ class RpcCallbacksTestCase(base.BaseTestCase):
     def test_update_device_up_with_device_not_bound_to_host(self):
         self.assertIsNone(self._test_update_device_not_bound_to_host(
             self.callbacks.update_device_up))
-        port = self.plugin._get_port.return_value
-        (self.plugin.nova_notifier.notify_port_active_direct.
-         assert_called_once_with(port))
 
     def test_update_device_down_with_device_not_bound_to_host(self):
         self.assertEqual(
@@ -315,8 +313,7 @@ class RpcCallbacksTestCase(base.BaseTestCase):
 class RpcApiTestCase(base.BaseTestCase):
 
     def _test_rpc_api(self, rpcapi, topic, method, rpc_method, **kwargs):
-        ctxt = oslo_context.RequestContext(user='fake_user',
-                                           tenant='fake_project')
+        ctxt = oslo_context.RequestContext('fake_user', 'fake_project')
         expected_retval = 'foo' if rpc_method == 'call' else None
         expected_version = kwargs.pop('version', None)
         fanout = kwargs.pop('fanout', False)
@@ -447,8 +444,7 @@ class RpcApiTestCase(base.BaseTestCase):
 
     def test_update_device_list_unsupported(self):
         rpcapi = agent_rpc.PluginApi(topics.PLUGIN)
-        ctxt = oslo_context.RequestContext(user='fake_user',
-                                           tenant='fake_project')
+        ctxt = oslo_context.RequestContext('fake_user', 'fake_project')
         devices_up = ['fake_device1', 'fake_device2']
         devices_down = ['fake_device3', 'fake_device4']
         expected_ret_val = {'devices_up': ['fake_device2'],
@@ -490,8 +486,7 @@ class RpcApiTestCase(base.BaseTestCase):
 
     def test_get_devices_details_list_and_failed_devices_unsupported(self):
         rpcapi = agent_rpc.PluginApi(topics.PLUGIN)
-        ctxt = oslo_context.RequestContext(user='fake_user',
-                                           tenant='fake_project')
+        ctxt = oslo_context.RequestContext('fake_user', 'fake_project')
         devices = ['fake_device1', 'fake_device2']
         dev2_details = {'device': 'fake_device2', 'network_id': 'net_id',
                         'port_id': 'port_id', 'admin_state_up': True}

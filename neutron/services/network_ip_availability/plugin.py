@@ -34,8 +34,7 @@ class NetworkIPAvailabilityPlugin(ip_availability_db.IpAvailabilityMixin,
     def get_plugin_description(self):
         return "Provides IP availability data for each network and subnet."
 
-    @classmethod
-    def get_plugin_type(cls):
+    def get_plugin_type(self):
         return "network-ip-availability"
 
     def get_network_ip_availabilities(self, context, filters=None,

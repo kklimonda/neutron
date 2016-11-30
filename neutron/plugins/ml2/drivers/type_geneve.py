@@ -13,32 +13,71 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log
+import sqlalchemy as sa
+from sqlalchemy import sql
 
-from neutron._i18n import _LE
-from neutron.common import _deprecate
-from neutron.conf.plugins.ml2.drivers import driver_type
-from neutron.db.models.plugins.ml2 import geneveallocation \
-     as geneve_model
+from neutron._i18n import _, _LE
+from neutron.common import exceptions as n_exc
+from neutron.db import model_base
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers import type_tunnel
 
 LOG = log.getLogger(__name__)
 
-_deprecate._moved_global('GeneveAllocation', new_module=geneve_model)
-_deprecate._moved_global('GeneveEndpoints', new_module=geneve_model)
+geneve_opts = [
+    cfg.ListOpt('vni_ranges',
+                default=[],
+                help=_("Comma-separated list of <vni_min>:<vni_max> tuples "
+                       "enumerating ranges of Geneve VNI IDs that are "
+                       "available for tenant network allocation")),
+    cfg.IntOpt('max_header_size',
+               default=p_const.GENEVE_ENCAP_MIN_OVERHEAD,
+               help=_("Geneve encapsulation header size is dynamic, this "
+                      "value is used to calculate the maximum MTU "
+                      "for the driver. "
+                      "This is the sum of the sizes of the outer "
+                      "ETH + IP + UDP + GENEVE header sizes. "
+                      "The default size for this field is 50, which is the "
+                      "size of the Geneve header without any additional "
+                      "option headers.")),
+]
 
-driver_type.register_ml2_drivers_geneve_opts()
+cfg.CONF.register_opts(geneve_opts, "ml2_type_geneve")
+
+
+class GeneveAllocation(model_base.BASEV2):
+
+    __tablename__ = 'ml2_geneve_allocations'
+
+    geneve_vni = sa.Column(sa.Integer, nullable=False, primary_key=True,
+                        autoincrement=False)
+    allocated = sa.Column(sa.Boolean, nullable=False, default=False,
+                          server_default=sql.false(), index=True)
+
+
+class GeneveEndpoints(model_base.BASEV2):
+    """Represents tunnel endpoint in RPC mode."""
+
+    __tablename__ = 'ml2_geneve_endpoints'
+    __table_args__ = (
+        sa.UniqueConstraint('host',
+                            name='unique_ml2_geneve_endpoints0host'),
+        model_base.BASEV2.__table_args__
+    )
+    ip_address = sa.Column(sa.String(64), primary_key=True)
+    host = sa.Column(sa.String(255), nullable=True)
+
+    def __repr__(self):
+        return "<GeneveTunnelEndpoint(%s)>" % self.ip_address
 
 
 class GeneveTypeDriver(type_tunnel.EndpointTunnelTypeDriver):
 
     def __init__(self):
-        super(GeneveTypeDriver, self).__init__(geneve_model.GeneveAllocation,
-                                               geneve_model.GeneveEndpoints)
+        super(GeneveTypeDriver, self).__init__(GeneveAllocation,
+                                               GeneveEndpoints)
         self.max_encap_size = cfg.CONF.ml2_type_geneve.max_header_size
 
     def get_type(self):
@@ -65,5 +104,3 @@ class GeneveTypeDriver(type_tunnel.EndpointTunnelTypeDriver):
     def get_mtu(self, physical_network=None):
         mtu = super(GeneveTypeDriver, self).get_mtu()
         return mtu - self.max_encap_size if mtu else 0
-
-_deprecate._MovedGlobals()

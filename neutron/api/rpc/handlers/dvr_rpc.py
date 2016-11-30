@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.plugins import directory
 from oslo_log import helpers as log_helpers
 from oslo_log import log as logging
 import oslo_messaging
@@ -21,6 +20,7 @@ import oslo_messaging
 from neutron.common import constants
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
+from neutron import manager
 
 LOG = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class DVRServerRpcCallback(object):
     @property
     def plugin(self):
         if not getattr(self, '_plugin', None):
-            self._plugin = directory.get_plugin()
+            self._plugin = manager.NeutronManager.get_plugin()
         return self._plugin
 
     def get_dvr_mac_address_list(self, context):

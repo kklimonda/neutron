@@ -18,13 +18,13 @@ import time
 
 from eventlet.timeout import Timeout
 
-from neutron.common import utils
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
 from neutron.tests.common import net_helpers
 from neutron.tests.functional.agent.l2 import base
 
 
 class TestOVSAgent(base.OVSAgentTestFramework):
+
     def test_port_creation_and_deletion(self):
         self.setup_agent_and_ports(
             port_dicts=self.create_test_ports())
@@ -34,53 +34,6 @@ class TestOVSAgent(base.OVSAgentTestFramework):
             self.agent.int_br.delete_port(port['vif_name'])
 
         self.wait_until_ports_state(self.ports, up=False)
-
-    def test_no_stale_flows_after_port_delete(self):
-        def find_drop_flow(ofport, flows):
-            for flow in flows.split("\n"):
-                if "in_port=%d" % ofport in flow and "actions=drop" in flow:
-                    return True
-            return False
-
-        def num_ports_with_drop_flows(ofports, flows):
-            count = 0
-            for ofport in ofports:
-                if find_drop_flow(ofport, flows):
-                    count = count + 1
-            return count
-        # setup
-        self.setup_agent_and_ports(
-            port_dicts=self.create_test_ports())
-        self.wait_until_ports_state(self.ports, up=True)
-
-        # call port_delete first
-        for port in self.ports:
-            self.agent.port_delete([], port_id=port['id'])
-        portnames = [port["vif_name"] for port in self.ports]
-        ofports = [port.ofport for port in self.agent.int_br.get_vif_ports()
-                   if port.port_name in portnames]
-
-        #wait until ports are marked dead, with drop flow
-        utils.wait_until_true(
-            lambda: num_ports_with_drop_flows(
-                ofports,
-                self.agent.int_br.dump_flows(
-                    constants.LOCAL_SWITCHING
-                )) == len(ofports))
-
-        #delete the ports on bridge
-        for port in self.ports:
-            self.agent.int_br.delete_port(port['vif_name'])
-        self.wait_until_ports_state(self.ports, up=False)
-
-        #verify no stale drop flows
-        self.assertEqual(0,
-            num_ports_with_drop_flows(
-                ofports,
-                self.agent.int_br.dump_flows(
-                    constants.LOCAL_SWITCHING
-                )
-            ))
 
     def _check_datapath_type_netdev(self, expected, default=False):
         if not default:
@@ -233,30 +186,6 @@ class TestOVSAgent(base.OVSAgentTestFramework):
                 self.agent.setup_integration_br()
                 time.sleep(0.25)
 
-    def test_assert_br_int_patch_port_ofports_dont_change(self):
-        # When the integration bridge is setup, it should reuse the existing
-        # patch ports between br-int and br-tun.
-        self.setup_agent_and_ports(port_dicts=[], create_tunnels=True)
-        patch_int_ofport_before = self.agent.patch_int_ofport
-        patch_tun_ofport_before = self.agent.patch_tun_ofport
-
-        self.setup_agent_and_ports(port_dicts=[], create_tunnels=True)
-        self.assertEqual(patch_int_ofport_before, self.agent.patch_int_ofport)
-        self.assertEqual(patch_tun_ofport_before, self.agent.patch_tun_ofport)
-
-    def test_assert_br_phys_patch_port_ofports_dont_change(self):
-        # When the integration bridge is setup, it should reuse the existing
-        # patch ports between br-int and br-phys.
-        self.setup_agent_and_ports(port_dicts=[])
-        patch_int_ofport_before = self.agent.int_ofports['physnet']
-        patch_phys_ofport_before = self.agent.phys_ofports['physnet']
-
-        self.setup_agent_and_ports(port_dicts=[])
-        self.assertEqual(patch_int_ofport_before,
-                         self.agent.int_ofports['physnet'])
-        self.assertEqual(patch_phys_ofport_before,
-                         self.agent.phys_ofports['physnet'])
-
     def test_assert_pings_during_br_phys_setup_not_lost_in_vlan_to_flat(self):
         provider_net = self._create_test_network_dict()
         provider_net['network_type'] = 'flat'
@@ -292,9 +221,6 @@ class TestOVSAgent(base.OVSAgentTestFramework):
         # is sent when a port is up on a physical bridge, hence waiting only
         # for the ports connected to br-int
         self.wait_until_ports_state([port_int], up=True)
-        # sanity pings before we start
-        net_helpers.assert_ping(ns_phys, ip_int)
-        net_helpers.assert_ping(self.namespace, ip_phys)
 
         with net_helpers.async_ping(ns_phys, [ip_int]) as done:
             while not done():
@@ -306,8 +232,31 @@ class TestOVSAgent(base.OVSAgentTestFramework):
                 self.agent.setup_physical_bridges(self.agent.bridge_mappings)
                 time.sleep(0.25)
 
-    def test_noresync_after_port_gone(self):
+    def test_assert_br_int_patch_port_ofports_dont_change(self):
+        # When the integration bridge is setup, it should reuse the existing
+        # patch ports between br-int and br-tun.
+        self.setup_agent_and_ports(port_dicts=[], create_tunnels=True)
+        patch_int_ofport_before = self.agent.patch_int_ofport
+        patch_tun_ofport_before = self.agent.patch_tun_ofport
 
+        self.setup_agent_and_ports(port_dicts=[], create_tunnels=True)
+        self.assertEqual(patch_int_ofport_before, self.agent.patch_int_ofport)
+        self.assertEqual(patch_tun_ofport_before, self.agent.patch_tun_ofport)
+
+    def test_assert_br_phys_patch_port_ofports_dont_change(self):
+        # When the integration bridge is setup, it should reuse the existing
+        # patch ports between br-int and br-phys.
+        self.setup_agent_and_ports(port_dicts=[])
+        patch_int_ofport_before = self.agent.int_ofports['physnet']
+        patch_phys_ofport_before = self.agent.phys_ofports['physnet']
+
+        self.setup_agent_and_ports(port_dicts=[])
+        self.assertEqual(patch_int_ofport_before,
+                         self.agent.int_ofports['physnet'])
+        self.assertEqual(patch_phys_ofport_before,
+                         self.agent.phys_ofports['physnet'])
+
+    def test_noresync_after_port_gone(self):
         '''This will test the scenario where a port is removed after listing
         it but before getting vif info about it.
         '''

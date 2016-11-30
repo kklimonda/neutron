@@ -16,9 +16,6 @@
 """Test of Policy Engine For Neutron"""
 
 import mock
-from neutron_lib import constants
-from neutron_lib import exceptions
-from neutron_lib.plugins import directory
 from oslo_db import exception as db_exc
 from oslo_policy import fixture as op_fixture
 from oslo_policy import policy as oslo_policy
@@ -27,8 +24,10 @@ from oslo_utils import importutils
 
 import neutron
 from neutron.api.v2 import attributes
-from neutron.common import constants as n_const
+from neutron.common import constants as const
+from neutron.common import exceptions
 from neutron import context
+from neutron import manager
 from neutron import policy
 from neutron.tests import base
 
@@ -220,7 +219,10 @@ class NeutronPolicyTestCase(base.BaseTestCase):
         self.context = context.Context('fake', 'fake', roles=['user'])
         plugin_klass = importutils.import_class(
             "neutron.db.db_base_plugin_v2.NeutronDbPluginV2")
-        directory.add_plugin(constants.CORE, plugin_klass())
+        self.manager_patcher = mock.patch('neutron.manager.NeutronManager')
+        fake_manager = self.manager_patcher.start()
+        fake_manager_instance = fake_manager.return_value
+        fake_manager_instance.plugin = plugin_klass()
 
     def _set_rules(self, **kwargs):
         rules_dict = {
@@ -326,10 +328,10 @@ class NeutronPolicyTestCase(base.BaseTestCase):
                                            oslo_policy.PolicyNotAuthorized)
 
     def test_create_port_device_owner_regex(self):
-        blocked_values = (constants.DEVICE_OWNER_NETWORK_PREFIX,
+        blocked_values = (const.DEVICE_OWNER_NETWORK_PREFIX,
                           'network:abdef',
-                          constants.DEVICE_OWNER_DHCP,
-                          constants.DEVICE_OWNER_ROUTER_INTF)
+                          const.DEVICE_OWNER_DHCP,
+                          const.DEVICE_OWNER_ROUTER_INTF)
         for val in blocked_values:
             self._test_advsvc_action_on_attr(
                 'create', 'port', 'device_owner', val,
@@ -355,7 +357,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
         self._test_advsvc_action_on_attr('get', 'port', 'shared', False)
 
     def test_advsvc_update_port_works(self):
-        kwargs = {n_const.ATTRIBUTES_TO_UPDATE: ['shared']}
+        kwargs = {const.ATTRIBUTES_TO_UPDATE: ['shared']}
         self._test_advsvc_action_on_attr('update', 'port', 'shared', True,
                                          **kwargs)
 
@@ -412,11 +414,11 @@ class NeutronPolicyTestCase(base.BaseTestCase):
         self._test_enforce_adminonly_attribute('create_network')
 
     def test_enforce_adminonly_attribute_update(self):
-        kwargs = {n_const.ATTRIBUTES_TO_UPDATE: ['shared']}
+        kwargs = {const.ATTRIBUTES_TO_UPDATE: ['shared']}
         self._test_enforce_adminonly_attribute('update_network', **kwargs)
 
     def test_reset_adminonly_attr_to_default_fails(self):
-        kwargs = {n_const.ATTRIBUTES_TO_UPDATE: ['shared']}
+        kwargs = {const.ATTRIBUTES_TO_UPDATE: ['shared']}
         self._test_nonadmin_action_on_attr('update', 'shared', False,
                                            oslo_policy.PolicyNotAuthorized,
                                            **kwargs)
@@ -512,7 +514,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
             return {'tenant_id': 'fake'}
 
         action = "create_port:mac"
-        with mock.patch.object(directory.get_plugin(),
+        with mock.patch.object(manager.NeutronManager.get_instance().plugin,
                                'get_network', new=fakegetnetwork):
             target = {'network_id': 'whatever'}
             result = policy.enforce(self.context, action, target)
@@ -527,7 +529,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
         # so long that we verify that, if *f* blows up, the behavior of the
         # policy engine to propagate the exception is preserved
         action = "create_port:mac"
-        with mock.patch.object(directory.get_plugin(),
+        with mock.patch.object(manager.NeutronManager.get_instance().plugin,
                                'get_network', new=fakegetnetwork):
             target = {'network_id': 'whatever'}
             self.assertRaises(NotImplementedError,
@@ -539,7 +541,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
     def test_retryrequest_on_notfound(self):
         failure = exceptions.NetworkNotFound(net_id='whatever')
         action = "create_port:mac"
-        with mock.patch.object(directory.get_plugin(),
+        with mock.patch.object(manager.NeutronManager.get_instance().plugin,
                                'get_network', side_effect=failure):
             target = {'network_id': 'whatever'}
             try:
@@ -557,7 +559,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
             admin_or_network_owner="role:admin or "
                                    "tenant_id:%(network_tenant_id)s")
         action = "create_port:mac"
-        with mock.patch.object(directory.get_plugin(),
+        with mock.patch.object(manager.NeutronManager.get_instance().plugin,
                                'get_network', new=fakegetnetwork):
             target = {'network_id': 'whatever'}
             result = policy.enforce(self.context, action, target)
@@ -649,7 +651,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
             attr, resource, target, action)
         self.assertFalse(result)
 
-        target = {attr: constants.ATTR_NOT_SPECIFIED, 'tgt-tenant': 'tenantA'}
+        target = {attr: attributes.ATTR_NOT_SPECIFIED, 'tgt-tenant': 'tenantA'}
         result = policy._is_attribute_explicitly_set(
             attr, resource, target, action)
         self.assertFalse(result)

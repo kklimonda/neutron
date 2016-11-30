@@ -17,8 +17,6 @@ from itertools import chain as iter_chain
 
 import jinja2
 import netaddr
-from neutron_lib import constants
-from neutron_lib.utils import file as file_utils
 from oslo_config import cfg
 from oslo_log import log as logging
 import six
@@ -26,7 +24,8 @@ import six
 from neutron._i18n import _
 from neutron.agent.linux import external_process
 from neutron.agent.linux import utils
-from neutron.common import constants as n_const
+from neutron.common import constants
+from neutron.common import utils as common_utils
 
 
 RADVD_SERVICE_NAME = 'radvd'
@@ -54,7 +53,7 @@ CONFIG_TEMPLATE = jinja2.Template("""interface {{ interface_name }}
    MinRtrAdvInterval {{ min_rtr_adv_interval }};
    MaxRtrAdvInterval {{ max_rtr_adv_interval }};
 
-   {% if network_mtu >= n_const.IPV6_MIN_MTU %}
+   {% if network_mtu >= constants.IPV6_MIN_MTU %}
    AdvLinkMTU {{network_mtu}};
    {% endif %}
 
@@ -133,13 +132,12 @@ class DaemonMonitor(object):
                 auto_config_prefixes=auto_config_prefixes,
                 stateful_config_prefixes=stateful_config_prefixes,
                 dns_servers=dns_servers[0:MAX_RDNSS_ENTRIES],
-                n_const=n_const,
                 constants=constants,
                 min_rtr_adv_interval=self._agent_conf.min_rtr_adv_interval,
                 max_rtr_adv_interval=self._agent_conf.max_rtr_adv_interval,
                 network_mtu=int(network_mtu)))
 
-        file_utils.replace_file(radvd_conf, buf.getvalue())
+        common_utils.replace_file(radvd_conf, buf.getvalue())
         return radvd_conf
 
     def _get_radvd_process_manager(self, callback=None):

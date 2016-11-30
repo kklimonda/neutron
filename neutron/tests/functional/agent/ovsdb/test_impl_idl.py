@@ -18,7 +18,7 @@ import mock
 from neutron.agent.common import ovs_lib
 from neutron.agent.ovsdb import api
 from neutron.agent.ovsdb import impl_idl
-from neutron.common import utils
+from neutron.tests import base as test_base
 from neutron.tests.common import net_helpers
 from neutron.tests.functional import base
 
@@ -36,7 +36,7 @@ class ImplIdlTestCase(base.BaseSudoTestCase):
         super(ImplIdlTestCase, self).setUp()
         self.config(group='OVS', ovsdb_interface='native')
         self.ovs = ovs_lib.BaseOVS()
-        self.brname = utils.get_rand_device_name(net_helpers.BR_PREFIX)
+        self.brname = test_base.get_rand_device_name(net_helpers.BR_PREFIX)
         # Make sure exceptions pass through by calling do_post_commit directly
         mock.patch.object(
             impl_idl.NeutronOVSDBTransaction, "post_commit",
@@ -56,7 +56,7 @@ class ImplIdlTestCase(base.BaseSudoTestCase):
         self._add_br()
         ofport = self.ovs.db_get_val("Interface", self.brname, "ofport")
         self.assertTrue(int(ofport))
-        self.assertGreater(ofport, -1)
+        self.assertTrue(ofport > -1)
 
     def test_post_commit_vswitchd_completed_no_failures(self):
         self._add_br_and_test()

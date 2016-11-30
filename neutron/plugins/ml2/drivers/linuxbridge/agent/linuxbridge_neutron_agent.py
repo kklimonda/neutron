@@ -22,8 +22,6 @@
 import sys
 
 import netaddr
-from neutron_lib import constants
-from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -35,13 +33,13 @@ from neutron._i18n import _LE, _LI, _LW
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
+from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.common import config as common_config
+from neutron.common import constants
 from neutron.common import exceptions
-from neutron.common import profiler as setup_profiler
 from neutron.common import topics
+from neutron.common import utils as n_utils
 from neutron.plugins.common import constants as p_const
-from neutron.plugins.common import utils as p_utils
 from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
 from neutron.plugins.ml2.drivers.agent import _common_agent as ca
 from neutron.plugins.ml2.drivers.agent import config as cagt_config  # noqa
@@ -51,17 +49,12 @@ from neutron.plugins.ml2.drivers.linuxbridge.agent import arp_protect
 from neutron.plugins.ml2.drivers.linuxbridge.agent.common import config  # noqa
 from neutron.plugins.ml2.drivers.linuxbridge.agent.common \
     import constants as lconst
-from neutron.plugins.ml2.drivers.linuxbridge.agent.common \
-    import utils as lb_utils
-from neutron.plugins.ml2.drivers.linuxbridge.agent \
-    import linuxbridge_capabilities
 
 
 LOG = logging.getLogger(__name__)
 
 LB_AGENT_BINARY = 'neutron-linuxbridge-agent'
 BRIDGE_NAME_PREFIX = "brq"
-MAX_VLAN_POSTFIX_LEN = 5
 VXLAN_INTERFACE_PREFIX = "vxlan-"
 
 
@@ -148,36 +141,17 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
         if not vlan_id:
             LOG.warning(_LW("Invalid VLAN ID, will lead to incorrect "
                             "subinterface name"))
-        vlan_postfix = '.%s' % vlan_id
-
-        # For the vlan subinterface name prefix we use:
-        # * the physical_interface, if len(physical_interface) +
-        #   len(vlan_postifx) <= 15 for backward compatibility reasons
-        #   Example: physical_interface = eth0
-        #            prefix = eth0.1
-        #            prefix = eth0.1111
-        #
-        # * otherwise a unique hash per physical_interface to help debugging
-        #   Example: physical_interface = long_interface
-        #            prefix = longHASHED.1
-        #            prefix = longHASHED.1111
-        #
-        # Remark: For some physical_interface values, the used prefix can be
-        # both, the physical_interface itself or a hash, depending
-        # on the vlan_postfix length.
-        # Example: physical_interface = mix_interface
-        #          prefix = mix_interface.1 (backward compatible)
-        #          prefix = mix_iHASHED.1111
-        if (len(physical_interface) + len(vlan_postfix) >
-            constants.DEVICE_NAME_MAX_LEN):
-            physical_interface = p_utils.get_interface_name(
-                physical_interface, max_len=(constants.DEVICE_NAME_MAX_LEN -
-                                             MAX_VLAN_POSTFIX_LEN))
-        return "%s%s" % (physical_interface, vlan_postfix)
+        subinterface_name = '%s.%s' % (physical_interface, vlan_id)
+        return subinterface_name
 
     @staticmethod
     def get_tap_device_name(interface_id):
-        return lb_utils.get_tap_device_name(interface_id)
+        if not interface_id:
+            LOG.warning(_LW("Invalid Interface ID, will lead to incorrect "
+                            "tap device name"))
+        tap_device_name = constants.TAP_DEVICE_PREFIX + \
+            interface_id[:lconst.RESOURCE_ID_LENGTH]
+        return tap_device_name
 
     def get_vxlan_device_name(self, segmentation_id):
         if 0 <= int(segmentation_id) <= p_const.MAX_VXLAN_VNI:
@@ -438,7 +412,7 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
     def add_tap_interface(self, network_id, network_type, physical_network,
                           segmentation_id, tap_device_name, device_owner):
-        """Add tap interface and handle interface missing exceptions."""
+        """Add tap interface and handle interface missing exeptions."""
         try:
             return self._add_tap_interface(network_id, network_type,
                                            physical_network, segmentation_id,
@@ -558,30 +532,19 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
     def remove_interface(self, bridge_name, interface_name):
         bridge_device = bridge_lib.BridgeDevice(bridge_name)
         if bridge_device.exists():
-            if not bridge_device.owns_interface(interface_name):
+            if not bridge_lib.is_bridged_interface(interface_name):
                 return True
             LOG.debug("Removing device %(interface_name)s from bridge "
                       "%(bridge_name)s",
                       {'interface_name': interface_name,
                        'bridge_name': bridge_name})
-            try:
-                bridge_device.delif(interface_name)
-                LOG.debug("Done removing device %(interface_name)s from "
-                          "bridge %(bridge_name)s",
-                          {'interface_name': interface_name,
-                           'bridge_name': bridge_name})
-                return True
-            except RuntimeError:
-                with excutils.save_and_reraise_exception() as ctxt:
-                    if not bridge_device.owns_interface(interface_name):
-                        # the exception was likely a side effect of the tap
-                        # being deleted by some other agent during handling
-                        ctxt.reraise = False
-                        LOG.debug("Cannot remove %(interface_name)s from "
-                                  "%(bridge_name)s. It is not on the bridge.",
-                                  {'interface_name': interface_name,
-                                   'bridge_name': bridge_name})
-                        return False
+            if bridge_device.delif(interface_name):
+                return False
+            LOG.debug("Done removing device %(interface_name)s from bridge "
+                      "%(bridge_name)s",
+                      {'interface_name': interface_name,
+                       'bridge_name': bridge_name})
+            return True
         else:
             LOG.debug("Cannot remove device %(interface_name)s bridge "
                       "%(bridge_name)s does not exist",
@@ -599,12 +562,7 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             LOG.debug("Done deleting interface %s", interface)
 
     def get_devices_modified_timestamps(self, devices):
-        # NOTE(kevinbenton): we aren't returning real timestamps here. We
-        # are returning interface indexes instead which change when the
-        # interface is removed/re-added. This works for the direct
-        # comparison the common agent loop performs with these.
-        # See bug/1622833 for details.
-        return {d: bridge_lib.get_interface_ifindex(d) for d in devices}
+        return {d: bridge_lib.get_interface_bridged_time(d) for d in devices}
 
     def get_all_devices(self):
         devices = set()
@@ -637,9 +595,10 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             return False
 
         try:
-            bridge_lib.FdbInterface.append(constants.FLOODING_ENTRY[0],
-                                           test_iface, '1.1.1.1',
-                                           log_fail_as_error=False)
+            utils.execute(
+                cmd=['bridge', 'fdb', 'append', constants.FLOODING_ENTRY[0],
+                     'dev', test_iface, 'dst', '1.1.1.1'],
+                run_as_root=True, log_fail_as_error=False)
             return True
         except RuntimeError:
             return False
@@ -681,7 +640,8 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
         return mac in entries
 
     def fdb_bridge_entry_exists(self, mac, interface, agent_ip=None):
-        entries = bridge_lib.FdbInterface.show(interface)
+        entries = utils.execute(['bridge', 'fdb', 'show', 'dev', interface],
+                                run_as_root=True)
         if not agent_ip:
             return mac in entries
 
@@ -695,38 +655,47 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
         if cfg.CONF.VXLAN.arp_responder:
             ip_lib.IPDevice(interface).neigh.delete(ip, mac)
 
+    def add_fdb_bridge_entry(self, mac, agent_ip, interface, operation="add"):
+        utils.execute(['bridge', 'fdb', operation, mac, 'dev', interface,
+                       'dst', agent_ip],
+                      run_as_root=True,
+                      check_exit_code=False)
+
+    def remove_fdb_bridge_entry(self, mac, agent_ip, interface):
+        utils.execute(['bridge', 'fdb', 'del', mac, 'dev', interface,
+                       'dst', agent_ip],
+                      run_as_root=True,
+                      check_exit_code=False)
+
     def add_fdb_entries(self, agent_ip, ports, interface):
         for mac, ip in ports:
             if mac != constants.FLOODING_ENTRY[0]:
                 self.add_fdb_ip_entry(mac, ip, interface)
-                bridge_lib.FdbInterface.replace(mac, interface, agent_ip,
-                                                check_exit_code=False)
+                self.add_fdb_bridge_entry(mac, agent_ip, interface,
+                                          operation="replace")
             elif self.vxlan_mode == lconst.VXLAN_UCAST:
                 if self.fdb_bridge_entry_exists(mac, interface):
-                    bridge_lib.FdbInterface.append(mac, interface, agent_ip,
-                                                   check_exit_code=False)
+                    self.add_fdb_bridge_entry(mac, agent_ip, interface,
+                                              "append")
                 else:
-                    bridge_lib.FdbInterface.add(mac, interface, agent_ip,
-                                                check_exit_code=False)
+                    self.add_fdb_bridge_entry(mac, agent_ip, interface)
 
     def remove_fdb_entries(self, agent_ip, ports, interface):
         for mac, ip in ports:
             if mac != constants.FLOODING_ENTRY[0]:
                 self.remove_fdb_ip_entry(mac, ip, interface)
-                bridge_lib.FdbInterface.delete(mac, interface, agent_ip,
-                                               check_exit_code=False)
+                self.remove_fdb_bridge_entry(mac, agent_ip, interface)
             elif self.vxlan_mode == lconst.VXLAN_UCAST:
-                bridge_lib.FdbInterface.delete(mac, interface, agent_ip,
-                                               check_exit_code=False)
+                self.remove_fdb_bridge_entry(mac, agent_ip, interface)
 
     def get_agent_id(self):
         if self.bridge_mappings:
-            mac = ip_lib.get_device_mac(
+            mac = utils.get_interface_mac(
                 list(self.bridge_mappings.values())[0])
         else:
             devices = ip_lib.IPWrapper().get_devices(True)
             if devices:
-                mac = ip_lib.get_device_mac(devices[0].name)
+                mac = utils.get_interface_mac(devices[0].name)
             else:
                 LOG.error(_LE("Unable to obtain MAC address for unique ID. "
                               "Agent terminated!"))
@@ -911,7 +880,7 @@ def main():
 
     common_config.setup_logging()
     try:
-        interface_mappings = helpers.parse_mappings(
+        interface_mappings = n_utils.parse_mappings(
             cfg.CONF.LINUX_BRIDGE.physical_interface_mappings)
     except ValueError as e:
         LOG.error(_LE("Parsing physical_interface_mappings failed: %s. "
@@ -920,7 +889,7 @@ def main():
     LOG.info(_LI("Interface mappings: %s"), interface_mappings)
 
     try:
-        bridge_mappings = helpers.parse_mappings(
+        bridge_mappings = n_utils.parse_mappings(
             cfg.CONF.LINUX_BRIDGE.bridge_mappings)
     except ValueError as e:
         LOG.error(_LE("Parsing bridge_mappings failed: %s. "
@@ -929,14 +898,12 @@ def main():
     LOG.info(_LI("Bridge mappings: %s"), bridge_mappings)
 
     manager = LinuxBridgeManager(bridge_mappings, interface_mappings)
-    linuxbridge_capabilities.register()
 
     polling_interval = cfg.CONF.AGENT.polling_interval
     quitting_rpc_timeout = cfg.CONF.AGENT.quitting_rpc_timeout
     agent = ca.CommonAgentLoop(manager, polling_interval, quitting_rpc_timeout,
                                constants.AGENT_TYPE_LINUXBRIDGE,
                                LB_AGENT_BINARY)
-    setup_profiler.setup("neutron-linuxbridge-agent", cfg.CONF.host)
     LOG.info(_LI("Agent initialized successfully, now running... "))
     launcher = service.launch(cfg.CONF, agent)
     launcher.wait()

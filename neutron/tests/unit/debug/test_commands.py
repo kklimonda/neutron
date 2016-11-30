@@ -173,7 +173,7 @@ class TestDebugCommands(base.BaseTestCase):
                                                      'fake_port',
                                                      'tap12345678-12',
                                                      'aa:bb:cc:dd:ee:ffa',
-                                                     bridge='',
+                                                     bridge='br-ex',
                                                      namespace=namespace),
                                       mock.call.init_l3('tap12345678-12',
                                                         ['10.0.0.3/24'],
@@ -223,7 +223,7 @@ class TestDebugCommands(base.BaseTestCase):
         self.driver.assert_has_calls([mock.call.get_device_name(mock.ANY),
                                       mock.call.unplug('tap12345678-12',
                                                        namespace=namespace,
-                                                       bridge='')])
+                                                       bridge='br-ex')])
 
     def test_list_probe(self):
         cmd = commands.ListProbe(self.app, None)

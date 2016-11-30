@@ -14,12 +14,7 @@
 #    under the License.
 
 RULE_TYPE_BANDWIDTH_LIMIT = 'bandwidth_limit'
-RULE_TYPE_DSCP_MARKING = 'dscp_marking'
-RULE_TYPE_MINIMUM_BANDWIDTH = 'minimum_bandwidth'
-VALID_RULE_TYPES = [RULE_TYPE_BANDWIDTH_LIMIT,
-                    RULE_TYPE_DSCP_MARKING,
-                    RULE_TYPE_MINIMUM_BANDWIDTH,
-                    ]
+VALID_RULE_TYPES = [RULE_TYPE_BANDWIDTH_LIMIT]
 
 QOS_POLICY_ID = 'qos_policy_id'
 

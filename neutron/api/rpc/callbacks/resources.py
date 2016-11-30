@@ -11,22 +11,24 @@
 #    under the License.
 
 from neutron.objects.qos import policy
-from neutron.objects import trunk
+
+
+_QOS_POLICY_CLS = policy.QosPolicy
+
+_VALID_CLS = (
+    _QOS_POLICY_CLS,
+)
+
+_VALID_TYPES = [cls.obj_name() for cls in _VALID_CLS]
 
 
 # Supported types
-TRUNK = trunk.Trunk.obj_name()
-QOS_POLICY = policy.QosPolicy.obj_name()
-SUBPORT = trunk.SubPort.obj_name()
+QOS_POLICY = _QOS_POLICY_CLS.obj_name()
 
 
-_VALID_CLS = (
-    policy.QosPolicy,
-    trunk.Trunk,
-    trunk.SubPort,
-)
-
-_TYPE_TO_CLS_MAP = {cls.obj_name(): cls for cls in _VALID_CLS}
+_TYPE_TO_CLS_MAP = {
+    QOS_POLICY: _QOS_POLICY_CLS,
+}
 
 LOCAL_RESOURCE_VERSIONS = {
     resource_type: cls.VERSION
@@ -45,7 +47,7 @@ def get_resource_type(resource_cls):
 
 
 def is_valid_resource_type(resource_type):
-    return resource_type in _TYPE_TO_CLS_MAP
+    return resource_type in _VALID_TYPES
 
 
 def get_resource_cls(resource_type):

@@ -13,9 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-
 from neutron.api import extensions
+from neutron.api.v2 import attributes
 
 # The type of vnic that this port should be attached to
 VNIC_TYPE = 'binding:vnic_type'
@@ -50,7 +49,6 @@ VIF_DETAILS_VLAN = 'vlan'
 VIF_DETAILS_MACVTAP_SOURCE = 'macvtap_source'
 VIF_DETAILS_MACVTAP_MODE = 'macvtap_mode'
 VIF_DETAILS_PHYSICAL_INTERFACE = 'physical_interface'
-VIF_DETAILS_BRIDGE_NAME = 'bridge_name'
 
 # The keys below are used in the VIF_DETAILS attribute to convey
 # information related to the configuration of the vhost-user VIF driver.
@@ -89,9 +87,6 @@ VIF_TYPE_OTHER = 'other'
 #                   which is defined further below. E.g. Macvtap agent uses
 #                   vnic_type 'normal'.
 VIF_TYPE_MACVTAP = 'macvtap'
-# SR-IOV VIF types
-VIF_TYPE_HW_VEB = 'hw_veb'
-VIF_TYPE_HOSTDEV_PHY = 'hostdev_physical'
 
 # VNIC_TYPE: It's used to determine which mechanism driver to use to bind a
 #            port. It can be specified via the Neutron API. Default is normal,
@@ -107,11 +102,11 @@ VNIC_TYPES = [VNIC_NORMAL, VNIC_DIRECT, VNIC_MACVTAP, VNIC_BAREMETAL,
 EXTENDED_ATTRIBUTES_2_0 = {
     'ports': {
         VIF_TYPE: {'allow_post': False, 'allow_put': False,
-                   'default': constants.ATTR_NOT_SPECIFIED,
+                   'default': attributes.ATTR_NOT_SPECIFIED,
                    'enforce_policy': True,
                    'is_visible': True},
         VIF_DETAILS: {'allow_post': False, 'allow_put': False,
-                      'default': constants.ATTR_NOT_SPECIFIED,
+                      'default': attributes.ATTR_NOT_SPECIFIED,
                       'enforce_policy': True,
                       'is_visible': True},
         VNIC_TYPE: {'allow_post': True, 'allow_put': True,
@@ -120,11 +115,11 @@ EXTENDED_ATTRIBUTES_2_0 = {
                     'validate': {'type:values': VNIC_TYPES},
                     'enforce_policy': True},
         HOST_ID: {'allow_post': True, 'allow_put': True,
-                  'default': constants.ATTR_NOT_SPECIFIED,
+                  'default': attributes.ATTR_NOT_SPECIFIED,
                   'is_visible': True,
                   'enforce_policy': True},
         PROFILE: {'allow_post': True, 'allow_put': True,
-                  'default': constants.ATTR_NOT_SPECIFIED,
+                  'default': attributes.ATTR_NOT_SPECIFIED,
                   'enforce_policy': True,
                   'validate': {'type:dict_or_none': None},
                   'is_visible': True},

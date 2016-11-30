@@ -18,7 +18,6 @@ from oslo_utils import fixture as utils_fixture
 from oslo_utils import timeutils
 from oslo_utils import uuidutils
 
-from neutron.conf.services import metering_agent as metering_agent_config
 from neutron.services.metering.agents import metering_agent
 from neutron.tests import base
 from neutron.tests import fake_notifier
@@ -50,7 +49,7 @@ class TestMeteringOperations(base.BaseTestCase):
 
     def setUp(self):
         super(TestMeteringOperations, self).setUp()
-        metering_agent_config.register_metering_agent_opts()
+        cfg.CONF.register_opts(metering_agent.MeteringAgent.Opts)
 
         self.noop_driver = ('neutron.services.metering.drivers.noop.'
                             'noop_driver.NoopMeteringDriver')
@@ -130,6 +129,7 @@ class TestMeteringOperations(base.BaseTestCase):
 
         now = timeutils.utcnow()
         time_fixture = self.useFixture(utils_fixture.TimeFixture(now))
+        self.addCleanup(timeutils.clear_time_override)
 
         self.agent.routers_updated(None, ROUTERS)
 
@@ -159,11 +159,11 @@ class TestMeteringOperations(base.BaseTestCase):
         payload = n['payload']
         self.assertEqual(TENANT_ID, payload['tenant_id'])
         self.assertEqual(LABEL_ID, payload['label_id'])
-        self.assertLess((payload['time'] - report_interval),
-                        measure_interval, payload)
+        self.assertTrue((payload['time'] - report_interval)
+                        < measure_interval, payload)
         interval = (payload['last_update'] - payload['first_update']) \
             - report_interval
-        self.assertLess(interval, measure_interval, payload)
+        self.assertTrue(interval < measure_interval, payload)
 
     def test_router_deleted(self):
         label_id = _uuid()
@@ -228,7 +228,7 @@ class TestMeteringOperations(base.BaseTestCase):
 class TestMeteringDriver(base.BaseTestCase):
     def setUp(self):
         super(TestMeteringDriver, self).setUp()
-        metering_agent_config.register_metering_agent_opts()
+        cfg.CONF.register_opts(metering_agent.MeteringAgent.Opts)
 
         self.noop_driver = ('neutron.services.metering.drivers.noop.'
                             'noop_driver.NoopMeteringDriver')

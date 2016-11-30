@@ -26,7 +26,6 @@ from neutron.agent.ovsdb import api
 from neutron.agent.ovsdb.native import commands as cmd
 from neutron.agent.ovsdb.native import connection
 from neutron.agent.ovsdb.native import idlutils
-from neutron.agent.ovsdb.native import vlog
 
 
 cfg.CONF.import_opt('ovs_vsctl_timeout', 'neutron.agent.common.ovs_lib')
@@ -65,7 +64,7 @@ class Transaction(api.Transaction):
     def commit(self):
         self.ovsdb_connection.queue_txn(self)
         try:
-            result = self.results.get(timeout=self.timeout)
+            result = self.results.get(self.timeout)
         except Queue.Empty:
             raise api.TimeoutException(
                 _("Commands %(commands)s exceeded timeout %(timeout)d "
@@ -82,15 +81,14 @@ class Transaction(api.Transaction):
         pass
 
     def post_commit(self, txn):
-        for command in self.commands:
-            command.post_commit(txn)
+        pass
 
     def do_commit(self):
         self.start_time = time.time()
         attempts = 0
         while True:
             if attempts > 0 and self.timeout_exceeded():
-                raise RuntimeError(_("OVS transaction timed out"))
+                raise RuntimeError("OVS transaction timed out")
             attempts += 1
             # TODO(twilson) Make sure we don't loop longer than vsctl_timeout
             txn = idl.Transaction(self.api.idl)
@@ -146,7 +144,6 @@ class NeutronOVSDBTransaction(Transaction):
         txn.expected_ifaces = set()
 
     def post_commit(self, txn):
-        super(NeutronOVSDBTransaction, self).post_commit(txn)
         # ovs-vsctl only logs these failures and does not return nonzero
         try:
             self.do_post_commit(txn)
@@ -212,15 +209,6 @@ class OvsdbIdl(api.API):
                                        self.context.vsctl_timeout,
                                        check_error, log_errors)
 
-    def add_manager(self, connection_uri):
-        return cmd.AddManagerCommand(self, connection_uri)
-
-    def get_manager(self):
-        return cmd.GetManagerCommand(self)
-
-    def remove_manager(self, connection_uri):
-        return cmd.RemoveManagerCommand(self, connection_uri)
-
     def add_br(self, name, may_exist=True, datapath_type=None):
         return cmd.AddBridgeCommand(self, name, may_exist, datapath_type)
 
@@ -253,9 +241,6 @@ class OvsdbIdl(api.API):
 
     def db_set(self, table, record, *col_values):
         return cmd.DbSetCommand(self, table, record, *col_values)
-
-    def db_add(self, table, record, column, *values):
-        return cmd.DbAddCommand(self, table, record, column, *values)
 
     def db_clear(self, table, record, column):
         return cmd.DbClearCommand(self, table, record, column)
@@ -292,9 +277,3 @@ class OvsdbIdl(api.API):
 
     def list_ifaces(self, bridge):
         return cmd.ListIfacesCommand(self, bridge)
-
-
-class NeutronOvsdbIdl(OvsdbIdl):
-    def __init__(self, context):
-        vlog.use_oslo_logger()
-        super(NeutronOvsdbIdl, self).__init__(context)

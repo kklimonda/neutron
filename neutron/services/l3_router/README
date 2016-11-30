@@ -10,11 +10,12 @@ The required changes to a core plugin are in that case:
   anymore.
 - Remove "router" from 'supported_extension_aliases'.
 - Modify any 'self' references to members in L3_NAT_db_mixin to instead use
-  'directory.get_plugin(constants.L3)'
+  'manager.NeutronManager.get_service_plugins().get(constants.L3_ROUTER_NAT)'
   For example,
      self.prevent_l3_port_deletion(...)
   becomes something like
-     plugin = directory.get_plugin(constants.L3)
+     plugin = manager.NeutronManager.get_service_plugins().get(
+         constants.L3_ROUTER_NAT)
      if plugin:
          plugin.prevent_l3_port_deletion(...)
 

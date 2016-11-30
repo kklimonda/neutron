@@ -18,17 +18,16 @@ import copy
 import datetime
 import mock
 
-from neutron_lib import constants
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_db import exception as exc
 from oslo_utils import timeutils
 import testscenarios
 
+from neutron.common import constants
+from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import db_base_plugin_v2 as base_plugin
-from neutron.db.models import agent as agent_model
 from neutron.tests.unit import testlib_api
 
 # the below code is required for the following reason
@@ -62,7 +61,7 @@ class TestAgentsDbBase(testlib_api.SqlTestCase):
 
     def _get_agents(self, hosts, agent_type):
         return [
-            agent_model.Agent(
+            agents_db.Agent(
                 binary='foo-agent',
                 host=host,
                 agent_type=agent_type,
@@ -360,7 +359,7 @@ class TestAgentExtRpcCallback(TestAgentsDbBase):
 
     def _take_down_agent(self):
         with self.context.session.begin(subtransactions=True):
-            query = self.context.session.query(agent_model.Agent)
+            query = self.context.session.query(agents_db.Agent)
             agt = query.first()
             agt.heartbeat_timestamp = (
                 agt.heartbeat_timestamp - datetime.timedelta(hours=1))

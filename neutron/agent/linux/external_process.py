@@ -27,6 +27,7 @@ from neutron._i18n import _, _LW, _LE
 from neutron.agent.common import config as agent_cfg
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
+from neutron.common import utils as common_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -60,8 +61,7 @@ class ProcessManager(MonitoredProcess):
     """
     def __init__(self, conf, uuid, namespace=None, service=None,
                  pids_path=None, default_cmd_callback=None,
-                 cmd_addl_env=None, pid_file=None, run_as_root=False,
-                 custom_reload_callback=None):
+                 cmd_addl_env=None, pid_file=None, run_as_root=False):
 
         self.conf = conf
         self.uuid = uuid
@@ -71,7 +71,6 @@ class ProcessManager(MonitoredProcess):
         self.pids_path = pids_path or self.conf.external_pids
         self.pid_file = pid_file
         self.run_as_root = run_as_root
-        self.custom_reload_callback = custom_reload_callback
 
         if service:
             self.service_pid_fname = 'pid.' + service
@@ -80,8 +79,7 @@ class ProcessManager(MonitoredProcess):
             self.service_pid_fname = 'pid'
             self.service = 'default-service'
 
-        fileutils.ensure_tree(os.path.dirname(self.get_pid_file_name()),
-                              mode=0o755)
+        common_utils.ensure_dir(os.path.dirname(self.get_pid_file_name()))
 
     def enable(self, cmd_callback=None, reload_cfg=False):
         if not self.active:
@@ -96,10 +94,7 @@ class ProcessManager(MonitoredProcess):
             self.reload_cfg()
 
     def reload_cfg(self):
-        if self.custom_reload_callback:
-            self.disable(get_stop_command=self.custom_reload_callback)
-        else:
-            self.disable('HUP')
+        self.disable('HUP')
 
     def disable(self, sig='9', get_stop_command=None):
         pid = self.pid

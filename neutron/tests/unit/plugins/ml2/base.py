@@ -12,9 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-from neutron_lib.plugins import directory
-
+from neutron import manager
+from neutron.plugins.common import constants as plugin_constants
 from neutron.tests.unit.plugins.ml2 import test_plugin
 
 
@@ -23,16 +22,11 @@ class ML2TestFramework(test_plugin.Ml2PluginV2TestCase):
                  'L3RouterPlugin')
     _mechanism_drivers = ['openvswitch']
 
-    def get_additional_service_plugins(self):
-        p = super(ML2TestFramework, self).get_additional_service_plugins()
-        p.update({'flavors_plugin_name': 'neutron.services.flavors.'
-                                         'flavors_plugin.FlavorsPlugin'})
-        return p
-
     def setUp(self):
         super(ML2TestFramework, self).setUp()
-        self.core_plugin = directory.get_plugin()
-        self.l3_plugin = directory.get_plugin(constants.L3)
+        self.core_plugin = manager.NeutronManager.get_instance().get_plugin()
+        self.l3_plugin = manager.NeutronManager.get_service_plugins().get(
+            plugin_constants.L3_ROUTER_NAT)
 
     def _create_router(self, distributed=False, ha=False):
         return self.l3_plugin.create_router(

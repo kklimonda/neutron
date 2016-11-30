@@ -20,6 +20,7 @@
       '''''''  Heading 4
       (Avoid deeper levels because they do not render well.)
 
+
 Neutron Open vSwitch vhost-user support
 =======================================
 
@@ -33,26 +34,23 @@ installation and passes that information over RPC via the agent
 'configurations' dictionary. The ML2 driver uses this information to select
 the proper VIF type and binding details.
 
-Platform requirements
----------------------
+Neutron+OVS+DPDK platform requirements
+--------------------------------------
+OVS 2.4.0+
+DPDK 2.0+
 
-* OVS 2.4.0+
-* DPDK 2.0+
+Neutron OVS+DPDK vhost-user config
+----------------------------------
 
-Configuration
--------------
+[OVS]
+datapath_type=netdev
+vhostuser_socket_dir=/var/run/openvswitch
 
-.. code-block:: ini
-
-    [OVS]
-    datapath_type=netdev
-    vhostuser_socket_dir=/var/run/openvswitch
-
-When OVS is running with DPDK support enabled, and the ``datapath_type`` is
-set to ``netdev``, then the OVS ML2 driver will use the ``vhost-user`` VIF
-type and pass the necessary binding details to use OVS+DPDK and vhost-user
-sockets. This includes the ``vhostuser_socket_dir`` setting, which must match
-the directory passed to ``ovs-vswitchd`` on startup.
+When OVS is running with DPDK support enabled, and the datapath_type is set to
+"netdev", then the OVS ML2 driver will use the vhost-user VIF type and pass
+the necessary binding details to use OVS+DPDK and vhost-user sockets. This
+includes the vhostuser_socket_dir setting, which must match the directory
+passed to ovs-vswitchd on startup.
 
 What about the networking-ovs-dpdk repo?
 ----------------------------------------
@@ -60,5 +58,5 @@ What about the networking-ovs-dpdk repo?
 The networking-ovs-dpdk repo will continue to exist and undergo active
 development. This feature just removes the necessity for a separate ML2 driver
 and OVS agent in the networking-ovs-dpdk repo. The networking-ovs-dpdk project
-also provides a devstack plugin which also allows automated CI, a Puppet
+also provides a devstack plugin which also allows automated CI, a puppet
 module, and an OpenFlow-based security group implementation.

@@ -17,15 +17,13 @@ import os
 import time
 import uuid
 
-from neutron_lib import exceptions
 from ovs.db import idl
 from ovs import jsonrpc
 from ovs import poller
 from ovs import stream
-import six
 
 from neutron._i18n import _
-from neutron.agent.ovsdb import api
+from neutron.common import exceptions
 
 
 RowLookup = collections.namedtuple('RowLookup',
@@ -38,7 +36,6 @@ _LOOKUP_TABLE = {
     'IPFIX': RowLookup('Bridge', 'name', 'ipfix'),
     'Mirror': RowLookup('Mirror', 'name', None),
     'NetFlow': RowLookup('Bridge', 'name', 'netflow'),
-    'Open_vSwitch': RowLookup('Open_vSwitch', None, None),
     'QoS': RowLookup('Port', 'name', 'qos'),
     'Queue': RowLookup(None, None, None),
     'sFlow': RowLookup('Bridge', 'name', 'sflow'),
@@ -77,11 +74,11 @@ def row_by_record(idl_, table, record):
         raise RowNotFound(table=table, col='uuid', match=record)
 
     rl = _LOOKUP_TABLE.get(table, RowLookup(table, get_index_column(t), None))
-    # no table means uuid only, no column means lookup table only has one row
+    # no table means uuid only, no column is just SSL which we don't need
     if rl.table is None:
         raise ValueError(_("Table %s can only be queried by UUID") % table)
     if rl.column is None:
-        return t.rows.values()[0]
+        raise NotImplementedError(_("'.' searches are not implemented"))
     row = row_by_value(idl_, rl.table, rl.column, record)
     if rl.uuid_column:
         rows = getattr(row, rl.uuid_column)
@@ -129,11 +126,6 @@ def wait_for_change(_idl, timeout, seqno=None):
 
 
 def get_column_value(row, col):
-    """Retrieve column value from the given row.
-
-    If column's type is optional, the value will be returned as a single
-    element instead of a list of length 1.
-    """
     if col == '_uuid':
         val = row.uuid
     else:
@@ -143,9 +135,8 @@ def get_column_value(row, col):
     if isinstance(val, list) and len(val):
         if isinstance(val[0], idl.Row):
             val = [v.uuid for v in val]
-        col_type = row._table.columns[col].type
         # ovs-vsctl treats lists of 1 as single results
-        if col_type.is_optional():
+        if len(val) == 1:
             val = val[0]
     return val
 
@@ -156,28 +147,9 @@ def condition_match(row, condition):
     :param row:       An OVSDB Row
     :param condition: A 3-tuple containing (column, operation, match)
     """
+
     col, op, match = condition
     val = get_column_value(row, col)
-
-    # both match and val are primitive types, so type can be used for type
-    # equality here.
-    if type(match) is not type(val):
-        # Types of 'val' and 'match' arguments MUST match in all cases with 2
-        # exceptions:
-        # - 'match' is an empty list and column's type is optional;
-        # - 'value' is an empty and  column's type is optional
-        if (not all([match, val]) and
-                row._table.columns[col].type.is_optional()):
-            # utilize the single elements comparison logic
-            if match == []:
-                match = None
-            elif val == []:
-                val = None
-        else:
-            # no need to process any further
-            raise ValueError(
-                _("Column type and condition operand do not match"))
-
     matched = True
 
     # TODO(twilson) Implement other operators and type comparisons
@@ -195,25 +167,7 @@ def condition_match(row, condition):
             else:
                 raise NotImplementedError()
     elif isinstance(match, list):
-        # According to rfc7047, lists support '=' and '!='
-        # (both strict and relaxed). Will follow twilson's dict comparison
-        # and implement relaxed version (excludes/includes as per standard)
-        if op == "=":
-            if not all([val, match]):
-                return val == match
-            for elem in set(match):
-                if elem not in val:
-                    matched = False
-                    break
-        elif op == '!=':
-            if not all([val, match]):
-                return val != match
-            for elem in set(match):
-                if elem in val:
-                    matched = False
-                    break
-        else:
-            raise NotImplementedError()
+        raise NotImplementedError()
     else:
         if op == '=':
             if val != match:
@@ -236,28 +190,3 @@ def get_index_column(table):
         idx = table.indexes[0]
         if len(idx) == 1:
             return idx[0].name
-
-
-def db_replace_record(obj):
-    """Replace any api.Command objects with their results
-
-    This method should leave obj untouched unless the object contains an
-    api.Command object.
-    """
-    if isinstance(obj, collections.Mapping):
-        for k, v in six.iteritems(obj):
-            if isinstance(v, api.Command):
-                obj[k] = v.result
-    elif (isinstance(obj, collections.Sequence)
-          and not isinstance(obj, six.string_types)):
-        for i, v in enumerate(obj):
-            if isinstance(v, api.Command):
-                try:
-                    obj[i] = v.result
-                except TypeError:
-                    # NOTE(twilson) If someone passes a tuple, then just return
-                    # a tuple with the Commands replaced with their results
-                    return type(obj)(getattr(v, "result", v) for v in obj)
-    elif isinstance(obj, api.Command):
-        obj = obj.result
-    return obj

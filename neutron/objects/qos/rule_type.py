@@ -10,10 +10,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.plugins import directory
 from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import fields as obj_fields
 
+from neutron import manager
 from neutron.objects import base
 from neutron.services.qos import qos_consts
 
@@ -29,9 +29,7 @@ class RuleTypeField(obj_fields.BaseEnumField):
 @obj_base.VersionedObjectRegistry.register
 class QosRuleType(base.NeutronObject):
     # Version 1.0: Initial version
-    # Version 1.1: Added QosDscpMarkingRule
-    # Version 1.2: Added QosMinimumBandwidthRule
-    VERSION = '1.2'
+    VERSION = '1.0'
 
     fields = {
         'type': RuleTypeField(),
@@ -39,10 +37,8 @@ class QosRuleType(base.NeutronObject):
 
     # we don't receive context because we don't need db access at all
     @classmethod
-    def get_objects(cls, validate_filters=True, **kwargs):
-        if validate_filters:
-            cls.validate_filters(**kwargs)
-        core_plugin = directory.get_plugin()
-        # TODO(ihrachys): apply filters to returned result
+    def get_objects(cls, **kwargs):
+        cls.validate_filters(**kwargs)
+        core_plugin = manager.NeutronManager.get_plugin()
         return [cls(type=type_)
                 for type_ in core_plugin.supported_qos_rule_types]

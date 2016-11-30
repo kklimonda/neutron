@@ -13,34 +13,43 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import validators
+import sqlalchemy as sa
+from sqlalchemy import orm
 
 from neutron.api.v2 import attributes
-from neutron.common import _deprecate
 from neutron.db import db_base_plugin_v2
-from neutron.db.models import portbinding as pmodels
+from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.db import portbindings_base
 from neutron.extensions import portbindings
 
 
-_deprecate._moved_global('PortBindingPort', new_module=pmodels)
+class PortBindingPort(model_base.BASEV2):
+    port_id = sa.Column(sa.String(36),
+                        sa.ForeignKey('ports.id', ondelete="CASCADE"),
+                        primary_key=True)
+    host = sa.Column(sa.String(255), nullable=False)
+    port = orm.relationship(
+        models_v2.Port,
+        backref=orm.backref("portbinding",
+                            lazy='joined', uselist=False,
+                            cascade='delete'))
 
 
 class PortBindingMixin(portbindings_base.PortBindingBaseMixin):
     extra_binding_dict = None
 
     def _port_model_hook(self, context, original_model, query):
-        query = query.outerjoin(
-            pmodels.PortBindingPort,
-            (original_model.id == pmodels.PortBindingPort.port_id))
+        query = query.outerjoin(PortBindingPort,
+                                (original_model.id ==
+                                 PortBindingPort.port_id))
         return query
 
     def _port_result_filter_hook(self, query, filters):
         values = filters and filters.get(portbindings.HOST_ID, [])
         if not values:
             return query
-        query = query.filter(pmodels.PortBindingPort.host.in_(values))
+        query = query.filter(PortBindingPort.host.in_(values))
         return query
 
     db_base_plugin_v2.NeutronDbPluginV2.register_model_query_hook(
@@ -53,12 +62,12 @@ class PortBindingMixin(portbindings_base.PortBindingBaseMixin):
     def _process_portbindings_create_and_update(self, context, port_data,
                                                 port):
         binding_profile = port.get(portbindings.PROFILE)
-        binding_profile_set = validators.is_attr_set(binding_profile)
+        binding_profile_set = attributes.is_attr_set(binding_profile)
         if not binding_profile_set and binding_profile is not None:
             del port[portbindings.PROFILE]
 
         binding_vnic = port.get(portbindings.VNIC_TYPE)
-        binding_vnic_set = validators.is_attr_set(binding_vnic)
+        binding_vnic_set = attributes.is_attr_set(binding_vnic)
         if not binding_vnic_set and binding_vnic is not None:
             del port[portbindings.VNIC_TYPE]
         # REVISIT(irenab) Add support for vnic_type for plugins that
@@ -67,14 +76,14 @@ class PortBindingMixin(portbindings_base.PortBindingBaseMixin):
         # PortBindingMixin.
 
         host = port_data.get(portbindings.HOST_ID)
-        host_set = validators.is_attr_set(host)
+        host_set = attributes.is_attr_set(host)
         with context.session.begin(subtransactions=True):
             bind_port = context.session.query(
-                pmodels.PortBindingPort).filter_by(port_id=port['id']).first()
+                PortBindingPort).filter_by(port_id=port['id']).first()
             if host_set:
                 if not bind_port:
-                    context.session.add(
-                        pmodels.PortBindingPort(port_id=port['id'], host=host))
+                    context.session.add(PortBindingPort(port_id=port['id'],
+                                                        host=host))
                 else:
                     bind_port.host = host
             else:
@@ -83,11 +92,8 @@ class PortBindingMixin(portbindings_base.PortBindingBaseMixin):
 
     def get_port_host(self, context, port_id):
         with context.session.begin(subtransactions=True):
-            bind_port = (
-                context.session.query(pmodels.PortBindingPort).
-                filter_by(port_id=port_id).
-                first()
-            )
+            bind_port = context.session.query(
+                PortBindingPort).filter_by(port_id=port_id).first()
             return bind_port.host if bind_port else None
 
     def _extend_port_dict_binding_host(self, port_res, host):
@@ -109,6 +115,3 @@ def _extend_port_dict_binding(plugin, port_res, port_db):
 # Register dict extend functions for ports
 db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
     attributes.PORTS, [_extend_port_dict_binding])
-
-
-_deprecate._MovedGlobals()

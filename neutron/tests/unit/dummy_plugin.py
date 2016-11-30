@@ -13,14 +13,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import exceptions
-from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
 
 from neutron.api import extensions
 from neutron.api.v2 import base
+from neutron.common import exceptions
 from neutron.db import servicetype_db
 from neutron.extensions import servicetype
+from neutron import manager
 from neutron.plugins.common import constants
 from neutron.services import service_base
 
@@ -70,7 +70,8 @@ class Dummy(object):
     @classmethod
     def get_resources(cls):
         """Returns Extended Resource for dummy management."""
-        dummy_inst = directory.get_plugin('DUMMY')
+        n_mgr = manager.NeutronManager.get_instance()
+        dummy_inst = n_mgr.get_service_plugins()['DUMMY']
         controller = base.create_resource(
             COLLECTION_NAME, RESOURCE_NAME, dummy_inst,
             RESOURCE_ATTRIBUTE_MAP[COLLECTION_NAME])
@@ -94,8 +95,7 @@ class DummyServicePlugin(service_base.ServicePluginBase):
         self.svctype_mgr = servicetype_db.ServiceTypeManager.get_instance()
         self.dummys = {}
 
-    @classmethod
-    def get_plugin_type(cls):
+    def get_plugin_type(self):
         return constants.DUMMY
 
     def get_plugin_description(self):

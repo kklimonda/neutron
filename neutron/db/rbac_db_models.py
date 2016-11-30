@@ -15,15 +15,15 @@
 
 import abc
 
-from neutron_lib.db import model_base
-from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import directory
 import sqlalchemy as sa
 from sqlalchemy.ext import declarative
 from sqlalchemy.orm import validates
 
 from neutron._i18n import _
 from neutron.api.v2 import attributes as attr
+from neutron.common import exceptions as n_exc
+from neutron.db import model_base
+from neutron import manager
 
 
 ACCESS_SHARED = 'access_as_shared'
@@ -35,7 +35,7 @@ class InvalidActionForType(n_exc.InvalidInput):
                 "'%(object_type)s'. Valid actions: %(valid_actions)s")
 
 
-class RBACColumns(model_base.HasId, model_base.HasProject):
+class RBACColumns(model_base.HasId, model_base.HasTenant):
     """Mixin that object-specific RBAC tables should inherit.
 
     All RBAC tables should inherit directly from this one because
@@ -97,7 +97,7 @@ class NetworkRBAC(RBACColumns, model_base.BASEV2):
 
     def get_valid_actions(self):
         actions = (ACCESS_SHARED,)
-        pl = directory.get_plugin()
+        pl = manager.NeutronManager.get_plugin()
         if 'external-net' in pl.supported_extension_aliases:
             actions += (ACCESS_EXTERNAL,)
         return actions

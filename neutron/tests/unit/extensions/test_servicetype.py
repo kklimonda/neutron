@@ -14,14 +14,13 @@
 #    under the License.
 
 import mock
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 import webob.exc as webexc
 import webtest
 
 from neutron.api import extensions
+from neutron.common import exceptions as n_exc
 from neutron import context
-from neutron.db.models import servicetype as st_model
 from neutron.db import servicetype_db as st_db
 from neutron.extensions import servicetype
 from neutron.plugins.common import constants
@@ -36,8 +35,6 @@ from neutron.tests.unit import testlib_api
 _uuid = test_base._uuid
 _get_path = test_base._get_path
 
-PLUGIN_NAME = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
-
 
 class ServiceTypeManagerTestCase(testlib_api.SqlTestCase):
     def setUp(self):
@@ -45,7 +42,6 @@ class ServiceTypeManagerTestCase(testlib_api.SqlTestCase):
             provconf.NeutronModule, 'service_providers').start()
         super(ServiceTypeManagerTestCase, self).setUp()
         self.ctx = context.get_admin_context()
-        self.setup_coreplugin(PLUGIN_NAME)
 
     def _set_override(self, service_providers):
         self.service_providers.return_value = service_providers
@@ -113,22 +109,6 @@ class ServiceTypeManagerTestCase(testlib_api.SqlTestCase):
             None, constants.DUMMY
         )
 
-    def test_get_provider_names_by_resource_ids(self):
-        self._set_override([constants.DUMMY + ':dummy1:driver_path',
-                            constants.DUMMY + ':dummy2:driver_path2'])
-        ctx = context.get_admin_context()
-        self.manager.add_resource_association(ctx, constants.DUMMY,
-                                              'dummy1', '1')
-        self.manager.add_resource_association(ctx, constants.DUMMY,
-                                              'dummy1', '2')
-        self.manager.add_resource_association(ctx, constants.DUMMY,
-                                              'dummy2', '3')
-        names_by_id = self.manager.get_provider_names_by_resource_ids(
-            ctx, ['1', '2', '3', '4'])
-        # unmatched IDs will be excluded from the result
-        self.assertEqual({'1': 'dummy1', '2': 'dummy1', '3': 'dummy2'},
-                         names_by_id)
-
     def test_add_resource_association(self):
         self._set_override([constants.LOADBALANCER +
                             ':lbaas1:driver_path:default',
@@ -139,9 +119,9 @@ class ServiceTypeManagerTestCase(testlib_api.SqlTestCase):
                                               constants.LOADBALANCER,
                                               'lbaas1', '123-123')
         self.assertEqual(ctx.session.
-                         query(st_model.ProviderResourceAssociation).count(),
+                         query(st_db.ProviderResourceAssociation).count(),
                          1)
-        assoc = ctx.session.query(st_model.ProviderResourceAssociation).one()
+        assoc = ctx.session.query(st_db.ProviderResourceAssociation).one()
         ctx.session.delete(assoc)
 
     def test_invalid_resource_association(self):

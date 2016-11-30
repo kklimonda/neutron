@@ -13,10 +13,42 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import sqlalchemy as sa
+from sqlalchemy import orm
+
 from neutron.api.v2 import attributes
 from neutron.db import db_base_plugin_v2
+from neutron.db import model_base
+from neutron.db import models_v2
 from neutron.extensions import extra_dhcp_opt as edo_ext
-from neutron.objects.port.extensions import extra_dhcp_opt as obj_extra_dhcp
+
+
+class ExtraDhcpOpt(model_base.BASEV2, model_base.HasId):
+    """Represent a generic concept of extra options associated to a port.
+
+    Each port may have none to many dhcp opts associated to it that can
+    define specifically different or extra options to DHCP clients.
+    These will be written to the <network_id>/opts files, and each option's
+    tag will be referenced in the <network_id>/host file.
+    """
+    port_id = sa.Column(sa.String(36),
+                        sa.ForeignKey('ports.id', ondelete="CASCADE"),
+                        nullable=False)
+    opt_name = sa.Column(sa.String(64), nullable=False)
+    opt_value = sa.Column(sa.String(255), nullable=False)
+    ip_version = sa.Column(sa.Integer, server_default='4', nullable=False)
+    __table_args__ = (sa.UniqueConstraint(
+        'port_id',
+        'opt_name',
+        'ip_version',
+        name='uniq_extradhcpopts0portid0optname0ipversion'),
+                      model_base.BASEV2.__table_args__,)
+
+    # Add a relationship to the Port model in order to instruct SQLAlchemy to
+    # eagerly load extra_dhcp_opts bindings
+    ports = orm.relationship(
+        models_v2.Port,
+        backref=orm.backref("dhcp_opts", lazy='joined', cascade='delete'))
 
 
 class ExtraDhcpOptMixin(object):
@@ -25,6 +57,7 @@ class ExtraDhcpOptMixin(object):
     """
 
     def _is_valid_opt_value(self, opt_name, opt_value):
+
         # If the dhcp opt is blank-able, it shouldn't be saved to the DB in
         # case that the value is None
         if opt_name in edo_ext.VALID_BLANK_EXTRA_DHCP_OPTS:
@@ -43,13 +76,12 @@ class ExtraDhcpOptMixin(object):
                 if self._is_valid_opt_value(dopt['opt_name'],
                                             dopt['opt_value']):
                     ip_version = dopt.get('ip_version', 4)
-                    extra_dhcp_obj = obj_extra_dhcp.ExtraDhcpOpt(
-                        context,
+                    db = ExtraDhcpOpt(
                         port_id=port['id'],
                         opt_name=dopt['opt_name'],
                         opt_value=dopt['opt_value'],
                         ip_version=ip_version)
-                    extra_dhcp_obj.create()
+                    context.session.add(db)
         return self._extend_port_extra_dhcp_opts_dict(context, port)
 
     def _extend_port_extra_dhcp_opts_dict(self, context, port):
@@ -57,13 +89,11 @@ class ExtraDhcpOptMixin(object):
             context, port['id'])
 
     def _get_port_extra_dhcp_opts_binding(self, context, port_id):
-        opts = obj_extra_dhcp.ExtraDhcpOpt.get_objects(
-                            context, port_id=port_id)
-        # TODO(mhickey): When port serilization is available then
-        # the object list should be returned instead
+        query = self._model_query(context, ExtraDhcpOpt)
+        binding = query.filter(ExtraDhcpOpt.port_id == port_id)
         return [{'opt_name': r.opt_name, 'opt_value': r.opt_value,
                  'ip_version': r.ip_version}
-                for r in opts]
+                for r in binding]
 
     def _update_extra_dhcp_opts_on_port(self, context, id, port,
                                         updated_port=None):
@@ -72,40 +102,39 @@ class ExtraDhcpOptMixin(object):
         dopts = port['port'].get(edo_ext.EXTRADHCPOPTS)
 
         if dopts:
-            opts = obj_extra_dhcp.ExtraDhcpOpt.get_objects(
-                                context, port_id=id)
+            opt_db = self._model_query(
+                context, ExtraDhcpOpt).filter_by(port_id=id).all()
             # if there are currently no dhcp_options associated to
             # this port, Then just insert the new ones and be done.
             with context.session.begin(subtransactions=True):
                 for upd_rec in dopts:
-                    for opt in opts:
+                    for opt in opt_db:
                         if (opt['opt_name'] == upd_rec['opt_name']
                                 and opt['ip_version'] == upd_rec.get(
                                     'ip_version', 4)):
                             # to handle deleting of a opt from the port.
                             if upd_rec['opt_value'] is None:
-                                opt.delete()
+                                context.session.delete(opt)
                             else:
                                 if (self._is_valid_opt_value(
                                         opt['opt_name'],
                                         upd_rec['opt_value']) and
                                         opt['opt_value'] !=
                                         upd_rec['opt_value']):
-                                    opt['opt_value'] = upd_rec['opt_value']
-                                    opt.update()
+                                    opt.update(
+                                        {'opt_value': upd_rec['opt_value']})
                             break
                     else:
                         if self._is_valid_opt_value(
                                 upd_rec['opt_name'],
                                 upd_rec['opt_value']):
                             ip_version = upd_rec.get('ip_version', 4)
-                            extra_dhcp_obj = obj_extra_dhcp.ExtraDhcpOpt(
-                                context,
+                            db = ExtraDhcpOpt(
                                 port_id=id,
                                 opt_name=upd_rec['opt_name'],
                                 opt_value=upd_rec['opt_value'],
                                 ip_version=ip_version)
-                            extra_dhcp_obj.create()
+                            context.session.add(db)
 
             if updated_port:
                 edolist = self._get_port_extra_dhcp_opts_binding(context, id)

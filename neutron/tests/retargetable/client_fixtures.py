@@ -18,10 +18,9 @@ Neutron API via different methods.
 import abc
 
 import fixtures
-from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import directory
 import six
 
+from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron import manager
 from neutron.tests import base
@@ -74,10 +73,9 @@ class PluginClientFixture(AbstractClientFixture):
 
     def _setUp(self):
         super(PluginClientFixture, self)._setUp()
-        self.useFixture(testlib_api.StaticSqlFixture())
+        self.useFixture(testlib_api.SqlFixture())
         self.useFixture(self.plugin_conf)
         self.useFixture(base.PluginFixture(self.plugin_conf.plugin_name))
-        manager.init()
 
     @property
     def ctx(self):
@@ -87,7 +85,7 @@ class PluginClientFixture(AbstractClientFixture):
 
     @property
     def plugin(self):
-        return directory.get_plugin()
+        return manager.NeutronManager.get_plugin()
 
     @property
     def NotFound(self):

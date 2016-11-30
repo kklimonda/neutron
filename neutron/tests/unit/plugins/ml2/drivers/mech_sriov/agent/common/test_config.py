@@ -13,9 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib.utils import helpers
+
 from oslo_config import cfg
 
+from neutron.common import utils as n_utils
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common import config
 from neutron.plugins.ml2.drivers.mech_sriov.agent \
     import sriov_nic_agent as agent
@@ -60,7 +61,7 @@ class TestSriovAgentConfig(base.BaseTestCase):
         cfg.CONF.set_override('physical_device_mappings',
                               self.DEVICE_MAPPING_LIST,
                               'SRIOV_NIC')
-        device_mappings = helpers.parse_mappings(
+        device_mappings = n_utils.parse_mappings(
             cfg.CONF.SRIOV_NIC.physical_device_mappings, unique_keys=False)
         self.assertEqual(self.DEVICE_MAPPING, device_mappings)
 
@@ -68,7 +69,7 @@ class TestSriovAgentConfig(base.BaseTestCase):
         cfg.CONF.set_override('physical_device_mappings',
                               self.DEVICE_MAPPING_WITH_ERROR_LIST,
                               'SRIOV_NIC')
-        self.assertRaises(ValueError, helpers.parse_mappings,
+        self.assertRaises(ValueError, n_utils.parse_mappings,
                           cfg.CONF.SRIOV_NIC.physical_device_mappings,
                           unique_keys=False)
 
@@ -76,7 +77,7 @@ class TestSriovAgentConfig(base.BaseTestCase):
         cfg.CONF.set_override('physical_device_mappings',
                               self.DEVICE_MAPPING_WITH_SPACES_LIST,
                               'SRIOV_NIC')
-        device_mappings = helpers.parse_mappings(
+        device_mappings = n_utils.parse_mappings(
             cfg.CONF.SRIOV_NIC.physical_device_mappings, unique_keys=False)
         self.assertEqual(self.DEVICE_MAPPING, device_mappings)
 

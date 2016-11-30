@@ -359,7 +359,7 @@ Is there any ordering guarantee during notifications?
   notified. Priorities can be a future extension, if a use case arises that require enforced
   ordering.
 
-How is the notifying object expected to interact with the subscribing objects?
+How is the the notifying object expected to interact with the subscribing objects?
 
   The ``notify`` method implements a one-way communication paradigm: the notifier sends a message
   without expecting a response back (in other words it fires and forget). However, due to the nature
@@ -384,8 +384,8 @@ What kind of operation I can add into callback?
 
   For callback function of PRECOMMIT_XXX events, we can't use blocking functions or a function
   that would take a long time, like communicating to SDN controller over network.
-  Callbacks for PRECOMMIT events are meant to execute DB operations in a transaction context. The
-  errors that occur will be taken care by the context manager.
+  Callbacks for PRECOMMIT events are meant to execute DB operations in a transaction context, the
+  errors occured will be taken care by the context manager.
 
 What kind of function can be a callback?
 

@@ -14,17 +14,17 @@
 # limitations under the License.
 
 import mock
-from neutron_lib import constants
-from neutron_lib.plugins import directory
+from oslo_config import cfg
 
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
+from neutron.common import constants
 from neutron import context
 from neutron.db import dvr_mac_db
-from neutron.db.models import dvr as dvr_models
 from neutron.extensions import dvr
 from neutron.extensions import portbindings
+from neutron import manager
 from neutron.tests.unit.plugins.ml2 import test_plugin
 
 
@@ -43,13 +43,13 @@ class DvrDbMixinTestCase(test_plugin.Ml2PluginV2TestCase):
 
     def _create_dvr_mac_entry(self, host, mac_address):
         with self.ctx.session.begin(subtransactions=True):
-            entry = dvr_models.DistributedVirtualRouterMacAddress(
+            entry = dvr_mac_db.DistributedVirtualRouterMacAddress(
                 host=host, mac_address=mac_address)
             self.ctx.session.add(entry)
 
     def test__get_dvr_mac_address_by_host(self):
         with self.ctx.session.begin(subtransactions=True):
-            entry = dvr_models.DistributedVirtualRouterMacAddress(
+            entry = dvr_mac_db.DistributedVirtualRouterMacAddress(
                 host='foo_host', mac_address='foo_mac_address')
             self.ctx.session.add(entry)
         result = self.mixin._get_dvr_mac_address_by_host(self.ctx, 'foo_host')
@@ -69,15 +69,18 @@ class DvrDbMixinTestCase(test_plugin.Ml2PluginV2TestCase):
         self.assertEqual(expected, entry)
 
     def test__create_dvr_mac_address_retries_exceeded_retry_logic(self):
+        new_retries = 8
+        cfg.CONF.set_override('mac_generation_retries', new_retries)
         self._create_dvr_mac_entry('foo_host_1', 'non_unique_mac')
         with mock.patch.object(dvr_mac_db.utils, 'get_random_mac') as f:
             f.return_value = 'non_unique_mac'
             self.assertRaises(dvr.MacAddressGenerationFailure,
                               self.mixin._create_dvr_mac_address,
                               self.ctx, "foo_host_2")
+        self.assertEqual(new_retries, f.call_count)
 
     def test_mac_not_cleared_on_agent_delete_event_with_remaining_agents(self):
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         self._create_dvr_mac_entry('host_1', 'mac_1')
         self._create_dvr_mac_entry('host_2', 'mac_2')
         agent1 = {'host': 'host_1', 'id': 'a1'}
@@ -91,7 +94,7 @@ class DvrDbMixinTestCase(test_plugin.Ml2PluginV2TestCase):
         self.assertFalse(notifier.dvr_mac_address_update.called)
 
     def test_mac_cleared_on_agent_delete_event(self):
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         self._create_dvr_mac_entry('host_1', 'mac_1')
         self._create_dvr_mac_entry('host_2', 'mac_2')
         agent = {'host': 'host_1', 'id': 'a1'}
@@ -187,5 +190,4 @@ class DvrDbMixinTestCase(test_plugin.Ml2PluginV2TestCase):
             dvr_ports = self.mixin.get_ports_on_host_by_subnet(
                 self.ctx, HOST, subnet['subnet']['id'])
             self.assertEqual(len(expected_ids), len(dvr_ports))
-            self.assertItemsEqual(expected_ids,
-                                  [port['id'] for port in dvr_ports])
+            self.assertEqual(expected_ids, [port['id'] for port in dvr_ports])

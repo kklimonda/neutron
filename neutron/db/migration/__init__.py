@@ -15,6 +15,7 @@
 import contextlib
 import functools
 
+import alembic
 from alembic import context
 from alembic import op
 import sqlalchemy as sa
@@ -25,16 +26,21 @@ from neutron._i18n import _
 # Neutron milestones for upgrade aliases
 LIBERTY = 'liberty'
 MITAKA = 'mitaka'
-NEWTON = 'newton'
-OCATA = 'ocata'
 
 NEUTRON_MILESTONES = [
     # earlier milestones were not tagged
     LIBERTY,
     MITAKA,
-    NEWTON,
-    # Do not add the milestone until the end of the release
 ]
+
+CREATION_OPERATIONS = (sa.sql.ddl.CreateIndex,
+                       sa.sql.ddl.CreateTable,
+                       sa.sql.ddl.CreateColumn,
+                       )
+DROP_OPERATIONS = (sa.sql.ddl.DropConstraint,
+                   sa.sql.ddl.DropIndex,
+                   sa.sql.ddl.DropTable,
+                   alembic.ddl.base.DropColumn)
 
 
 def skip_if_offline(func):
@@ -106,39 +112,22 @@ def rename_table_if_exists(old_table_name, new_table_name):
         op.rename_table(old_table_name, new_table_name)
 
 
-def alter_enum(table, column, enum_type, nullable, do_drop=True,
-               do_rename=True, do_create=True):
-    """Alter a enum type column.
-
-    Set the do_xx parameters only when the modified enum type
-    is used by multiple columns. Else don't provide these
-    parameters.
-
-    :param do_drop: set to False when modified column is
-    not the last one use this enum
-    :param do_rename: set to False when modified column is
-    not the first one use this enum
-    :param do_create: set to False when modified column is
-    not the first one use this enum
-    """
+def alter_enum(table, column, enum_type, nullable):
     bind = op.get_bind()
     engine = bind.engine
     if engine.name == 'postgresql':
         values = {'table': table,
                   'column': column,
                   'name': enum_type.name}
-        if do_rename:
-            op.execute("ALTER TYPE %(name)s RENAME TO old_%(name)s" % values)
-        if do_create:
-            enum_type.create(bind, checkfirst=False)
+        op.execute("ALTER TYPE %(name)s RENAME TO old_%(name)s" % values)
+        enum_type.create(bind, checkfirst=False)
         op.execute("ALTER TABLE %(table)s RENAME COLUMN %(column)s TO "
                    "old_%(column)s" % values)
         op.add_column(table, sa.Column(column, enum_type, nullable=nullable))
         op.execute("UPDATE %(table)s SET %(column)s = "
                    "old_%(column)s::text::%(name)s" % values)
         op.execute("ALTER TABLE %(table)s DROP COLUMN old_%(column)s" % values)
-        if do_drop:
-            op.execute("DROP TYPE old_%(name)s" % values)
+        op.execute("DROP TYPE old_%(name)s" % values)
     else:
         op.alter_column(table, column, type_=enum_type,
                         existing_nullable=nullable)
@@ -159,27 +148,6 @@ def create_table_if_not_exist_psql(table_name, values):
                 'columns': values})
 
 
-def get_unique_constraints_map(table):
-    inspector = reflection.Inspector.from_engine(op.get_bind())
-    return {
-        tuple(sorted(cons['column_names'])): cons['name']
-        for cons in inspector.get_unique_constraints(table)
-    }
-
-
-def remove_fk_unique_constraints(table, foreign_keys):
-    unique_constraints_map = get_unique_constraints_map(table)
-    for fk in foreign_keys:
-        constraint_name = unique_constraints_map.get(
-            tuple(sorted(fk['constrained_columns'])))
-        if constraint_name:
-            op.drop_constraint(
-                constraint_name=constraint_name,
-                table_name=table,
-                type_="unique"
-            )
-
-
 def remove_foreign_keys(table, foreign_keys):
     for fk in foreign_keys:
         op.drop_constraint(
@@ -197,18 +165,16 @@ def create_foreign_keys(table, foreign_keys):
             referent_table=fk['referred_table'],
             local_cols=fk['constrained_columns'],
             remote_cols=fk['referred_columns'],
-            ondelete=fk['options'].get('ondelete')
+            ondelete='CASCADE'
         )
 
 
 @contextlib.contextmanager
-def remove_fks_from_table(table, remove_unique_constraints=False):
+def remove_fks_from_table(table):
     try:
         inspector = reflection.Inspector.from_engine(op.get_bind())
         foreign_keys = inspector.get_foreign_keys(table)
         remove_foreign_keys(table, foreign_keys)
-        if remove_unique_constraints:
-            remove_fk_unique_constraints(table, foreign_keys)
         yield
     finally:
         create_foreign_keys(table, foreign_keys)

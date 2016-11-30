@@ -13,12 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import exceptions
+from oslo_db import api as oslo_db_api
 from oslo_log import log
 
-from neutron.common import exceptions as n_exc
-from neutron.db import _utils as db_utils
+from neutron.common import exceptions
 from neutron.db import api as db_api
+from neutron.db import common_db_mixin as common_db
 from neutron.db.quota import api as quota_api
 from neutron.db.quota import models as quota_models
 
@@ -33,23 +33,6 @@ class DbQuotaDriver(object):
     """
 
     @staticmethod
-    def get_default_quotas(context, resources, tenant_id):
-        """Given a list of resources, retrieve the default quotas set for
-        a tenant.
-
-        :param context: The request context, for access checks.
-        :param resources: A dictionary of the registered resource keys.
-        :param tenant_id: The ID of the tenant to return default quotas for.
-        :return dict: from resource name to dict of name and limit
-        """
-        # Currently the tenant_id parameter is unused, since all tenants
-        # share the same default values. This may change in the future so
-        # we include tenant-id to remain backwards compatible.
-        return dict((key, resource.default)
-                    for key, resource in resources.items())
-
-    @staticmethod
-    @db_api.retry_if_session_inactive()
     def get_tenant_quotas(context, resources, tenant_id):
         """Given a list of resources, retrieve the quotas for the given
         tenant. If no limits are found for the specified tenant, the operation
@@ -66,7 +49,7 @@ class DbQuotaDriver(object):
                             for key, resource in resources.items())
 
         # update with tenant specific limits
-        q_qry = db_utils.model_query(context, quota_models.Quota).filter_by(
+        q_qry = common_db.model_query(context, quota_models.Quota).filter_by(
             tenant_id=tenant_id)
         for item in q_qry:
             tenant_quota[item['resource']] = item['limit']
@@ -74,23 +57,17 @@ class DbQuotaDriver(object):
         return tenant_quota
 
     @staticmethod
-    @db_api.retry_if_session_inactive()
     def delete_tenant_quota(context, tenant_id):
         """Delete the quota entries for a given tenant_id.
 
         After deletion, this tenant will use default quota values in conf.
-        Raise a "not found" error if the quota for the given tenant was
-        never defined.
         """
         with context.session.begin():
             tenant_quotas = context.session.query(quota_models.Quota)
             tenant_quotas = tenant_quotas.filter_by(tenant_id=tenant_id)
-            if not tenant_quotas.delete():
-                # No record deleted means the quota was not found
-                raise n_exc.TenantQuotaNotFound(tenant_id=tenant_id)
+            tenant_quotas.delete()
 
     @staticmethod
-    @db_api.retry_if_session_inactive()
     def get_all_quotas(context, resources):
         """Given a list of resources, retrieve the quotas for the all tenants.
 
@@ -122,7 +99,6 @@ class DbQuotaDriver(object):
         return list(all_tenant_quotas.values())
 
     @staticmethod
-    @db_api.retry_if_session_inactive()
     def update_quota_limit(context, tenant_id, resource, limit):
         with context.session.begin():
             tenant_quota = context.session.query(quota_models.Quota).filter_by(
@@ -154,13 +130,17 @@ class DbQuotaDriver(object):
         return dict((k, v) for k, v in quotas.items())
 
     def _handle_expired_reservations(self, context, tenant_id):
-        LOG.debug("Deleting expired reservations for tenant:%s", tenant_id)
+        LOG.debug("Deleting expired reservations for tenant:%s" % tenant_id)
         # Delete expired reservations (we don't want them to accrue
         # in the database)
         quota_api.remove_expired_reservations(
             context, tenant_id=tenant_id)
 
-    @db_api.retry_if_session_inactive()
+    @oslo_db_api.wrap_db_retry(max_retries=db_api.MAX_RETRIES,
+                               retry_interval=0.1,
+                               inc_retry_interval=True,
+                               retry_on_request=True,
+                               exception_checker=db_api.is_retriable)
     def make_reservation(self, context, tenant_id, resources, deltas, plugin):
         # Lock current reservation table
         # NOTE(salv-orlando): This routine uses DB write locks.
@@ -185,8 +165,8 @@ class DbQuotaDriver(object):
                                        current_limits.items() if limit < 0])
             # Do not even bother counting resources and calculating headroom
             # for resources with unlimited quota
-            LOG.debug("Resources %s have unlimited quota limit. It is not "
-                      "required to calculate headroom ",
+            LOG.debug(("Resources %s have unlimited quota limit. It is not "
+                       "required to calculated headroom "),
                       ",".join(unlimited_resources))
             requested_resources = (set(requested_resources) -
                                    unlimited_resources)
@@ -267,13 +247,14 @@ class DbQuotaDriver(object):
         # Ensure no value is less than zero
         unders = [key for key, val in values.items() if val < 0]
         if unders:
-            raise n_exc.InvalidQuotaValue(unders=sorted(unders))
+            raise exceptions.InvalidQuotaValue(unders=sorted(unders))
 
         # Get the applicable quotas
         quotas = self._get_quotas(context, tenant_id, resources)
 
         # Check the quotas and construct a list of the resources that
         # would be put over limit by the desired values
-        overs = [key for key, val in values.items() if 0 <= quotas[key] < val]
+        overs = [key for key, val in values.items()
+                 if quotas[key] >= 0 and quotas[key] < val]
         if overs:
             raise exceptions.OverQuota(overs=sorted(overs))

@@ -17,7 +17,6 @@ import signal
 import eventlet
 import eventlet.event
 import eventlet.queue
-from neutron_lib.utils import helpers
 from oslo_log import log as logging
 
 from neutron._i18n import _, _LE
@@ -114,7 +113,7 @@ class AsyncProcess(object):
             self._spawn()
 
         if block:
-            common_utils.wait_until_true(self.is_active)
+            utils.wait_until_true(self.is_active)
 
     def stop(self, block=False, kill_signal=signal.SIGKILL):
         """Halt the process and watcher threads.
@@ -132,7 +131,7 @@ class AsyncProcess(object):
             raise AsyncProcessException(_('Process is not running.'))
 
         if block:
-            common_utils.wait_until_true(lambda: not self.is_active())
+            utils.wait_until_true(lambda: not self.is_active())
 
     def _spawn(self):
         """Spawn a process and its watchers."""
@@ -226,7 +225,7 @@ class AsyncProcess(object):
     def _read(self, stream, queue):
         data = stream.readline()
         if data:
-            data = helpers.safe_decode_utf8(data.strip())
+            data = common_utils.safe_decode_utf8(data.strip())
             queue.put(data)
             return data
 

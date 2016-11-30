@@ -12,11 +12,9 @@
 #    under the License.
 
 import abc
-
-from neutron_lib.api import validators
-from neutron_lib import exceptions
-from neutron_lib.plugins import directory
 import six
+
+from oslo_log import log as logging
 import webob.exc
 
 from neutron._i18n import _
@@ -24,8 +22,12 @@ from neutron.api import extensions
 from neutron.api.v2 import attributes
 from neutron.api.v2 import base
 from neutron.api.v2 import resource as api_resource
+from neutron.common import exceptions
+from neutron import manager
 from neutron.services import service_base
 
+
+LOG = logging.getLogger(__name__)
 
 TAG = 'tag'
 TAGS = TAG + 's'
@@ -59,22 +61,23 @@ def get_parent_resource_and_id(kwargs):
 
 
 def validate_tag(tag):
-    msg = validators.validate_string(tag, MAX_TAG_LEN)
+    msg = attributes._validate_string(tag, MAX_TAG_LEN)
     if msg:
         raise exceptions.InvalidInput(error_message=msg)
 
 
 def validate_tags(body):
     if 'tags' not in body:
-        raise exceptions.InvalidInput(error_message=_("Invalid tags body"))
-    msg = validators.validate_list_of_unique_strings(body['tags'], MAX_TAG_LEN)
+        raise exceptions.InvalidInput(error_message="Invalid tags body.")
+    msg = attributes.validate_list_of_unique_strings(body['tags'], MAX_TAG_LEN)
     if msg:
         raise exceptions.InvalidInput(error_message=msg)
 
 
 class TagController(object):
     def __init__(self):
-        self.plugin = directory.get_plugin(TAG_PLUGIN_TYPE)
+        self.plugin = (manager.NeutronManager.get_service_plugins()
+                       [TAG_PLUGIN_TYPE])
 
     def index(self, request, **kwargs):
         # GET /v2.0/networks/{network_id}/tags
@@ -176,8 +179,7 @@ class TagPluginBase(service_base.ServicePluginBase):
     def get_plugin_description(self):
         return "Tag support"
 
-    @classmethod
-    def get_plugin_type(cls):
+    def get_plugin_type(self):
         return TAG_PLUGIN_TYPE
 
     @abc.abstractmethod

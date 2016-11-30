@@ -22,7 +22,7 @@ from neutron._i18n import _, _LE, _LI
 from neutron.agent.common import config
 from neutron.agent.linux import interface
 from neutron.agent.linux import iptables_manager
-from neutron.common import constants
+from neutron.common import constants as constants
 from neutron.common import ipv6_utils
 from neutron.services.metering.drivers import abstract_driver
 
@@ -74,7 +74,7 @@ class RouterWithMetering(object):
             namespace=self.ns_name,
             binary_name=WRAP_NAME,
             state_less=True,
-            use_ipv6=ipv6_utils.is_enabled_and_bind_by_default())
+            use_ipv6=ipv6_utils.is_enabled())
         self.metering_labels = {}
 
 
@@ -135,11 +135,7 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
     def _process_metering_label_rules(self, rm, rules, label_chain,
                                       rules_chain):
         im = rm.iptables_manager
-        ex_gw_port = rm.router.get('gw_port_id')
-        if not ex_gw_port:
-            return
-
-        ext_dev = self.get_external_device_name(ex_gw_port)
+        ext_dev = self.get_external_device_name(rm.router['gw_port_id'])
         if not ext_dev:
             return
 
@@ -181,9 +177,9 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
     def _prepare_rule(self, ext_dev, rule, label_chain):
         remote_ip = rule['remote_ip_prefix']
         if rule['direction'] == 'egress':
-            dir_opt = '-d %s -o %s' % (remote_ip, ext_dev)
+            dir_opt = '-o %s -d %s' % (ext_dev, remote_ip)
         else:
-            dir_opt = '-s %s -i %s' % (remote_ip, ext_dev)
+            dir_opt = '-i %s -s %s' % (ext_dev, remote_ip)
 
         if rule['excluded']:
             ipt_rule = '%s -j RETURN' % dir_opt
@@ -343,7 +339,6 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
     @log_helpers.log_method_call
     def get_traffic_counters(self, context, routers):
         accs = {}
-        routers_to_reconfigure = set()
         for router in routers:
             rm = self.routers.get(router['id'])
             if not rm:
@@ -361,7 +356,6 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
                 except RuntimeError:
                     LOG.exception(_LE('Failed to get traffic counters, '
                                       'router: %s'), router)
-                    routers_to_reconfigure.add(router['id'])
                     continue
 
                 if not chain_acc:
@@ -373,8 +367,5 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
                 acc['bytes'] += chain_acc['bytes']
 
                 accs[label_id] = acc
-
-        for router_id in routers_to_reconfigure:
-            del self.routers[router_id]
 
         return accs

@@ -12,16 +12,15 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-
-from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import directory
+from oslo_config import cfg
 
 from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
-from neutron.conf import quota
+from neutron.common import exceptions as n_exc
 from neutron.db import rbac_db_models
+from neutron import manager
 from neutron.quota import resource_registry
 
 
@@ -77,8 +76,13 @@ RESOURCE_ATTRIBUTE_MAP = {
     }
 }
 
-# Register the configuration options
-quota.register_quota_opts(quota.rbac_quota_opts)
+rbac_quota_opts = [
+    cfg.IntOpt('quota_rbac_policy', default=10,
+               deprecated_name='quota_rbac_entry',
+               help=_('Default number of RBAC entries allowed per tenant. '
+                      'A negative value means unlimited.'))
+]
+cfg.CONF.register_opts(rbac_quota_opts, 'QUOTAS')
 
 
 class Rbac(extensions.ExtensionDescriptor):
@@ -106,7 +110,7 @@ class Rbac(extensions.ExtensionDescriptor):
         """Returns Ext Resources."""
         plural_mappings = {'rbac_policies': 'rbac_policy'}
         attr.PLURALS.update(plural_mappings)
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         params = RESOURCE_ATTRIBUTE_MAP['rbac_policies']
         collection_name = 'rbac-policies'
         resource_name = 'rbac_policy'

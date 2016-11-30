@@ -14,17 +14,15 @@
 # limitations under the License.
 
 import mock
-from neutron_lib import constants as n_const
-from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import directory
 import testtools
 
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
+from neutron.common import exceptions as n_exc
 from neutron.db import l3_db
-from neutron.db.models import l3 as l3_models
 from neutron.extensions import l3
+from neutron import manager
 from neutron.tests import base
 
 
@@ -49,7 +47,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
     def test__get_subnets_by_network_no_query(self):
         """Basic test that no query is performed if no Ports are passed"""
         context = mock.Mock()
-        with mock.patch.object(directory, 'get_plugin') as get_p:
+        with mock.patch.object(manager.NeutronManager, 'get_plugin') as get_p:
             self.db._get_subnets_by_network_list(context, [])
         self.assertFalse(context.session.query.called)
         self.assertFalse(get_p.called)
@@ -61,7 +59,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
         query.__iter__.return_value = [(mock.sentinel.subnet_db,
                                         mock.sentinel.address_scope_id)]
 
-        with mock.patch.object(directory, 'get_plugin') as get_p:
+        with mock.patch.object(manager.NeutronManager, 'get_plugin') as get_p:
             get_p()._make_subnet_dict.return_value = {
                 'network_id': mock.sentinel.network_id}
             subnets = self.db._get_subnets_by_network_list(
@@ -74,7 +72,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
     def test__populate_ports_for_subnets_none(self):
         """Basic test that the method runs correctly with no ports"""
         ports = []
-        with mock.patch.object(directory, 'get_plugin') as get_p:
+        with mock.patch.object(manager.NeutronManager, 'get_plugin') as get_p:
             get_p().get_networks.return_value = []
             self.db._populate_mtu_and_subnets_for_ports(mock.sentinel.context,
                                                         ports)
@@ -96,7 +94,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
         ports = [{'network_id': 'net_id',
                   'id': 'port_id',
                   'fixed_ips': [{'subnet_id': mock.sentinel.subnet_id}]}]
-        with mock.patch.object(directory, 'get_plugin') as get_p:
+        with mock.patch.object(manager.NeutronManager, 'get_plugin') as get_p:
             get_p().get_networks.return_value = [{'id': 'net_id', 'mtu': 1446}]
             self.db._populate_mtu_and_subnets_for_ports(mock.sentinel.context,
                                                         ports)
@@ -142,57 +140,57 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
         query.reset_mock()
         result = list(
             l3_db.L3_NAT_dbonly_mixin._unique_floatingip_iterator(query))
-        query.order_by.assert_called_once_with(l3_models.FloatingIP.id)
+        query.order_by.assert_called_once_with(l3_db.FloatingIP.id)
         self.assertEqual([({'id': 'id1'}, 'scope1'),
                           ({'id': 'id2'}, 'scope2'),
                           ({'id': 'id3'}, 'scope3')], result)
 
-    @mock.patch.object(directory, 'get_plugin')
+    @mock.patch.object(manager.NeutronManager, 'get_plugin')
     def test_prevent_l3_port_deletion_port_not_found(self, gp):
         # port not found doesn't prevent
         gp.return_value.get_port.side_effect = n_exc.PortNotFound(port_id='1')
         self.db.prevent_l3_port_deletion(None, None)
 
-    @mock.patch.object(directory, 'get_plugin')
+    @mock.patch.object(manager.NeutronManager, 'get_plugin')
     def test_prevent_l3_port_device_owner_not_router(self, gp):
         # ignores other device owners
         gp.return_value.get_port.return_value = {'device_owner': 'cat'}
         self.db.prevent_l3_port_deletion(None, None)
 
-    @mock.patch.object(directory, 'get_plugin')
+    @mock.patch.object(manager.NeutronManager, 'get_plugin')
     def test_prevent_l3_port_no_fixed_ips(self, gp):
         # without fixed IPs is allowed
         gp.return_value.get_port.return_value = {
-            'device_owner': n_const.DEVICE_OWNER_ROUTER_INTF, 'fixed_ips': [],
+            'device_owner': 'network:router_interface', 'fixed_ips': [],
             'id': 'f'
         }
         self.db.prevent_l3_port_deletion(None, None)
 
-    @mock.patch.object(directory, 'get_plugin')
+    @mock.patch.object(manager.NeutronManager, 'get_plugin')
     def test_prevent_l3_port_no_router(self, gp):
         # without router is allowed
         gp.return_value.get_port.return_value = {
-            'device_owner': n_const.DEVICE_OWNER_ROUTER_INTF,
+            'device_owner': 'network:router_interface',
             'device_id': '44', 'id': 'f',
             'fixed_ips': [{'ip_address': '1.1.1.1', 'subnet_id': '4'}]}
         self.db.get_router = mock.Mock()
         self.db.get_router.side_effect = l3.RouterNotFound(router_id='44')
         self.db.prevent_l3_port_deletion(mock.Mock(), None)
 
-    @mock.patch.object(directory, 'get_plugin')
+    @mock.patch.object(manager.NeutronManager, 'get_plugin')
     def test_prevent_l3_port_existing_router(self, gp):
         gp.return_value.get_port.return_value = {
-            'device_owner': n_const.DEVICE_OWNER_ROUTER_INTF,
+            'device_owner': 'network:router_interface',
             'device_id': 'some_router', 'id': 'f',
             'fixed_ips': [{'ip_address': '1.1.1.1', 'subnet_id': '4'}]}
         self.db.get_router = mock.Mock()
         with testtools.ExpectedException(n_exc.ServicePortInUse):
             self.db.prevent_l3_port_deletion(mock.Mock(), None)
 
-    @mock.patch.object(directory, 'get_plugin')
+    @mock.patch.object(manager.NeutronManager, 'get_plugin')
     def test_prevent_l3_port_existing_floating_ip(self, gp):
         gp.return_value.get_port.return_value = {
-            'device_owner': n_const.DEVICE_OWNER_FLOATINGIP,
+            'device_owner': 'network:floatingip',
             'device_id': 'some_flip', 'id': 'f',
             'fixed_ips': [{'ip_address': '1.1.1.1', 'subnet_id': '4'}]}
         self.db.get_floatingip = mock.Mock()
@@ -201,7 +199,7 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
 
     @mock.patch.object(l3_db, '_notify_subnetpool_address_scope_update')
     def test_subscribe_address_scope_of_subnetpool(self, notify):
-        l3_db.L3RpcNotifierMixin._subscribe_callbacks()
+        l3_db.subscribe()
         registry.notify(resources.SUBNETPOOL_ADDRESS_SCOPE,
                         events.AFTER_UPDATE, mock.ANY, context=mock.ANY,
                         subnetpool_id='fake_id')
@@ -210,36 +208,6 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
                                        context=mock.ANY,
                                        subnetpool_id='fake_id')
 
-    def test__check_and_get_fip_assoc_with_extra_association_no_change(self):
-        fip = {'extra_key': 'value'}
-        context = mock.MagicMock()
-        floatingip_db = l3_models.FloatingIP(
-            id='fake_fip_id',
-            floating_network_id='fake_floating_network_id',
-            floating_ip_address='8.8.8.8',
-            fixed_port_id='fake_fixed_port_id',
-            floating_port_id='fake_floating_port_id')
-        with mock.patch.object(
-                l3_db.L3_NAT_dbonly_mixin,
-                '_get_assoc_data',
-                return_value=('1', '2', '3')) as mock_get_assoc_data:
-            self.db._check_and_get_fip_assoc(context, fip, floatingip_db)
-            context.session.query.assert_not_called()
-            mock_get_assoc_data.assert_called_once_with(
-                mock.ANY, fip, floatingip_db)
-
-    def test__notify_attaching_interface(self):
-        with mock.patch.object(l3_db.registry, 'notify') as mock_notify:
-            context = mock.MagicMock()
-            router_id = 'router_id'
-            net_id = 'net_id'
-            self.db._notify_attaching_interface(context, router_id, net_id)
-            kwargs = {'context': context, 'router_id': router_id,
-                      'network_id': net_id}
-            mock_notify.assert_called_once_with(
-                resources.ROUTER_INTERFACE, events.BEFORE_CREATE, self.db,
-                **kwargs)
-
 
 class L3_NAT_db_mixin(base.BaseTestCase):
     def setUp(self):
@@ -247,7 +215,7 @@ class L3_NAT_db_mixin(base.BaseTestCase):
         self.db = l3_db.L3_NAT_db_mixin()
 
     def _test_create_router(self, external_gateway_info=None):
-        router_db = l3_models.Router(id='123')
+        router_db = l3_db.Router(id='123')
         router_dict = {'id': '123', 'tenant_id': '456',
                        'external_gateway_info': external_gateway_info}
         # Need to use a copy here as the create_router method pops the gateway
@@ -260,12 +228,10 @@ class L3_NAT_db_mixin(base.BaseTestCase):
                               return_value=router_dict),\
             mock.patch.object(l3_db.L3_NAT_dbonly_mixin,
                               '_update_router_gw_info') as urgi,\
-            mock.patch.object(l3_db.L3_NAT_dbonly_mixin, '_get_router',
-                              return_value=router_db),\
             mock.patch.object(l3_db.L3_NAT_db_mixin, 'notify_router_updated')\
             as nru:
 
-            self.db.create_router(mock.Mock(), router_input)
+            self.db.create_router(mock.ANY, router_input)
             self.assertTrue(crd.called)
             if external_gateway_info:
                 self.assertTrue(urgi.called)

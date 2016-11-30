@@ -12,15 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import collections
-
 from oslo_config import cfg
 from oslo_log import log as logging
 
+from neutron.agent.common import ovs_lib
 from neutron.agent.l2.extensions import qos
 from neutron.plugins.ml2.drivers.openvswitch.mech_driver import (
     mech_openvswitch)
-from neutron.services.qos import qos_consts
 
 
 LOG = logging.getLogger(__name__)
@@ -35,15 +33,9 @@ class QosOVSAgentDriver(qos.QosAgentDriver):
         super(QosOVSAgentDriver, self).__init__()
         self.br_int_name = cfg.CONF.OVS.integration_bridge
         self.br_int = None
-        self.agent_api = None
-        self.ports = collections.defaultdict(dict)
-
-    def consume_api(self, agent_api):
-        self.agent_api = agent_api
 
     def initialize(self):
-        self.br_int = self.agent_api.request_int_br()
-        self.cookie = self.br_int.default_cookie
+        self.br_int = ovs_lib.OVSBridge(self.br_int_name)
 
     def create_bandwidth_limit(self, port, rule):
         self.update_bandwidth_limit(port, rule)
@@ -51,7 +43,7 @@ class QosOVSAgentDriver(qos.QosAgentDriver):
     def update_bandwidth_limit(self, port, rule):
         vif_port = port.get('vif_port')
         if not vif_port:
-            port_id = port.get('port_id')
+            port_id = port.get('port_id', None)
             LOG.debug("update_bandwidth_limit was received for port %s but "
                       "vif_port was not found. It seems that port is already "
                       "deleted", port_id)
@@ -69,64 +61,9 @@ class QosOVSAgentDriver(qos.QosAgentDriver):
     def delete_bandwidth_limit(self, port):
         vif_port = port.get('vif_port')
         if not vif_port:
-            port_id = port.get('port_id')
+            port_id = port.get('port_id', None)
             LOG.debug("delete_bandwidth_limit was received for port %s but "
                       "vif_port was not found. It seems that port is already "
                       "deleted", port_id)
             return
         self.br_int.delete_egress_bw_limit_for_port(vif_port.port_name)
-
-    def create_dscp_marking(self, port, rule):
-        self.update_dscp_marking(port, rule)
-
-    def update_dscp_marking(self, port, rule):
-        self.ports[port['port_id']][qos_consts.RULE_TYPE_DSCP_MARKING] = port
-        vif_port = port.get('vif_port')
-        if not vif_port:
-            port_id = port.get('port_id')
-            LOG.debug("update_dscp_marking was received for port %s but "
-                      "vif_port was not found. It seems that port is already "
-                      "deleted", port_id)
-            return
-        port_name = vif_port.port_name
-        port = self.br_int.get_port_ofport(port_name)
-        mark = rule.dscp_mark
-        #mark needs to be bit shifted 2 left to not overwrite the
-        #lower 2 bits of type of service packet header.
-        #source: man ovs-ofctl (/mod_nw_tos)
-        mark = str(mark << 2)
-
-        # reg2 is a metadata field that does not alter packets.
-        # By loading a value into this field and checking if the value is
-        # altered it allows the packet to be resubmitted and go through
-        # the flow table again to be identified by other flows.
-        flows = self.br_int.dump_flows_for(cookie=self.cookie, table=0,
-                                           in_port=port, reg2=0)
-        if not flows:
-            actions = ("mod_nw_tos:" + mark + ",load:55->NXM_NX_REG2[0..5]," +
-                       "resubmit(,0)")
-            self.br_int.add_flow(in_port=port, table=0, priority=65535,
-                                 reg2=0, actions=actions)
-        else:
-            for flow in flows:
-                actions = str(flow).partition("actions=")[2]
-                acts = actions.split(',')
-                # mod_nw_tos = modify type of service header
-                # This is the second byte of the IPv4 packet header.
-                # DSCP makes up the upper 6 bits of this header field.
-                actions = "mod_nw_tos:" + mark + ","
-                actions += ','.join([act for act in acts
-                                     if "mod_nw_tos:" not in act])
-                self.br_int.mod_flow(reg2=0, in_port=port, table=0,
-                                     actions=actions)
-
-    def delete_dscp_marking(self, port):
-        dscp_port = self.ports[port['port_id']].pop(qos_consts.
-                                                    RULE_TYPE_DSCP_MARKING, 0)
-        if dscp_port:
-            port_num = dscp_port['vif_port'].ofport
-            self.br_int.delete_flows(in_port=port_num, table=0, reg2=0)
-        else:
-            LOG.debug("delete_dscp_marking was received for port %s but "
-                      "no port information was stored to be deleted",
-                      port['port_id'])

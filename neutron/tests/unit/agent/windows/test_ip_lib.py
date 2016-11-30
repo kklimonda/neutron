@@ -37,6 +37,13 @@ class TestIpWrapper(base.BaseTestCase):
 
         self.assertEqual(mock_dev2, ret)
 
+    @mock.patch.object(ip_lib.IPWrapper, 'get_devices')
+    def test_get_device_by_ip_exception(self, mock_get_devices):
+        mock_get_devices.side_effects = OSError
+        ret = ip_lib.IPWrapper().get_device_by_ip(mock.sentinel.fake_ip)
+
+        self.assertIsNone(ret)
+
     @mock.patch('netifaces.interfaces')
     def test_get_devices(self, mock_interfaces):
         mock_interfaces.return_value = [mock.sentinel.dev1,
@@ -48,7 +55,7 @@ class TestIpWrapper(base.BaseTestCase):
 
     @mock.patch('netifaces.interfaces')
     def test_get_devices_error(self, mock_interfaces):
-        mock_interfaces.side_effect = OSError
+        mock_interfaces.side_effects = OSError
         ret = ip_lib.IPWrapper().get_devices()
 
         self.assertEqual([], ret)
@@ -77,16 +84,7 @@ class TestIpDevice(base.BaseTestCase):
 
     @mock.patch('netifaces.ifaddresses')
     def test_device_has_ip_error(self, mock_netifaces):
-        mock_netifaces.side_effect = OSError
-
-        ret = ip_lib.IPDevice("fake_dev").device_has_ip(
-            mock.sentinel.fake_addr)
-
-        self.assertFalse(ret)
-
-    @mock.patch('netifaces.ifaddresses')
-    def test_device_not_found(self, mock_netifaces):
-        mock_netifaces.side_effect = ValueError
+        mock_netifaces.side_effects = OSError
 
         ret = ip_lib.IPDevice("fake_dev").device_has_ip(
             mock.sentinel.fake_addr)

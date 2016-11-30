@@ -118,10 +118,7 @@ class IptablesRule(object):
             chain = '%s-%s' % (self.wrap_name, self.chain)
         else:
             chain = self.chain
-        rule = '-A %s %s' % (chain, self.rule)
-        # If self.rule is '' the above will cause a trailing space, which
-        # could cause us to not match on save/restore, so strip it now.
-        return comment_rule(rule.strip(), self.comment)
+        return comment_rule('-A %s %s' % (chain, self.rule), self.comment)
 
 
 class IptablesTable(object):
@@ -183,18 +180,24 @@ class IptablesTable(object):
             # so we keep a list of them to be iterated over in apply()
             self.remove_chains.add(name)
 
-            # Add rules to remove that have a matching chain name or
-            # a matching jump chain
-            jump_snippet = '-j %s' % name
+            # first, add rules to remove that have a matching chain name
             self.remove_rules += [str(r) for r in self.rules
-                                  if r.chain == name or jump_snippet in r.rule]
+                                  if r.chain == name]
+
+        # next, remove rules from list that have a matching chain name
+        self.rules = [r for r in self.rules if r.chain != name]
+
+        if not wrap:
+            jump_snippet = '-j %s' % name
+            # next, add rules to remove that have a matching jump chain
+            self.remove_rules += [str(r) for r in self.rules
+                                  if jump_snippet in r.rule]
         else:
             jump_snippet = '-j %s-%s' % (self.wrap_name, name)
 
-        # Remove rules from list that have a matching chain name or
-        # a matching jump chain
+        # finally, remove rules from list that have a matching jump chain
         self.rules = [r for r in self.rules
-                      if r.chain != name and jump_snippet not in r.rule]
+                      if jump_snippet not in r.rule]
 
     def add_rule(self, chain, rule, wrap=True, top=False, tag=None,
                  comment=None):
@@ -387,6 +390,49 @@ class IptablesManager(object):
             self.ipv4['mangle'].add_chain('mark')
             self.ipv4['mangle'].add_rule('PREROUTING', '-j $mark')
 
+            # Add address scope related chains
+            self.ipv4['mangle'].add_chain('scope')
+            self.ipv6['mangle'].add_chain('scope')
+
+            self.ipv4['mangle'].add_chain('floatingip')
+            self.ipv4['mangle'].add_chain('float-snat')
+
+            self.ipv4['filter'].add_chain('scope')
+            self.ipv6['filter'].add_chain('scope')
+            self.ipv4['filter'].add_rule('FORWARD', '-j $scope')
+            self.ipv6['filter'].add_rule('FORWARD', '-j $scope')
+
+            # Add rules for marking traffic for address scopes
+            mark_new_ingress_address_scope_by_interface = (
+                '-j $scope')
+            copy_address_scope_for_existing = (
+                '-m connmark ! --mark 0x0/0xffff0000 '
+                '-j CONNMARK --restore-mark '
+                '--nfmask 0xffff0000 --ctmask 0xffff0000')
+            mark_new_ingress_address_scope_by_floatingip = (
+                '-j $floatingip')
+            save_mark_to_connmark = (
+                '-m connmark --mark 0x0/0xffff0000 '
+                '-j CONNMARK --save-mark '
+                '--nfmask 0xffff0000 --ctmask 0xffff0000')
+
+            self.ipv4['mangle'].add_rule(
+                'PREROUTING', mark_new_ingress_address_scope_by_interface)
+            self.ipv4['mangle'].add_rule(
+                'PREROUTING', copy_address_scope_for_existing)
+            # The floating ip scope rules must come after the CONNTRACK rules
+            # because the (CONN)MARK targets are non-terminating (this is true
+            # despite them not being documented as such) and the floating ip
+            # rules need to override the mark from CONNMARK to cross scopes.
+            self.ipv4['mangle'].add_rule(
+                'PREROUTING', mark_new_ingress_address_scope_by_floatingip)
+            self.ipv4['mangle'].add_rule(
+                'float-snat', save_mark_to_connmark)
+            self.ipv6['mangle'].add_rule(
+                'PREROUTING', mark_new_ingress_address_scope_by_interface)
+            self.ipv6['mangle'].add_rule(
+                'PREROUTING', copy_address_scope_for_existing)
+
     def get_tables(self, ip_version):
         return {4: self.ipv4, 6: self.ipv6}[ip_version]
 
@@ -409,9 +455,6 @@ class IptablesManager(object):
         finally:
             try:
                 self.defer_apply_off()
-            except n_exc.IpTablesApplyException:
-                # already in the format we want, just reraise
-                raise
             except Exception:
                 msg = _('Failure applying iptables rules')
                 LOG.exception(msg)
@@ -436,16 +479,7 @@ class IptablesManager(object):
             lock_name += '-' + self.namespace
 
         with lockutils.lock(lock_name, utils.SYNCHRONIZED_PREFIX, True):
-            first = self._apply_synchronized()
-            if not cfg.CONF.AGENT.debug_iptables_rules:
-                return first
-            second = self._apply_synchronized()
-            if second:
-                msg = (_("IPTables Rules did not converge. Diff: %s") %
-                       '\n'.join(second))
-                LOG.error(msg)
-                raise n_exc.IpTablesApplyException(msg)
-            return first
+            return self._apply_synchronized()
 
     def get_rules_for_table(self, table):
         """Runs iptables-save on a table and returns the results."""
@@ -759,11 +793,6 @@ def _generate_chain_diff_iptables_commands(chain, old_chain_rules,
         elif line.startswith('+'):  # line added
             # strip the chain name since we have to add it before the index
             rule = line[5:].split(' ', 1)[-1]
-            # IptablesRule does not add trailing spaces for rules, so we
-            # have to detect that here by making sure this chain isn't
-            # referencing itself
-            if rule == chain:
-                rule = ''
             # rule inserted at this position
             statements.append('-I %s %d %s' % (chain, old_index, rule))
         old_index += 1

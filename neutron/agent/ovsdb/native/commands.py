@@ -16,7 +16,6 @@ import collections
 
 from oslo_log import log as logging
 from oslo_utils import excutils
-import six
 
 from neutron._i18n import _, _LE
 from neutron.agent.ovsdb import api
@@ -42,9 +41,6 @@ class BaseCommand(api.Command):
                 if not check_error:
                     ctx.reraise = False
 
-    def post_commit(self, txn):
-        pass
-
     def __str__(self):
         command_info = self.__dict__
         return "%s(%s)" % (
@@ -53,47 +49,6 @@ class BaseCommand(api.Command):
                       if k not in ['api', 'result']))
 
     __repr__ = __str__
-
-
-class AddManagerCommand(BaseCommand):
-    def __init__(self, api, target):
-        super(AddManagerCommand, self).__init__(api)
-        self.target = target
-
-    def run_idl(self, txn):
-        row = txn.insert(self.api._tables['Manager'])
-        row.target = self.target
-        self.api._ovs.verify('manager_options')
-        self.api._ovs.manager_options = self.api._ovs.manager_options + [row]
-
-
-class GetManagerCommand(BaseCommand):
-    def __init__(self, api):
-        super(GetManagerCommand, self).__init__(api)
-
-    def run_idl(self, txn):
-        self.result = [m.target for m in
-                       self.api._tables['Manager'].rows.values()]
-
-
-class RemoveManagerCommand(BaseCommand):
-    def __init__(self, api, target):
-        super(RemoveManagerCommand, self).__init__(api)
-        self.target = target
-
-    def run_idl(self, txn):
-        try:
-            manager = idlutils.row_by_value(self.api.idl, 'Manager', 'target',
-                                            self.target)
-        except idlutils.RowNotFound:
-            msg = _("Manager with target %s does not exist") % self.target
-            LOG.error(msg)
-            raise RuntimeError(msg)
-        self.api._ovs.verify('manager_options')
-        manager_list = self.api._ovs.manager_options
-        manager_list.remove(manager)
-        self.api._ovs.manager_options = manager_list
-        self.api._tables['Manager'].rows[manager.uuid].delete()
 
 
 class AddBridgeCommand(BaseCommand):
@@ -209,13 +164,8 @@ class DbCreateCommand(BaseCommand):
     def run_idl(self, txn):
         row = txn.insert(self.api._tables[self.table])
         for col, val in self.columns.items():
-            setattr(row, col, idlutils.db_replace_record(val))
-        # This is a temporary row to be used within the transaction
+            setattr(row, col, val)
         self.result = row
-
-    def post_commit(self, txn):
-        # Replace the temporary row with the post-commit UUID to match vsctl
-        self.result = txn.get_insert_uuid(self.result.uuid)
 
 
 class DbDestroyCommand(BaseCommand):
@@ -244,40 +194,7 @@ class DbSetCommand(BaseCommand):
             # this soon.
             if isinstance(val, collections.OrderedDict):
                 val = dict(val)
-            if isinstance(val, dict):
-                # NOTE(twilson) OVS 2.6's Python IDL has mutate methods that
-                # would make this cleaner, but it's too early to rely on them.
-                existing = getattr(record, col, {})
-                existing.update(val)
-                val = existing
-            setattr(record, col, idlutils.db_replace_record(val))
-
-
-class DbAddCommand(BaseCommand):
-    def __init__(self, api, table, record, column, *values):
-        super(DbAddCommand, self).__init__(api)
-        self.table = table
-        self.record = record
-        self.column = column
-        self.values = values
-
-    def run_idl(self, txn):
-        record = idlutils.row_by_record(self.api.idl, self.table, self.record)
-        for value in self.values:
-            if isinstance(value, collections.Mapping):
-                # We should be doing an add on a 'map' column. If the key is
-                # already set, do nothing, otherwise set the key to the value
-                field = getattr(record, self.column, {})
-                for k, v in six.iteritems(value):
-                    if k in field:
-                        continue
-                    field[k] = v
-            else:
-                # We should be appending to a 'set' column.
-                field = getattr(record, self.column, [])
-                field.append(value)
-            record.verify(self.column)
-            setattr(record, self.column, idlutils.db_replace_record(field))
+            setattr(record, col, val)
 
 
 class DbClearCommand(BaseCommand):
@@ -386,7 +303,8 @@ class AddPortCommand(BaseCommand):
         br.ports = ports
 
         iface = txn.insert(self.api._tables['Interface'])
-        txn.expected_ifaces.add(iface.uuid)
+        # NOTE(twilson) The OVS lib's __getattr__ breaks iface.uuid here
+        txn.expected_ifaces.add(iface.__dict__['uuid'])
         iface.name = self.port
         port.verify('interfaces')
         ifaces = getattr(port, 'interfaces', [])
