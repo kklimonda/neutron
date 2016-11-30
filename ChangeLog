@@ -1,10 +1,27 @@
 CHANGES
 =======
 
+* Changing arping command execute to accept 1 as extra OK code
+* l3-ha: Send gratuitous ARP when new floating IP is added
+* DVR: remove misleading error log
+* Fix "failed unplugging ha interface" error when deleting router
+* Avoid trace in _notify_l3_agent_ha_port_update
+* LinuxBridge: Pass host into get_devices_details_list
+* Ensure there are fdb_entries before iterating
+* Update metadata proxy when subnet add/delete
+* Check if namespace exists before getting devices
+* ovsfw: Add a dl_type match for action=ct flows
+* ovsfw: fix troublesome port_rule_masking
+* Check for ha port to become ACTIVE
+* l2pop fdb flows for HA router ports
+* Get rid of double-join to rbac_entries without filter
+
 8.3.0
 -----
 
 * ml2 lb: do not program arp responder when unused
+* Add 169.254.169.254 when enable force_metadata
+* Move class properties to instances for dhcp tests
 * New option for num_threads for state change server
 * DVR: Pings to floatingip returns with fixed-ip on same network
 * Install dibbler.filters rootwrap file

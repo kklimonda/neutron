@@ -281,6 +281,24 @@ class TestIpWrapper(base.BaseTestCase):
         self.assertTrue(fake_str.split.called)
         self.assertEqual(retval, [ip_lib.IPDevice('lo', namespace='foo')])
 
+    @mock.patch('neutron.agent.common.utils.execute')
+    def test_get_devices_namespaces_ns_not_exists(self, mocked_execute):
+        mocked_execute.side_effect = RuntimeError(
+            "Cannot open network namespace")
+        with mock.patch.object(ip_lib.IpNetnsCommand, 'exists',
+                               return_value=False):
+            retval = ip_lib.IPWrapper(namespace='foo').get_devices()
+            self.assertEqual([], retval)
+
+    @mock.patch('neutron.agent.common.utils.execute')
+    def test_get_devices_namespaces_ns_exists(self, mocked_execute):
+        mocked_execute.side_effect = RuntimeError(
+            "Cannot open network namespace")
+        with mock.patch.object(ip_lib.IpNetnsCommand, 'exists',
+                               return_value=True):
+            self.assertRaises(RuntimeError,
+                              ip_lib.IPWrapper(namespace='foo').get_devices)
+
     def test_get_namespaces(self):
         self.execute.return_value = '\n'.join(NETNS_SAMPLE)
         retval = ip_lib.IPWrapper.get_namespaces()
@@ -1368,7 +1386,7 @@ class TestArpPing(TestIPCmdBase):
                       '-w', mock.ANY,
                       address]
         ip_wrapper.netns.execute.assert_any_call(arping_cmd,
-                                                 check_exit_code=True)
+                                                 extra_ok_codes=[1])
 
     @mock.patch('eventlet.spawn_n')
     def test_no_ipv6_addr_notif(self, spawn_n):
@@ -1391,3 +1409,11 @@ class TestAddNamespaceToCmd(base.BaseTestCase):
     def test_add_namespace_to_cmd_without_namespace(self):
         cmd = ['ping', '8.8.8.8']
         self.assertEqual(cmd, ip_lib.add_namespace_to_cmd(cmd, None))
+
+
+class TestSetIpNonlocalBindForHaNamespace(base.BaseTestCase):
+    def test_setting_failure(self):
+        """Make sure message is formatted correctly."""
+        with mock.patch.object(
+                ip_lib, 'set_ip_nonlocal_bind', side_effect=RuntimeError):
+            ip_lib.set_ip_nonlocal_bind_for_namespace('foo')

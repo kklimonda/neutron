@@ -27,17 +27,20 @@ from oslo_utils import uuidutils
 from sqlalchemy.orm import exc as sqla_exc
 
 from neutron._i18n import _
+from neutron.api.v2 import attributes as attrs
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.common import constants
 from neutron.common import exceptions as exc
+from neutron.common import topics
 from neutron.common import utils
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2 as base_plugin
 from neutron.db import l3_db
+from neutron.db import l3_hascheduler_db
 from neutron.db import models_v2
 from neutron.extensions import availability_zone as az_ext
 from neutron.extensions import external_net
@@ -54,6 +57,8 @@ from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers import type_vlan
 from neutron.plugins.ml2 import models
 from neutron.plugins.ml2 import plugin as ml2_plugin
+from neutron.plugins.ml2 import rpc
+from neutron.services.l3_router import l3_router_plugin
 from neutron.services.qos import qos_consts
 from neutron.tests import base
 from neutron.tests.unit import _test_extension_portbindings as test_bindings
@@ -76,6 +81,7 @@ PLUGIN_NAME = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 
 DEVICE_OWNER_COMPUTE = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
 HOST = 'fake_host'
+TEST_ROUTER_ID = 'router_id'
 
 
 # TODO(marun) - Move to somewhere common for reuse
@@ -871,6 +877,59 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
         func()
         # make sure that the grenade went off during the commit
         self.assertTrue(listener.except_raised)
+
+
+class TestMl2PortsV2WithL3(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
+    """For testing methods that require the L3 service plugin."""
+
+    def test_update_port_status_notify_port_event_after_update(self):
+        # Check if _notify_l3_agent_ha_port_update has any trace
+        _orig = l3_hascheduler_db._notify_l3_agent_ha_port_update
+        self.raised = False
+
+        def _mock_notify_l3_agent_ha_port_update(*args, **kwargs):
+            try:
+                _orig(*args, **kwargs)
+            except Exception:
+                self.raised = True
+
+        # register mock for _notify_l3_agent_ha_port_update, to identify any
+        # trace in that function
+        def mock_subscribe():
+            registry.subscribe(
+                _mock_notify_l3_agent_ha_port_update,
+                resources.PORT, events.AFTER_UPDATE)
+        mock.patch.object(l3_hascheduler_db, 'subscribe',
+                          side_effect=mock_subscribe).start()
+        ctx = context.get_admin_context()
+        plugin = manager.NeutronManager.get_plugin()
+        notifier = rpc.AgentNotifierApi(topics.AGENT)
+        self.plugin_rpc = rpc.RpcCallbacks(notifier, plugin.type_manager)
+        # enable subscription for events
+        l3_router_plugin.L3RouterPlugin()
+        l3plugin = manager.NeutronManager.get_service_plugins().get(
+            p_const.L3_ROUTER_NAT)
+        with self.subnet() as subnet,\
+            mock.patch.object(l3plugin.l3_rpc_notifier,
+                              'routers_updated_on_host') as mock_updated:
+            port_data = {
+                'port': {'name': 'test1',
+                         'network_id': subnet['subnet']['network_id'],
+                         'tenant_id': self._tenant_id,
+                         'admin_state_up': True,
+                         'device_id': TEST_ROUTER_ID,
+                         'device_owner': constants.DEVICE_OWNER_ROUTER_HA_INTF,
+                         'mac_address': attrs.ATTR_NOT_SPECIFIED,
+                         'fixed_ips': attrs.ATTR_NOT_SPECIFIED}}
+            port = self.plugin.create_port(ctx, port_data)
+            self.plugin.update_port(
+                ctx, port['id'], {'port': {portbindings.HOST_ID: HOST}})
+            self.plugin_rpc.update_device_up(
+                ctx, agent_id="theAgentId", device=port['id'], host=HOST)
+            mock_updated.assert_called_once_with(
+                mock.ANY, [TEST_ROUTER_ID], HOST)
+            # Fail if _notify_l3_agent_ha_port_update has any trace
+            self.assertFalse(self.raised)
 
 
 class TestMl2PluginOnly(Ml2PluginV2TestCase):

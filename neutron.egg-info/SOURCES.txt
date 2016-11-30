@@ -1302,6 +1302,7 @@ releasenotes/notes/fail-on-missing-extensions-bc332124b780875b.yaml
 releasenotes/notes/firewall_driver_not_needed_on_server-4159669ad834dea6.yaml
 releasenotes/notes/hyperv-neutron-agent-decomposition-ae6a052aeb48c6ac.yaml
 releasenotes/notes/keepalived-state-change-server-threads-9ed775e7533dd1a0.yaml
+releasenotes/notes/l3ha-agent-server-dependency-1fcb775328ac4502.yaml
 releasenotes/notes/linuxbridge-agent-extensions-66bdf9feee25ef99.yaml
 releasenotes/notes/linuxbridge_vxlan_arp_responder-e9ea91552e1b62a7.yaml
 releasenotes/notes/macvtap-l2-agent-2b551d8ec341196d.yaml
@@ -1315,6 +1316,7 @@ releasenotes/notes/ovs-ct-firewall-driver-52a70a6a16d06f59.yaml
 releasenotes/notes/ovs-ipv6-tunnel-endpoints-f41b4954a04c43f6.yaml
 releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml
 releasenotes/notes/segment_mtu_to_global_physnet_mtu-9cee5ff09557edeb.yaml
+releasenotes/notes/sending-garp-for-l3-ha-c118871833ad8743.yaml
 releasenotes/notes/set-of-default-qos-burst-value-0790773703fa08fc.yaml
 releasenotes/notes/sriov-agent-num-vf-0-0c06424247e7efe0.yaml
 releasenotes/notes/sriov_allow_use_many_nics_for_one_physnet-3570aa67a60ce6c4.yaml
