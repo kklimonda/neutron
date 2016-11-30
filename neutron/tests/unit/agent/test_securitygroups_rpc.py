@@ -18,6 +18,7 @@ import contextlib
 
 import mock
 from neutron_lib import constants as const
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 import oslo_messaging
 from oslo_utils import netutils
@@ -33,7 +34,6 @@ from neutron import context
 from neutron.db import securitygroups_rpc_base as sg_db_rpc
 from neutron.extensions import allowedaddresspairs as addr_pair
 from neutron.extensions import securitygroup as ext_sg
-from neutron import manager
 from neutron.tests import base
 from neutron.tests import tools
 from neutron.tests.unit.extensions import test_securitygroup as test_sg
@@ -123,7 +123,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
         plugin = plugin or TEST_PLUGIN_CLASS
         set_firewall_driver(FIREWALL_NOOP_DRIVER)
         super(SGServerRpcCallBackTestCase, self).setUp(plugin)
-        self.notifier = manager.NeutronManager.get_plugin().notifier
+        self.notifier = directory.get_plugin().notifier
         self.rpc = securitygroups_rpc.SecurityGroupServerRpcCallback()
 
     def _test_security_group_port(self, device_owner, gw_ip,
@@ -284,7 +284,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
 
     @contextlib.contextmanager
     def _port_with_addr_pairs_and_security_group(self):
-        plugin_obj = manager.NeutronManager.get_plugin()
+        plugin_obj = directory.get_plugin()
         if ('allowed-address-pairs'
             not in plugin_obj.supported_extension_aliases):
             self.skipTest("Test depends on allowed-address-pairs extension")
@@ -1220,7 +1220,7 @@ class SecurityGroupAgentRpcTestCase(BaseSecurityGroupAgentRpcTestCase):
         self.agent.refresh_firewall = mock.Mock()
         self.agent.security_groups_provider_updated(None)
         self.agent.refresh_firewall.assert_has_calls(
-            [mock.call.refresh_firewall(None)])
+            [mock.call.refresh_firewall()])
 
     def test_refresh_firewall(self):
         self.agent.prepare_devices_filter(['fake_port_id'])
@@ -1344,7 +1344,7 @@ class SecurityGroupAgentEnhancedRpcTestCase(
         self.agent.refresh_firewall = mock.Mock()
         self.agent.security_groups_provider_updated(None)
         self.agent.refresh_firewall.assert_has_calls(
-            [mock.call.refresh_firewall(None)])
+            [mock.call.refresh_firewall()])
 
     def test_refresh_firewall_enhanced_rpc(self):
         self.agent.prepare_devices_filter(['fake_port_id'])
@@ -1489,8 +1489,15 @@ class SecurityGroupAgentRpcWithDeferredRefreshTestCase(
         self.assertTrue(self.agent.global_refresh_firewall)
 
     def test_security_groups_provider_updated_devices_specified(self):
+        self.agent.firewall.ports = {
+            'fake_device_1': {
+                'id': 'fake_port_id_1',
+                'device': 'fake_device_1'},
+            'fake_device_2': {
+                'id': 'fake_port_id_2',
+                'device': 'fake_device_2'}}
         self.agent.security_groups_provider_updated(
-            ['fake_device_1', 'fake_device_2'])
+            ['fake_port_id_1', 'fake_port_id_2'])
         self.assertFalse(self.agent.global_refresh_firewall)
         self.assertIn('fake_device_1', self.agent.devices_to_refilter)
         self.assertIn('fake_device_2', self.agent.devices_to_refilter)

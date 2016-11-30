@@ -21,7 +21,6 @@ import signal
 import sys
 import time
 
-import debtcollector
 import netaddr
 from neutron_lib import constants as n_const
 from neutron_lib.utils import helpers
@@ -73,10 +72,6 @@ cfg.CONF.import_group('AGENT', 'neutron.plugins.ml2.drivers.openvswitch.'
                       'agent.common.config')
 cfg.CONF.import_group('OVS', 'neutron.plugins.ml2.drivers.openvswitch.agent.'
                       'common.config')
-
-LocalVLANMapping = debtcollector.moves.moved_class(
-    vlanmanager.LocalVLANMapping, 'LocalVLANMapping', __name__,
-    version='Newton', removal_version='Ocata')
 
 
 class _mac_mydialect(netaddr.mac_unix):
@@ -205,6 +200,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             # The patch_int_ofport and patch_tun_ofport are updated
             # here inside the call to setup_tunnel_br()
             self.setup_tunnel_br(ovs_conf.tunnel_bridge)
+            self.setup_tunnel_br_flows()
 
         self.init_extension_manager(self.connection)
 
@@ -222,9 +218,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             host,
             self.enable_tunneling,
             self.enable_distributed_routing)
-
-        if self.enable_tunneling:
-            self.setup_tunnel_br_flows()
 
         if self.enable_distributed_routing:
             self.dvr_agent.setup_dvr_flows()
@@ -295,12 +288,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.connection.consume_in_threads()
 
         self.quitting_rpc_timeout = agent_conf.quitting_rpc_timeout
-
-    @debtcollector.removals.removed_property(
-        version='Newton', removal_version='Ocata')
-    def local_vlan_map(self):
-        """Provide backward compatibility with local_vlan_map attribute"""
-        return self.vlan_manager.mapping
 
     def _parse_bridge_mappings(self, bridge_mappings):
         try:
@@ -401,16 +388,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.ext_manager.initialize(
             connection, constants.EXTENSION_DRIVER_TYPE,
             self.agent_api)
-
-    @debtcollector.moves.moved_method(
-        'get_net_uuid',
-        'OVSNeutronAgent.get_net_uuid() moved to vlanmanager.LocalVlanManager',
-        removal_version='Ocata')
-    def get_net_uuid(self, vif_id):
-        try:
-            return self.vlan_manager.get_net_uuid(vif_id)
-        except vlanmanager.VifIdNotFound:
-            pass
 
     def port_update(self, context, **kwargs):
         port = kwargs.get('port')
@@ -810,9 +787,9 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
 
         vlan_mapping = {'net_uuid': net_uuid,
                         'network_type': network_type,
-                        'physical_network': physical_network}
+                        'physical_network': str(physical_network)}
         if segmentation_id is not None:
-            vlan_mapping['segmentation_id'] = segmentation_id
+            vlan_mapping['segmentation_id'] = str(segmentation_id)
         port_other_config.update(vlan_mapping)
         self.int_br.set_db_attribute("Port", port.port_name, "other_config",
                                      port_other_config)
@@ -834,7 +811,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             cur_info = info_by_port.get(port.port_name)
             if cur_info is not None and cur_info[0] != lvm.vlan:
                 other_config = cur_info[1] or {}
-                other_config['tag'] = lvm.vlan
+                other_config['tag'] = str(lvm.vlan)
                 self.int_br.set_db_attribute(
                     "Port", port.port_name, "other_config", other_config)
 

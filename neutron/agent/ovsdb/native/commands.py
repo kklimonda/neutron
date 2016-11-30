@@ -55,6 +55,47 @@ class BaseCommand(api.Command):
     __repr__ = __str__
 
 
+class AddManagerCommand(BaseCommand):
+    def __init__(self, api, target):
+        super(AddManagerCommand, self).__init__(api)
+        self.target = target
+
+    def run_idl(self, txn):
+        row = txn.insert(self.api._tables['Manager'])
+        row.target = self.target
+        self.api._ovs.verify('manager_options')
+        self.api._ovs.manager_options = self.api._ovs.manager_options + [row]
+
+
+class GetManagerCommand(BaseCommand):
+    def __init__(self, api):
+        super(GetManagerCommand, self).__init__(api)
+
+    def run_idl(self, txn):
+        self.result = [m.target for m in
+                       self.api._tables['Manager'].rows.values()]
+
+
+class RemoveManagerCommand(BaseCommand):
+    def __init__(self, api, target):
+        super(RemoveManagerCommand, self).__init__(api)
+        self.target = target
+
+    def run_idl(self, txn):
+        try:
+            manager = idlutils.row_by_value(self.api.idl, 'Manager', 'target',
+                                            self.target)
+        except idlutils.RowNotFound:
+            msg = _("Manager with target %s does not exist") % self.target
+            LOG.error(msg)
+            raise RuntimeError(msg)
+        self.api._ovs.verify('manager_options')
+        manager_list = self.api._ovs.manager_options
+        manager_list.remove(manager)
+        self.api._ovs.manager_options = manager_list
+        self.api._tables['Manager'].rows[manager.uuid].delete()
+
+
 class AddBridgeCommand(BaseCommand):
     def __init__(self, api, name, may_exist, datapath_type):
         super(AddBridgeCommand, self).__init__(api)
@@ -223,16 +264,17 @@ class DbAddCommand(BaseCommand):
     def run_idl(self, txn):
         record = idlutils.row_by_record(self.api.idl, self.table, self.record)
         for value in self.values:
-            field = getattr(record, self.column)
             if isinstance(value, collections.Mapping):
                 # We should be doing an add on a 'map' column. If the key is
                 # already set, do nothing, otherwise set the key to the value
+                field = getattr(record, self.column, {})
                 for k, v in six.iteritems(value):
                     if k in field:
                         continue
                     field[k] = v
             else:
                 # We should be appending to a 'set' column.
+                field = getattr(record, self.column, [])
                 field.append(value)
             record.verify(self.column)
             setattr(record, self.column, idlutils.db_replace_record(field))

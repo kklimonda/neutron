@@ -11,12 +11,14 @@
 #    under the License.
 
 import abc
+import collections
 import copy
 import functools
 import itertools
 
 from neutron_lib import exceptions as n_exc
 from oslo_db import exception as obj_exc
+from oslo_serialization import jsonutils
 from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import fields as obj_fields
 import six
@@ -439,6 +441,20 @@ class NeutronDbObject(NeutronObject):
             return [str(val) for val in value]
         return str(value)
 
+    @staticmethod
+    def filter_to_json_str(value):
+        def _dict_to_json(v):
+            return jsonutils.dumps(
+                collections.OrderedDict(
+                    sorted(v.items(), key=lambda t: t[0])
+                ) if v else {}
+            )
+
+        if isinstance(value, list):
+            return [_dict_to_json(val) for val in value]
+        v = _dict_to_json(value)
+        return v
+
     def _get_changed_persistent_fields(self):
         fields = self.obj_get_changes()
         for field in self.synthetic_fields:
@@ -587,4 +603,22 @@ class NeutronDbObject(NeutronObject):
             cls.validate_filters(**kwargs)
         return obj_db_api.count(
             context, cls.db_model, **cls.modify_fields_to_db(kwargs)
+        )
+
+    @classmethod
+    def objects_exist(cls, context, validate_filters=True, **kwargs):
+        """
+        Check if objects are present in DB.
+
+        :param context:
+        :param validate_filters: Raises an error in case of passing an unknown
+                                 filter
+        :param kwargs: multiple keys defined by key=value pairs
+        :return: boolean. True if object is present.
+        """
+        if validate_filters:
+            cls.validate_filters(**kwargs)
+        # Succeed if at least a single object matches; no need to fetch more
+        return bool(obj_db_api.get_object(
+            context, cls.db_model, **cls.modify_fields_to_db(kwargs))
         )

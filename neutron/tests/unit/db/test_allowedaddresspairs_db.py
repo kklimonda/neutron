@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from neutron_lib.api import validators
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from webob import exc as web_exc
 
@@ -23,7 +24,6 @@ from neutron.db import portsecurity_db
 from neutron.extensions import allowedaddresspairs as addr_pair
 from neutron.extensions import portsecurity as psec
 from neutron.extensions import securitygroup as secgroup
-from neutron import manager
 from neutron.tests.unit.db import test_db_base_plugin_v2
 
 
@@ -37,7 +37,7 @@ class AllowedAddressPairTestCase(
         super(AllowedAddressPairTestCase, self).setUp(plugin)
 
         # Check if a plugin supports security groups
-        plugin_obj = manager.NeutronManager.get_plugin()
+        plugin_obj = directory.get_plugin()
         self._skip_port_security = ('port-security' not in
                                     plugin_obj.supported_extension_aliases)
 
@@ -100,7 +100,8 @@ class TestAllowedAddressPairs(AllowedAddressPairDBTestCase):
 
     def test_create_port_allowed_address_pairs_bad_format(self):
         with self.network() as net:
-            bad_values = [False, True, 1.1, 1]
+            bad_values = [False, True, 1.1, 1, ['ip_address'],
+                          ['mac_address']]
             for value in bad_values:
                 self._create_port(
                     self.fmt, net['network']['id'],
@@ -175,6 +176,10 @@ class TestAllowedAddressPairs(AllowedAddressPairDBTestCase):
                           'ip_address': '10.0.0.1222'}]
         self._create_port_with_address_pairs(address_pairs, 400)
 
+    def test_create_missing_mac_field(self):
+        address_pairs = [{'ip_address': '10.0.0.1'}]
+        self._create_port_with_address_pairs(address_pairs, 201)
+
     def test_create_missing_ip_field(self):
         address_pairs = [{'mac_address': '00:00:00:00:00:01'}]
         self._create_port_with_address_pairs(address_pairs, 400)
@@ -244,6 +249,19 @@ class TestAllowedAddressPairs(AllowedAddressPairDBTestCase):
             self.assertEqual(res.status_int, ret_code)
             if ret_code == 201:
                 self._delete('ports', port['port']['id'])
+
+    def test_update_port_allowed_address_pairs_bad_format(self):
+        with self.network() as net:
+            res = self._create_port(self.fmt, net['network']['id'])
+            port = self.deserialize(self.fmt, res)
+            bad_values = [False, True, 1.1, 1, ['ip_address'],
+                          ['mac_address']]
+            for value in bad_values:
+                update_port = {'port': {addr_pair.ADDRESS_PAIRS: value}}
+                req = self.new_update_request('ports', update_port,
+                                              port['port']['id'])
+                res = req.get_response(self.api)
+                self.assertEqual(400, res.status_int)
 
     def test_update_add_address_pairs(self):
         with self.network() as net:

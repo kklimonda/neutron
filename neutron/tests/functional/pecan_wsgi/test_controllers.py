@@ -14,6 +14,7 @@ import uuid
 
 import mock
 from neutron_lib import constants as n_const
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_policy import policy as oslo_policy
@@ -26,7 +27,6 @@ from neutron import context
 from neutron import manager
 from neutron.pecan_wsgi.controllers import root as controllers
 from neutron.pecan_wsgi.controllers import utils as controller_utils
-from neutron.plugins.common import constants
 from neutron import policy
 from neutron.tests.common import helpers
 from neutron.tests.functional.pecan_wsgi import test_functional
@@ -56,7 +56,7 @@ class TestRootController(test_functional.PecanFunctionalTest):
     def setUp(self):
         super(TestRootController, self).setUp()
         self.setup_service_plugin()
-        self.plugin = manager.NeutronManager.get_plugin()
+        self.plugin = directory.get_plugin()
         self.ctx = context.get_admin_context()
 
     def setup_service_plugin(self):
@@ -235,6 +235,40 @@ class TestQuotasController(test_functional.PecanFunctionalTest):
         json_body = jsonutils.loads(response.body)
         self._verify_default_limits(json_body)
 
+    def test_update_list_delete(self):
+        # PUT and DELETE actions are in the same test as a meaningful DELETE
+        # test would require a put anyway
+        url = '%s/foo.json' % self.base_url
+        response = self.app.put_json(url,
+                                     params={'quota': {'network': 99}},
+                                     headers={'X-Project-Id': 'admin',
+                                              'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        json_body = jsonutils.loads(response.body)
+        self._verify_after_update(json_body, {'network': 99})
+
+        response = self.app.get(self.base_url,
+                                headers={'X-Project-Id': 'admin',
+                                         'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        json_body = jsonutils.loads(response.body)
+        found = False
+        for qs in json_body['quotas']:
+            if qs['tenant_id'] == 'foo':
+                found = True
+        self.assertTrue(found)
+
+        response = self.app.delete(url, headers={'X-Project-Id': 'admin',
+                                                 'X-Roles': 'admin'})
+        self.assertEqual(204, response.status_int)
+        response = self.app.get(self.base_url,
+                                headers={'X-Project-Id': 'admin',
+                                         'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        json_body = jsonutils.loads(response.body)
+        for qs in json_body['quotas']:
+            self.assertNotEqual('foo', qs['tenant_id'])
+
 
 class TestResourceController(TestRootController):
     """Test generic controller"""
@@ -404,7 +438,7 @@ class TestPaginationAndSorting(test_functional.PecanFunctionalTest):
         cfg.CONF.set_override('allow_pagination', True)
         cfg.CONF.set_override('allow_sorting', True)
         super(TestPaginationAndSorting, self).setUp()
-        self.plugin = manager.NeutronManager.get_plugin()
+        self.plugin = directory.get_plugin()
         self.ctx = context.get_admin_context()
         self._create_networks(self.RESOURCE_COUNT)
         self.networks = self._get_collection()['networks']
@@ -624,7 +658,7 @@ class TestRequestProcessing(TestRootController):
         self.assertEqual('router', self.req_stash['resource_type'])
         # make sure the core plugin was identified as the handler for ports
         self.assertEqual(
-            manager.NeutronManager.get_service_plugins()['L3_ROUTER_NAT'],
+            directory.get_plugin(n_const.L3),
             self.req_stash['plugin'])
 
     def test_service_plugin_uri(self):
@@ -650,10 +684,9 @@ class TestRouterController(TestResourceController):
             ['neutron.services.l3_router.l3_router_plugin.L3RouterPlugin',
              'neutron.services.flavors.flavors_plugin.FlavorsPlugin'])
         super(TestRouterController, self).setUp()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         ctx = context.get_admin_context()
-        service_plugins = manager.NeutronManager.get_service_plugins()
-        l3_plugin = service_plugins[constants.L3_ROUTER_NAT]
+        l3_plugin = directory.get_plugin(n_const.L3)
         network_id = pecan_utils.create_network(ctx, plugin)['id']
         self.subnet = pecan_utils.create_subnet(ctx, plugin, network_id)
         self.router = pecan_utils.create_router(ctx, l3_plugin)
@@ -700,7 +733,7 @@ class TestDHCPAgentShimControllers(test_functional.PecanFunctionalTest):
                  'create_dhcp-networks': 'role:admin',
                  'delete_dhcp-networks': 'role:admin'}),
             overwrite=False)
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         ctx = context.get_admin_context()
         self.network = pecan_utils.create_network(ctx, plugin)
         self.agent = helpers.register_dhcp_agent()
@@ -754,8 +787,7 @@ class TestL3AgentShimControllers(test_functional.PecanFunctionalTest):
                  'get_l3-routers': 'role:admin'}),
             overwrite=False)
         ctx = context.get_admin_context()
-        service_plugins = manager.NeutronManager.get_service_plugins()
-        l3_plugin = service_plugins[constants.L3_ROUTER_NAT]
+        l3_plugin = directory.get_plugin(n_const.L3)
         self.router = pecan_utils.create_router(ctx, l3_plugin)
         self.agent = helpers.register_l3_agent()
         # NOTE(blogan): Not sending notifications because this test is for
@@ -894,3 +926,45 @@ class TestMemberActionController(test_functional.PecanFunctionalTest):
         url = '/v2.0/{}/something/put_meh.json'.format(self.collection)
         resp = self.app.get(url, expect_errors=True)
         self.assertEqual(405, resp.status_int)
+
+
+class TestParentSubresourceController(test_functional.PecanFunctionalTest):
+    def setUp(self):
+        fake_ext = pecan_utils.FakeExtension()
+        fake_plugin = pecan_utils.FakePlugin()
+        plugins = {pecan_utils.FakePlugin.PLUGIN_TYPE: fake_plugin}
+        new_extensions = {fake_ext.get_alias(): fake_ext}
+        super(TestParentSubresourceController, self).setUp(
+            service_plugins=plugins, extensions=new_extensions)
+        policy.init()
+        policy._ENFORCER.set_rules(
+            oslo_policy.Rules.from_dict(
+                {'get_fake_duplicate': '',
+                 'get_meh_meh_fake_duplicates': ''}),
+            overwrite=False)
+        self.addCleanup(policy.reset)
+        hyphen_collection = pecan_utils.FakeExtension.HYPHENATED_COLLECTION
+        self.collection = hyphen_collection.replace('_', '-')
+        self.fake_collection = (pecan_utils.FakeExtension.
+                                FAKE_PARENT_SUBRESOURCE_COLLECTION)
+
+    def test_get_duplicate_parent_resource(self):
+        url = '/v2.0/{}'.format(self.fake_collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({'fake_duplicates': [{'fake': 'fakeduplicates'}]},
+                         resp.json)
+
+    def test_get_duplicate_parent_resource_item(self):
+        url = '/v2.0/{}/something'.format(self.fake_collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({'fake_duplicate': {'fake': 'something'}}, resp.json)
+
+    def test_get_parent_resource_and_duplicate_subresources(self):
+        url = '/v2.0/{0}/something/{1}'.format(self.collection,
+                                             self.fake_collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({'fake_duplicates': [{'fake': 'something'}]},
+                         resp.json)

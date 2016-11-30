@@ -1,12 +1,21 @@
 Metadata-Version: 1.1
 Name: neutron
-Version: 10.0.0.0b1
+Version: 10.0.0.0b2.dev169
 Summary: OpenStack Networking
 Home-page: http://docs.openstack.org/developer/neutron/
 Author: OpenStack
 Author-email: openstack-dev@lists.openstack.org
 License: UNKNOWN
-Description: Welcome!
+Description: ========================
+        Team and repository tags
+        ========================
+        
+        .. image:: http://governance.openstack.org/badges/neutron.svg
+            :target: http://governance.openstack.org/reference/tags/index.html
+        
+        .. Change things from this point on
+        
+        Welcome!
         ========
         
         To learn more about neutron:
