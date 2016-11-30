@@ -1,4 +1,3 @@
-check-namespace-before-getting-devices.patch
 skip-test-secure-client.patch
 skip-ryu-tests.patch
 skip-iptest.patch
