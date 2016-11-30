@@ -1,6 +1,79 @@
 CHANGES
 =======
 
+* Reuse plugin's update method for changing trunk status
+* Introduce objects_exist method in neutron/objects/base.py
+* OVO: add SubnetServiceType object and code integration
+* Revert "Deprecate SR-IOV 'physical_device_mappings' config option"
+* Integrate Address Scope OVO into DB
+* Add missing revises_on_change attribute
+* Redirect ExtensionDescriptor to neutron-lib
+* Show team and repo badges on README
+* ovs-agent: Close ryu app on all exceptions
+* Get rid of DVR inheritance of _delete_current_gw_port
+* Solve unexpected NoneType returned by _get_routers_can_schedule
+* fullstack: add some more security group tests
+* Update network dict with segment and mtu info in _create_subnet_db
+* Capture NotFound Exceptions in subnet postcommit
+* Revert "DHCP agent: advertise SLAAC prefixes"
+* L3: Only send notifications if l3 plugin exists
+* Squash revert to breaking changes
+* Remove REVERSED_PLURALS and get_resource_info()
+* Remove legacy oslo.messaging.notify.drivers
+* Fix InvalidInput exception output
+* Revert "Fix file permissions"
+* Adopt neutron-lib plugin directory
+* DB: use get_unique_keys from oslo_db
+* ovsdb: don't erase existing ovsdb managers
+* OVO for Provisioning Block DB Model
+* ovs-agent: Catch exceptions in agent_main_wrapper
+* Updated from global requirements
+* Refactoring config options for plugin l2pop opts
+* Refactoring config options for plugin macvtap opts
+* Refactoring config options for l2 agent ext opts
+* Refactoring agent metadata config
+* Metering: sync only active routers hosted on the same host
+* Fix security_groups_provider_updated for linuxbridge
+* Using a new security group in scenario tests
+* Fix file permissions
+* DB: remove deprecation warnings for BASEV2
+* cors: update default configuration
+* Add unit test in test_allowedaddresspairs_db
+* Adjustment method execution order
+* functional: Pass string tag to other_config
+* functional: Use VLAN tags from range <1; 4094>
+* Replace create_test_segment with NetworkSegment object
+* Remove unused LOG
+* Get post-subnet actions out of transaction
+* ProviderResourceAssociation to OVO
+* sanity check: Check that ip_nonlocal_bind works with namespaces
+* callbacks: Make the value of FLOATING_IP match with api resource
+* Move SR-IOV VIF type constants to the portbindings extension
+* Use new enginefacade metering db
+* Move DVR fip agent gw port create out of transaction
+* Separate floating IP port creation from transaction
+* Use callbacks to create DVR floating GW port
+* Disallow specifying too long name and description for qos
+* Move AgentStatusCheckWorker to PeriodicWorker
+* Speed-up iptables_manager remove_chain() code
+* Typo on side_effect rendering the test useless
+* Fix reset/start methods on AgentStatusCheckWorker
+* Pecan:Add functional test for QuotasController
+* Elimination duplication of lots of DVR tests
+* Have qos object increment port/network revision
+* Update devref examples about alembic migrations
+* Stop using deprecated CORS.set_latent()
+* L3 scheduler: add retry indicators for bind_router
+* Install OVS from git if current version < 2.5.1
+* Fix typos in standard_attr.py & attributes.py
+* Clean up agent status check debt
+* Collect OVS Debt
+* Disable 'accept_ra' in DHCP agent namespace
+* Replace assertEqual(None, *) with assertIsNone in tests
+* Fix ML2, base db plugin update_subnet for transactions
+* DVR: Fix func docstring and comments
+* Move sysctl out of IPDevice class
+
 10.0.0.0b1
 ----------
 
@@ -10,6 +83,8 @@ CHANGES
 * Add a trunk rally test
 * Updated from global requirements
 * Use new enginefacade for servicetype_db
+* ovsfw: small cleanups to improve readability
+* Use new enginefacade for tag
 * Change import statement to not rename the module
 * Add unit tests for ip_lib.get_routing_table
 * Changing arping command execute to accept 1 as extra OK code
@@ -17,38 +92,55 @@ CHANGES
 * Make OVO exception NeutronDbObjectDuplicateEntry retriable
 * Move OVO exceptions to neutron/objects/exceptions
 * neutron-lib: complete usage of helpers
+* Add check to address_pair that items in list are dict
 * Add rally hook to neutron devstack plugin
+* Agent to OVO
 * Retire deprecations for constants, exceptions, attributes
 * Truncate IPDevice's name to interface max size
+* Change cfg.set_defaults into cors.set_defaults
 * DHCP: Add missing path for marking ports as ready
+* Stop using osprofiler options as if they are part of public API
 * Register osprofiler options before setting engine hook
 * Don't pass config object to send_ip_addr_adv_notif()
 * Deprecate SR-IOV 'physical_device_mappings' config option
+* Remove timeutils.clear_time_override in neutron
+* Deprecate run_tests.sh
 * Removed deprecation warning for waiting_until_true
 * Removed deprecated function import_modules_recursively
 * Switch to new hacking 0.12
+* Avoid UnboundLocalErrors in _create_bulk_ml2
 * Introduce context in methods for Router Extra Attributes OVO usage
+* Pecan: Find subresource controllers by parent
 * Removed dispose_pool() from db/api
 * Removed deprecation warning for converters and validators
 * Removed get_engine() from db/api
 * Removed paginate_query and sqlalchemyutils module
+* Removed deprecated methods for AgentSchedulers
+* Removed deprecated checks
+* Removed update_network from plugin.common.utils
+* Removed network_segment functions from ml2.db
 * Deprecate send_arp_for_ha option
 * Change IPAM DB API to use context instead of session object
 * Add fullstack test for check DSCP marks outbounds
 * L3-HA: remove unused deprecated code
 * neutron-lib: use replace_file from neutron lib
 * Remove unused configuration variable
+* Fix typo in comment
 * Migrate to neutron-lib released API definition for trunk APIs
 * Updated from global requirements
 * Reduce rally executions of create_and_list_ports
+* Neutron lib adoption
 * Use ensure_tree from oslo_utils.fileutils
 * Remove last vestiges of oslo-incubator
 * Updated from global requirements
 * Updated from global requirements
+* Pecan: No fields to plugin on GET member actions
 * IP Conntrack Manager changes for FWaaS v2
 * Only mark ports ready on synced networks
 * Fix modify_fields_from_db for vif_details empty str
+* Forbid contract migration scripts for Ocata
 * Check if namespace exists before getting devices
+* DHCP agent: advertise SLAAC prefixes
 * Use new enginefacade for address_scope_db
 * Replace a test with use of network object
 * Add 'to_primitive' for MACAddress and IPNetwork
@@ -63,8 +155,10 @@ CHANGES
 * Make crystal clear how to contribute/approach the neutron community
 * Refactor/prepare db common utils for neutron-lib
 * Add OVO for dns Objects
+* Fix test_unwatch_log() to cleanup after itself
 * Updated from global requirements
 * Rename ipv6_utils.is_enabled()
+* Handle db_add in transaction for new objects
 * [TrivialFix] Replace 'assertTrue(a in b)' with 'assertIn(a, b)'
 * Correcting a spelling in README
 * Refactoring config options for cache_utils opts
@@ -92,6 +186,7 @@ CHANGES
 * Make ovs functional tests mutually isolated
 * Pecan: rework notifier hook for registry callbacks
 * set_db_attribute differs between vsctl and native
+* Only send string values to OVSDB other_config column
 * test_routers_flavors: Skip if requirements are not met
 * Add http_proxy_to_wsgi to api-paste
 * Only emit deprecation warning when deprecated value read
@@ -149,9 +244,11 @@ CHANGES
 * Relocate L3HARouter DB model
 * Replace create_test_network with network object
 * Relocate Tag DB model
+* DVR: remove misleading error log
 * Enable OVSDB Connection unit tests for py3
 * Handle uuid references within an ovsdb transaction
 * Remove deprecation warning for l3_agent_scheduler
+* Expose OVS bridge related options into metering agent config file
 * Refactoring config options for ml2 plugin drivers
 * Remove recursion from import_modules_recursively
 * Refactoring config options for l3 ha agent opts
@@ -208,6 +305,7 @@ CHANGES
 * Support new osprofiler API
 * Include entity in provisioning block logs
 * API tests: Check MTU sanity of trunk/subport
+* Use assertItemsEqual to compare dicts
 * Fix wrong use of six.moves.queue.get()
 * Allow more time for DB migration tests
 * Update trunk metadata during wire/unwire operations
@@ -312,6 +410,7 @@ CHANGES
 * objects: expose database model for NeutronDbObject instances
 * Defer setting 'ha'/'distributed' flags in L3 code
 * Updated from global requirements
+* Add sg_id in the AFTER_DELETE event of sg_rule delete
 * Fix sudo errors in test__set_trunk_metadata_with_None_params
 * Add release note for blueprint vlan-aware-vms
 * Make optional the validation of filters
@@ -421,6 +520,7 @@ CHANGES
 * IPAM: fix the mode of ipam_backend_mixin.py
 * Pecan: Handle member actions
 * Get rid of flush() in create_segment()
+* Fixes DBDeadlock race condition during driver initialization
 * Remove FWaaS entries from neutron setup.cfg
 * fix port address allocation for auto-addr subnet
 * DVR: Cleanup the stale snat redirect rules in router namespace

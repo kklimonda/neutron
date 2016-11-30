@@ -13,8 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import debtcollector
 from neutron_lib import constants
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
@@ -37,8 +37,6 @@ from neutron.db.models import l3_attrs
 from neutron.db.models import l3agent as rb_model
 from neutron.extensions import l3agentscheduler
 from neutron.extensions import router_availability_zone as router_az
-from neutron import manager
-from neutron.plugins.common import constants as service_constants
 
 
 _deprecate._moved_global('RouterL3AgentBinding',
@@ -70,19 +68,6 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
     """
 
     router_scheduler = None
-
-    @debtcollector.removals.remove(
-        message="This will be removed in the O cycle. "
-                "Please use 'add_periodic_l3_agent_status_check' instead."
-    )
-    def start_periodic_l3_agent_status_check(self):
-        if not cfg.CONF.allow_automatic_l3agent_failover:
-            LOG.info(_LI("Skipping period L3 agent status check because "
-                         "automatic router rescheduling is disabled."))
-            return
-
-        self.add_agent_status_check(
-            self.reschedule_routers_from_down_agents)
 
     def add_periodic_l3_agent_status_check(self):
         if not cfg.CONF.allow_automatic_l3agent_failover:
@@ -183,16 +168,16 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         router_id = router['id']
         agent_id = agent['id']
         if self.router_scheduler:
+            plugin = directory.get_plugin(constants.L3)
             try:
                 if router.get('ha'):
-                    plugin = manager.NeutronManager.get_service_plugins().get(
-                        service_constants.L3_ROUTER_NAT)
                     self.router_scheduler.create_ha_port_and_bind(
                         plugin, context, router['id'],
-                        router['tenant_id'], agent, is_manual_scheduling=True)
+                        router['tenant_id'], agent,
+                        is_manual_scheduling=True)
                 else:
                     self.router_scheduler.bind_router(
-                        context, router_id, agent)
+                        plugin, context, router_id, agent.id)
             except db_exc.DBError:
                 raise l3agentscheduler.RouterSchedulingFailed(
                     router_id=router_id, agent_id=agent_id)
@@ -230,8 +215,7 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         self._unbind_router(context, router_id, agent_id)
 
         router = self.get_router(context, router_id)
-        plugin = manager.NeutronManager.get_service_plugins().get(
-            service_constants.L3_ROUTER_NAT)
+        plugin = directory.get_plugin(constants.L3)
         if router.get('ha'):
             plugin.delete_ha_interfaces_on_host(context, router_id, agent.host)
         # NOTE(Swami): Need to verify if there are DVR serviceable

@@ -14,6 +14,7 @@
 
 from neutron_lib import constants as lib_const
 from neutron_lib import exceptions as lib_exc
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import log as logging
 
@@ -22,7 +23,6 @@ from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.db import servicetype_db as st_db
-from neutron import manager
 from neutron.plugins.common import constants
 from neutron.services import provider_configuration
 from neutron.services import service_base
@@ -64,8 +64,7 @@ class DriverController(object):
     @property
     def _flavor_plugin(self):
         if not hasattr(self, '_flavor_plugin_ref'):
-            _service_plugins = manager.NeutronManager.get_service_plugins()
-            self._flavor_plugin_ref = _service_plugins[constants.FLAVORS]
+            self._flavor_plugin_ref = directory.get_plugin(constants.FLAVORS)
         return self._flavor_plugin_ref
 
     def _set_router_provider(self, resource, event, trigger, context, router,
@@ -133,7 +132,7 @@ class DriverController(object):
                       "%(new)s provider.", {'id': router_id, 'old': drv,
                                             'new': new_drv})
             _ensure_driver_supports_request(new_drv, router)
-            # TODO(kevinbenton): notify old driver explicity of driver change
+            # TODO(kevinbenton): notify old driver explicitly of driver change
             with context.session.begin(subtransactions=True):
                 self._stm.del_resource_associations(context, [router_id])
                 self._stm.add_resource_association(

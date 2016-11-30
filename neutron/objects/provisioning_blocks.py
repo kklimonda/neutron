@@ -1,6 +1,3 @@
-# Copyright (c) 2013 OpenStack Foundation.
-# All Rights Reserved.
-#
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -13,15 +10,23 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_config import cfg
+from oslo_versionedobjects import base as obj_base
+from oslo_versionedobjects import fields as obj_fields
 
-from neutron._i18n import _
+from neutron.db.models import provisioning_block as pb_model
+from neutron.objects import base
 
 
-l2_population_options = [
-    cfg.IntOpt('agent_boot_time', default=180,
-               help=_('Delay within which agent is expected to update '
-                      'existing ports whent it restarts')),
-]
+@obj_base.VersionedObjectRegistry.register
+class ProvisioningBlock(base.NeutronDbObject):
+    # Version 1.0: Initial version
+    VERSION = '1.0'
 
-cfg.CONF.register_opts(l2_population_options, "l2pop")
+    db_model = pb_model.ProvisioningBlock
+
+    fields = {
+        'standard_attr_id': obj_fields.IntegerField(),
+        'entity': obj_fields.StringField()
+    }
+
+    primary_keys = ['standard_attr_id', 'entity']

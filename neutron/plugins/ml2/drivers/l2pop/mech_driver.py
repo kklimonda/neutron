@@ -15,21 +15,22 @@
 
 from neutron_lib import constants as const
 from neutron_lib import exceptions
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron._i18n import _, _LW
+from neutron.conf.plugins.ml2.drivers import l2pop as config
 from neutron import context as n_context
 from neutron.db import api as db_api
 from neutron.db import l3_hamode_db
-from neutron import manager
-from neutron.plugins.common import constants as service_constants
 from neutron.plugins.ml2 import driver_api as api
-from neutron.plugins.ml2.drivers.l2pop import config  # noqa
 from neutron.plugins.ml2.drivers.l2pop import db as l2pop_db
 from neutron.plugins.ml2.drivers.l2pop import rpc as l2pop_rpc
 
 LOG = logging.getLogger(__name__)
+
+config.register_l2_population_opts()
 
 
 class L2populationMechanismDriver(api.MechanismDriver):
@@ -238,8 +239,7 @@ class L2populationMechanismDriver(api.MechanismDriver):
     def update_port_down(self, context):
         port = context.current
         agent_host = context.host
-        l3plugin = manager.NeutronManager.get_service_plugins().get(
-            service_constants.L3_ROUTER_NAT)
+        l3plugin = directory.get_plugin(const.L3)
         # when agent transitions to backup, don't remove flood flows
         if agent_host and l3plugin and getattr(
             l3plugin, "list_router_ids_on_host", None):

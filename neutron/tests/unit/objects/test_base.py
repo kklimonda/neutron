@@ -34,7 +34,7 @@ from neutron.db import db_base_plugin_v2
 from neutron.db import model_base
 from neutron.db.models import external_net as ext_net_model
 from neutron.db.models import l3 as l3_model
-from neutron.db.models import segment as segments_model
+from neutron.db import standard_attr
 from neutron import objects
 from neutron.objects import base
 from neutron.objects import common_types
@@ -395,8 +395,10 @@ def get_set_of_random_uuids():
 
 FIELD_TYPE_VALUE_GENERATOR_MAP = {
     obj_fields.BooleanField: tools.get_random_boolean,
+    obj_fields.DateTimeField: tools.get_random_datetime,
     obj_fields.IntegerField: tools.get_random_integer,
     obj_fields.StringField: tools.get_random_string,
+    obj_fields.ListOfStringsField: tools.get_random_string_list,
     obj_fields.UUIDField: uuidutils.generate_uuid,
     obj_fields.ObjectField: lambda: None,
     obj_fields.ListOfObjectsField: lambda: [],
@@ -434,9 +436,12 @@ def get_value(generator, version):
     return generator()
 
 
-def remove_timestamps_from_fields(obj_fields):
-    return {field: value for field, value in obj_fields.items()
-            if field not in TIMESTAMP_FIELDS}
+def remove_timestamps_from_fields(obj_fields, cls_fields):
+    obj_fields_result = obj_fields.copy()
+    for ts_field in TIMESTAMP_FIELDS:
+        if ts_field in cls_fields.keys() and cls_fields[ts_field].nullable:
+            obj_fields_result.pop(ts_field)
+    return obj_fields_result
 
 
 def get_non_synthetic_fields(objclass, obj_fields):
@@ -1189,14 +1194,10 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
         return port
 
     def _create_test_segment(self, network):
-        test_segment = {
-            'network_id': network['id'],
-            'network_type': 'vxlan',
-        }
-        # TODO(korzen): replace with segment.create() once we get an object
-        # implementation for segments
-        self._segment = obj_db_api.create_object(
-            self.context, segments_model.NetworkSegment, test_segment)
+        self._segment = net_obj.NetworkSegment(self.context,
+            network_id=network['id'],
+            network_type='vxlan')
+        self._segment.create()
 
     def _create_test_router(self):
         attrs = {
@@ -1210,10 +1211,22 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
     def _create_test_port(self, network):
         self._port = self._create_port(network_id=network['id'])
 
+    def _create_test_standard_attribute(self):
+        attrs = {
+            'id': tools.get_random_integer(),
+            'resource_type': tools.get_random_string(4),
+            'revision_number': tools.get_random_integer()
+        }
+        self._standard_attribute = obj_db_api.create_object(
+            self.context,
+            standard_attr.StandardAttribute,
+            attrs)
+
     def _make_object(self, fields):
         fields = get_non_synthetic_fields(self._test_class, fields)
-        return self._test_class(
-            self.context, **remove_timestamps_from_fields(fields))
+        return self._test_class(self.context,
+                                **remove_timestamps_from_fields(
+                                    fields, self._test_class.fields))
 
     def test_get_object_create_update_delete(self):
         # Timestamps can't be initialized and multiple objects may use standard
@@ -1325,11 +1338,11 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
         obj = self._make_object(self.obj_fields[0])
         obj.create()
 
-        for field in remove_timestamps_from_fields(get_obj_db_fields(obj)):
-            if not isinstance(self.objs[0][field], list):
-                filters = {field: [self.objs[0][field]]}
+        for field in get_obj_db_fields(obj):
+            if not isinstance(obj[field], list):
+                filters = {field: [obj[field]]}
             else:
-                filters = {field: self.objs[0][field]}
+                filters = {field: obj[field]}
             new = self._test_class.get_objects(self.context, **filters)
             self.assertItemsEqual(
                 [obj._get_composite_keys()],
@@ -1338,7 +1351,7 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
 
     def _get_non_synth_fields(self, objclass, db_attrs):
         fields = objclass.modify_fields_from_db(db_attrs)
-        fields = remove_timestamps_from_fields(fields)
+        fields = remove_timestamps_from_fields(fields, objclass.fields)
         fields = get_non_synthetic_fields(objclass, fields)
         return fields
 
@@ -1447,6 +1460,25 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
         self.assertRaises(n_exc.InvalidInput,
                           self._test_class.count, self.context,
                           fake_field='xxx')
+
+    def test_objects_exist(self):
+        for fields in self.obj_fields:
+            self._make_object(fields).create()
+        self.assertTrue(self._test_class.objects_exist(self.context))
+
+    def test_objects_exist_false(self):
+        self.assertFalse(self._test_class.objects_exist(self.context))
+
+    def test_objects_exist_validate_filters(self):
+        self.assertRaises(n_exc.InvalidInput,
+                          self._test_class.objects_exist, self.context,
+                          fake_field='xxx')
+
+    def test_objects_exist_validate_filters_false(self):
+        for fields in self.obj_fields:
+            self._make_object(fields).create()
+        self.assertTrue(self._test_class.objects_exist(
+            self.context, validate_filters=False, fake_filter='xxx'))
 
     def test_db_obj(self):
         obj = self._make_object(self.obj_fields[0])

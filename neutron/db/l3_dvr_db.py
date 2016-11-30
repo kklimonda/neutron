@@ -16,6 +16,7 @@ import collections
 from neutron_lib.api import validators
 from neutron_lib import constants as const
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import helpers as log_helper
 from oslo_log import log as logging
@@ -39,8 +40,6 @@ from neutron.db import models_v2
 from neutron.extensions import l3
 from neutron.extensions import portbindings
 from neutron.ipam import utils as ipam_utils
-from neutron import manager
-from neutron.plugins.common import constants
 from neutron.plugins.common import utils as p_utils
 
 
@@ -69,6 +68,18 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
             'name': "distributed",
             'default': cfg.CONF.router_distributed
         }])
+
+    def __new__(cls, *args, **kwargs):
+        n = super(L3_NAT_with_dvr_db_mixin, cls).__new__(cls, *args, **kwargs)
+        registry.subscribe(n._create_dvr_floating_gw_port,
+                           resources.FLOATING_IP, events.AFTER_UPDATE)
+        registry.subscribe(n._create_snat_interfaces_after_change,
+                           resources.ROUTER, events.AFTER_UPDATE)
+        registry.subscribe(n._create_snat_interfaces_after_change,
+                           resources.ROUTER, events.AFTER_CREATE)
+        registry.subscribe(n._delete_dvr_internal_ports,
+                           resources.ROUTER_GATEWAY, events.AFTER_DELETE)
+        return n
 
     def _create_router_db(self, context, router, tenant_id):
         """Create a router db object with dvr additions."""
@@ -135,17 +146,6 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
             self._update_distributed_attr(
                 context, router_id, router_db, data)
             if migrating_to_distributed:
-                if router_db['gw_port_id']:
-                    # If the Legacy router is getting migrated to a DVR
-                    # router, make sure to create corresponding
-                    # snat interface ports that are to be consumed by
-                    # the Service Node.
-                    # TODO(haleyb): move this out of transaction
-                    setattr(context, 'GUARD_TRANSACTION', False)
-                    if not self._create_snat_intf_ports_if_not_exists(
-                        context.elevated(), router_db):
-                        LOG.debug("SNAT interface ports not created: %s",
-                                  router_db['id'])
                 cur_agents = self.list_l3_agents_hosting_router(
                     context, router_db['id'])['agents']
                 for agent in cur_agents:
@@ -153,52 +153,55 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
                                         agent['id'])
             return router_db
 
-    def _delete_current_gw_port(self, context, router_id, router, new_network):
-        """
-        Overridden here to handle deletion of dvr internal ports.
+    def _create_snat_interfaces_after_change(self, resource, event, trigger,
+                                             context, router_id, router,
+                                             request_attrs, router_db,
+                                             **kwargs):
+        if not router.get(l3.EXTERNAL_GW_INFO) or not router['distributed']:
+            # we don't care if it's not distributed or not attached to an
+            # external network
+            return
+        if event == events.AFTER_UPDATE:
+            # after an update, we check to see if it was a migration or a
+            # gateway attachment
+            old_router = kwargs['old_router']
+            do_create = (not old_router['distributed'] or
+                         not old_router.get(l3.EXTERNAL_GW_INFO))
+            if not do_create:
+                return
+        if not self._create_snat_intf_ports_if_not_exists(
+            context.elevated(), router_db):
+            LOG.debug("SNAT interface ports not created: %s",
+                      router_db['id'])
+        return router_db
 
-        If there is a valid router update with gateway port to be deleted,
-        then go ahead and delete the csnat ports and the floatingip
+    def _delete_dvr_internal_ports(self, event, trigger, resource,
+                                   context, router, network_id, **kwargs):
+        """
+        GW port AFTER_DELETE event handler to cleanup DVR ports.
+
+        This event is emitted when a router gateway port is being deleted,
+        so go ahead and delete the csnat ports and the floatingip
         agent gateway port associated with the dvr router.
         """
 
-        gw_ext_net_id = (
-            router.gw_port['network_id'] if router.gw_port else None)
-
-        super(L3_NAT_with_dvr_db_mixin,
-              self)._delete_current_gw_port(context, router_id,
-                                            router, new_network)
-        if (is_distributed_router(router) and
-            gw_ext_net_id != new_network and gw_ext_net_id is not None):
-            self.delete_csnat_router_interface_ports(
-                context.elevated(), router)
-            # NOTE(Swami): Delete the Floatingip agent gateway port
-            # on all hosts when it is the last gateway port in the
-            # given external network.
-            filters = {'network_id': [gw_ext_net_id],
-                       'device_owner': [const.DEVICE_OWNER_ROUTER_GW]}
-            ext_net_gw_ports = self._core_plugin.get_ports(
-                context.elevated(), filters)
-            if not ext_net_gw_ports:
-                self.delete_floatingip_agent_gateway_port(
-                    context.elevated(), None, gw_ext_net_id)
-                # Send the information to all the L3 Agent hosts
-                # to clean up the fip namespace as it is no longer required.
-                self.l3_rpc_notifier.delete_fipnamespace_for_ext_net(
-                    context, gw_ext_net_id)
-
-    def _create_gw_port(self, context, router_id, router, new_network,
-                        ext_ips):
-        super(L3_NAT_with_dvr_db_mixin,
-              self)._create_gw_port(context, router_id, router, new_network,
-                                    ext_ips)
-        # Make sure that the gateway port exists before creating the
-        # snat interface ports for distributed router.
-        if router.extra_attributes.distributed and router.gw_port:
-            snat_p_list = self._create_snat_intf_ports_if_not_exists(
-                context.elevated(), router)
-            if not snat_p_list:
-                LOG.debug("SNAT interface ports not created: %s", snat_p_list)
+        if not is_distributed_router(router):
+            return
+        self.delete_csnat_router_interface_ports(context.elevated(), router)
+        # NOTE(Swami): Delete the Floatingip agent gateway port
+        # on all hosts when it is the last gateway port in the
+        # given external network.
+        filters = {'network_id': [network_id],
+                   'device_owner': [const.DEVICE_OWNER_ROUTER_GW]}
+        ext_net_gw_ports = self._core_plugin.get_ports(
+            context.elevated(), filters)
+        if not ext_net_gw_ports:
+            self.delete_floatingip_agent_gateway_port(
+                context.elevated(), None, network_id)
+            # Send the information to all the L3 Agent hosts
+            # to clean up the fip namespace as it is no longer required.
+            self.l3_rpc_notifier.delete_fipnamespace_for_ext_net(
+                context, network_id)
 
     def _get_device_owner(self, context, router=None):
         """Get device_owner for the specified router."""
@@ -221,39 +224,33 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
                 models_v2.Port.admin_state_up == True)  # noqa
         return query.all()
 
-    def _update_fip_assoc(self, context, fip, floatingip_db, external_port):
-        """Override to create floating agent gw port for DVR.
+    def _create_dvr_floating_gw_port(self, resource, event, trigger, context,
+                                     router_id, fixed_port_id, floating_ip_id,
+                                     floating_network_id, fixed_ip_address,
+                                     **kwargs):
+        """Create floating agent gw port for DVR.
 
         Floating IP Agent gateway port will be created when a
         floatingIP association happens.
         """
-        fip_port = fip.get('port_id')
-        super(L3_NAT_with_dvr_db_mixin, self)._update_fip_assoc(
-            context, fip, floatingip_db, external_port)
-        associate_fip = fip_port and floatingip_db['id']
-        if associate_fip and floatingip_db.get('router_id'):
+        associate_fip = fixed_port_id and floating_ip_id
+        if associate_fip and router_id:
             admin_ctx = context.elevated()
-            router_dict = self.get_router(
-                admin_ctx, floatingip_db['router_id'])
+            router_dict = self.get_router(admin_ctx, router_id)
             # Check if distributed router and then create the
             # FloatingIP agent gateway port
             if router_dict.get('distributed'):
-                hostid = self._get_dvr_service_port_hostid(
-                    context, fip_port)
+                hostid = self._get_dvr_service_port_hostid(context,
+                                                           fixed_port_id)
                 if hostid:
                     # FIXME (Swami): This FIP Agent Gateway port should be
                     # created only once and there should not be a duplicate
                     # for the same host. Until we find a good solution for
                     # augmenting multiple server requests we should use the
                     # existing flow.
-                    # FIXME(kevinbenton): refactor so this happens outside
-                    # of floating IP transaction since it creates a port
-                    # via ML2.
-                    setattr(admin_ctx, 'GUARD_TRANSACTION', False)
                     fip_agent_port = (
                         self.create_fip_agent_gw_port_if_not_exists(
-                            admin_ctx, external_port['network_id'],
-                            hostid))
+                            admin_ctx, floating_network_id, hostid))
                     LOG.debug("FIP Agent gateway port: %s", fip_agent_port)
                 else:
                     # If not hostid check if the fixed ip provided has to
@@ -261,7 +258,7 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
                     # port. Get the port_dict, inherit the service port host
                     # and device owner(if it does not exist).
                     port = self._core_plugin.get_port(
-                        admin_ctx, fip_port)
+                        admin_ctx, fixed_port_id)
                     allowed_device_owners = (
                         n_utils.get_dvr_allowed_address_pair_device_owners())
                     # NOTE: We just need to deal with ports that do not
@@ -273,7 +270,7 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
                         addr_pair_active_service_port_list = (
                             self._get_ports_for_allowed_address_pair_ip(
                                 admin_ctx, port['network_id'],
-                                floatingip_db['fixed_ip_address']))
+                                fixed_ip_address))
                         if not addr_pair_active_service_port_list:
                             return
                         if len(addr_pair_active_service_port_list) > 1:
@@ -503,8 +500,7 @@ class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
                 L3_NAT_with_dvr_db_mixin, self).remove_router_interface(
                     context, router_id, interface_info)
 
-        plugin = manager.NeutronManager.get_service_plugins().get(
-            constants.L3_ROUTER_NAT)
+        plugin = directory.get_plugin(const.L3)
         router_hosts_before = plugin._get_dvr_hosts_for_router(
             context, router_id)
 

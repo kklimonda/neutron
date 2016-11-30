@@ -29,6 +29,7 @@ from neutron.tests import base as test_base
 object_data = {
     '_DefaultSecurityGroup': '1.0-971520cb2e0ec06d747885a0cf78347f',
     'AddressScope': '1.0-25560799db384acfe1549634959a82b4',
+    'Agent': '1.0-7a8de4fedc7d318e7b6883b9747d1adb',
     'AllowedAddressPair': '1.0-9f9186b6f952fbf31d257b0458b852c0',
     'DistributedPortBinding': '1.0-4df058ae1aeae3ae1c15b8f6a4c692d9',
     'DNSNameServer': '1.0-bf87a85327e2d812d1666ede99d9918b',
@@ -45,6 +46,8 @@ object_data = {
     'PortBindingLevel': '1.0-de66a4c61a083b8f34319fa9dde5b060',
     'PortDNS': '1.0-201cf6d057fde75539c3d1f2bbf05902',
     'PortSecurity': '1.0-b30802391a87945ee9c07582b4ff95e3',
+    'ProviderResourceAssociation': '1.0-05ab2d5a3017e5ce9dd381328f285f34',
+    'ProvisioningBlock': '1.0-c19d6d05bfa8143533471c1296066125',
     'QosBandwidthLimitRule': '1.2-4e44a8f5c2895ab1278399f87b40a13d',
     'QosDscpMarkingRule': '1.2-0313c6554b34fd10c753cb63d638256c',
     'QosMinimumBandwidthRule': '1.2-314c3419f4799067cc31cc319080adff',
@@ -56,9 +59,10 @@ object_data = {
     'SecurityGroup': '1.0-e26b90c409b31fd2e3c6fcec402ac0b9',
     'SecurityGroupRule': '1.0-e9b8dace9d48b936c62ad40fe1f339d5',
     'SegmentHostMapping': '1.0-521597cf82ead26217c3bd10738f00f0',
-    'Subnet': '1.0-b71e720f45fff2a39759940e010be7d1',
+    'Subnet': '1.0-9c19023a61b42d29fbf3766df380e5b7',
     'SubnetPool': '1.0-e8300bfbc4762cc88a7f6205b52da2f8',
     'SubnetPoolPrefix': '1.0-13c15144135eb869faa4a76dc3ee3b6c',
+    'SubnetServiceType': '1.0-05ae4cdb2a9026a697b143926a1add8c',
     'SubPort': '1.0-72c8471068db1f0491b5480fe49b52bb',
     'Trunk': '1.0-80ebebb57f2b0dbb510f84d91421ed10',
 }
