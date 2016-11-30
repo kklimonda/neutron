@@ -1,3 +1,9 @@
+neutron (2:8.3.1~dev24-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream version.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Wed, 30 Nov 2016 16:11:51 -0500
+
 neutron (2:8.3.0-0ubuntu1.2) xenial; urgency=medium
 
   * d/p/check-namespace-before-getting-devices.patch: Cherry-pick patch
