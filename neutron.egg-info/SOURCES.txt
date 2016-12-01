@@ -1485,6 +1485,8 @@ neutron/tests/unit/tests/example/README
 neutron/tests/unit/tests/example/__init__.py
 neutron/tests/unit/tests/example/dir/__init__.py
 neutron/tests/unit/tests/example/dir/example_module.py
+neutron/tests/unit/tests/example/dir/subdir/__init__.py
+neutron/tests/unit/tests/example/dir/subdir/example_module.py
 neutron/tests/var/ca.crt
 neutron/tests/var/certandkey.pem
 neutron/tests/var/certificate.crt
@@ -1498,6 +1500,7 @@ releasenotes/notes/.placeholder
 releasenotes/notes/1500-default-mtu-b0d6e4ab193b62a4.yaml
 releasenotes/notes/1500-default-segment-mtu-54e2cf6aea9602d5.yaml
 releasenotes/notes/404-for-quota-tenant-2c09c16759269b21.yaml
+releasenotes/notes/Adds-http_proxy_to_wsgi-middleware-24e8271cbd94ffdf.yaml
 releasenotes/notes/QoS-for-linuxbridge-agent-bdb13515aac4e555.yaml
 releasenotes/notes/access_as_external_rbac-455dc74b9fa22761.yaml
 releasenotes/notes/add-availability-zone-4440cf00be7c54ba.yaml
@@ -1552,6 +1555,7 @@ releasenotes/notes/fdb_population-70d751c8c2e4395f.yaml
 releasenotes/notes/firewall_driver_not_needed_on_server-4159669ad834dea6.yaml
 releasenotes/notes/fix-mtu-for-existing-networks-5a476cde9bc46a53.yaml
 releasenotes/notes/hyperv-neutron-agent-decomposition-ae6a052aeb48c6ac.yaml
+releasenotes/notes/keepalived-state-change-server-threads-9ed775e7533dd1a0.yaml
 releasenotes/notes/l2_adjacency-e6e54e5ff9aad9b7.yaml
 releasenotes/notes/l3-agent-extensions-b348ff26aec0fe88.yaml
 releasenotes/notes/linuxbridge-agent-extensions-66bdf9feee25ef99.yaml

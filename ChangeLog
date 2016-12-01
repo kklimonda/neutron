@@ -1,6 +1,40 @@
 CHANGES
 =======
 
+9.1.1
+-----
+
+* Install OVS from git if current version < 2.5.1
+* Truncate IPDevice's name to interface max size
+* Add L3 HA test with linux bridge
+* Fix "failed unplugging ha interface" error when deleting router
+* Parse the output of ip route more robustly
+* Reduce rally executions of create_and_list_ports
+* Lower concurrency on rally port job
+* Only mark ports ready on synced networks
+* DHCP: Add missing path for marking ports as ready
+* Add unit tests for ip_lib.get_routing_table
+* Update metadata proxy when subnet add/delete
+* Check if namespace exists before getting devices
+
+9.1.0
+-----
+
+* Don't depend on translated strings for error check
+* Remove recursion from import_modules_recursively
+* ovsfw: Add a dl_type match for action=ct flows
+* Fix IPv6 PD with pluggable IPAM
+* Only emit deprecation warning when deprecated value read
+* Add http_proxy_to_wsgi to api-paste
+* Extend project_id in object dicts (Newton only)
+* Add required extension to trunk_details descriptor
+* Fix misleading error trace in trunk fullstack life cycle test
+* Ignore gre0 and gretap0 devices in netns cleanup script
+* L3 DVR: always notify on ROUTER_INTERFACE AFTER_CREATE
+* Fix the 'port_id' attribute not exist error
+* TestSanityCheck: drop test tables during cleanup
+* New option for num_threads for state change server
+
 9.0.0
 -----
 
@@ -11,6 +45,7 @@ CHANGES
 
 * Process OVS trunk bridges associated to VM deletes
 * Correct fix for IPv6 auto address interfaces
+* Keepalived global_defs configuration entries required to avoid DNS lookup
 * Refetch subnet/network from DB in ML2 update ops
 * Add missing revision number altercations
 * Send a callback before attaching a subnet to a router
