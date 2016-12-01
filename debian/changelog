@@ -1,9 +1,13 @@
-neutron (2:9.0.0-0ubuntu1.16.10.3) UNRELEASED; urgency=medium
+neutron (2:9.1.1-0ubuntu1) UNRELEASED; urgency=medium
 
+  [ Chuck Short ]
   * debian/patches/check-namespace-before-getting-devices.patch: Dropped
     no longer needed, merged into stable/newton. 
 
- -- Chuck Short <zulcss@ubuntu.com>  Sat, 26 Nov 2016 16:54:17 -0500
+  [ David Della Vecchia ]
+  * New upstream point release for OpenStack Newton (LP: #1645772).
+
+ -- David Della Vecchia <ddv@canonical.com>  Thu, 01 Dec 2016 11:36:16 -0500
 
 neutron (2:9.0.0-0ubuntu1.16.10.2) yakkety; urgency=medium
 
