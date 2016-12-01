@@ -17,13 +17,13 @@ import netaddr
 
 from designateclient import exceptions as d_exc
 from designateclient.v2 import client as d_client
-from keystoneclient.auth.identity.generic import password
-from keystoneclient.auth import token_endpoint
-from keystoneclient import session
+from keystoneauth1.identity.generic import password
+from keystoneauth1 import session
+from keystoneauth1 import token_endpoint
+from neutron_lib import constants
 from oslo_config import cfg
-from oslo_log import log
 
-from neutron._i18n import _
+from neutron.conf.services import extdns_designate_driver
 from neutron.extensions import dns
 from neutron.services.externaldns import driver
 
@@ -32,55 +32,10 @@ IPV4_PTR_ZONE_PREFIX_MAX_SIZE = 24
 IPV6_PTR_ZONE_PREFIX_MIN_SIZE = 4
 IPV6_PTR_ZONE_PREFIX_MAX_SIZE = 124
 
-LOG = log.getLogger(__name__)
 _SESSION = None
 
-designate_opts = [
-    cfg.StrOpt('url',
-               help=_('URL for connecting to designate')),
-    cfg.StrOpt('admin_username',
-               help=_('Username for connecting to designate in admin '
-                      'context')),
-    cfg.StrOpt('admin_password',
-               help=_('Password for connecting to designate in admin '
-                      'context'),
-               secret=True),
-    cfg.StrOpt('admin_tenant_id',
-               help=_('Tenant id for connecting to designate in admin '
-                      'context')),
-    cfg.StrOpt('admin_tenant_name',
-               help=_('Tenant name for connecting to designate in admin '
-                      'context')),
-    cfg.StrOpt('admin_auth_url',
-               help=_('Authorization URL for connecting to designate in admin '
-                      'context')),
-    cfg.BoolOpt('insecure', default=False,
-                help=_('Skip cert validation for SSL based admin_auth_url')),
-    cfg.StrOpt('ca_cert',
-               help=_('CA certificate file to use to verify '
-                      'connecting clients')),
-    cfg.BoolOpt('allow_reverse_dns_lookup', default=True,
-                help=_('Allow the creation of PTR records')),
-    cfg.IntOpt('ipv4_ptr_zone_prefix_size', default=24,
-        help=_('Number of bits in an ipv4 PTR zone that will be considered '
-               'network prefix. It has to align to byte boundary. Minimum '
-               'value is 8. Maximum value is 24. As a consequence, range '
-               'of values is 8, 16 and 24')),
-    cfg.IntOpt('ipv6_ptr_zone_prefix_size', default=120,
-        help=_('Number of bits in an ipv6 PTR zone that will be considered '
-               'network prefix. It has to align to nyble boundary. Minimum '
-               'value is 4. Maximum value is 124. As a consequence, range '
-               'of values is 4, 8, 12, 16,..., 124')),
-    cfg.StrOpt('ptr_zone_email', default='',
-               help=_('The email address to be used when creating PTR zones. '
-                      'If not specified, the email address will be '
-                      'admin@<dns_domain>')),
-]
-
-DESIGNATE_GROUP = 'designate'
-
 CONF = cfg.CONF
-CONF.register_opts(designate_opts, DESIGNATE_GROUP)
+extdns_designate_driver.register_designate_opts()
 
 
 def get_clients(context):
@@ -184,8 +139,10 @@ class Designate(driver.ExternalDNSService):
 
     def _get_bytes_or_nybles_to_skip(self, in_addr_name):
         if 'in-addr.arpa' in in_addr_name:
-            return int((32 - CONF.designate.ipv4_ptr_zone_prefix_size) / 8)
-        return int((128 - CONF.designate.ipv6_ptr_zone_prefix_size) / 4)
+            return int((constants.IPv4_BITS -
+                        CONF.designate.ipv4_ptr_zone_prefix_size) / 8)
+        return int((constants.IPv6_BITS -
+                    CONF.designate.ipv6_ptr_zone_prefix_size) / 4)
 
     def delete_record_set(self, context, dns_domain, dns_name, records):
         designate, designate_admin = get_clients(context)

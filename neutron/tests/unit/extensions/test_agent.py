@@ -17,12 +17,12 @@ import copy
 from datetime import datetime
 import time
 
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_utils import uuidutils
 from webob import exc
 
 from neutron.api.v2 import attributes
-from neutron.common import constants
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import db_base_plugin_v2
@@ -124,9 +124,6 @@ class AgentDBTestMixIn(object):
 
     def _register_l3_agent(self, host):
         helpers.register_l3_agent(host)
-
-    def _register_bgp_dragent(self, host):
-        helpers.register_bgp_dragent(host)
 
 
 class AgentDBTestCase(AgentDBTestMixIn,

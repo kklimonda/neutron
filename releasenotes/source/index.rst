@@ -6,5 +6,7 @@
    :maxdepth: 1
 
    README.rst
+   unreleased 
+   mitaka
    liberty
-   unreleased
+

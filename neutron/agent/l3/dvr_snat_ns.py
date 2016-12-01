@@ -10,11 +10,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants
 from oslo_log import log as logging
 
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
-from neutron.common import constants
 
 LOG = logging.getLogger(__name__)
 SNAT_NS_PREFIX = 'snat-'
@@ -28,12 +28,6 @@ class SnatNamespace(namespaces.Namespace):
         name = self.get_snat_ns_name(router_id)
         super(SnatNamespace, self).__init__(
             name, agent_conf, driver, use_ipv6)
-
-    def create(self):
-        super(SnatNamespace, self).create()
-        # This might be an HA router namespaces and it should not have
-        # ip_nonlocal_bind enabled
-        ip_lib.set_ip_nonlocal_bind_for_namespace(self.name)
 
     @classmethod
     def get_snat_ns_name(cls, router_id):

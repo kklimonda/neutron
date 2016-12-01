@@ -14,6 +14,7 @@
 #    under the License.
 
 import mock
+from neutron_lib import exceptions
 from oslo_utils import uuidutils
 
 from neutron.agent.l2.extensions import qos
@@ -21,11 +22,14 @@ from neutron.api.rpc.callbacks.consumer import registry
 from neutron.api.rpc.callbacks import events
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import resources_rpc
-from neutron.common import exceptions
 from neutron import context
 from neutron.objects.qos import policy
 from neutron.objects.qos import rule
+from neutron.plugins.ml2.drivers.openvswitch.agent import (
+        ovs_agent_extension_api as ovs_ext_api)
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
+from neutron.plugins.ml2.drivers.openvswitch.agent.openflow.ovs_ofctl import (
+    ovs_bridge)
 from neutron.services.qos import qos_consts
 from neutron.tests import base
 
@@ -133,9 +137,17 @@ class QosExtensionBaseTestCase(base.BaseTestCase):
 
     def setUp(self):
         super(QosExtensionBaseTestCase, self).setUp()
+        conn_patcher = mock.patch(
+            'neutron.agent.ovsdb.native.connection.Connection.start')
+        conn_patcher.start()
+        self.addCleanup(conn_patcher.stop)
         self.qos_ext = qos.QosAgentExtension()
         self.context = context.get_admin_context()
         self.connection = mock.Mock()
+        self.agent_api = ovs_ext_api.OVSAgentExtensionAPI(
+                         ovs_bridge.OVSAgentBridge('br-int'),
+                         ovs_bridge.OVSAgentBridge('br-tun'))
+        self.qos_ext.consume_api(self.agent_api)
 
         # Don't rely on used driver
         mock.patch(
@@ -226,7 +238,7 @@ class QosExtensionRpcTestCase(QosExtensionBaseTestCase):
             self.qos_ext, '_process_update_policy') as update_mock:
 
             policy_obj = mock.Mock()
-            self.qos_ext._handle_notification(policy_obj, events.UPDATED)
+            self.qos_ext._handle_notification([policy_obj], events.UPDATED)
             update_mock.assert_called_with(policy_obj)
 
     def test__process_update_policy(self):
@@ -296,7 +308,7 @@ class QosExtensionInitializeTestCase(QosExtensionBaseTestCase):
                  resources_rpc.resource_type_versioned_topic(resource_type),
                  [rpc_mock()],
                  fanout=True)
-             for resource_type in self.qos_ext.SUPPORTED_RESOURCES]
+             for resource_type in self.qos_ext.SUPPORTED_RESOURCE_TYPES]
         )
         subscribe_mock.assert_called_with(mock.ANY, resources.QOS_POLICY)
 

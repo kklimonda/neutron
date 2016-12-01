@@ -17,21 +17,22 @@ import itertools
 import os
 
 import netaddr
+from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron._i18n import _, _LE
 from neutron.agent.linux import external_process
-from neutron.common import exceptions
+from neutron.common import constants
 from neutron.common import utils as common_utils
 
 VALID_STATES = ['MASTER', 'BACKUP']
 VALID_AUTH_TYPES = ['AH', 'PASS']
 HA_DEFAULT_PRIORITY = 50
 PRIMARY_VIP_RANGE_SIZE = 24
-# TODO(amuller): Use L3 agent constant when new constants module is introduced.
-FIP_LL_SUBNET = '169.254.64.0/18'
 KEEPALIVED_SERVICE_NAME = 'keepalived'
+KEEPALIVED_EMAIL_FROM = 'neutron@openstack.local'
+KEEPALIVED_ROUTER_ID = 'neutron'
 GARP_MASTER_DELAY = 60
 
 LOG = logging.getLogger(__name__)
@@ -176,10 +177,10 @@ class KeepalivedInstance(object):
         self.vips = []
         self.virtual_routes = KeepalivedInstanceRoutes()
         self.authentication = None
-        metadata_cidr = '169.254.169.254/32'
         self.primary_vip_range = get_free_range(
-            parent_range='169.254.0.0/16',
-            excluded_ranges=[metadata_cidr, FIP_LL_SUBNET] + ha_cidrs,
+            parent_range=constants.PRIVATE_CIDR_RANGE,
+            excluded_ranges=[constants.METADATA_CIDR,
+                             constants.DVR_FIP_LL_CIDR] + ha_cidrs,
             size=PRIMARY_VIP_RANGE_SIZE)
 
     def set_authentication(self, auth_type, password):
@@ -318,7 +319,11 @@ class KeepalivedConf(object):
         return self.instances.get(vrouter_id)
 
     def build_config(self):
-        config = []
+        config = ['global_defs {',
+                  '    notification_email_from %s' % KEEPALIVED_EMAIL_FROM,
+                  '    router_id %s' % KEEPALIVED_ROUTER_ID,
+                  '}'
+                  ]
 
         for instance in self.instances.values():
             config.extend(instance.build_config())

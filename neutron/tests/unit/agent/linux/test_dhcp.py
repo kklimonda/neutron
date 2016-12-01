@@ -17,15 +17,16 @@ import os
 
 import mock
 import netaddr
+from neutron_lib import constants
 from oslo_config import cfg
 
 from neutron.agent.common import config
-from neutron.agent.dhcp import config as dhcp_config
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import external_process
-from neutron.common import config as base_config
-from neutron.common import constants
+from neutron.common import constants as n_const
 from neutron.common import utils
+from neutron.conf.agent import dhcp as dhcp_config
+from neutron.conf import common as base_config
 from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.tests import base
 from neutron.tests import tools
@@ -85,9 +86,11 @@ class FakeReservedPort(object):
         self.device_owner = constants.DEVICE_OWNER_DHCP
         self.fixed_ips = [
             FakeIPAllocation('192.168.0.6',
-                             'dddddddd-dddd-dddd-dddd-dddddddddddd')]
+                             'dddddddd-dddd-dddd-dddd-dddddddddddd'),
+            FakeIPAllocation('fdca:3ba5:a17a:4ba3::2',
+                             'ffffffff-ffff-ffff-ffff-ffffffffffff')]
         self.mac_address = '00:00:80:aa:bb:ee'
-        self.device_id = constants.DEVICE_ID_RESERVED_DHCP_PORT
+        self.device_id = n_const.DEVICE_ID_RESERVED_DHCP_PORT
         self.extra_dhcp_opts = []
         self.id = id
 
@@ -276,6 +279,23 @@ class FakeRouterPort(object):
         self.device_owner = dev_owner
         self.fixed_ips = [FakeIPAllocation(
             ip_address, 'dddddddd-dddd-dddd-dddd-dddddddddddd')]
+        self.dns_assignment = [FakeDNSAssignment(ip.ip_address, domain=domain)
+                               for ip in self.fixed_ips]
+
+
+class FakeRouterPortNoDHCP(object):
+    def __init__(self, dev_owner=constants.DEVICE_OWNER_ROUTER_INTF,
+                 ip_address='192.168.0.1', domain='openstacklocal'):
+        self.id = 'ssssssss-ssss-ssss-ssss-ssssssssssss'
+        self.admin_state_up = True
+        self.device_owner = constants.DEVICE_OWNER_ROUTER_INTF
+        self.mac_address = '00:00:0f:rr:rr:rr'
+        self.device_id = 'fake_router_port_no_dhcp'
+        self.dns_assignment = []
+        self.extra_dhcp_opts = []
+        self.device_owner = dev_owner
+        self.fixed_ips = [FakeIPAllocation(
+            ip_address, 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee')]
         self.dns_assignment = [FakeDNSAssignment(ip.ip_address, domain=domain)
                                for ip in self.fixed_ips]
 
@@ -601,6 +621,15 @@ class FakeDualNetworkSingleDHCP(object):
         self.namespace = 'qdhcp-ns'
 
 
+class FakeDualNetworkSingleDHCPBothAttaced(object):
+    def __init__(self):
+        self.id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+        # dhcp-agent actually can't get the subnet with dhcp disabled
+        self.subnets = [FakeV4Subnet()]
+        self.ports = [FakePort1(), FakeRouterPortNoDHCP(), FakeRouterPort()]
+        self.namespace = 'qdhcp-ns'
+
+
 class FakeDualNetworkDualDHCP(object):
     def __init__(self):
         self.id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
@@ -849,6 +878,7 @@ class TestBase(TestConfBase):
 
         self.replace_p = mock.patch('neutron.common.utils.replace_file')
         self.execute_p = mock.patch('neutron.agent.common.utils.execute')
+        mock.patch('neutron.agent.linux.utils.execute').start()
         self.safe = self.replace_p.start()
         self.execute = self.execute_p.start()
 
@@ -1334,6 +1364,18 @@ class TestDnsmasq(TestBase):
 
         self._test_output_opts_file(expected, FakeDualNetworkSingleDHCP())
 
+    def test_output_opts_file_single_dhcp_both_not_isolated(self):
+        expected = (
+            'tag:tag0,option:dns-server,8.8.8.8\n'
+            'tag:tag0,option:classless-static-route,20.0.0.1/24,20.0.0.1,'
+            '169.254.169.254/32,192.168.0.1,0.0.0.0/0,192.168.0.1\n'
+            'tag:tag0,249,20.0.0.1/24,20.0.0.1,'
+            '169.254.169.254/32,192.168.0.1,0.0.0.0/0,192.168.0.1\n'
+            'tag:tag0,option:router,192.168.0.1').lstrip()
+
+        self._test_output_opts_file(expected,
+                                    FakeDualNetworkSingleDHCPBothAttaced())
+
     def test_output_opts_file_dual_dhcp_rfc3442(self):
         expected = (
             'tag:tag0,option:dns-server,8.8.8.8\n'
@@ -1530,6 +1572,15 @@ class TestDnsmasq(TestBase):
 
         self._test_output_opts_file(expected, FakeV6Network())
 
+    def test_output_opts_file_ipv6_address_force_metadata(self):
+        fake_v6 = '2001:0200:feed:7ac0::1'
+        expected = (
+            'tag:tag0,option6:dns-server,%s\n'
+            'tag:tag0,option6:domain-search,openstacklocal').lstrip() % (
+                '[' + fake_v6 + ']')
+        self.conf.force_metadata = True
+        self._test_output_opts_file(expected, FakeV6Network())
+
     @property
     def _test_no_dhcp_domain_alloc_data(self):
         exp_host_name = '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc/host'
@@ -1607,6 +1658,15 @@ class TestDnsmasq(TestBase):
                 exp_addn_name, exp_addn_data,
                 exp_opt_name, exp_opt_data,)
 
+    def test_reload_allocations_no_interface(self):
+        net = FakeDualNetwork()
+        ipath = '/dhcp/%s/interface' % net.id
+        self.useFixture(tools.OpenFixture(ipath))
+        test_pm = mock.Mock()
+        dm = self._get_dnsmasq(net, test_pm)
+        dm.reload_allocations()
+        self.assertFalse(test_pm.register.called)
+
     def test_reload_allocations(self):
         (exp_host_name, exp_host_data,
          exp_addn_name, exp_addn_data,
@@ -1616,7 +1676,7 @@ class TestDnsmasq(TestBase):
         hpath = '/dhcp/%s/host' % net.id
         ipath = '/dhcp/%s/interface' % net.id
         self.useFixture(tools.OpenFixture(hpath))
-        self.useFixture(tools.OpenFixture(ipath))
+        self.useFixture(tools.OpenFixture(ipath, 'tapdancingmice'))
         test_pm = mock.Mock()
         dm = self._get_dnsmasq(net, test_pm)
         dm.reload_allocations()
@@ -1637,22 +1697,34 @@ class TestDnsmasq(TestBase):
         mac1 = '00:00:80:aa:bb:cc'
         ip2 = '192.168.1.3'
         mac2 = '00:00:80:cc:bb:aa'
+        ip3 = '0001:0002:0003:004:0005:0006:0007:0008'
+        mac3 = '00:00:80:bb:aa:cc'
 
-        old_leases = set([(ip1, mac1, None), (ip2, mac2, None)])
+        old_leases = {(ip1, mac1, None), (ip2, mac2, None), (ip3, mac3, None)}
         dnsmasq._read_hosts_file_leases = mock.Mock(return_value=old_leases)
+        dnsmasq._read_v6_leases_file_leases = mock.Mock(
+            return_value={
+                '0001:0002:0003:004:0005:0006:0007:0008':
+                    {'iaid': 0xff,
+                     'client_id': 'client_id',
+                     'server_id': 'server_id'}}
+        )
+
         dnsmasq._output_hosts_file = mock.Mock()
         dnsmasq._release_lease = mock.Mock()
         dnsmasq.network.ports = []
-        dnsmasq.device_manager.driver.unplug = mock.Mock()
+        dnsmasq.device_manager.unplug = mock.Mock()
 
         dnsmasq._release_unused_leases()
 
         dnsmasq._release_lease.assert_has_calls([mock.call(mac1, ip1, None),
-                                                 mock.call(mac2, ip2, None)],
+                                                 mock.call(mac2, ip2, None),
+                                                 mock.call(mac3, ip3,
+                                                           'client_id',
+                                                           'server_id',
+                                                           0xff),
+                                                 ],
                                                 any_order=True)
-        dnsmasq.device_manager.driver.unplug.assert_has_calls(
-            [mock.call(dnsmasq.interface_name,
-                       namespace=dnsmasq.network.namespace)])
 
     def test_release_for_ipv6_lease(self):
         dnsmasq = self._get_dnsmasq(FakeDualNetwork())
@@ -1664,13 +1736,44 @@ class TestDnsmasq(TestBase):
 
         old_leases = set([(ip1, mac1, None), (ip2, mac2, None)])
         dnsmasq._read_hosts_file_leases = mock.Mock(return_value=old_leases)
+        dnsmasq._read_v6_leases_file_leases = mock.Mock(
+            return_value={'fdca:3ba5:a17a::1': {'iaid': 0xff,
+                                                'client_id': 'client_id',
+                                                'server_id': 'server_id'}
+                          })
         ipw = mock.patch(
             'neutron.agent.linux.ip_lib.IpNetnsCommand.execute').start()
         dnsmasq._release_unused_leases()
-        # Verify that dhcp_release is called only for ipv4 addresses.
-        self.assertEqual(1, ipw.call_count)
+        # Verify that dhcp_release is called  both for ipv4 and ipv6 addresses.
+        self.assertEqual(2, ipw.call_count)
+        ipw.assert_has_calls([mock.call(['dhcp_release6',
+                                         '--iface', None, '--ip', ip1,
+                                         '--client-id', 'client_id',
+                                         '--server-id', 'server_id',
+                                         '--iaid', 0xff],
+                                        run_as_root=True)])
         ipw.assert_has_calls([mock.call(['dhcp_release', None, ip2, mac2],
-                             run_as_root=True)])
+                             run_as_root=True), ])
+
+    def test_release_for_ipv6_lease_no_dhcp_release6(self):
+        dnsmasq = self._get_dnsmasq(FakeDualNetwork())
+
+        ip1 = 'fdca:3ba5:a17a::1'
+        mac1 = '00:00:80:aa:bb:cc'
+
+        old_leases = set([(ip1, mac1, None)])
+        dnsmasq._read_hosts_file_leases = mock.Mock(return_value=old_leases)
+        dnsmasq._read_v6_leases_file_leases = mock.Mock(
+            return_value={'fdca:3ba5:a17a::1': {'iaid': 0xff,
+                                                'client_id': 'client_id',
+                                                'server_id': 'server_id'}
+                          })
+        ipw = mock.patch(
+            'neutron.agent.linux.ip_lib.IpNetnsCommand.execute').start()
+        dnsmasq._IS_DHCP_RELEASE6_SUPPORTED = False
+        dnsmasq._release_unused_leases()
+        # Verify that dhcp_release6 is not called when it is not present
+        ipw.assert_not_called()
 
     def test_release_unused_leases_with_dhcp_port(self):
         dnsmasq = self._get_dnsmasq(FakeNetworkDhcpPort())
@@ -1678,14 +1781,22 @@ class TestDnsmasq(TestBase):
         mac1 = '00:00:80:aa:bb:cc'
         ip2 = '192.168.1.3'
         mac2 = '00:00:80:cc:bb:aa'
+        ip6 = '2001:0db8:11a3:09d7:1f34:8a2e:07a0:765d'
 
         old_leases = set([(ip1, mac1, None), (ip2, mac2, None)])
         dnsmasq._read_hosts_file_leases = mock.Mock(return_value=old_leases)
+        dnsmasq._read_v6_leases_file_leases = mock.Mock(
+            return_value={ip6: {'iaid': 0xff,
+                                'client_id': 'client_id',
+                                'server_id': 'server_id'}
+                          })
         dnsmasq._output_hosts_file = mock.Mock()
         dnsmasq._release_lease = mock.Mock()
         dnsmasq.device_manager.get_device_id = mock.Mock(
             return_value='fake_dhcp_port')
         dnsmasq._release_unused_leases()
+        self.assertFalse(
+            dnsmasq.device_manager.unplug.called)
         self.assertFalse(
             dnsmasq.device_manager.driver.unplug.called)
 
@@ -1698,9 +1809,15 @@ class TestDnsmasq(TestBase):
         ip2 = '192.168.1.3'
         mac2 = '00:00:80:cc:bb:aa'
         client_id2 = 'client2'
+        ip6 = '2001:0db8:11a3:09d7:1f34:8a2e:07a0:765d'
 
         old_leases = set([(ip1, mac1, client_id1), (ip2, mac2, client_id2)])
         dnsmasq._read_hosts_file_leases = mock.Mock(return_value=old_leases)
+        dnsmasq._read_v6_leases_file_leases = mock.Mock(
+            return_value={ip6: {'iaid': 0xff,
+                                'client_id': 'client_id',
+                                'server_id': 'server_id'}
+                          })
         dnsmasq._output_hosts_file = mock.Mock()
         dnsmasq._release_lease = mock.Mock()
         dnsmasq.network.ports = []
@@ -1719,9 +1836,15 @@ class TestDnsmasq(TestBase):
         mac1 = '00:00:80:aa:bb:cc'
         ip2 = '192.168.0.3'
         mac2 = '00:00:80:cc:bb:aa'
+        ip6 = '2001:0db8:11a3:09d7:1f34:8a2e:07a0:765d'
 
         old_leases = set([(ip1, mac1, None), (ip2, mac2, None)])
         dnsmasq._read_hosts_file_leases = mock.Mock(return_value=old_leases)
+        dnsmasq._read_v6_leases_file_leases = mock.Mock(
+            return_value={ip6: {'iaid': 0xff,
+                                'client_id': 'client_id',
+                                'server_id': 'server_id'}
+                          })
         dnsmasq._output_hosts_file = mock.Mock()
         dnsmasq._release_lease = mock.Mock()
         dnsmasq.network.ports = [FakePort1()]
@@ -1740,10 +1863,16 @@ class TestDnsmasq(TestBase):
         ip2 = '192.168.0.5'
         mac2 = '00:00:0f:aa:bb:55'
         client_id2 = 'test5'
+        ip6 = '2001:0db8:11a3:09d7:1f34:8a2e:07a0:765d'
 
         old_leases = set([(ip1, mac1, client_id1), (ip2, mac2, client_id2)])
         dnsmasq._read_hosts_file_leases = mock.Mock(return_value=old_leases)
         dnsmasq._output_hosts_file = mock.Mock()
+        dnsmasq._read_v6_leases_file_leases = mock.Mock(
+            return_value={ip6: {'iaid': 0xff,
+                                'client_id': 'client_id',
+                                'server_id': 'server_id'}
+                          })
         dnsmasq._release_lease = mock.Mock()
         dnsmasq.network.ports = [FakePort5()]
 
@@ -1798,6 +1927,51 @@ class TestDnsmasq(TestBase):
                               ("fdca:3ba5:a17a::1", "00:00:80:aa:bb:cc",
                               'client2')]), leases)
 
+    def test_read_v6_leases_file_leases(self):
+        filename = '/path/to/file'
+        lines = [
+                "1472673289 aa:bb:cc:00:00:01 192.168.1.2 host-192-168-1-2 *",
+                "1472673289 aa:bb:cc:00:00:01 192.168.1.3 host-192-168-1-3 *",
+                "1472673289 aa:bb:cc:00:00:01 192.168.1.4 host-192-168-1-4 *",
+                "duid 00:01:00:01:02:03:04:05:06:07:08:09:0a:0b",
+                "1472597740 1044800001 [2001:DB8::a] host-2001-db8--a "
+                "00:04:4a:d0:d2:34:19:2b:49:08:84:e8:34:bd:0c:dc:b9:3b",
+                "1472597823 1044800002 [2001:DB8::b] host-2001-db8--b "
+                "00:04:ce:96:53:3d:f2:c2:4c:4c:81:7d:db:c9:8d:d2:74:22:3b:0a",
+                "1472599048 1044800003 [2001:DB8::c] host-2001-db8--c "
+                "00:04:4f:f0:cd:ca:5e:77:41:bc:9d:7f:5c:33:31:37:5d:80:77:b4"
+                 ]
+        mock_open = self.useFixture(
+            tools.OpenFixture(filename, '\n'.join(lines))).mock_open
+
+        dnsmasq = self._get_dnsmasq(FakeDualNetwork())
+        with mock.patch('os.path.exists', return_value=True):
+            leases = dnsmasq._read_v6_leases_file_leases(filename)
+        server_id = '00:01:00:01:02:03:04:05:06:07:08:09:0a:0b'
+        entry1 = {'iaid': '1044800001',
+                  'client_id': '00:04:4a:d0:d2:34:19:2b:49:08:84:'
+                               'e8:34:bd:0c:dc:b9:3b',
+                  'server_id': server_id
+                  }
+
+        entry2 = {'iaid': '1044800002',
+                  'client_id': '00:04:ce:96:53:3d:f2:c2:4c:4c:81:'
+                               '7d:db:c9:8d:d2:74:22:3b:0a',
+                  'server_id': server_id
+                  }
+        entry3 = {'iaid': '1044800003',
+                  'client_id': '00:04:4f:f0:cd:ca:5e:77:41:bc:9d:'
+                               '7f:5c:33:31:37:5d:80:77:b4',
+                  'server_id': server_id
+                  }
+        expected = {'2001:DB8::a': entry1,
+                    '2001:DB8::b': entry2,
+                    '2001:DB8::c': entry3
+                    }
+
+        self.assertEqual(expected, leases)
+        mock_open.assert_called_once_with(filename)
+
     def test_make_subnet_interface_ip_map(self):
         with mock.patch('neutron.agent.linux.ip_lib.IPDevice') as ip_dev:
             ip_dev.return_value.addr.list.return_value = [
@@ -1837,14 +2011,14 @@ class TestDnsmasq(TestBase):
         with mock.patch('os.listdir') as mock_listdir:
             with mock.patch.object(dhcp.Dnsmasq, 'active') as mock_active:
                 mock_active.__get__ = active_fake
-                mock_listdir.return_value = cases.keys()
+                mock_listdir.return_value = list(cases)
 
                 result = dhcp.Dnsmasq.existing_dhcp_networks(self.conf)
 
                 mock_listdir.assert_called_once_with(path)
-                self.assertEqual(['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-                                  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'],
-                                 sorted(result))
+                self.assertItemsEqual(['aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+                                       'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'],
+                                      result)
 
     def test__output_hosts_file_log_only_twice(self):
         dm = self._get_dnsmasq(FakeDualStackNetworkSingleDHCP())
@@ -2046,6 +2220,10 @@ class TestDeviceManager(TestConfBase):
                                     'ip_address': 'unique-IP-address'})
                     for ip in port.fixed_ips
                 ]
+                # server rudely gave us an extra address we didn't ask for
+                port.fixed_ips.append(dhcp.DictModel(
+                    {'subnet_id': 'ffffffff-6666-6666-6666-ffffffffffff',
+                     'ip_address': '2003::f816:3eff:fe45:e893'}))
                 return port
 
             plugin.create_dhcp_port.side_effect = mock_create
@@ -2130,11 +2308,11 @@ class TestDeviceManager(TestConfBase):
             plugin.update_dhcp_port.assert_called_with(reserved_port.id,
                                                        mock.ANY)
 
-            except_ips = ['192.168.0.6/24']
+            expect_ips = ['192.168.0.6/24', 'fdca:3ba5:a17a:4ba3::2/64']
             if enable_isolated_metadata or force_metadata:
-                except_ips.append(dhcp.METADATA_DEFAULT_CIDR)
+                expect_ips.append(dhcp.METADATA_DEFAULT_CIDR)
             mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                                  except_ips,
+                                                  expect_ips,
                                                   namespace='qdhcp-ns')
 
     def test_setup_reserved_and_disable_metadata(self):
@@ -2202,9 +2380,9 @@ class TestDeviceManager(TestConfBase):
             plugin.update_dhcp_port.assert_called_with(reserved_port_2.id,
                                                        mock.ANY)
 
-            mgr.driver.init_l3.assert_called_with('ns-XXX',
-                                                  ['192.168.0.6/24'],
-                                                  namespace='qdhcp-ns')
+            mgr.driver.init_l3.assert_called_with(
+                'ns-XXX', ['192.168.0.6/24', 'fdca:3ba5:a17a:4ba3::2/64'],
+                namespace='qdhcp-ns')
 
 
 class TestDictModel(base.BaseTestCase):

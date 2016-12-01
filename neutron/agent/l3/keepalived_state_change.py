@@ -16,7 +16,6 @@ import os
 import sys
 
 import httplib2
-import netaddr
 from oslo_config import cfg
 from oslo_log import log as logging
 import requests
@@ -24,17 +23,13 @@ import requests
 from neutron._i18n import _, _LE
 from neutron.agent.l3 import ha
 from neutron.agent.linux import daemon
-from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ip_monitor
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import config
+from neutron.conf.agent.l3 import keepalived
 
 
 LOG = logging.getLogger(__name__)
-
-
-class L3HAConfig(object):
-    send_arp_for_ha = 3
 
 
 class KeepalivedUnixDomainConnection(agent_utils.UnixDomainHTTPConnection):
@@ -55,21 +50,20 @@ class MonitorDaemon(daemon.Daemon):
         self.conf_dir = conf_dir
         self.interface = interface
         self.cidr = cidr
-        self.monitor = None
         super(MonitorDaemon, self).__init__(pidfile, uuid=router_id,
                                             user=user, group=group)
 
     def run(self, run_as_root=False):
-        self.monitor = ip_monitor.IPMonitor(namespace=self.namespace,
-                                            run_as_root=run_as_root)
-        self.monitor.start()
+        monitor = ip_monitor.IPMonitor(namespace=self.namespace,
+                                       run_as_root=run_as_root)
+        monitor.start()
         # Only drop privileges if the process is currently running as root
         # (The run_as_root variable name here is unfortunate - It means to
         # use a root helper when the running process is NOT already running
         # as root
         if not run_as_root:
             super(MonitorDaemon, self).run()
-        for iterable in self.monitor:
+        for iterable in monitor:
             self.parse_and_handle_event(iterable)
 
     def parse_and_handle_event(self, iterable):
@@ -79,15 +73,6 @@ class MonitorDaemon(daemon.Daemon):
                 new_state = 'master' if event.added else 'backup'
                 self.write_state_change(new_state)
                 self.notify_agent(new_state)
-            elif event.interface != self.interface and event.added:
-                # Send GARPs for all new router interfaces.
-                # REVISIT(jlibosva): keepalived versions 1.2.19 and below
-                # contain bug where gratuitous ARPs are not sent on receiving
-                # SIGHUP signal. This is a workaround to this bug. keepalived
-                # has this issue fixed since 1.2.20 but the version is not
-                # packaged in some distributions (RHEL/CentOS/Ubuntu Xenial).
-                # Remove this code once new keepalived versions are available.
-                self.send_garp(event)
         except Exception:
             LOG.exception(_LE(
                 'Failed to process or handle event for line %s'), iterable)
@@ -112,53 +97,17 @@ class MonitorDaemon(daemon.Daemon):
 
         LOG.debug('Notified agent router %s, state %s', self.router_id, state)
 
-    def send_garp(self, event):
-        """Send gratuitous ARP for given event."""
-        ip_lib.send_ip_addr_adv_notif(
-            self.namespace,
-            event.interface,
-            str(netaddr.IPNetwork(event.cidr).ip),
-            L3HAConfig,
-            log_exception=False
-        )
-
-
-def register_opts(conf):
-    conf.register_cli_opt(
-        cfg.StrOpt('router_id', help=_('ID of the router')))
-    conf.register_cli_opt(
-        cfg.StrOpt('namespace', help=_('Namespace of the router')))
-    conf.register_cli_opt(
-        cfg.StrOpt('conf_dir', help=_('Path to the router directory')))
-    conf.register_cli_opt(
-        cfg.StrOpt('monitor_interface', help=_('Interface to monitor')))
-    conf.register_cli_opt(
-        cfg.StrOpt('monitor_cidr', help=_('CIDR to monitor')))
-    conf.register_cli_opt(
-        cfg.StrOpt('pid_file', help=_('Path to PID file for this process')))
-    conf.register_cli_opt(
-        cfg.StrOpt('user', help=_('User (uid or name) running this process '
-                                  'after its initialization')))
-    conf.register_cli_opt(
-        cfg.StrOpt('group', help=_('Group (gid or name) running this process '
-                                   'after its initialization')))
-    conf.register_opt(
-        cfg.StrOpt('metadata_proxy_socket',
-                   default='$state_path/metadata_proxy',
-                   help=_('Location of Metadata Proxy UNIX domain '
-                          'socket')))
-
 
 def configure(conf):
     config.init(sys.argv[1:])
     conf.set_override('log_dir', cfg.CONF.conf_dir)
     conf.set_override('debug', True)
-    conf.set_override('verbose', True)
     config.setup_logging()
 
 
 def main():
-    register_opts(cfg.CONF)
+    keepalived.register_cli_l3_agent_keepalived_opts()
+    keepalived.register_l3_agent_keepalived_opts()
     configure(cfg.CONF)
     MonitorDaemon(cfg.CONF.pid_file,
                   cfg.CONF.router_id,

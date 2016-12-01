@@ -25,7 +25,6 @@ from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.common import utils
 from neutron.tests.common import net_helpers
-from neutron.tests.functional.agent.linux import base
 from neutron.tests.functional import base as functional_base
 
 LOG = logging.getLogger(__name__)
@@ -52,11 +51,11 @@ class IpLibTestFramework(functional_base.BaseSudoTestCase):
 
     def generate_device_details(self, name=None, ip_cidrs=None,
                                 mac_address=None, namespace=None):
-        return Device(name or base.get_rand_name(),
+        return Device(name or utils.get_rand_name(),
                       ip_cidrs or ["%s/24" % TEST_IP],
                       mac_address or
                       utils.get_random_mac('fa:16:3e:00:00:00'.split(':')),
-                      namespace or base.get_rand_name())
+                      namespace or utils.get_rand_name())
 
     def _safe_delete_device(self, device):
         try:
@@ -96,6 +95,9 @@ class IpLibTestCase(IpLibTestFramework):
 
         self.assertTrue(
             ip_lib.device_exists(device.name, namespace=attr.namespace))
+
+        self.assertFalse(
+            ip_lib.device_exists(attr.name, namespace='wrong_namespace'))
 
         device.link.delete()
 
@@ -182,27 +184,9 @@ class IpLibTestCase(IpLibTestFramework):
 
     def test_dummy_exists(self):
         namespace = self.useFixture(net_helpers.NamespaceFixture())
-        dev_name = base.get_rand_name()
+        dev_name = utils.get_rand_name()
         device = namespace.ip_wrapper.add_dummy(dev_name)
         self.addCleanup(self._safe_delete_device, device)
         self._check_for_device_name(namespace.ip_wrapper, dev_name, True)
         device.link.delete()
         self._check_for_device_name(namespace.ip_wrapper, dev_name, False)
-
-
-class TestSetIpNonlocalBind(functional_base.BaseSudoTestCase):
-    def test_assigned_value(self):
-        namespace = self.useFixture(net_helpers.NamespaceFixture())
-        for expected in (0, 1):
-            try:
-                ip_lib.set_ip_nonlocal_bind(expected, namespace.name)
-            except RuntimeError as rte:
-                stat_message = (
-                    'cannot stat /proc/sys/net/ipv4/ip_nonlocal_bind')
-                if stat_message in str(rte):
-                    raise self.skipException(
-                        "This kernel doesn't support %s in network "
-                        "namespaces." % ip_lib.IP_NONLOCAL_BIND)
-                raise
-            observed = ip_lib.get_ip_nonlocal_bind(namespace.name)
-            self.assertEqual(expected, observed)

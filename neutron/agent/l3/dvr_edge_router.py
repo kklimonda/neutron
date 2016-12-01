@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants as lib_constants
 from oslo_log import log as logging
 
 from neutron._i18n import _LE
@@ -20,7 +21,6 @@ from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
-from neutron.common import constants as l3_constants
 
 LOG = logging.getLogger(__name__)
 
@@ -156,8 +156,8 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         self.snat_iptables_manager = iptables_manager.IptablesManager(
             namespace=snat_ns.name,
             use_ipv6=self.use_ipv6)
-        # kicks the FW Agent to add rules for the snat namespace
-        self.agent.process_router_add(self)
+
+        self._initialize_address_scope_iptables(self.snat_iptables_manager)
 
     def _create_snat_namespace(self):
         # TODO(mlavalle): in the near future, this method should contain the
@@ -235,8 +235,8 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         if external_port:
             external_port_scopemark = self._get_port_devicename_scopemark(
                 [external_port], self.get_external_device_name)
-            for ip_version in (l3_constants.IP_VERSION_4,
-                               l3_constants.IP_VERSION_6):
+            for ip_version in (lib_constants.IP_VERSION_4,
+                               lib_constants.IP_VERSION_6):
                 ports_scopemark[ip_version].update(
                     external_port_scopemark[ip_version])
 

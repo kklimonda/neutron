@@ -14,6 +14,7 @@
 
 import sys
 
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -27,10 +28,11 @@ from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.common import config
 from neutron.agent import rpc as agent_rpc
 from neutron.common import config as common_config
-from neutron.common import constants as constants
+from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
+from neutron.conf.services import metering_agent
 from neutron import context
 from neutron import manager
 from neutron import service as neutron_service
@@ -61,17 +63,6 @@ class MeteringPluginRpc(object):
 
 
 class MeteringAgent(MeteringPluginRpc, manager.Manager):
-
-    Opts = [
-        cfg.StrOpt('driver',
-                   default='neutron.services.metering.drivers.noop.'
-                   'noop_driver.NoopMeteringDriver',
-                   help=_("Metering driver")),
-        cfg.IntOpt('measure_interval', default=30,
-                   help=_("Interval between two metering measures")),
-        cfg.IntOpt('report_interval', default=300,
-                   help=_("Interval between two metering reports")),
-    ]
 
     def __init__(self, host, conf=None):
         self.conf = conf or cfg.CONF
@@ -145,12 +136,11 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
         self.label_tenant_id = {}
         for router in self.routers.values():
             tenant_id = router['tenant_id']
-            labels = router.get(constants.METERING_LABEL_KEY, [])
+            labels = router.get(n_const.METERING_LABEL_KEY, [])
             for label in labels:
                 label_id = label['id']
                 self.label_tenant_id[label_id] = tenant_id
 
-            tenant_id = self.label_tenant_id.get
         accs = self._get_traffic_counters(self.context, self.routers.values())
         if not accs:
             return
@@ -289,7 +279,7 @@ class MeteringAgentWithStateReport(MeteringAgent):
 
 def main():
     conf = cfg.CONF
-    conf.register_opts(MeteringAgent.Opts)
+    metering_agent.register_metering_agent_opts()
     config.register_agent_state_opts_helper(conf)
     common_config.init(sys.argv[1:])
     config.setup_logging()

@@ -14,10 +14,16 @@
 #    under the License.
 
 import mock
+import netaddr
+from neutron_lib import constants
+import webob.exc
 
-from neutron.common import constants
+from neutron.db import db_base_plugin_v2
 from neutron.db import ipam_backend_mixin
+from neutron.db import portbindings_db
+from neutron.extensions import portbindings
 from neutron.tests import base
+from neutron.tests.unit.db import test_db_base_plugin_v2
 
 
 class TestIpamBackendMixin(base.BaseTestCase):
@@ -65,13 +71,24 @@ class TestIpamBackendMixin(base.BaseTestCase):
 
         self.mixin._get_subnet = mock.Mock(side_effect=_get_subnet)
 
-    def _test_get_changed_ips_for_port(self, expected_change, original_ips,
+    def _test_get_changed_ips_for_port(self, expected, original_ips,
                                        new_ips, owner):
         change = self.mixin._get_changed_ips_for_port(self.ctx,
                                                       original_ips,
                                                       new_ips,
                                                       owner)
-        self.assertEqual(expected_change, change)
+
+        def assertUnorderedListOfDictEqual(a, b):
+            # Dicts are unorderable in py34. Return something orderable.
+            def key(d):
+                return sorted(d.items())
+
+            # Compare the sorted lists since the order isn't deterministic
+            self.assertEqual(sorted(a, key=key), sorted(b, key=key))
+
+        assertUnorderedListOfDictEqual(expected.add, change.add)
+        assertUnorderedListOfDictEqual(expected.original, change.original)
+        assertUnorderedListOfDictEqual(expected.remove, change.remove)
 
     def test__get_changed_ips_for_port(self):
         new_ips = self._prepare_ips(self.default_new_ips)
@@ -161,6 +178,86 @@ class TestIpamBackendMixin(base.BaseTestCase):
         self._mock_slaac_subnet_on()
         self._test_get_changed_ips_for_port_no_ip_address()
 
+    def test__get_changed_ips_for_port_subnet_id_no_ip(self):
+        # If a subnet is specified without an IP address only allocate a new
+        # address if one doesn't exist
+        self._mock_slaac_subnet_off()
+        new_ips = [{'subnet_id': 'id-3'}]
+        original_ips = [{'subnet_id': 'id-3', 'ip_address': '4.3.2.1'}]
+
+        expected_change = self.mixin.Changes(
+            add=[],
+            original=[{'subnet_id': 'id-3', 'ip_address': '4.3.2.1'}],
+            remove=[])
+        self._test_get_changed_ips_for_port(expected_change, original_ips,
+                                            new_ips, self.owner_non_router)
+
+    def test__get_changed_ips_for_port_multiple_ips_one_subnet_add_third(self):
+        # If a subnet is specified without an IP address only allocate a new
+        # address if one doesn't exist
+        self._mock_slaac_subnet_off()
+        new_ips = [{'subnet_id': 'id-3', 'ip_address': '4.3.2.1'},
+                   {'subnet_id': 'id-3'},
+                   {'subnet_id': 'id-3', 'ip_address': '4.3.2.10'}]
+        original_ips = [{'subnet_id': 'id-3', 'ip_address': '4.3.2.1'},
+                        {'subnet_id': 'id-3', 'ip_address': '4.3.2.10'}]
+
+        expected_change = self.mixin.Changes(
+            add=[{'subnet_id': 'id-3'}],
+            original=[{'subnet_id': 'id-3', 'ip_address': '4.3.2.1'},
+                      {'subnet_id': 'id-3', 'ip_address': '4.3.2.10'}],
+            remove=[])
+        self._test_get_changed_ips_for_port(expected_change, original_ips,
+                                            new_ips, self.owner_non_router)
+
+    def test__get_changed_ips_for_port_multiple_ips_one_subnet_noip(self):
+        # If a subnet is specified without an IP address only allocate a new
+        # address if one doesn't exist
+        self._mock_slaac_subnet_off()
+        new_ips = [{'subnet_id': 'id-3'},
+                   {'subnet_id': 'id-3'}]
+        original_ips = [{'subnet_id': 'id-3', 'ip_address': '4.3.2.1'},
+                        {'subnet_id': 'id-3', 'ip_address': '4.3.2.10'}]
+
+        expected_change = self.mixin.Changes(
+            add=[],
+            original=[{'subnet_id': 'id-3', 'ip_address': '4.3.2.1'},
+                      {'subnet_id': 'id-3', 'ip_address': '4.3.2.10'}],
+            remove=[])
+        self._test_get_changed_ips_for_port(expected_change, original_ips,
+                                            new_ips, self.owner_non_router)
+
+    def test__get_changed_ips_for_port_subnet_id_no_ip_ipv6(self):
+        # If a subnet is specified without an IP address only allocate a new
+        # address if one doesn't exist
+        self._mock_slaac_subnet_off()
+        new_ips = [{'subnet_id': 'id-3'}]
+        original_ips = [{'subnet_id': 'id-3', 'ip_address': '2001:db8::8'}]
+
+        expected_change = self.mixin.Changes(
+            add=[],
+            original=[{'subnet_id': 'id-3', 'ip_address': '2001:db8::8'}],
+            remove=[])
+        self._test_get_changed_ips_for_port(expected_change, original_ips,
+                                            new_ips, self.owner_non_router)
+
+    def test__get_changed_ips_for_port_subnet_id_no_ip_eui64(self):
+        # If a subnet is specified without an IP address allocate a new address
+        # if the address is eui-64. This supports changing prefix when prefix
+        # delegation is in use.
+        self._mock_slaac_subnet_off()
+        new_ips = [{'subnet_id': 'id-3'}]
+        original_ips = [{'subnet_id': 'id-3',
+                         'ip_address': '2001::eeb1:d7ff:fe2c:9c5f'}]
+
+        expected_change = self.mixin.Changes(
+            add=[{'subnet_id': 'id-3'}],
+            original=[],
+            remove=[{'subnet_id': 'id-3',
+                     'ip_address': '2001::eeb1:d7ff:fe2c:9c5f'}])
+        self._test_get_changed_ips_for_port(expected_change, original_ips,
+                                            new_ips, self.owner_non_router)
+
     def test__is_ip_required_by_subnet_for_router_port(self):
         # Owner -> router:
         # _get_subnet should not be called,
@@ -193,3 +290,64 @@ class TestIpamBackendMixin(base.BaseTestCase):
                                                       self.owner_non_router)
         self.assertFalse(result)
         self.assertTrue(self.mixin._get_subnet.called)
+
+
+class TestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
+                 portbindings_db.PortBindingMixin):
+    __native_pagination_support = True
+    __native_sorting_support = True
+
+    supported_extension_aliases = ["binding"]
+
+    def get_plugin_description(self):
+        return "Test Plugin"
+
+    @classmethod
+    def get_plugin_type(cls):
+        return "test_plugin"
+
+    def create_port(self, context, port):
+        port_dict = super(TestPlugin, self).create_port(context, port)
+        self._process_portbindings_create_and_update(
+            context, port['port'], port_dict)
+        return port_dict
+
+
+class TestPortUpdateIpam(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
+    def setUp(self, plugin=None):
+        if not plugin:
+            plugin = 'neutron.tests.unit.db.test_ipam_backend_mixin.TestPlugin'
+        super(TestPortUpdateIpam, self).setUp(plugin=plugin)
+
+    def test_port_update_allocate_from_net_subnet(self):
+        """Tests that a port can get address by updating fixed_ips"""
+        with self.network() as network:
+            pass
+
+        # Create a bound port with no IP address (since there is not subnet)
+        response = self._create_port(self.fmt,
+                                     net_id=network['network']['id'],
+                                     tenant_id=network['network']['tenant_id'],
+                                     arg_list=(portbindings.HOST_ID,),
+                                     **{portbindings.HOST_ID: 'fakehost'})
+        port = self.deserialize(self.fmt, response)
+
+        # Create the subnet and try to update the port to get an IP
+        with self.subnet(network=network) as subnet:
+            data = {'port': {
+                'fixed_ips': [{'subnet_id': subnet['subnet']['id']}]}}
+            port_id = port['port']['id']
+            port_req = self.new_update_request('ports', data, port_id)
+            response = port_req.get_response(self.api)
+            res = self.deserialize(self.fmt, response)
+
+        self.assertEqual(webob.exc.HTTPOk.code, response.status_int)
+        self.assertEqual(1, len(res['port']['fixed_ips']))
+        ip = res['port']['fixed_ips'][0]['ip_address']
+        ip_net = netaddr.IPNetwork(subnet['subnet']['cidr'])
+        self.assertIn(ip, ip_net)
+
+
+class TestPortUpdateIpamML2(TestPortUpdateIpam):
+    def setUp(self):
+        super(TestPortUpdateIpamML2, self).setUp(plugin='ml2')

@@ -17,6 +17,7 @@ import mock
 from oslo_config import cfg
 from oslo_policy import policy as oslo_policy
 from oslo_serialization import jsonutils
+from oslo_utils import uuidutils
 
 from neutron.api.v2 import attributes
 from neutron import context
@@ -221,7 +222,7 @@ class TestPolicyEnforcementHook(test_functional.PecanFunctionalTest):
         self.assertNotIn('restricted_attr', json_response['mehs'][0])
 
 
-class TestDHCPNotifierHook(test_functional.PecanFunctionalTest):
+class DHCPNotifierTestBase(test_functional.PecanFunctionalTest):
 
     def setUp(self):
         # the DHCP notifier needs to be mocked so that correct operations can
@@ -231,29 +232,42 @@ class TestDHCPNotifierHook(test_functional.PecanFunctionalTest):
         patcher = mock.patch('neutron.api.rpc.agentnotifiers.'
                              'dhcp_rpc_agent_api.DhcpAgentNotifyAPI.notify')
         self.mock_notifier = patcher.start()
-        super(TestDHCPNotifierHook, self).setUp()
+        super(DHCPNotifierTestBase, self).setUp()
+
+
+class TestDHCPNotifierHookNegative(DHCPNotifierTestBase):
+
+    def setUp(self):
+        cfg.CONF.set_override('dhcp_agent_notification', False)
+        super(TestDHCPNotifierHookNegative, self).setUp()
 
     def test_dhcp_notifications_disabled(self):
-        cfg.CONF.set_override('dhcp_agent_notification', False)
         self.app.post_json(
             '/v2.0/networks.json',
             params={'network': {'name': 'meh'}},
             headers={'X-Project-Id': 'tenid'})
         self.assertEqual(0, self.mock_notifier.call_count)
 
+
+class TestDHCPNotifierHook(DHCPNotifierTestBase):
+
     def test_get_does_not_trigger_notification(self):
         self.do_request('/v2.0/networks', tenant_id='tenid')
         self.assertEqual(0, self.mock_notifier.call_count)
 
     def test_post_put_delete_triggers_notification(self):
+        ctx = context.get_admin_context()
+        plugin = manager.NeutronManager.get_plugin()
+
         req_headers = {'X-Project-Id': 'tenid', 'X-Roles': 'admin'}
         response = self.app.post_json(
             '/v2.0/networks.json',
             params={'network': {'name': 'meh'}}, headers=req_headers)
         self.assertEqual(201, response.status_int)
         json_body = jsonutils.loads(response.body)
+        net = {'network': plugin.get_network(ctx, json_body['network']['id'])}
         self.assertEqual(1, self.mock_notifier.call_count)
-        self.assertEqual(mock.call(mock.ANY, json_body, 'network.create.end'),
+        self.assertEqual(mock.call(mock.ANY, net, 'network.create.end'),
                          self.mock_notifier.mock_calls[-1])
         network_id = json_body['network']['id']
 
@@ -263,8 +277,9 @@ class TestDHCPNotifierHook(test_functional.PecanFunctionalTest):
             headers=req_headers)
         self.assertEqual(200, response.status_int)
         json_body = jsonutils.loads(response.body)
+        net = {'network': plugin.get_network(ctx, json_body['network']['id'])}
         self.assertEqual(2, self.mock_notifier.call_count)
-        self.assertEqual(mock.call(mock.ANY, json_body, 'network.update.end'),
+        self.assertEqual(mock.call(mock.ANY, net, 'network.update.end'),
                          self.mock_notifier.mock_calls[-1])
 
         response = self.app.delete(
@@ -301,6 +316,16 @@ class TestNovaNotifierHook(test_functional.PecanFunctionalTest):
         self.mock_notifier = patcher.start()
         super(TestNovaNotifierHook, self).setUp()
 
+    def test_nova_notification_skips_on_failure(self):
+        req_headers = {'X-Project-Id': 'tenid', 'X-Roles': 'admin'}
+        response = self.app.put_json(
+            '/v2.0/networks/%s.json' % uuidutils.generate_uuid(),
+            params={'network': {'name': 'meh-2'}},
+            headers=req_headers,
+            expect_errors=True)
+        self.assertEqual(404, response.status_int)
+        self.assertFalse(self.mock_notifier.called)
+
     def test_nova_notifications_disabled(self):
         cfg.CONF.set_override('notify_nova_on_port_data_changes', False)
         self.app.post_json(
@@ -324,7 +349,9 @@ class TestNovaNotifierHook(test_functional.PecanFunctionalTest):
         # NOTE(kevinbenton): the original passed into the notifier does
         # not contain all of the fields of the object. Only those required
         # by the policy engine are included.
-        orig = pe.fetch_resource(context.get_admin_context(),
+        controller = manager.NeutronManager.get_controller_for_resource(
+            'networks')
+        orig = pe.fetch_resource(context.get_admin_context(), controller,
                                  'network', network_id)
         response = self.app.put_json(
             '/v2.0/networks/%s.json' % network_id,
@@ -336,7 +363,7 @@ class TestNovaNotifierHook(test_functional.PecanFunctionalTest):
                                                    orig, json_body)
         self.mock_notifier.reset_mock()
 
-        orig = pe.fetch_resource(context.get_admin_context(),
+        orig = pe.fetch_resource(context.get_admin_context(), controller,
                                  'network', network_id)
         response = self.app.delete(
             '/v2.0/networks/%s.json' % network_id, headers=req_headers)

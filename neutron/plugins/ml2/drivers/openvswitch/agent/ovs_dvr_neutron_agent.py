@@ -15,13 +15,14 @@
 
 import sys
 
+from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
+from osprofiler import profiler
 
 from neutron._i18n import _LE, _LI, _LW
-from neutron.common import constants as n_const
 from neutron.common import utils as n_utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
@@ -112,6 +113,7 @@ class OVSPort(object):
         return self.ofport
 
 
+@profiler.trace_cls("ovs_dvr_agent")
 class OVSDVRNeutronAgent(object):
     '''
     Implements OVS-based DVR(Distributed Virtual Router), for overlay networks.
@@ -202,8 +204,6 @@ class OVSDVRNeutronAgent(object):
 
     def setup_dvr_flows_on_integ_br(self):
         '''Setup up initial dvr flows into br-int'''
-        if not self.in_distributed_mode():
-            return
 
         LOG.info(_LI("L2 Agent operating in DVR Mode with MAC %s"),
                  self.dvr_mac_address)
@@ -232,7 +232,7 @@ class OVSDVRNeutronAgent(object):
 
     def setup_dvr_flows_on_tun_br(self):
         '''Setup up initial dvr flows into br-tun'''
-        if not self.enable_tunneling or not self.in_distributed_mode():
+        if not self.enable_tunneling:
             return
 
         self.tun_br.install_goto(dest_table_id=constants.DVR_PROCESS,
@@ -248,8 +248,6 @@ class OVSDVRNeutronAgent(object):
 
     def setup_dvr_flows_on_phys_br(self):
         '''Setup up initial dvr flows into br-phys'''
-        if not self.in_distributed_mode():
-            return
 
         for physical_network in self.bridge_mappings:
             self.phys_brs[physical_network].install_goto(
@@ -311,10 +309,6 @@ class OVSDVRNeutronAgent(object):
         self.registered_dvr_macs.remove(mac)
 
     def setup_dvr_mac_flows_on_all_brs(self):
-        if not self.in_distributed_mode():
-            LOG.debug("Not in distributed mode, ignoring invocation "
-                      "of get_dvr_mac_address_list() ")
-            return
         dvr_macs = self.plugin_rpc.get_dvr_mac_address_list(self.context)
         LOG.debug("L2 Agent DVR: Received these MACs: %r", dvr_macs)
         for mac in dvr_macs:
@@ -363,8 +357,15 @@ class OVSDVRNeutronAgent(object):
         # IP, directly use fixed_ips[0]
         fixed_ip = fixed_ips[0]
         subnet_uuid = fixed_ip['subnet_id']
+        csnat_ofport = constants.OFPORT_INVALID
+        ldm = None
         if subnet_uuid in self.local_dvr_map:
             ldm = self.local_dvr_map[subnet_uuid]
+            csnat_ofport = ldm.get_csnat_ofport()
+            if csnat_ofport == constants.OFPORT_INVALID:
+                LOG.error(_LE("DVR: Duplicate DVR router interface detected "
+                              "for subnet %s"), subnet_uuid)
+                return
         else:
             # set up LocalDVRSubnetMapping available for this subnet
             subnet_info = self.plugin_rpc.get_subnet_for_dvr(
@@ -561,8 +562,8 @@ class OVSDVRNeutronAgent(object):
         if local_vlan_map.network_type not in (constants.TUNNEL_NETWORK_TYPES
                                                + [p_const.TYPE_VLAN]):
             LOG.debug("DVR: Port %s is with network_type %s not supported"
-                      " for dvr plumbing" % (port.vif_id,
-                                             local_vlan_map.network_type))
+                      " for dvr plumbing", port.vif_id,
+                      local_vlan_map.network_type)
             return
 
         if (port.vif_id in self.local_ports and

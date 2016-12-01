@@ -13,11 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import exceptions
 from oslo_utils import uuidutils
 
 from neutron.api import extensions
 from neutron.api.v2 import base
-from neutron.common import exceptions
 from neutron.db import servicetype_db
 from neutron.extensions import servicetype
 from neutron import manager
@@ -95,7 +95,8 @@ class DummyServicePlugin(service_base.ServicePluginBase):
         self.svctype_mgr = servicetype_db.ServiceTypeManager.get_instance()
         self.dummys = {}
 
-    def get_plugin_type(self):
+    @classmethod
+    def get_plugin_type(cls):
         return constants.DUMMY
 
     def get_plugin_description(self):

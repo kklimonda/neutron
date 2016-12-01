@@ -14,6 +14,7 @@
 #    under the License.
 
 import netaddr
+from neutron_lib.db import model_base
 from oslo_config import cfg
 from oslo_log import log as logging
 import sqlalchemy as sa
@@ -23,7 +24,6 @@ from neutron._i18n import _
 from neutron.common import utils
 from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
-from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.extensions import extraroute
 from neutron.extensions import l3
@@ -50,6 +50,7 @@ class RouterRoute(model_base.BASEV2, models_v2.Route):
                               backref=orm.backref("route_list",
                                                   lazy='joined',
                                                   cascade='delete'))
+    revises_on_change = ('router', )
 
 
 class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
