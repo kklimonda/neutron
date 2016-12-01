@@ -1,4 +1,4 @@
-neutron (2:9.1.1-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:9.1.1-0ubuntu1) zesty; urgency=medium
 
   [ Chuck Short ]
   * debian/patches/check-namespace-before-getting-devices.patch: Dropped
