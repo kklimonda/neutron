@@ -183,24 +183,18 @@ class IptablesTable(object):
             # so we keep a list of them to be iterated over in apply()
             self.remove_chains.add(name)
 
-            # first, add rules to remove that have a matching chain name
-            self.remove_rules += [str(r) for r in self.rules
-                                  if r.chain == name]
-
-        # next, remove rules from list that have a matching chain name
-        self.rules = [r for r in self.rules if r.chain != name]
-
-        if not wrap:
+            # Add rules to remove that have a matching chain name or
+            # a matching jump chain
             jump_snippet = '-j %s' % name
-            # next, add rules to remove that have a matching jump chain
             self.remove_rules += [str(r) for r in self.rules
-                                  if jump_snippet in r.rule]
+                                  if r.chain == name or jump_snippet in r.rule]
         else:
             jump_snippet = '-j %s-%s' % (self.wrap_name, name)
 
-        # finally, remove rules from list that have a matching jump chain
+        # Remove rules from list that have a matching chain name or
+        # a matching jump chain
         self.rules = [r for r in self.rules
-                      if jump_snippet not in r.rule]
+                      if r.chain != name and jump_snippet not in r.rule]
 
     def add_rule(self, chain, rule, wrap=True, top=False, tag=None,
                  comment=None):
@@ -567,11 +561,17 @@ class IptablesManager(object):
         # Sort the output chains here to make their order predictable.
         unwrapped_chains = sorted(table.unwrapped_chains)
         chains = sorted(table.chains)
+        rules = set(map(str, table.rules))
 
         # we don't want to change any rules that don't belong to us so we start
         # the new_filter with these rules
+        # there are some rules that belong to us but they don't have the wrap
+        # name. we want to add them in the right location in case our new rules
+        # changed the order
+        # (e.g. '-A FORWARD -j neutron-filter-top')
         new_filter = [line.strip() for line in current_lines
-                      if self.wrap_name not in line]
+                      if self.wrap_name not in line and
+                      line.strip() not in rules]
 
         # generate our list of chain names
         our_chains = [':%s-%s' % (self.wrap_name, name) for name in chains]
@@ -586,12 +586,6 @@ class IptablesManager(object):
         our_bottom_rules = []
         for rule in table.rules:
             rule_str = str(rule)
-            # similar to the unwrapped chains, there are some rules that belong
-            # to us but they don't have the wrap name. we want to remove them
-            # from the new_filter and then add them in the right location in
-            # case our new rules changed the order.
-            # (e.g. '-A FORWARD -j neutron-filter-top')
-            new_filter = [s for s in new_filter if rule_str not in s]
 
             if rule.top:
                 # rule.top == True means we want this rule to be at the top.

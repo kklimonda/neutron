@@ -21,9 +21,9 @@ import signal
 import sys
 import time
 
-import debtcollector
 import netaddr
 from neutron_lib import constants as n_const
+from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -41,15 +41,15 @@ from neutron.agent.common import polling
 from neutron.agent.common import utils
 from neutron.agent.l2 import l2_agent_extensions_manager as ext_manager
 from neutron.agent import rpc as agent_rpc
-from neutron.agent import securitygroups_rpc as sg_rpc
+from neutron.agent import securitygroups_rpc as agent_sg_rpc
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import dvr_rpc
+from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
 from neutron.callbacks import events as callback_events
 from neutron.callbacks import registry
 from neutron.common import config
 from neutron.common import constants as c_const
 from neutron.common import topics
-from neutron.common import utils as n_utils
 from neutron import context
 from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_const
@@ -72,10 +72,6 @@ cfg.CONF.import_group('AGENT', 'neutron.plugins.ml2.drivers.openvswitch.'
                       'agent.common.config')
 cfg.CONF.import_group('OVS', 'neutron.plugins.ml2.drivers.openvswitch.agent.'
                       'common.config')
-
-LocalVLANMapping = debtcollector.moves.moved_class(
-    vlanmanager.LocalVLANMapping, 'LocalVLANMapping', __name__,
-    version='Newton', removal_version='Ocata')
 
 
 class _mac_mydialect(netaddr.mac_unix):
@@ -204,6 +200,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             # The patch_int_ofport and patch_tun_ofport are updated
             # here inside the call to setup_tunnel_br()
             self.setup_tunnel_br(ovs_conf.tunnel_bridge)
+            self.setup_tunnel_br_flows()
 
         self.init_extension_manager(self.connection)
 
@@ -222,9 +219,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             self.enable_tunneling,
             self.enable_distributed_routing)
 
-        if self.enable_tunneling:
-            self.setup_tunnel_br_flows()
-
         if self.enable_distributed_routing:
             self.dvr_agent.setup_dvr_flows()
 
@@ -237,7 +231,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self._restore_local_vlan_map()
 
         # Security group agent support
-        self.sg_agent = sg_rpc.SecurityGroupAgentRpc(
+        self.sg_agent = agent_sg_rpc.SecurityGroupAgentRpc(
             self.context, self.sg_plugin_rpc, defer_refresh_firewall=True,
             integration_bridge=self.int_br)
 
@@ -295,15 +289,9 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
 
         self.quitting_rpc_timeout = agent_conf.quitting_rpc_timeout
 
-    @debtcollector.removals.removed_property(
-        version='Newton', removal_version='Ocata')
-    def local_vlan_map(self):
-        """Provide backward compatibility with local_vlan_map attribute"""
-        return self.vlan_manager.mapping
-
     def _parse_bridge_mappings(self, bridge_mappings):
         try:
-            return n_utils.parse_mappings(bridge_mappings)
+            return helpers.parse_mappings(bridge_mappings)
         except ValueError as e:
             raise ValueError(_("Parsing bridge_mappings failed: %s.") % e)
 
@@ -400,16 +388,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.ext_manager.initialize(
             connection, constants.EXTENSION_DRIVER_TYPE,
             self.agent_api)
-
-    @debtcollector.moves.moved_method(
-        'get_net_uuid',
-        'OVSNeutronAgent.get_net_uuid() moved to vlanmanager.LocalVlanManager',
-        removal_version='Ocata')
-    def get_net_uuid(self, vif_id):
-        try:
-            return self.vlan_manager.get_net_uuid(vif_id)
-        except vlanmanager.VifIdNotFound:
-            pass
 
     def port_update(self, context, **kwargs):
         port = kwargs.get('port')
@@ -809,9 +787,9 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
 
         vlan_mapping = {'net_uuid': net_uuid,
                         'network_type': network_type,
-                        'physical_network': physical_network}
+                        'physical_network': str(physical_network)}
         if segmentation_id is not None:
-            vlan_mapping['segmentation_id'] = segmentation_id
+            vlan_mapping['segmentation_id'] = str(segmentation_id)
         port_other_config.update(vlan_mapping)
         self.int_br.set_db_attribute("Port", port.port_name, "other_config",
                                      port_other_config)
@@ -833,7 +811,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             cur_info = info_by_port.get(port.port_name)
             if cur_info is not None and cur_info[0] != lvm.vlan:
                 other_config = cur_info[1] or {}
-                other_config['tag'] = lvm.vlan
+                other_config['tag'] = str(lvm.vlan)
                 self.int_br.set_db_attribute(
                     "Port", port.port_name, "other_config", other_config)
 
@@ -1625,6 +1603,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                  port_info.get('updated', set()))
         need_binding_devices = []
         security_disabled_ports = []
+        skipped_devices = set()
         if devices_added_updated:
             start = time.time()
             (skipped_devices, need_binding_devices,
@@ -1642,12 +1621,12 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                        'elapsed': time.time() - start})
             # Update the list of current ports storing only those which
             # have been actually processed.
-            port_info['current'] = (port_info['current'] -
-                                    set(skipped_devices))
+            skipped_devices = set(skipped_devices)
+            port_info['current'] = (port_info['current'] - skipped_devices)
 
         # TODO(salv-orlando): Optimize avoiding applying filters
         # unnecessarily, (eg: when there are no IP address changes)
-        added_ports = port_info.get('added', set())
+        added_ports = port_info.get('added', set()) - skipped_devices
         self._add_port_tag_info(need_binding_devices)
         if security_disabled_ports:
             added_ports -= set(security_disabled_ports)

@@ -13,8 +13,10 @@
 
 import abc
 
+from neutron_lib.api import extensions as api_extensions
 from neutron_lib.api import validators
 from neutron_lib import exceptions
+from neutron_lib.plugins import directory
 import six
 import webob.exc
 
@@ -23,7 +25,6 @@ from neutron.api import extensions
 from neutron.api.v2 import attributes
 from neutron.api.v2 import base
 from neutron.api.v2 import resource as api_resource
-from neutron import manager
 from neutron.services import service_base
 
 
@@ -66,7 +67,7 @@ def validate_tag(tag):
 
 def validate_tags(body):
     if 'tags' not in body:
-        raise exceptions.InvalidInput(error_message="Invalid tags body.")
+        raise exceptions.InvalidInput(error_message=_("Invalid tags body"))
     msg = validators.validate_list_of_unique_strings(body['tags'], MAX_TAG_LEN)
     if msg:
         raise exceptions.InvalidInput(error_message=msg)
@@ -74,8 +75,7 @@ def validate_tags(body):
 
 class TagController(object):
     def __init__(self):
-        self.plugin = (manager.NeutronManager.get_service_plugins()
-                       [TAG_PLUGIN_TYPE])
+        self.plugin = directory.get_plugin(TAG_PLUGIN_TYPE)
 
     def index(self, request, **kwargs):
         # GET /v2.0/networks/{network_id}/tags
@@ -122,7 +122,7 @@ class TagController(object):
         return self.plugin.delete_tags(request.context, parent, parent_id)
 
 
-class Tag(extensions.ExtensionDescriptor):
+class Tag(api_extensions.ExtensionDescriptor):
     """Extension class supporting tags."""
 
     @classmethod

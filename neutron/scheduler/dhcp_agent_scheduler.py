@@ -24,13 +24,14 @@ from oslo_log import log as logging
 from sqlalchemy import sql
 
 from neutron._i18n import _LI, _LW
-from neutron.db import agents_db
+from neutron.agent.common import utils as agent_utils
 from neutron.db import api as db_api
+from neutron.db.models import agent as agent_model
 from neutron.db.network_dhcp_agent_binding import models as ndab_model
 from neutron.extensions import availability_zone as az_ext
+from neutron.objects import network
 from neutron.scheduler import base_resource_filter
 from neutron.scheduler import base_scheduler
-from neutron.services.segments import db as segments_db
 
 LOG = logging.getLogger(__name__)
 
@@ -58,20 +59,20 @@ class AutoScheduler(object):
             if not net_ids:
                 LOG.debug('No non-hosted networks')
                 return False
-            query = context.session.query(agents_db.Agent)
-            query = query.filter(agents_db.Agent.agent_type ==
-                                 constants.AGENT_TYPE_DHCP,
-                                 agents_db.Agent.host == host,
-                                 agents_db.Agent.admin_state_up == sql.true())
+            query = context.session.query(agent_model.Agent)
+            query = query.filter(
+                agent_model.Agent.agent_type == constants.AGENT_TYPE_DHCP,
+                agent_model.Agent.host == host,
+                agent_model.Agent.admin_state_up == sql.true())
             dhcp_agents = query.all()
 
-            query = context.session.query(
-                segments_db.SegmentHostMapping.segment_id)
-            query = query.filter(segments_db.SegmentHostMapping.host == host)
-            segments_on_host = {s.segment_id for s in query}
+            segment_host_mapping = network.SegmentHostMapping.get_objects(
+                context, host=host)
+
+            segments_on_host = {s.segment_id for s in segment_host_mapping}
 
             for dhcp_agent in dhcp_agents:
-                if agents_db.AgentDbMixin.is_agent_down(
+                if agent_utils.is_agent_down(
                     dhcp_agent.heartbeat_timestamp):
                     LOG.warning(_LW('DHCP agent %s is not active'),
                                 dhcp_agent.id)
@@ -217,8 +218,8 @@ class DhcpFilter(base_resource_filter.BaseResourceFilter):
                     'hosted_agents': agents_dict['hosted_agents']}
         return agents_dict
 
-    def _filter_agents_with_network_access(self, hostable_agents, plugin,
-                                           context, network):
+    def _filter_agents_with_network_access(self, plugin, context,
+                                           network, hostable_agents):
         if 'candidate_hosts' in network:
             hostable_dhcp_hosts = network['candidate_hosts']
         else:
@@ -284,7 +285,7 @@ class DhcpFilter(base_resource_filter.BaseResourceFilter):
         ]
 
         hostable_dhcp_agents = self._filter_agents_with_network_access(
-            hostable_dhcp_agents, plugin, context, network)
+            plugin, context, network, hostable_dhcp_agents)
 
         if not hostable_dhcp_agents:
             return {'n_agents': 0, 'hostable_agents': [],

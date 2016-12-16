@@ -29,6 +29,7 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
 
     of_interface = None
     ovsdb_interface = None
+    arp_responder = False
 
     def setUp(self):
         host_descriptions = [
@@ -43,7 +44,8 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
         env = environment.Environment(
             environment.EnvironmentDescription(
                 network_type=self.network_type,
-                l2_pop=self.l2_pop),
+                l2_pop=self.l2_pop,
+                arp_responder=self.arp_responder),
             host_descriptions)
         super(BaseConnectivitySameNetworkTest, self).setUp(env)
 
@@ -54,21 +56,17 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
         self.safe_client.create_subnet(
             tenant_uuid, network['id'], '20.0.0.0/24')
 
-        vms = [
+        vms = machine.FakeFullstackMachinesList([
             self.useFixture(
                 machine.FakeFullstackMachine(
                     self.environment.hosts[i],
                     network['id'],
                     tenant_uuid,
                     self.safe_client))
-            for i in range(3)]
+            for i in range(3)])
 
-        for vm in vms:
-            vm.block_until_boot()
-
-        vms[0].block_until_ping(vms[1].ip)
-        vms[0].block_until_ping(vms[2].ip)
-        vms[1].block_until_ping(vms[2].ip)
+        vms.block_until_all_boot()
+        vms.ping_all()
 
 
 class TestOvsConnectivitySameNetwork(BaseConnectivitySameNetworkTest):
@@ -77,8 +75,9 @@ class TestOvsConnectivitySameNetwork(BaseConnectivitySameNetworkTest):
     network_scenarios = [
         ('VXLAN', {'network_type': 'vxlan',
                    'l2_pop': False}),
-        ('GRE and l2pop', {'network_type': 'gre',
-                           'l2_pop': True}),
+        ('GRE-l2pop-arp_responder', {'network_type': 'gre',
+                                     'l2_pop': True,
+                                     'arp_responder': True}),
         ('VLANs', {'network_type': 'vlan',
                    'l2_pop': False})]
     scenarios = testscenarios.multiply_scenarios(

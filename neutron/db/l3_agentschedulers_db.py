@@ -13,9 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import debtcollector
 from neutron_lib import constants
-from neutron_lib.db import model_base
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
@@ -29,19 +28,22 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy import sql
 
 from neutron._i18n import _, _LI
+from neutron.agent.common import utils as agent_utils
+from neutron.common import _deprecate
 from neutron.common import utils as n_utils
-from neutron.db import agents_db
 from neutron.db import agentschedulers_db
-from neutron.db import l3_attrs_db
+from neutron.db.models import agent as agent_model
+from neutron.db.models import l3_attrs
+from neutron.db.models import l3agent as rb_model
 from neutron.extensions import l3agentscheduler
 from neutron.extensions import router_availability_zone as router_az
-from neutron import manager
-from neutron.plugins.common import constants as service_constants
 
+
+_deprecate._moved_global('RouterL3AgentBinding',
+                         new_module=rb_model)
 
 LOG = logging.getLogger(__name__)
 
-LOWEST_BINDING_INDEX = 1
 
 L3_AGENTS_SCHEDULER_OPTS = [
     cfg.StrOpt('router_scheduler_driver',
@@ -59,27 +61,6 @@ L3_AGENTS_SCHEDULER_OPTS = [
 cfg.CONF.register_opts(L3_AGENTS_SCHEDULER_OPTS)
 
 
-class RouterL3AgentBinding(model_base.BASEV2):
-    """Represents binding between neutron routers and L3 agents."""
-
-    __table_args__ = (
-        sa.UniqueConstraint(
-            'router_id', 'binding_index',
-            name='uniq_router_l3_agent_binding0router_id0binding_index0'),
-        model_base.BASEV2.__table_args__
-    )
-
-    router_id = sa.Column(sa.String(36),
-                          sa.ForeignKey("routers.id", ondelete='CASCADE'),
-                          primary_key=True)
-    l3_agent = orm.relation(agents_db.Agent)
-    l3_agent_id = sa.Column(sa.String(36),
-                            sa.ForeignKey("agents.id", ondelete='CASCADE'),
-                            primary_key=True)
-    binding_index = sa.Column(sa.Integer, nullable=False,
-                              server_default=str(LOWEST_BINDING_INDEX))
-
-
 class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
                               agentschedulers_db.AgentSchedulerDbMixin):
     """Mixin class to add l3 agent scheduler extension to plugins
@@ -87,19 +68,6 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
     """
 
     router_scheduler = None
-
-    @debtcollector.removals.remove(
-        message="This will be removed in the O cycle. "
-                "Please use 'add_periodic_l3_agent_status_check' instead."
-    )
-    def start_periodic_l3_agent_status_check(self):
-        if not cfg.CONF.allow_automatic_l3agent_failover:
-            LOG.info(_LI("Skipping period L3 agent status check because "
-                         "automatic router rescheduling is disabled."))
-            return
-
-        self.add_agent_status_check(
-            self.reschedule_routers_from_down_agents)
 
     def add_periodic_l3_agent_status_check(self):
         if not cfg.CONF.allow_automatic_l3agent_failover:
@@ -123,16 +91,17 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
 
     def get_down_router_bindings(self, context, agent_dead_limit):
             cutoff = self.get_cutoff_time(agent_dead_limit)
-            return (context.session.query(RouterL3AgentBinding).
-                    join(agents_db.Agent).
-                    filter(agents_db.Agent.heartbeat_timestamp < cutoff,
-                    agents_db.Agent.admin_state_up).
-                    outerjoin(l3_attrs_db.RouterExtraAttributes,
-                    l3_attrs_db.RouterExtraAttributes.router_id ==
-                    RouterL3AgentBinding.router_id).filter(
+            return (context.session.query(
+                    rb_model.RouterL3AgentBinding).
+                    join(agent_model.Agent).
+                    filter(agent_model.Agent.heartbeat_timestamp < cutoff,
+                    agent_model.Agent.admin_state_up).outerjoin(
+                        l3_attrs.RouterExtraAttributes,
+                        l3_attrs.RouterExtraAttributes.router_id ==
+                    rb_model.RouterL3AgentBinding.router_id).filter(
                     sa.or_(
-                        l3_attrs_db.RouterExtraAttributes.ha == sql.false(),
-                        l3_attrs_db.RouterExtraAttributes.ha == sql.null())))
+                        l3_attrs.RouterExtraAttributes.ha == sql.false(),
+                        l3_attrs.RouterExtraAttributes.ha == sql.null())))
 
     def _get_agent_mode(self, agent_db):
         agent_conf = self.get_configuration_dict(agent_db)
@@ -179,7 +148,7 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         """
         router_id = router['id']
         agent_id = agent['id']
-        query = context.session.query(RouterL3AgentBinding)
+        query = context.session.query(rb_model.RouterL3AgentBinding)
         bindings = query.filter_by(router_id=router_id).all()
         if not bindings:
             return True
@@ -199,16 +168,16 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         router_id = router['id']
         agent_id = agent['id']
         if self.router_scheduler:
+            plugin = directory.get_plugin(constants.L3)
             try:
                 if router.get('ha'):
-                    plugin = manager.NeutronManager.get_service_plugins().get(
-                        service_constants.L3_ROUTER_NAT)
                     self.router_scheduler.create_ha_port_and_bind(
                         plugin, context, router['id'],
-                        router['tenant_id'], agent, is_manual_scheduling=True)
+                        router['tenant_id'], agent,
+                        is_manual_scheduling=True)
                 else:
                     self.router_scheduler.bind_router(
-                        context, router_id, agent)
+                        plugin, context, router_id, agent.id)
             except db_exc.DBError:
                 raise l3agentscheduler.RouterSchedulingFailed(
                     router_id=router_id, agent_id=agent_id)
@@ -246,8 +215,7 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         self._unbind_router(context, router_id, agent_id)
 
         router = self.get_router(context, router_id)
-        plugin = manager.NeutronManager.get_service_plugins().get(
-            service_constants.L3_ROUTER_NAT)
+        plugin = directory.get_plugin(constants.L3)
         if router.get('ha'):
             plugin.delete_ha_interfaces_on_host(context, router_id, agent.host)
         # NOTE(Swami): Need to verify if there are DVR serviceable
@@ -270,10 +238,10 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
 
     def _unbind_router(self, context, router_id, agent_id):
         with context.session.begin(subtransactions=True):
-            query = context.session.query(RouterL3AgentBinding)
+            query = context.session.query(rb_model.RouterL3AgentBinding)
             query = query.filter(
-                RouterL3AgentBinding.router_id == router_id,
-                RouterL3AgentBinding.l3_agent_id == agent_id)
+                rb_model.RouterL3AgentBinding.router_id == router_id,
+                rb_model.RouterL3AgentBinding.l3_agent_id == agent_id)
             query.delete()
 
     def _unschedule_router(self, context, router_id, agents_ids):
@@ -325,8 +293,9 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
                     router_id=router_id)
 
     def list_routers_on_l3_agent(self, context, agent_id):
-        query = context.session.query(RouterL3AgentBinding.router_id)
-        query = query.filter(RouterL3AgentBinding.l3_agent_id == agent_id)
+        query = context.session.query(rb_model.RouterL3AgentBinding.router_id)
+        query = query.filter(
+            rb_model.RouterL3AgentBinding.l3_agent_id == agent_id)
 
         router_ids = [item[0] for item in query]
         if router_ids:
@@ -362,13 +331,13 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         Overridden for DVR to handle agents in 'dvr' mode which have
         no explicit bindings with routers
         """
-        query = context.session.query(RouterL3AgentBinding.router_id)
+        query = context.session.query(rb_model.RouterL3AgentBinding.router_id)
         query = query.filter(
-            RouterL3AgentBinding.l3_agent_id == agent.id)
+            rb_model.RouterL3AgentBinding.l3_agent_id == agent.id)
 
         if router_ids:
             query = query.filter(
-                RouterL3AgentBinding.router_id.in_(router_ids))
+                rb_model.RouterL3AgentBinding.router_id.in_(router_ids))
 
         return [item[0] for item in query]
 
@@ -399,28 +368,29 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
                                       active=None):
         if not router_ids:
             return []
-        query = context.session.query(RouterL3AgentBinding)
+        query = context.session.query(rb_model.RouterL3AgentBinding)
         query = query.options(orm.contains_eager(
-                              RouterL3AgentBinding.l3_agent))
-        query = query.join(RouterL3AgentBinding.l3_agent)
-        query = query.filter(RouterL3AgentBinding.router_id.in_(router_ids))
+            rb_model.RouterL3AgentBinding.l3_agent))
+        query = query.join(rb_model.RouterL3AgentBinding.l3_agent)
+        query = query.filter(
+            rb_model.RouterL3AgentBinding.router_id.in_(router_ids))
         if admin_state_up is not None:
-            query = (query.filter(agents_db.Agent.admin_state_up ==
+            query = (query.filter(agent_model.Agent.admin_state_up ==
                                   admin_state_up))
         l3_agents = [binding.l3_agent for binding in query]
         if active is not None:
             l3_agents = [l3_agent for l3_agent in
                          l3_agents if not
-                         agents_db.AgentDbMixin.is_agent_down(
+                         agent_utils.is_agent_down(
                              l3_agent['heartbeat_timestamp'])]
         return l3_agents
 
     def _get_l3_bindings_hosting_routers(self, context, router_ids):
         if not router_ids:
             return []
-        query = context.session.query(RouterL3AgentBinding)
+        query = context.session.query(rb_model.RouterL3AgentBinding)
         query = query.options(joinedload('l3_agent')).filter(
-            RouterL3AgentBinding.router_id.in_(router_ids))
+            rb_model.RouterL3AgentBinding.router_id.in_(router_ids))
         return query.all()
 
     def list_l3_agents_hosting_router(self, context, router_id):
@@ -432,14 +402,14 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
                            binding in bindings]}
 
     def get_l3_agents(self, context, active=None, filters=None):
-        query = context.session.query(agents_db.Agent)
+        query = context.session.query(agent_model.Agent)
         query = query.filter(
-            agents_db.Agent.agent_type == constants.AGENT_TYPE_L3)
+            agent_model.Agent.agent_type == constants.AGENT_TYPE_L3)
         if active is not None:
-            query = (query.filter(agents_db.Agent.admin_state_up == active))
+            query = (query.filter(agent_model.Agent.admin_state_up == active))
         if filters:
             for key, value in six.iteritems(filters):
-                column = getattr(agents_db.Agent, key, None)
+                column = getattr(agent_model.Agent, key, None)
                 if column:
                     if not value:
                         return []
@@ -449,7 +419,7 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
             if agent_modes:
                 agent_mode_key = '\"agent_mode\": \"'
                 configuration_filter = (
-                    [agents_db.Agent.configurations.contains('%s%s\"' %
+                    [agent_model.Agent.configurations.contains('%s%s\"' %
                      (agent_mode_key, agent_mode))
                      for agent_mode in agent_modes])
                 query = query.filter(or_(*configuration_filter))
@@ -521,13 +491,15 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         if not agent_ids:
             return None
         query = context.session.query(
-            agents_db.Agent,
+            agent_model.Agent,
             func.count(
-                RouterL3AgentBinding.router_id
-            ).label('count')).outerjoin(RouterL3AgentBinding).group_by(
-                agents_db.Agent.id,
-                RouterL3AgentBinding.l3_agent_id).order_by('count')
-        res = query.filter(agents_db.Agent.id.in_(agent_ids)).first()
+                rb_model.RouterL3AgentBinding.router_id
+            ).label('count')).outerjoin(
+                rb_model.RouterL3AgentBinding).group_by(
+                agent_model.Agent.id,
+                rb_model.RouterL3AgentBinding
+                .l3_agent_id).order_by('count')
+        res = query.filter(agent_model.Agent.id.in_(agent_ids)).first()
         return res[0]
 
     def get_hosts_to_notify(self, context, router_id):
@@ -550,14 +522,16 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         """
         num_agents = self.get_number_of_agents_for_scheduling(context)
 
-        query = context.session.query(RouterL3AgentBinding)
+        query = context.session.query(rb_model.RouterL3AgentBinding)
         query = query.filter(
-            RouterL3AgentBinding.router_id == router_id)
-        query = query.order_by(RouterL3AgentBinding.binding_index.asc())
+            rb_model.RouterL3AgentBinding.router_id == router_id)
+        query = query.order_by(rb_model.
+                               RouterL3AgentBinding.binding_index.asc())
 
         bindings = query.all()
         binding_indices = [b.binding_index for b in bindings]
-        all_indicies = set(range(LOWEST_BINDING_INDEX, num_agents + 1))
+        all_indicies = set(range(rb_model.LOWEST_BINDING_INDEX,
+                                 num_agents + 1))
         open_slots = sorted(list(all_indicies - set(binding_indices)))
 
         if open_slots:
@@ -578,3 +552,6 @@ class AZL3AgentSchedulerDbMixin(L3AgentSchedulerDbMixin,
 
     def get_router_availability_zones(self, router):
         return list({agent.availability_zone for agent in router.l3_agents})
+
+
+_deprecate._MovedGlobals()

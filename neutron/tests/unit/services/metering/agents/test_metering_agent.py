@@ -130,7 +130,6 @@ class TestMeteringOperations(base.BaseTestCase):
 
         now = timeutils.utcnow()
         time_fixture = self.useFixture(utils_fixture.TimeFixture(now))
-        self.addCleanup(timeutils.clear_time_override)
 
         self.agent.routers_updated(None, ROUTERS)
 
@@ -160,11 +159,11 @@ class TestMeteringOperations(base.BaseTestCase):
         payload = n['payload']
         self.assertEqual(TENANT_ID, payload['tenant_id'])
         self.assertEqual(LABEL_ID, payload['label_id'])
-        self.assertTrue((payload['time'] - report_interval)
-                        < measure_interval, payload)
+        self.assertLess((payload['time'] - report_interval),
+                        measure_interval, payload)
         interval = (payload['last_update'] - payload['first_update']) \
             - report_interval
-        self.assertTrue(interval < measure_interval, payload)
+        self.assertLess(interval, measure_interval, payload)
 
     def test_router_deleted(self):
         label_id = _uuid()

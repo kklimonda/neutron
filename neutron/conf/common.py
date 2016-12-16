@@ -13,13 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-
+from neutron_lib.utils import net
 from oslo_config import cfg
 from oslo_service import wsgi
 
 from neutron._i18n import _
 from neutron.common import constants
-from neutron.common import utils
 
 
 core_opts = [
@@ -46,22 +45,8 @@ core_opts = [
                       "The first 3 octets will remain unchanged. If the 4th "
                       "octet is not 00, it will also be used. The others "
                       "will be randomly generated.")),
-    cfg.IntOpt('mac_generation_retries', default=16,
-               deprecated_for_removal=True,
-               help=_("How many times Neutron will retry MAC generation. This "
-                      "option is now obsolete and so is deprecated to be "
-                      "removed in the Ocata release.")),
     cfg.BoolOpt('allow_bulk', default=True,
                 help=_("Allow the usage of the bulk API")),
-    cfg.BoolOpt('allow_pagination', default=True,
-                deprecated_for_removal=True,
-                help=_("Allow the usage of the pagination. This option has "
-                       "been deprecated and will now be enabled "
-                       "unconditionally.")),
-    cfg.BoolOpt('allow_sorting', default=True,
-                deprecated_for_removal=True,
-                help=_("Allow the usage of the sorting. This option has been "
-                       "deprecated and will now be enabled unconditionally.")),
     cfg.StrOpt('pagination_max_limit', default="-1",
                help=_("The maximum number of items returned in a single "
                       "response, value was 'infinite' or negative integer "
@@ -111,7 +96,7 @@ core_opts = [
                        "Attention: the following parameter MUST be set to "
                        "False if Neutron is being used in conjunction with "
                        "Nova security groups.")),
-    cfg.StrOpt('host', default=utils.get_hostname(),
+    cfg.StrOpt('host', default=net.get_hostname(),
                sample_default='example.domain',
                help=_("Hostname to be used by the Neutron server, agents and "
                       "services running on this machine. All the agents and "

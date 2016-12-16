@@ -18,31 +18,31 @@
 
 """Utilities and helper functions."""
 
-import collections
-import decimal
-import errno
 import functools
 import importlib
-import multiprocessing
 import os
 import os.path
 import random
 import signal
-import socket
 import sys
-import tempfile
 import time
 import uuid
 
+from debtcollector import removals
 import eventlet
 from eventlet.green import subprocess
 import netaddr
 from neutron_lib import constants as n_const
+from neutron_lib.utils import file as file_utils
+from neutron_lib.utils import helpers
+from neutron_lib.utils import host
+from neutron_lib.utils import net
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from oslo_utils import excutils
+from oslo_utils import fileutils
 from oslo_utils import importutils
 import six
 from stevedore import driver
@@ -58,14 +58,11 @@ SYNCHRONIZED_PREFIX = 'neutron-'
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
 
 
+@removals.remove(
+    message="Use ensure_tree(path, 0o755) from oslo_utils.fileutils")
 def ensure_dir(dir_path):
     """Ensure a directory with 755 permissions mode."""
-    try:
-        os.makedirs(dir_path, 0o755)
-    except OSError as e:
-        # If the directory already existed, don't raise the error.
-        if e.errno != errno.EEXIST:
-            raise
+    fileutils.ensure_tree(dir_path, mode=0o755)
 
 
 def _subprocess_setup():
@@ -82,98 +79,57 @@ def subprocess_popen(args, stdin=None, stdout=None, stderr=None, shell=False,
                             close_fds=close_fds, env=env)
 
 
+@removals.remove(
+    message="Use parse_mappings from neutron_lib.utils.helpers")
 def parse_mappings(mapping_list, unique_values=True, unique_keys=True):
-    """Parse a list of mapping strings into a dictionary.
-
-    :param mapping_list: a list of strings of the form '<key>:<value>'
-    :param unique_values: values must be unique if True
-    :param unique_keys: keys must be unique if True, else implies that keys
-    and values are not unique
-    :returns: a dict mapping keys to values or to list of values
-    """
-    mappings = {}
-    for mapping in mapping_list:
-        mapping = mapping.strip()
-        if not mapping:
-            continue
-        split_result = mapping.split(':')
-        if len(split_result) != 2:
-            raise ValueError(_("Invalid mapping: '%s'") % mapping)
-        key = split_result[0].strip()
-        if not key:
-            raise ValueError(_("Missing key in mapping: '%s'") % mapping)
-        value = split_result[1].strip()
-        if not value:
-            raise ValueError(_("Missing value in mapping: '%s'") % mapping)
-        if unique_keys:
-            if key in mappings:
-                raise ValueError(_("Key %(key)s in mapping: '%(mapping)s' not "
-                                   "unique") % {'key': key,
-                                                'mapping': mapping})
-            if unique_values and value in mappings.values():
-                raise ValueError(_("Value %(value)s in mapping: '%(mapping)s' "
-                                   "not unique") % {'value': value,
-                                                    'mapping': mapping})
-            mappings[key] = value
-        else:
-            mappings.setdefault(key, [])
-            if value not in mappings[key]:
-                mappings[key].append(value)
-    return mappings
+    return helpers.parse_mappings(mapping_list, unique_values=unique_values,
+                                  unique_keys=unique_keys)
 
 
+@removals.remove(
+    message="Use get_hostname from neutron_lib.utils.net")
 def get_hostname():
-    return socket.gethostname()
+    return net.get_hostname()
 
 
 def get_first_host_ip(net, ip_version):
     return str(netaddr.IPAddress(net.first + 1, ip_version))
 
 
+@removals.remove(
+    message="Use compare_elements from neutron_lib.utils.helpers")
 def compare_elements(a, b):
-    """Compare elements if a and b have same elements.
-
-    This method doesn't consider ordering
-    """
-    if a is None:
-        a = []
-    if b is None:
-        b = []
-    return set(a) == set(b)
+    return helpers.compare_elements(a, b)
 
 
+@removals.remove(
+    message="Use safe_sort_key from neutron_lib.utils.helpers")
 def safe_sort_key(value):
-    """Return value hash or build one for dictionaries."""
-    if isinstance(value, collections.Mapping):
-        return sorted(value.items())
-    return value
+    return helpers.safe_sort_key(value)
 
 
+@removals.remove(
+    message="Use dict2str from neutron_lib.utils.helpers")
 def dict2str(dic):
-    return ','.join("%s=%s" % (key, val)
-                    for key, val in sorted(six.iteritems(dic)))
+    return helpers.dict2str(dic)
 
 
+@removals.remove(
+    message="Use str2dict from neutron_lib.utils.helpers")
 def str2dict(string):
-    res_dict = {}
-    for keyvalue in string.split(','):
-        (key, value) = keyvalue.split('=', 1)
-        res_dict[key] = value
-    return res_dict
+    return helpers.str2dict(string)
 
 
+@removals.remove(
+    message="Use dict2tuple from neutron_lib.utils.helpers")
 def dict2tuple(d):
-    items = list(d.items())
-    items.sort()
-    return tuple(items)
+    return helpers.dict2tuple(d)
 
 
+@removals.remove(
+    message="Use diff_list_of_dict from neutron_lib.utils.helpers")
 def diff_list_of_dict(old_list, new_list):
-    new_set = set([dict2str(l) for l in new_list])
-    old_set = set([dict2str(l) for l in old_list])
-    added = new_set - old_set
-    removed = old_set - new_set
-    return [str2dict(a) for a in added], [str2dict(r) for r in removed]
+    return helpers.diff_list_of_dict(old_list, new_list)
 
 
 def is_extension_supported(plugin, ext_alias):
@@ -194,11 +150,10 @@ def get_random_mac(base_mac):
     return ':'.join(["%02x" % x for x in mac])
 
 
+@removals.remove(
+    message="Use get_random_string from neutron_lib.utils.helpers")
 def get_random_string(length):
-    """Get a random hex string of the specified length.
-    """
-
-    return "{0:0{1}x}".format(random.getrandbits(length * 4), length)
+    return helpers.get_random_string(length)
 
 
 def get_dhcp_agent_device_id(network_id, host):
@@ -210,11 +165,10 @@ def get_dhcp_agent_device_id(network_id, host):
     return 'dhcp%s-%s' % (host_uuid, network_id)
 
 
+@removals.remove(
+    message="Use cpu_count from neutron_lib.utils.host")
 def cpu_count():
-    try:
-        return multiprocessing.cpu_count()
-    except NotImplementedError:
-        return 1
+    return host.cpu_count()
 
 
 class exception_logger(object):
@@ -355,33 +309,16 @@ class DelayedStringRenderer(object):
         return str(self.function(*self.args, **self.kwargs))
 
 
-def camelize(s):
-    return ''.join(s.replace('_', ' ').title().split())
-
-
+@removals.remove(
+    message="Use round_val from neutron_lib.utils.helpers")
 def round_val(val):
-    # we rely on decimal module since it behaves consistently across Python
-    # versions (2.x vs. 3.x)
-    return int(decimal.Decimal(val).quantize(decimal.Decimal('1'),
-                                             rounding=decimal.ROUND_HALF_UP))
+    return helpers.round_val(val)
 
 
+@removals.remove(
+    message="Use replace_file from neutron_lib.utils")
 def replace_file(file_name, data, file_mode=0o644):
-    """Replaces the contents of file_name with data in a safe manner.
-
-    First write to a temp file and then rename. Since POSIX renames are
-    atomic, the file is unlikely to be corrupted by competing writes.
-
-    We create the tempfile on the same device to ensure that it can be renamed.
-    """
-
-    base_dir = os.path.dirname(os.path.abspath(file_name))
-    with tempfile.NamedTemporaryFile('w+',
-                                     dir=base_dir,
-                                     delete=False) as tmp_file:
-        tmp_file.write(data)
-    os.chmod(tmp_file.name, file_mode)
-    os.rename(tmp_file.name, file_name)
+    file_utils.replace_file(file_name, data, file_mode=file_mode)
 
 
 def load_class_by_alias_or_classname(namespace, name):
@@ -413,10 +350,10 @@ def load_class_by_alias_or_classname(namespace, name):
     return class_to_load
 
 
+@removals.remove(
+    message="Use safe_decode_utf8 from neutron_lib.utils.helpers")
 def safe_decode_utf8(s):
-    if six.PY3 and isinstance(s, bytes):
-        return s.decode('utf-8', 'surrogateescape')
-    return s
+    return helpers.safe_decode_utf8(s)
 
 
 def _hex_format(port, mask=0):
@@ -891,10 +828,11 @@ def get_related_rand_names(prefixes, max_length=None):
     if max_length:
         length = max_length - max(len(p) for p in prefixes)
         if length <= 0:
-            raise ValueError("'max_length' must be longer than all prefixes")
+            raise ValueError(
+                _("'max_length' must be longer than all prefixes"))
     else:
         length = 8
-    rndchrs = get_random_string(length)
+    rndchrs = helpers.get_random_string(length)
     return [p + rndchrs for p in prefixes]
 
 

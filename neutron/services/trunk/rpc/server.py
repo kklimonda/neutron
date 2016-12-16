@@ -14,6 +14,8 @@
 
 import collections
 
+from neutron_lib.plugins import directory
+from oslo_log import helpers as log_helpers
 from oslo_log import log as logging
 import oslo_messaging
 
@@ -25,7 +27,6 @@ from neutron.api.rpc.handlers import resources_rpc
 from neutron.common import rpc as n_rpc
 from neutron.db import api as db_api
 from neutron.extensions import portbindings
-from neutron import manager
 from neutron.objects import trunk as trunk_objects
 from neutron.services.trunk import constants as trunk_consts
 from neutron.services.trunk import exceptions as trunk_exc
@@ -75,9 +76,10 @@ class TrunkSkeleton(object):
     @property
     def core_plugin(self):
         if not self._core_plugin:
-            self._core_plugin = manager.NeutronManager.get_plugin()
+            self._core_plugin = directory.get_plugin()
         return self._core_plugin
 
+    @log_helpers.log_method_call
     def update_subport_bindings(self, context, subports):
         """Update subport bindings to match trunk host binding."""
         el = context.elevated()
@@ -170,18 +172,22 @@ class TrunkStub(object):
     def __init__(self):
         self._resource_rpc = resources_rpc.ResourcesPushRpcApi()
 
+    @log_helpers.log_method_call
     def trunk_created(self, context, trunk):
         """Tell the agent about a trunk being created."""
         self._resource_rpc.push(context, [trunk], events.CREATED)
 
+    @log_helpers.log_method_call
     def trunk_deleted(self, context, trunk):
         """Tell the agent about a trunk being deleted."""
         self._resource_rpc.push(context, [trunk], events.DELETED)
 
+    @log_helpers.log_method_call
     def subports_added(self, context, subports):
         """Tell the agent about new subports to add."""
         self._resource_rpc.push(context, subports, events.CREATED)
 
+    @log_helpers.log_method_call
     def subports_deleted(self, context, subports):
         """Tell the agent about existing subports to remove."""
         self._resource_rpc.push(context, subports, events.DELETED)

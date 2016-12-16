@@ -25,7 +25,7 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 import six
 
-from neutron._i18n import _, _LE
+from neutron._i18n import _, _LE, _LW
 from neutron.agent.common import utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils as common_utils
@@ -38,6 +38,7 @@ OPTS = [
                 help=_('Force ip_lib calls to use the root helper')),
 ]
 
+IP_NONLOCAL_BIND = 'net.ipv4.ip_nonlocal_bind'
 
 LOOPBACK_DEVNAME = 'lo'
 GRE_TUNNEL_DEVICE_NAMES = ['gre0', 'gretap0']
@@ -328,36 +329,10 @@ class IPDevice(SubProcessBase):
             LOG.exception(_LE("Failed deleting egress connection state of"
                               " floatingip %s"), ip_str)
 
-    def _sysctl(self, cmd):
-        """execute() doesn't return the exit status of the command it runs,
-        it returns stdout and stderr. Setting check_exit_code=True will cause
-        it to raise a RuntimeError if the exit status of the command is
-        non-zero, which in sysctl's case is an error. So we're normalizing
-        that into zero (success) and one (failure) here to mimic what
-        "echo $?" in a shell would be.
-
-        This is all because sysctl is too verbose and prints the value you
-        just set on success, unlike most other utilities that print nothing.
-
-        execute() will have dumped a message to the logs with the actual
-        output on failure, so it's not lost, and we don't need to print it
-        here.
-        """
-        cmd = ['sysctl', '-w'] + cmd
-        ip_wrapper = IPWrapper(self.namespace)
-        try:
-            ip_wrapper.netns.execute(cmd, run_as_root=True,
-                                     check_exit_code=True)
-        except RuntimeError:
-            LOG.exception(_LE("Failed running %s"), cmd)
-            return 1
-
-        return 0
-
     def disable_ipv6(self):
         sysctl_name = re.sub(r'\.', '/', self.name)
-        cmd = 'net.ipv6.conf.%s.disable_ipv6=1' % sysctl_name
-        return self._sysctl([cmd])
+        cmd = ['net.ipv6.conf.%s.disable_ipv6=1' % sysctl_name]
+        return sysctl(cmd, namespace=self.namespace)
 
     @property
     def name(self):
@@ -955,6 +930,11 @@ def device_exists_with_ips_and_mac(device_name, ip_cidrs, mac, namespace=None):
         return True
 
 
+def get_device_mac(device_name, namespace=None):
+    """Return the MAC address of the device."""
+    return IPDevice(device_name, namespace=namespace).link.address
+
+
 _IP_ROUTE_PARSE_KEYS = {
     'via': 'nexthop',
     'dev': 'device',
@@ -1030,22 +1010,30 @@ def iproute_arg_supported(command, arg):
     return any(arg in line for line in stderr.split('\n'))
 
 
-def _arping(ns_name, iface_name, address, count):
+def _arping(ns_name, iface_name, address, count, log_exception):
     # Pass -w to set timeout to ensure exit if interface removed while running
     arping_cmd = ['arping', '-A', '-I', iface_name, '-c', count,
                   '-w', 1.5 * count, address]
     try:
         ip_wrapper = IPWrapper(namespace=ns_name)
-        ip_wrapper.netns.execute(arping_cmd, check_exit_code=True)
-    except Exception:
-        msg = _LE("Failed sending gratuitous ARP "
-                  "to %(addr)s on %(iface)s in namespace %(ns)s")
-        LOG.exception(msg, {'addr': address,
+        # Since arping is used to send gratuitous ARP, a response is not
+        # expected. In some cases (no response) and with some platforms
+        # (>=Ubuntu 14.04), arping exit code can be 1.
+        ip_wrapper.netns.execute(arping_cmd, extra_ok_codes=[1])
+    except Exception as exc:
+        msg = _("Failed sending gratuitous ARP "
+                "to %(addr)s on %(iface)s in namespace %(ns)s: %(err)s")
+        logger_method = LOG.exception
+        if not log_exception:
+            logger_method = LOG.warning
+        logger_method(msg, {'addr': address,
                             'iface': iface_name,
-                            'ns': ns_name})
+                            'ns': ns_name,
+                            'err': exc})
 
 
-def send_ip_addr_adv_notif(ns_name, iface_name, address, config):
+def send_ip_addr_adv_notif(
+        ns_name, iface_name, address, count=3, log_exception=True):
     """Send advance notification of an IP address assignment.
 
     If the address is in the IPv4 family, send gratuitous ARP.
@@ -1055,14 +1043,57 @@ def send_ip_addr_adv_notif(ns_name, iface_name, address, config):
     Address Discovery (DAD), and (for stateless addresses) router
     advertisements (RAs) are sufficient for address resolution and
     duplicate address detection.
-    """
-    count = config.send_arp_for_ha
 
+    :param ns_name: Namespace name which GARPs are gonna be sent from.
+    :param iface_name: Name of interface which GARPs are gonna be sent from.
+    :param address: Advertised IP address.
+    :param count: (Optional) How many GARPs are gonna be sent. Default is 3.
+    :param log_exception: (Optional) True if possible failures should be logged
+                          on exception level. Otherwise they are logged on
+                          WARNING level. Default is True.
+    """
     def arping():
-        _arping(ns_name, iface_name, address, count)
+        _arping(ns_name, iface_name, address, count, log_exception)
 
     if count > 0 and netaddr.IPAddress(address).version == 4:
         eventlet.spawn_n(arping)
+
+
+def sysctl(cmd, namespace=None, log_fail_as_error=True):
+    """Run sysctl command 'cmd'
+
+    @param cmd: a list containing the sysctl command to run
+    @param namespace: network namespace to run command in
+    @param log_fail_as_error: failure logged as LOG.error
+
+    execute() doesn't return the exit status of the command it runs,
+    it returns stdout and stderr. Setting check_exit_code=True will cause
+    it to raise a RuntimeError if the exit status of the command is
+    non-zero, which in sysctl's case is an error. So we're normalizing
+    that into zero (success) and one (failure) here to mimic what
+    "echo $?" in a shell would be.
+
+    This is all because sysctl is too verbose and prints the value you
+    just set on success, unlike most other utilities that print nothing.
+
+    execute() will have dumped a message to the logs with the actual
+    output on failure, so it's not lost, and we don't need to print it
+    here.
+    """
+    cmd = ['sysctl', '-w'] + cmd
+    ip_wrapper = IPWrapper(namespace=namespace)
+    try:
+        ip_wrapper.netns.execute(cmd, run_as_root=True,
+                                 log_fail_as_error=log_fail_as_error)
+    except RuntimeError as rte:
+        LOG.warning(
+            _LW("Setting %(cmd)s in namespace %(ns)s failed: %(err)s."),
+            {'cmd': cmd,
+             'ns': namespace,
+             'err': rte})
+        return 1
+
+    return 0
 
 
 def add_namespace_to_cmd(cmd, namespace=None):
@@ -1077,3 +1108,31 @@ def get_ip_version(ip_or_cidr):
 
 def get_ipv6_lladdr(mac_addr):
     return '%s/64' % netaddr.EUI(mac_addr).ipv6_link_local()
+
+
+def get_ip_nonlocal_bind(namespace=None):
+    """Get kernel option value of ip_nonlocal_bind in given namespace."""
+    cmd = ['sysctl', '-bn', IP_NONLOCAL_BIND]
+    ip_wrapper = IPWrapper(namespace)
+    return int(ip_wrapper.netns.execute(cmd, run_as_root=True))
+
+
+def set_ip_nonlocal_bind(value, namespace=None, log_fail_as_error=True):
+    """Set sysctl knob of ip_nonlocal_bind to given value."""
+    cmd = ['%s=%d' % (IP_NONLOCAL_BIND, value)]
+    return sysctl(cmd, namespace=namespace,
+                  log_fail_as_error=log_fail_as_error)
+
+
+def set_ip_nonlocal_bind_for_namespace(namespace):
+    """Set ip_nonlocal_bind but don't raise exception on failure."""
+    failed = set_ip_nonlocal_bind(value=0, namespace=namespace,
+                                  log_fail_as_error=False)
+    if failed:
+        LOG.warning(
+            _LW("%s will not be set to 0 in the root namespace in order to "
+                "not break DVR, which requires this value be set to 1. This "
+                "may introduce a race between moving a floating IP to a "
+                "different network node, and the peer side getting a "
+                "populated ARP cache for a given floating IP address."),
+            IP_NONLOCAL_BIND)

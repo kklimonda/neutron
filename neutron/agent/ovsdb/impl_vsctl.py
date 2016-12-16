@@ -14,6 +14,7 @@
 
 import collections
 import itertools
+import uuid
 
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
@@ -149,6 +150,22 @@ class DbGetCommand(DbCommand):
             self._result = list(self._result[0].values())[0]
 
 
+class DbCreateCommand(BaseCommand):
+    def __init__(self, context, opts=None, args=None):
+        super(DbCreateCommand, self).__init__(context, "create", opts, args)
+        # NOTE(twilson) pre-commit result used for intra-transaction reference
+        self.record_id = "@%s" % uuid.uuid4()
+        self.opts.append("--id=%s" % self.record_id)
+
+    @property
+    def result(self):
+        return self._result
+
+    @result.setter
+    def result(self, val):
+        self._result = uuid.UUID(val) if val else val
+
+
 class BrExistsCommand(DbCommand):
     @DbCommand.result.setter
     def result(self, val):
@@ -162,6 +179,21 @@ class BrExistsCommand(DbCommand):
 class OvsdbVsctl(ovsdb.API):
     def transaction(self, check_error=False, log_errors=True, **kwargs):
         return Transaction(self.context, check_error, log_errors, **kwargs)
+
+    def add_manager(self, connection_uri):
+        # This will add a new manager without overriding existing ones.
+        conn_uri = 'target="%s"' % connection_uri
+        args = ['create', 'Manager', conn_uri, '--', 'add', 'Open_vSwitch',
+                '.', 'manager_options', '@manager']
+        return BaseCommand(self.context, '--id=@manager', args=args)
+
+    def get_manager(self):
+        return MultiLineCommand(self.context, 'get-manager')
+
+    def remove_manager(self, connection_uri):
+        args = ['get', 'Manager', connection_uri, '--', 'remove',
+                'Open_vSwitch', '.', 'manager_options', '@manager']
+        return BaseCommand(self.context, '--id=@manager', args=args)
 
     def add_br(self, name, may_exist=True, datapath_type=None):
         opts = ['--may-exist'] if may_exist else None
@@ -194,7 +226,7 @@ class OvsdbVsctl(ovsdb.API):
     def db_create(self, table, **col_values):
         args = [table]
         args += _set_colval_args(*col_values.items())
-        return BaseCommand(self.context, 'create', args=args)
+        return DbCreateCommand(self.context, args=args)
 
     def db_destroy(self, table, record):
         args = [table, record]
@@ -204,6 +236,16 @@ class OvsdbVsctl(ovsdb.API):
         args = [table, record]
         args += _set_colval_args(*col_values)
         return BaseCommand(self.context, 'set', args=args)
+
+    def db_add(self, table, record, column, *values):
+        args = [table, record, column]
+        for value in values:
+            if isinstance(value, collections.Mapping):
+                args += ["{}={}".format(ovsdb.py_to_val(k), ovsdb.py_to_val(v))
+                         for k, v in six.iteritems(value)]
+            else:
+                args.append(ovsdb.py_to_val(value))
+        return BaseCommand(self.context, 'add', args=args)
 
     def db_clear(self, table, record, column):
         return BaseCommand(self.context, 'clear', args=[table, record,

@@ -18,13 +18,14 @@ import os
 
 import netaddr
 from neutron_lib import exceptions
+from neutron_lib.utils import file as file_utils
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import fileutils
 
 from neutron._i18n import _, _LE
 from neutron.agent.linux import external_process
 from neutron.common import constants
-from neutron.common import utils as common_utils
 
 VALID_STATES = ['MASTER', 'BACKUP']
 VALID_AUTH_TYPES = ['AH', 'PASS']
@@ -362,13 +363,13 @@ class KeepalivedManager(object):
     def get_full_config_file_path(self, filename, ensure_conf_dir=True):
         conf_dir = self.get_conf_dir()
         if ensure_conf_dir:
-            common_utils.ensure_dir(conf_dir)
+            fileutils.ensure_tree(conf_dir, mode=0o755)
         return os.path.join(conf_dir, filename)
 
     def _output_config_file(self):
         config_str = self.config.get_config_str()
         config_path = self.get_full_config_file_path('keepalived.conf')
-        common_utils.replace_file(config_path, config_str)
+        file_utils.replace_file(config_path, config_str)
 
         return config_path
 

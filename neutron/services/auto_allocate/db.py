@@ -14,7 +14,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import directory
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from sqlalchemy import sql
@@ -25,15 +27,14 @@ from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.common import exceptions as c_exc
+from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
 from neutron.db import db_base_plugin_v2
-from neutron.db import external_net_db
+from neutron.db.models import external_net as ext_net_models
 from neutron.db import models_v2
 from neutron.db import standard_attr
 from neutron.extensions import l3
-from neutron import manager
-from neutron.plugins.common import constants
 from neutron.plugins.common import utils as p_utils
 from neutron.services.auto_allocate import exceptions
 from neutron.services.auto_allocate import models
@@ -57,14 +58,14 @@ def _ensure_external_network_default_value_callback(
     is_default = request.get(IS_DEFAULT, False)
     if event in (events.BEFORE_CREATE, events.BEFORE_UPDATE) and is_default:
         # ensure there is only one default external network at any given time
-        obj = (context.session.query(external_net_db.ExternalNetwork).
+        obj = (context.session.query(ext_net_models.ExternalNetwork).
             filter_by(is_default=True)).first()
         if obj and network['id'] != obj.network_id:
             raise exceptions.DefaultExternalNetworkExists(
                 net_id=obj.network_id)
 
     # Reflect the status of the is_default on the create/update request
-    obj = (context.session.query(external_net_db.ExternalNetwork).
+    obj = (context.session.query(ext_net_models.ExternalNetwork).
         filter_by(network_id=network['id']))
     obj.update({IS_DEFAULT: is_default})
 
@@ -100,14 +101,13 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
     @property
     def core_plugin(self):
         if not getattr(self, '_core_plugin', None):
-            self._core_plugin = manager.NeutronManager.get_plugin()
+            self._core_plugin = directory.get_plugin()
         return self._core_plugin
 
     @property
     def l3_plugin(self):
         if not getattr(self, '_l3_plugin', None):
-            self._l3_plugin = manager.NeutronManager.get_service_plugins().get(
-                constants.L3_ROUTER_NAT)
+            self._l3_plugin = directory.get_plugin(constants.L3)
         return self._l3_plugin
 
     def get_auto_allocated_topology(self, context, tenant_id, fields=None):
@@ -208,19 +208,20 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
         if network:
             return network['network_id']
 
-    def _response(self, network_id, tenant_id, fields=None):
+    @staticmethod
+    def _response(network_id, tenant_id, fields=None):
         """Build response for auto-allocated network."""
         res = {
             'id': network_id,
             'tenant_id': tenant_id
         }
-        return self._fields(res, fields)
+        return db_utils.resource_fields(res, fields)
 
     def _get_default_external_network(self, context):
         """Get the default external network for the deployment."""
         with context.session.begin(subtransactions=True):
             default_external_networks = (context.session.query(
-                external_net_db.ExternalNetwork).
+                ext_net_models.ExternalNetwork).
                 filter_by(is_default=sql.true()).
                 join(models_v2.Network).
                 join(standard_attr.StandardAttribute).
@@ -345,12 +346,10 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
                 context, network_id,
                 {'network': {'admin_state_up': True}})
         except db_exc.DBDuplicateEntry:
-            LOG.error(_LE("Multiple auto-allocated networks detected for "
-                          "tenant %(tenant)s. Attempting clean up for "
-                          "network %(network)s and router %(router)s"),
-                      {'tenant': tenant_id,
-                       'network': network_id,
-                       'router': router_id})
+            LOG.debug("Multiple auto-allocated networks detected for "
+                      "tenant %s. Attempting clean up for network %s "
+                      "and router %s.",
+                      tenant_id, network_id, router_id)
             self._cleanup(
                 context, network_id=network_id,
                 router_id=router_id, subnets=subnets)

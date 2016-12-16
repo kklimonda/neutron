@@ -14,97 +14,28 @@
 #    under the License.
 
 from neutron_lib.api import validators
-from neutron_lib.db import model_base
 from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
-import sqlalchemy as sa
-from sqlalchemy import orm
 
 from neutron._i18n import _, _LE
+from neutron.common import _deprecate
 from neutron.common import utils
 from neutron.db import db_base_plugin_v2
-from neutron.db import l3_db
-from neutron.db import models_v2
+from neutron.db.models import dns as dns_models
 from neutron.extensions import dns
 from neutron.extensions import l3
+from neutron.objects import floatingip as fip_obj
+from neutron.objects import network
+from neutron.objects import ports as port_obj
 from neutron.services.externaldns import driver
 
 LOG = logging.getLogger(__name__)
 
 
-class NetworkDNSDomain(model_base.BASEV2):
-    network_id = sa.Column(sa.String(36),
-                           sa.ForeignKey('networks.id', ondelete="CASCADE"),
-                           primary_key=True,
-                           index=True)
-    dns_domain = sa.Column(sa.String(255),
-                           nullable=False)
-
-    # Add a relationship to the Network model in order to instruct
-    # SQLAlchemy to eagerly load this association
-    network = orm.relationship(models_v2.Network,
-                               backref=orm.backref("dns_domain",
-                                                   lazy='joined',
-                                                   uselist=False,
-                                                   cascade='delete'))
-    revises_on_change = ('network', )
-
-
-class FloatingIPDNS(model_base.BASEV2):
-
-    __tablename__ = 'floatingipdnses'
-
-    floatingip_id = sa.Column(sa.String(36),
-                              sa.ForeignKey('floatingips.id',
-                                            ondelete="CASCADE"),
-                              primary_key=True,
-                              index=True)
-    dns_name = sa.Column(sa.String(255),
-                         nullable=False)
-    dns_domain = sa.Column(sa.String(255),
-                           nullable=False)
-    published_dns_name = sa.Column(sa.String(255),
-                                   nullable=False)
-    published_dns_domain = sa.Column(sa.String(255),
-                                     nullable=False)
-
-    # Add a relationship to the FloatingIP model in order to instruct
-    # SQLAlchemy to eagerly load this association
-    floatingip = orm.relationship(l3_db.FloatingIP,
-                                  backref=orm.backref("dns",
-                                                      lazy='joined',
-                                                      uselist=False,
-                                                      cascade='delete'))
-    revises_on_change = ('floatingip', )
-
-
-class PortDNS(model_base.BASEV2):
-
-    __tablename__ = 'portdnses'
-
-    port_id = sa.Column(sa.String(36),
-                        sa.ForeignKey('ports.id',
-                                      ondelete="CASCADE"),
-                        primary_key=True,
-                        index=True)
-    current_dns_name = sa.Column(sa.String(255),
-                                 nullable=False)
-    current_dns_domain = sa.Column(sa.String(255),
-                                   nullable=False)
-    previous_dns_name = sa.Column(sa.String(255),
-                                  nullable=False)
-    previous_dns_domain = sa.Column(sa.String(255),
-                                    nullable=False)
-    dns_name = sa.Column(sa.String(255), nullable=False)
-    # Add a relationship to the Port model in order to instruct
-    # SQLAlchemy to eagerly load this association
-    port = orm.relationship(models_v2.Port,
-                            backref=orm.backref("dns",
-                                                lazy='joined',
-                                                uselist=False,
-                                                cascade='delete'))
-    revises_on_change = ('port', )
+_deprecate._moved_global('PortDNS', new_module=dns_models)
+_deprecate._moved_global('NetworkDNSDomain', new_module=dns_models)
+_deprecate._moved_global('FloatingIPDNS', new_module=dns_models)
 
 
 class DNSActionsData(object):
@@ -168,12 +99,12 @@ class DNSDbMixin(object):
                 context, floatingip_data, req_data))
         dns_actions_data = None
         if current_dns_name and current_dns_domain:
-            context.session.add(FloatingIPDNS(
+            fip_obj.FloatingIPDNS(context,
                 floatingip_id=floatingip_data['id'],
                 dns_name=req_data[dns.DNSNAME],
                 dns_domain=req_data[dns.DNSDOMAIN],
                 published_dns_name=current_dns_name,
-                published_dns_domain=current_dns_domain))
+                published_dns_domain=current_dns_domain).create()
             dns_actions_data = DNSActionsData(
                 current_dns_name=current_dns_name,
                 current_dns_domain=current_dns_domain)
@@ -199,8 +130,8 @@ class DNSDbMixin(object):
             return
         if not self.dns_driver:
             return
-        dns_data_db = context.session.query(FloatingIPDNS).filter_by(
-            floatingip_id=floatingip_data['id']).one_or_none()
+        dns_data_db = fip_obj.FloatingIPDNS.get_object(
+            context, floatingip_id=floatingip_data['id'])
         if dns_data_db and dns_data_db['dns_name']:
             # dns_name and dns_domain assigned for floating ip. It doesn't
             # matter whether they are defined for internal port
@@ -220,17 +151,17 @@ class DNSDbMixin(object):
                     dns_actions_data.current_dns_name = current_dns_name
                     dns_actions_data.current_dns_domain = current_dns_domain
                 else:
-                    context.session.delete(dns_data_db)
+                    dns_data_db.delete()
                 return dns_actions_data
             else:
                 return
         if current_dns_name and current_dns_domain:
-            context.session.add(FloatingIPDNS(
+            fip_obj.FloatingIPDNS(context,
                 floatingip_id=floatingip_data['id'],
                 dns_name='',
                 dns_domain='',
                 published_dns_name=current_dns_name,
-                published_dns_domain=current_dns_domain))
+                published_dns_domain=current_dns_domain).create()
             return DNSActionsData(current_dns_name=current_dns_name,
                                   current_dns_domain=current_dns_domain)
 
@@ -254,8 +185,8 @@ class DNSDbMixin(object):
         if not utils.is_extension_supported(self._core_plugin,
                                             dns.Dns.get_alias()):
             return
-        dns_data_db = context.session.query(FloatingIPDNS).filter_by(
-            floatingip_id=floatingip_data['id']).one_or_none()
+        dns_data_db = fip_obj.FloatingIPDNS.get_object(context,
+                floatingip_id=floatingip_data['id'])
         if dns_data_db:
             self._delete_floatingip_from_external_dns_service(
                 context, dns_data_db['published_dns_domain'],
@@ -271,14 +202,12 @@ class DNSDbMixin(object):
             raise n_exc.BadRequest(resource='floatingip', msg=msg)
 
     def _get_internal_port_dns_data(self, context, floatingip_data):
-        port_dns = context.session.query(PortDNS).filter_by(
-            port_id=floatingip_data['port_id']).one_or_none()
+        port_dns = port_obj.PortDNS.get_object(
+            context, port_id=floatingip_data['port_id'])
         if not (port_dns and port_dns['dns_name']):
             return None, None
-        net_dns = context.session.query(NetworkDNSDomain).join(
-            models_v2.Port, NetworkDNSDomain.network_id ==
-            models_v2.Port.network_id).filter_by(
-            id=floatingip_data['port_id']).one_or_none()
+        net_dns = network.NetworkDNSDomain.get_net_dns_from_port(
+            context=context, port_id=floatingip_data['port_id'])
         if not net_dns:
             return port_dns['dns_name'], None
         return port_dns['dns_name'], net_dns['dns_domain']
@@ -327,3 +256,6 @@ class DNSDbMixin(object):
                           {"name": dns_name,
                            "domain": dns_domain,
                            "message": e.msg})
+
+
+_deprecate._MovedGlobals()

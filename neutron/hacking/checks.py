@@ -15,7 +15,6 @@
 import os
 import re
 
-from debtcollector import moves
 from hacking import core
 from neutron_lib.hacking import checks
 import pep8
@@ -64,9 +63,6 @@ def _regex_for_level(level, hint):
     }
 
 
-log_string_interpolation = re.compile(r".*LOG\.(?:error|warn|warning|info"
-                                      r"|critical|exception|debug)"
-                                      r"\([^,]*%[^,]*[,)]")
 log_translation_hint = re.compile(
     '|'.join('(?:%s)' % _regex_for_level(level, hint)
              for level, hint in six.iteritems(_all_log_levels)))
@@ -219,18 +215,6 @@ def check_asserttruefalse(logical_line, filename):
             yield (0, msg)
 
 
-check_asserttrue = flake8ext(
-    moves.moved_function(
-        check_asserttruefalse, 'check_asserttrue', __name__,
-        version='Newton', removal_version='Ocata'))
-
-
-check_assertfalse = flake8ext(
-    moves.moved_function(
-        check_asserttruefalse, 'check_assertfalse', __name__,
-        version='Newton', removal_version='Ocata'))
-
-
 @flake8ext
 def no_mutable_default_args(logical_line):
     """N329 - Don't use mutable default arguments."""
@@ -365,28 +349,6 @@ def check_unittest_imports(logical_line):
 
 
 @flake8ext
-def check_delayed_string_interpolation(logical_line, filename, noqa):
-    """N342 String interpolation should be delayed at logging calls.
-
-    N342: LOG.debug('Example: %s' % 'bad')
-    Okay: LOG.debug('Example: %s', 'good')
-    """
-    msg = ("N342 String interpolation should be delayed to be "
-           "handled by the logging code, rather than being done "
-           "at the point of the logging call. "
-           "Use ',' instead of '%'.")
-
-    if noqa:
-        return
-
-    if 'neutron/tests/' in filename:
-        return
-
-    if log_string_interpolation.match(logical_line):
-        yield(0, msg)
-
-
-@flake8ext
 def check_no_imports_from_tests(logical_line, filename, noqa):
     """N343 Production code must not import from neutron.tests.*
     """
@@ -414,6 +376,19 @@ def check_python3_no_filter(logical_line):
         yield(0, msg)
 
 
+@flake8ext
+def check_assertIsNone(logical_line, filename):
+    """N345 - Enforce using assertIsNone."""
+    if 'neutron/tests/' in filename:
+        asse_eq_end_with_none_re = re.compile(r"assertEqual\(.*?,\s+None\)$")
+        asse_eq_start_with_none_re = re.compile(r"assertEqual\(None,")
+        res = (asse_eq_start_with_none_re.search(logical_line) or
+               asse_eq_end_with_none_re.search(logical_line))
+        if res:
+            yield (0, "N345: assertEqual(A, None) or assertEqual(None, A) "
+                   "sentences not allowed")
+
+
 def factory(register):
     register(validate_log_translations)
     register(use_jsonutils)
@@ -432,6 +407,6 @@ def factory(register):
     register(check_oslo_i18n_wrapper)
     register(check_builtins_gettext)
     register(check_unittest_imports)
-    register(check_delayed_string_interpolation)
     register(check_no_imports_from_tests)
     register(check_python3_no_filter)
+    register(check_assertIsNone)

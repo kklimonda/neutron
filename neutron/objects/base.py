@@ -11,13 +11,15 @@
 #    under the License.
 
 import abc
+import collections
 import copy
 import functools
 import itertools
 
-from neutron_lib import exceptions
+from neutron_lib import exceptions as n_exc
 from oslo_db import exception as obj_exc
-from oslo_utils import reflection
+from oslo_db.sqlalchemy import utils as db_utils
+from oslo_serialization import jsonutils
 from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import fields as obj_fields
 import six
@@ -25,54 +27,12 @@ import six
 from neutron._i18n import _
 from neutron.api.v2 import attributes
 from neutron.db import api as db_api
-from neutron.db import model_base
 from neutron.db import standard_attr
 from neutron.objects.db import api as obj_db_api
+from neutron.objects import exceptions as o_exc
 from neutron.objects.extensions import standardattributes
 
 _NO_DB_MODEL = object()
-
-
-#TODO(jlibosva): Move these classes to exceptions module
-class NeutronObjectUpdateForbidden(exceptions.NeutronException):
-    message = _("Unable to update the following object fields: %(fields)s")
-
-
-class NeutronDbObjectDuplicateEntry(exceptions.Conflict):
-    message = _("Failed to create a duplicate %(object_type)s: "
-                "for attribute(s) %(attributes)s with value(s) %(values)s")
-
-    def __init__(self, object_class, db_exception):
-        super(NeutronDbObjectDuplicateEntry, self).__init__(
-            object_type=reflection.get_class_name(object_class,
-                                                  fully_qualified=False),
-            attributes=db_exception.columns,
-            values=db_exception.value)
-
-
-class NeutronDbObjectNotFoundByModel(exceptions.NotFound):
-    message = _("NeutronDbObject not found by model %(model)s.")
-
-
-class NeutronPrimaryKeyMissing(exceptions.BadRequest):
-    message = _("For class %(object_type)s missing primary keys: "
-                "%(missing_keys)s")
-
-    def __init__(self, object_class, missing_keys):
-        super(NeutronPrimaryKeyMissing, self).__init__(
-            object_type=reflection.get_class_name(object_class,
-                                                  fully_qualified=False),
-            missing_keys=missing_keys
-        )
-
-
-class NeutronSyntheticFieldMultipleForeignKeys(exceptions.NeutronException):
-    message = _("Synthetic field %(field)s shouldn't have more than one "
-                "foreign key")
-
-
-class NeutronSyntheticFieldsForeignKeysNotFound(exceptions.NeutronException):
-    message = _("%(child)s does not define a foreign key for %(parent)s")
 
 
 def get_updatable_fields(cls, fields):
@@ -88,7 +48,7 @@ def get_object_class_by_model(model):
         obj_class = obj_class[0]
         if getattr(obj_class, 'db_model', _NO_DB_MODEL) is model:
             return obj_class
-    raise NeutronDbObjectNotFoundByModel(model=model.__name__)
+    raise o_exc.NeutronDbObjectNotFoundByModel(model=model.__name__)
 
 
 def register_filter_hook_on_model(model, filter_name):
@@ -150,6 +110,10 @@ class NeutronObject(obj_base.VersionedObject,
             # is included in self.items()
             if name in self.fields and name not in self.synthetic_fields:
                 value = self.fields[name].to_primitive(self, name, value)
+            if name == 'tenant_id':
+                if ('project_id' in self.fields and
+                        not self.obj_attr_is_set('project_id')):
+                    continue
             dict_[name] = value
         for field_name, value in self._synthetic_fields_items():
             field = self.fields[field_name]
@@ -203,7 +167,7 @@ class NeutronObject(obj_base.VersionedObject,
         if bad_filters:
             bad_filters = ', '.join(bad_filters)
             msg = _("'%s' is not supported for filtering") % bad_filters
-            raise exceptions.InvalidInput(error_message=msg)
+            raise n_exc.InvalidInput(error_message=msg)
 
     @classmethod
     @abc.abstractmethod
@@ -221,9 +185,9 @@ class NeutronObject(obj_base.VersionedObject,
         raise NotImplementedError()
 
     @classmethod
-    def count(cls, context, **kwargs):
+    def count(cls, context, validate_filters=True, **kwargs):
         '''Count the number of objects matching filtering criteria.'''
-        return len(cls.get_objects(context, **kwargs))
+        return len(cls.get_objects(context, validate_filters, **kwargs))
 
 
 def _detach_db_obj(func):
@@ -252,7 +216,8 @@ class DeclarativeObject(abc.ABCMeta):
             obj_extra_fields_set = set(cls.obj_extra_fields)
             obj_extra_fields_set.add('tenant_id')
             cls.obj_extra_fields = list(obj_extra_fields_set)
-            setattr(cls, 'tenant_id', property(lambda x: x.project_id))
+            setattr(cls, 'tenant_id',
+                    property(lambda x: x.get('project_id', None)))
 
         fields_no_update_set = set(cls.fields_no_update)
         for base in itertools.chain([cls], bases):
@@ -275,7 +240,8 @@ class DeclarativeObject(abc.ABCMeta):
                 model_to_obj_translation = {
                     v: k for (k, v) in cls.fields_need_translation.items()}
 
-                for model_unique_key in model_base.get_unique_keys(model):
+                keys = db_utils.get_unique_keys(model) or []
+                for model_unique_key in keys:
                     obj_unique_key = [model_to_obj_translation.get(key, key)
                                       for key in model_unique_key]
                     if obj_field_names.issuperset(obj_unique_key):
@@ -431,8 +397,8 @@ class NeutronDbObject(NeutronObject):
         all_keys = itertools.chain([cls.primary_keys], cls.unique_keys)
         if not any(lookup_keys.issuperset(keys) for keys in all_keys):
             missing_keys = set(cls.primary_keys).difference(lookup_keys)
-            raise NeutronPrimaryKeyMissing(object_class=cls.__name__,
-                                           missing_keys=missing_keys)
+            raise o_exc.NeutronPrimaryKeyMissing(object_class=cls.__name__,
+                                                 missing_keys=missing_keys)
 
         with db_api.autonested_transaction(context.session):
             db_obj = obj_db_api.get_object(
@@ -476,6 +442,20 @@ class NeutronDbObject(NeutronObject):
             return [str(val) for val in value]
         return str(value)
 
+    @staticmethod
+    def filter_to_json_str(value):
+        def _dict_to_json(v):
+            return jsonutils.dumps(
+                collections.OrderedDict(
+                    sorted(v.items(), key=lambda t: t[0])
+                ) if v else {}
+            )
+
+        if isinstance(value, list):
+            return [_dict_to_json(val) for val in value]
+        v = _dict_to_json(value)
+        return v
+
     def _get_changed_persistent_fields(self):
         fields = self.obj_get_changes()
         for field in self.synthetic_fields:
@@ -494,7 +474,7 @@ class NeutronDbObject(NeutronObject):
         fields = fields.copy()
         forbidden_updates = set(self.fields_no_update) & set(fields.keys())
         if forbidden_updates:
-            raise NeutronObjectUpdateForbidden(fields=forbidden_updates)
+            raise o_exc.NeutronObjectUpdateForbidden(fields=forbidden_updates)
 
         return fields
 
@@ -526,10 +506,11 @@ class NeutronDbObject(NeutronObject):
             objclass = objclasses[0]
             foreign_keys = objclass.foreign_keys.get(clsname)
             if not foreign_keys:
-                raise NeutronSyntheticFieldsForeignKeysNotFound(
+                raise o_exc.NeutronSyntheticFieldsForeignKeysNotFound(
                     parent=clsname, child=objclass.__name__)
             if len(foreign_keys.keys()) > 1:
-                raise NeutronSyntheticFieldMultipleForeignKeys(field=field)
+                raise o_exc.NeutronSyntheticFieldMultipleForeignKeys(
+                        field=field)
 
             synthetic_field_db_name = (
                 self.fields_need_translation.get(field, field))
@@ -546,7 +527,7 @@ class NeutronDbObject(NeutronObject):
             else:
                 synth_objs = objclass.get_objects(
                     self.obj_context, **{
-                        k: getattr(self, v)
+                        k: getattr(self, v) if v in self else db_obj.get(v)
                         for k, v in foreign_keys.items()})
             if isinstance(self.fields[field], obj_fields.ObjectField):
                 setattr(self, field, synth_objs[0] if synth_objs else None)
@@ -562,7 +543,7 @@ class NeutronDbObject(NeutronObject):
                     self.obj_context, self.db_model,
                     self.modify_fields_to_db(fields))
             except obj_exc.DBDuplicateEntry as db_exc:
-                raise NeutronDbObjectDuplicateEntry(
+                raise o_exc.NeutronDbObjectDuplicateEntry(
                     object_class=self.__class__, db_exception=db_exc)
 
             self.from_db_object(db_obj)
@@ -609,15 +590,36 @@ class NeutronDbObject(NeutronObject):
         self._captured_db_model = None
 
     @classmethod
-    def count(cls, context, **kwargs):
+    def count(cls, context, validate_filters=True, **kwargs):
         """
         Count the number of objects matching filtering criteria.
 
         :param context:
+        :param validate_filters: Raises an error in case of passing an unknown
+                                 filter
         :param kwargs: multiple keys defined by key=value pairs
         :return: number of matching objects
         """
-        cls.validate_filters(**kwargs)
+        if validate_filters:
+            cls.validate_filters(**kwargs)
         return obj_db_api.count(
             context, cls.db_model, **cls.modify_fields_to_db(kwargs)
+        )
+
+    @classmethod
+    def objects_exist(cls, context, validate_filters=True, **kwargs):
+        """
+        Check if objects are present in DB.
+
+        :param context:
+        :param validate_filters: Raises an error in case of passing an unknown
+                                 filter
+        :param kwargs: multiple keys defined by key=value pairs
+        :return: boolean. True if object is present.
+        """
+        if validate_filters:
+            cls.validate_filters(**kwargs)
+        # Succeed if at least a single object matches; no need to fetch more
+        return bool(obj_db_api.get_object(
+            context, cls.db_model, **cls.modify_fields_to_db(kwargs))
         )

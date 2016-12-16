@@ -17,6 +17,7 @@ from eventlet import greenthread
 from neutron_lib.api import validators
 from neutron_lib import constants as const
 from neutron_lib import exceptions as exc
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as os_db_exception
 from oslo_log import helpers as log_helpers
@@ -45,6 +46,7 @@ from neutron.common import ipv6_utils
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
+from neutron.db import _utils as db_utils
 from neutron.db import address_scope_db
 from neutron.db import agents_db
 from neutron.db import agentschedulers_db
@@ -70,8 +72,6 @@ from neutron.extensions import portbindings
 from neutron.extensions import portsecurity as psec
 from neutron.extensions import providernet as provider
 from neutron.extensions import vlantransparent
-from neutron import manager
-from neutron.plugins.common import constants as service_constants
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import config  # noqa
 from neutron.plugins.ml2 import db
@@ -659,40 +659,40 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         objects = []
         collection = "%ss" % resource
         items = request_items[collection]
-        try:
-            with context.session.begin(subtransactions=True):
-                obj_creator = getattr(self, '_create_%s_db' % resource)
-                for item in items:
+        with context.session.begin(subtransactions=True):
+            obj_creator = getattr(self, '_create_%s_db' % resource)
+            for item in items:
+                try:
                     attrs = item[resource]
                     result, mech_context = obj_creator(context, item)
                     objects.append({'mech_context': mech_context,
                                     'result': result,
                                     'attributes': attrs})
 
-        except Exception as e:
-            with excutils.save_and_reraise_exception():
-                utils.attach_exc_details(
-                    e, _LE("An exception occurred while creating "
-                           "the %(resource)s:%(item)s"),
-                    {'resource': resource, 'item': item})
+                except Exception as e:
+                    with excutils.save_and_reraise_exception():
+                        utils.attach_exc_details(
+                            e, _LE("An exception occurred while creating "
+                                   "the %(resource)s:%(item)s"),
+                            {'resource': resource, 'item': item})
 
-        try:
-            postcommit_op = getattr(self.mechanism_manager,
-                                    'create_%s_postcommit' % resource)
-            for obj in objects:
+        postcommit_op = getattr(self.mechanism_manager,
+                                'create_%s_postcommit' % resource)
+        for obj in objects:
+            try:
                 postcommit_op(obj['mech_context'])
-            return objects
-        except ml2_exc.MechanismDriverError:
-            with excutils.save_and_reraise_exception():
-                resource_ids = [res['result']['id'] for res in objects]
-                LOG.exception(_LE("mechanism_manager.create_%(res)s"
-                                  "_postcommit failed for %(res)s: "
-                                  "'%(failed_id)s'. Deleting "
-                                  "%(res)ss %(resource_ids)s"),
-                              {'res': resource,
-                               'failed_id': obj['result']['id'],
-                               'resource_ids': ', '.join(resource_ids)})
-                self._delete_objects(context, resource, objects)
+            except ml2_exc.MechanismDriverError:
+                with excutils.save_and_reraise_exception():
+                    resource_ids = [res['result']['id'] for res in objects]
+                    LOG.exception(_LE("mechanism_manager.create_%(res)s"
+                                      "_postcommit failed for %(res)s: "
+                                      "'%(failed_id)s'. Deleting "
+                                      "%(res)ss %(resource_ids)s"),
+                                  {'res': resource,
+                                   'failed_id': obj['result']['id'],
+                                   'resource_ids': ', '.join(resource_ids)})
+                    self._delete_objects(context, resource, objects)
+        return objects
 
     def _get_network_mtu(self, network):
         mtus = []
@@ -844,7 +844,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             self.type_manager.extend_network_dict_provider(context, result)
             result[api.MTU] = self._get_network_mtu(result)
 
-        return self._fields(result, fields)
+        return db_utils.resource_fields(result, fields)
 
     @db_api.retry_if_session_inactive()
     def get_networks(self, context, filters=None, fields=None,
@@ -861,7 +861,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             for net in nets:
                 net[api.MTU] = self._get_network_mtu(net)
 
-        return [self._fields(net, fields) for net in nets]
+        return [db_utils.resource_fields(net, fields) for net in nets]
 
     def _delete_ports(self, context, port_ids):
         for port_id in port_ids:
@@ -986,19 +986,19 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
     def _create_subnet_db(self, context, subnet):
         session = context.session
-        # FIXME(kevinbenton): this is a mess because create_subnet ends up
-        # calling _update_router_gw_ports which ends up calling update_port
-        # on a router port inside this transaction. Need to find a way to
-        # separate router updates from the subnet update operation.
-        setattr(context, 'GUARD_TRANSACTION', False)
         with session.begin(subtransactions=True):
-            result = super(Ml2Plugin, self).create_subnet(context, subnet)
+            result, net_db, ipam_sub = self._create_subnet_precommit(
+                context, subnet)
             self.extension_manager.process_create_subnet(
                 context, subnet[attributes.SUBNET], result)
-            network = self.get_network(context, result['network_id'])
+            network = self._make_network_dict(net_db, context=context)
+            self.type_manager.extend_network_dict_provider(context, network)
+            network[api.MTU] = self._get_network_mtu(network)
             mech_context = driver_context.SubnetContext(self, context,
                                                         result, network)
             self.mechanism_manager.create_subnet_precommit(mech_context)
+        # db base plugin post commit ops
+        self._create_subnet_postcommit(context, result, net_db, ipam_sub)
 
         return result, mech_context
 
@@ -1028,8 +1028,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
     def update_subnet(self, context, id, subnet):
         session = context.session
         with session.begin(subtransactions=True):
-            original_subnet = super(Ml2Plugin, self).get_subnet(context, id)
-            updated_subnet = super(Ml2Plugin, self).update_subnet(
+            original_subnet = self.get_subnet(context, id)
+            updated_subnet = self._update_subnet_precommit(
                 context, id, subnet)
             self.extension_manager.process_update_subnet(
                 context, subnet[attributes.SUBNET], updated_subnet)
@@ -1040,6 +1040,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 original_subnet=original_subnet)
             self.mechanism_manager.update_subnet_precommit(mech_context)
 
+        self._update_subnet_postcommit(context, original_subnet,
+                                       updated_subnet)
         # TODO(apech) - handle errors raised by update_subnet, potentially
         # by re-calling update_subnet with the previous attributes. For
         # now the error is propagated to the caller, which is expected to
@@ -1128,9 +1130,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                             self._subnet_check_ip_allocations(context, id)):
                         # allocation found and it was DHCP port
                         # that appeared after autodelete ports were
-                        # removed - need to restart whole operation
-                        raise os_db_exception.RetryRequest(
-                            exc.SubnetInUse(subnet_id=id))
+                        # removed - continue iteration to find offending port
+                        # to update or raise SubnetInUse
+                        continue
                     network = self.get_network(context, subnet['network_id'])
                     mech_context = driver_context.SubnetContext(self, context,
                                                                 subnet,
@@ -1588,8 +1590,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         self._pre_delete_port(context, id, l3_port_check)
         # TODO(armax): get rid of the l3 dependency in the with block
         router_ids = []
-        l3plugin = manager.NeutronManager.get_service_plugins().get(
-            service_constants.L3_ROUTER_NAT)
+        l3plugin = directory.get_plugin(const.L3)
 
         session = context.session
         with session.begin(subtransactions=True):

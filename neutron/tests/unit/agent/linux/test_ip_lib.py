@@ -1391,12 +1391,10 @@ class TestArpPing(TestIPCmdBase):
         spawn_n.side_effect = lambda f: f()
         ARPING_COUNT = 3
         address = '20.0.0.1'
-        config = mock.Mock()
-        config.send_arp_for_ha = ARPING_COUNT
         ip_lib.send_ip_addr_adv_notif(mock.sentinel.ns_name,
                                       mock.sentinel.iface_name,
                                       address,
-                                      config)
+                                      ARPING_COUNT)
 
         self.assertTrue(spawn_n.called)
         mIPWrapper.assert_called_once_with(namespace=mock.sentinel.ns_name)
@@ -1410,17 +1408,15 @@ class TestArpPing(TestIPCmdBase):
                       '-w', mock.ANY,
                       address]
         ip_wrapper.netns.execute.assert_any_call(arping_cmd,
-                                                 check_exit_code=True)
+                                                 extra_ok_codes=[1])
 
     @mock.patch('eventlet.spawn_n')
     def test_no_ipv6_addr_notif(self, spawn_n):
         ipv6_addr = 'fd00::1'
-        config = mock.Mock()
-        config.send_arp_for_ha = 3
         ip_lib.send_ip_addr_adv_notif(mock.sentinel.ns_name,
                                       mock.sentinel.iface_name,
                                       ipv6_addr,
-                                      config)
+                                      3)
         self.assertFalse(spawn_n.called)
 
 
@@ -1433,3 +1429,10 @@ class TestAddNamespaceToCmd(base.BaseTestCase):
     def test_add_namespace_to_cmd_without_namespace(self):
         cmd = ['ping', '8.8.8.8']
         self.assertEqual(cmd, ip_lib.add_namespace_to_cmd(cmd, None))
+
+
+class TestSetIpNonlocalBindForHaNamespace(base.BaseTestCase):
+    def test_setting_failure(self):
+        """Make sure message is formatted correctly."""
+        with mock.patch.object(ip_lib, 'set_ip_nonlocal_bind', return_value=1):
+            ip_lib.set_ip_nonlocal_bind_for_namespace('foo')

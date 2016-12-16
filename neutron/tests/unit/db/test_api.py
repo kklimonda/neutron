@@ -14,7 +14,6 @@
 
 import mock
 from neutron_lib import exceptions
-from oslo_config import cfg
 from oslo_db import exception as db_exc
 import osprofiler
 import sqlalchemy
@@ -92,6 +91,9 @@ class TestDeadLockDecorator(base.BaseTestCase):
         self.assertIsNone(self._decorated_function(1, e))
 
     def test_multi_exception_raised_on_exceed(self):
+        # limit retries so this doesn't take 40 seconds
+        mock.patch.object(db_api._retry_db_errors, 'max_retries',
+                          new=2).start()
         e = exceptions.MultipleExceptions([ValueError(), db_exc.DBDeadlock()])
         with testtools.ExpectedException(exceptions.MultipleExceptions):
             self._decorated_function(db_api.MAX_RETRIES + 1, e)
@@ -164,11 +166,13 @@ class TestDeadLockDecorator(base.BaseTestCase):
 class TestCommonDBfunctions(base.BaseTestCase):
 
     def test_set_hook(self):
-        with mock.patch.object(osprofiler.sqlalchemy,
-                               'add_tracing') as profiler:
-            cfg.CONF.set_override('enabled', True, group='profiler')
-            cfg.CONF.set_override('trace_sqlalchemy', True, group='profiler')
-            engine_mock = mock.Mock()
-            db_api.set_hook(engine_mock)
-            profiler.assert_called_with(sqlalchemy, engine_mock,
-                                        'neutron.db')
+        with mock.patch.object(osprofiler.opts, 'is_trace_enabled',
+                               return_value=True),\
+             mock.patch.object(osprofiler.opts, 'is_db_trace_enabled',
+                               return_value=True):
+            with mock.patch.object(osprofiler.sqlalchemy,
+                    'add_tracing') as add_tracing:
+                engine_mock = mock.Mock()
+                db_api.set_hook(engine_mock)
+                add_tracing.assert_called_with(sqlalchemy, engine_mock,
+                                               'neutron.db')

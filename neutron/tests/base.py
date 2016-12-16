@@ -16,8 +16,11 @@
 """Base test cases for all neutron tests.
 """
 
+import abc
 import contextlib
+import functools
 import gc
+import inspect
 import os
 import os.path
 import sys
@@ -27,10 +30,12 @@ from debtcollector import moves
 import eventlet.timeout
 import fixtures
 import mock
+from neutron_lib.plugins import directory
 from oslo_concurrency.fixture import lockutils
 from oslo_config import cfg
 from oslo_messaging import conffixture as messaging_conffixture
 from oslo_utils import excutils
+from oslo_utils import fileutils
 from oslo_utils import strutils
 from oslotest import base
 import six
@@ -86,7 +91,7 @@ def bool_from_env(key, strict=False, default=False):
 def setup_test_logging(config_opts, log_dir, log_file_path_template):
     # Have each test log into its own log file
     config_opts.set_override('debug', True)
-    utils.ensure_dir(log_dir)
+    fileutils.ensure_tree(log_dir, mode=0o755)
     log_file = sanitize_log_path(
         os.path.join(log_dir, log_file_path_template))
     config_opts.set_override('log_file', log_file)
@@ -115,6 +120,32 @@ class AttributeDict(dict):
         raise AttributeError(_("Unknown attribute '%s'.") % name)
 
 
+def _catch_timeout(f):
+    @functools.wraps(f)
+    def func(self, *args, **kwargs):
+        try:
+            return f(self, *args, **kwargs)
+        except eventlet.timeout.Timeout as e:
+            self.fail('Execution of this test timed out: %s' % e)
+    return func
+
+
+class _CatchTimeoutMetaclass(abc.ABCMeta):
+    def __init__(cls, name, bases, dct):
+        super(_CatchTimeoutMetaclass, cls).__init__(name, bases, dct)
+        for name, method in inspect.getmembers(
+                # NOTE(ihrachys): we should use isroutine because it will catch
+                # both unbound methods (python2) and functions (python3)
+                cls, predicate=inspect.isroutine):
+            if name.startswith('test_'):
+                setattr(cls, name, _catch_timeout(method))
+
+
+# Test worker cannot survive eventlet's Timeout exception, which effectively
+# kills the whole worker, with all test cases scheduled to it. This metaclass
+# makes all test cases convert Timeout exceptions into unittest friendly
+# failure mode (self.fail).
+@six.add_metaclass(_CatchTimeoutMetaclass)
 class DietTestCase(base.BaseTestCase):
     """Same great taste, less filling.
 
@@ -272,6 +303,7 @@ class BaseTestCase(DietTestCase):
         self.setup_rpc_mocks()
         self.setup_config()
         self.setup_test_registry_instance()
+        self.setup_test_directory_instance()
 
         policy.init()
         self.addCleanup(policy.reset)
@@ -341,6 +373,14 @@ class BaseTestCase(DietTestCase):
         mock.patch.object(registry, '_get_callback_manager',
                           return_value=self._callback_manager).start()
 
+    def setup_test_directory_instance(self):
+        """Give a private copy of the directory to each test."""
+        # TODO(armax): switch to using a fixture to stop relying on stubbing
+        # out _get_plugin_directory directly.
+        self._plugin_directory = directory._PluginDirectory()
+        mock.patch.object(directory, '_get_plugin_directory',
+                          return_value=self._plugin_directory).start()
+
     def setup_config(self, args=None):
         """Tests that need a non-default config can override this method."""
         self.config_parse(args=args)
@@ -361,11 +401,13 @@ class BaseTestCase(DietTestCase):
         for k, v in six.iteritems(kw):
             CONF.set_override(k, v, group)
 
-    def setup_coreplugin(self, core_plugin=None):
+    def setup_coreplugin(self, core_plugin=None, load_plugins=True):
         cp = PluginFixture(core_plugin)
         self.useFixture(cp)
         self.patched_dhcp_periodic = cp.patched_dhcp_periodic
         self.patched_default_svc_plugins = cp.patched_default_svc_plugins
+        if load_plugins:
+            manager.init()
 
     def setup_notification_driver(self, notification_driver=None):
         self.addCleanup(fake_notifier.reset)

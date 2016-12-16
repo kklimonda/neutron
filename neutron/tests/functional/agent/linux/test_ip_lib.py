@@ -16,6 +16,7 @@
 import collections
 
 import netaddr
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
@@ -158,6 +159,30 @@ class IpLibTestCase(IpLibTestFramework):
 
         device.link.delete()
 
+    def test_get_device_mac(self):
+        attr = self.generate_device_details()
+        device = self.manage_device(attr)
+
+        mac_address = ip_lib.get_device_mac(attr.name,
+                                            namespace=attr.namespace)
+
+        self.assertEqual(attr.mac_address, mac_address)
+
+        device.link.delete()
+
+    def test_get_device_mac_too_long_name(self):
+        name = utils.get_rand_name(
+            max_length=constants.DEVICE_NAME_MAX_LEN + 5)
+        attr = self.generate_device_details(name=name)
+        device = self.manage_device(attr)
+
+        mac_address = ip_lib.get_device_mac(attr.name,
+                                            namespace=attr.namespace)
+
+        self.assertEqual(attr.mac_address, mac_address)
+
+        device.link.delete()
+
     def test_get_routing_table(self):
         attr = self.generate_device_details()
         device = self.manage_device(attr)
@@ -190,3 +215,23 @@ class IpLibTestCase(IpLibTestFramework):
         self._check_for_device_name(namespace.ip_wrapper, dev_name, True)
         device.link.delete()
         self._check_for_device_name(namespace.ip_wrapper, dev_name, False)
+
+
+class TestSetIpNonlocalBind(functional_base.BaseSudoTestCase):
+    def test_assigned_value(self):
+        namespace = self.useFixture(net_helpers.NamespaceFixture())
+        for expected in (0, 1):
+            failed = ip_lib.set_ip_nonlocal_bind(expected, namespace.name)
+            try:
+                observed = ip_lib.get_ip_nonlocal_bind(namespace.name)
+            except RuntimeError as rte:
+                stat_message = (
+                    'cannot stat /proc/sys/net/ipv4/ip_nonlocal_bind')
+                if stat_message in str(rte):
+                    raise self.skipException(
+                        "This kernel doesn't support %s in network "
+                        "namespaces." % ip_lib.IP_NONLOCAL_BIND)
+                raise
+
+            self.assertFalse(failed)
+            self.assertEqual(expected, observed)

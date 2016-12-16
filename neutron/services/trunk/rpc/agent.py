@@ -14,6 +14,7 @@
 
 import abc
 
+from oslo_log import helpers as log_helpers
 import oslo_messaging
 
 from neutron.api.rpc.callbacks.consumer import registry
@@ -41,8 +42,8 @@ class TrunkSkeleton(object):
     """Skeleton proxy code for server->agent communication."""
 
     def __init__(self):
-        registry.subscribe(self.handle_trunks, resources.TRUNK)
-        registry.subscribe(self.handle_subports, resources.SUBPORT)
+        registry.register(self.handle_trunks, resources.TRUNK)
+        registry.register(self.handle_subports, resources.SUBPORT)
 
         self._connection = n_rpc.create_connection()
         endpoints = [resources_rpc.ResourcesPushRpcCallback()]
@@ -53,19 +54,19 @@ class TrunkSkeleton(object):
         self._connection.consume_in_threads()
 
     @abc.abstractmethod
-    def handle_trunks(self, trunks, event_type):
+    def handle_trunks(self, context, resource_type, trunks, event_type):
         """Handle trunk events."""
         # if common logic may be extracted out, consider making a base
-        # version of this method that can be overidden by the inherited
+        # version of this method that can be overridden by the inherited
         # skeleton.
         # NOTE: If trunk is not managed by the agent, the notification can
         # either be ignored or cached for future use.
 
     @abc.abstractmethod
-    def handle_subports(self, subports, event_type):
+    def handle_subports(self, context, resource_type, subports, event_type):
         """Handle subports event."""
         # if common logic may be extracted out, consider making a base
-        # version of this method that can be overidden by the inherited
+        # version of this method that can be overridden by the inherited
         # skeleton.
         # NOTE: If the subport belongs to a trunk which the agent does not
         # manage, the notification should be ignored.
@@ -85,16 +86,19 @@ class TrunkStub(object):
             namespace=trunk_consts.TRUNK_BASE_NAMESPACE)
         self.rpc_client = n_rpc.get_client(target)
 
+    @log_helpers.log_method_call
     def get_trunk_details(self, context, parent_port_id):
         """Get information about the trunk for the given parent port."""
         return self.stub.pull(context, resources.TRUNK, parent_port_id)
 
+    @log_helpers.log_method_call
     def update_trunk_status(self, context, trunk_id, status):
         """Update the trunk status to reflect outcome of data plane wiring."""
         return self.rpc_client.prepare().call(
             context, 'update_trunk_status',
             trunk_id=trunk_id, status=status)
 
+    @log_helpers.log_method_call
     def update_subport_bindings(self, context, subports):
         """Update subport bindings to match parent port host binding."""
         return self.rpc_client.prepare().call(

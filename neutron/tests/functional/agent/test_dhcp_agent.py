@@ -84,10 +84,11 @@ class DHCPAgentOVSTestFramework(base.BaseSudoTestCase):
 
         self.conf.set_override('check_child_processes_interval', 1, 'AGENT')
 
-    def network_dict_for_dhcp(self, dhcp_enabled=True, ip_version=4):
+    def network_dict_for_dhcp(self, dhcp_enabled=True, ip_version=4,
+                              prefix_override=None):
         net_id = uuidutils.generate_uuid()
         subnet_dict = self.create_subnet_dict(
-            net_id, dhcp_enabled, ip_version)
+            net_id, dhcp_enabled, ip_version, prefix_override)
         port_dict = self.create_port_dict(
             net_id, subnet_dict.id,
             mac_address=str(self._DHCP_PORT_MAC_ADDRESS),
@@ -98,12 +99,16 @@ class DHCPAgentOVSTestFramework(base.BaseSudoTestCase):
             net_id, [subnet_dict], [port_dict])
         return net_dict
 
-    def create_subnet_dict(self, net_id, dhcp_enabled=True, ip_version=4):
+    def create_subnet_dict(self, net_id, dhcp_enabled=True, ip_version=4,
+                           prefix_override=None):
+        cidr = self._IP_ADDRS[ip_version]['cidr']
+        if prefix_override is not None:
+            cidr = '/'.join((cidr.split('/')[0], str(prefix_override)))
         sn_dict = dhcp.DictModel({
             "id": uuidutils.generate_uuid(),
             "network_id": net_id,
             "ip_version": ip_version,
-            "cidr": self._IP_ADDRS[ip_version]['cidr'],
+            "cidr": cidr,
             "gateway_ip": (self.
                 _IP_ADDRS[ip_version]['gateway']),
             "enable_dhcp": dhcp_enabled,
@@ -161,11 +166,17 @@ class DHCPAgentOVSTestFramework(base.BaseSudoTestCase):
         iface_name = self.get_interface_name(network, port)
         self.assertEqual(dhcp_enabled, ovs.port_exists(iface_name))
         self.assert_dhcp_namespace(network.namespace, dhcp_enabled)
+        self.assert_accept_ra_disabled(network.namespace)
         self.assert_dhcp_device(network.namespace, iface_name, dhcp_enabled)
 
     def assert_dhcp_namespace(self, namespace, dhcp_enabled):
         ip = ip_lib.IPWrapper()
         self.assertEqual(dhcp_enabled, ip.netns.exists(namespace))
+
+    def assert_accept_ra_disabled(self, namespace):
+        actual = ip_lib.IPWrapper(namespace=namespace).netns.execute(
+            ['sysctl', '-b', 'net.ipv6.conf.default.accept_ra'])
+        self.assertEqual('0', actual)
 
     def assert_dhcp_device(self, namespace, dhcp_iface_name, dhcp_enabled):
         dev = ip_lib.IPDevice(dhcp_iface_name, namespace)
@@ -253,6 +264,18 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
             self.configure_dhcp_for_network(network=network,
                                             dhcp_enabled=dhcp_enabled)
             self.assert_dhcp_resources(network, dhcp_enabled)
+
+    def test_create_subnet_with_non64_ipv6_cidrs(self):
+        # the agent should not throw exceptions on weird prefixes
+        dhcp_enabled = True
+        version = 6
+        for i in (0, 1, 41, 81, 121, 127, 128):
+            network = self.network_dict_for_dhcp(
+                dhcp_enabled, ip_version=version, prefix_override=i)
+            self.configure_dhcp_for_network(network=network,
+                                            dhcp_enabled=dhcp_enabled)
+            self.assertFalse(self.agent.needs_resync_reasons[network.id],
+                             msg="prefix size of %s triggered resync" % i)
 
     def test_agent_mtu_set_on_interface_driver(self):
         network = self.network_dict_for_dhcp()

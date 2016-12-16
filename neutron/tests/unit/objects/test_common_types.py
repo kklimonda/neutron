@@ -16,8 +16,10 @@ import itertools
 import random
 
 from neutron_lib import constants as const
+from oslo_serialization import jsonutils
 
 from neutron.common import constants
+from neutron.extensions import dns as dns_ext
 from neutron.objects import common_types
 from neutron.tests import base as test_base
 from neutron.tests import tools
@@ -38,6 +40,12 @@ class TestField(object):
         for in_val, prim_val in self.to_primitive_values:
             self.assertEqual(prim_val, self.field.to_primitive('obj', 'attr',
                                                                in_val))
+
+    def test_to_primitive_json_serializable(self):
+        for in_val, _ in self.to_primitive_values:
+            prim = self.field.to_primitive('obj', 'attr', in_val)
+            jsencoded = jsonutils.dumps(prim)
+            self.assertEqual(prim, jsonutils.loads(jsencoded))
 
     def test_from_primitive(self):
         class ObjectLikeThing(object):
@@ -132,7 +140,8 @@ class IPNetworkFieldTest(test_base.BaseTestCase, TestField):
             # if they represent a valid IP network
             '10.0.0.0/24',
         ]
-        self.to_primitive_values = self.coerce_good_values
+        self.to_primitive_values = ((a1, str(a2))
+                                    for a1, a2 in self.coerce_good_values)
         self.from_primitive_values = self.coerce_good_values
 
     def test_stringify(self):
@@ -162,6 +171,23 @@ class FlowDirectionEnumFieldTest(test_base.BaseTestCase, TestField):
         self.coerce_good_values = [(val, val)
                                    for val in constants.VALID_DIRECTIONS]
         self.coerce_bad_values = ['test', '8', 10, []]
+        self.to_primitive_values = self.coerce_good_values
+        self.from_primitive_values = self.coerce_good_values
+
+    def test_stringify(self):
+        for in_val, out_val in self.coerce_good_values:
+            self.assertEqual("'%s'" % in_val, self.field.stringify(in_val))
+
+
+class DomainNameFieldTest(test_base.BaseTestCase, TestField):
+    def setUp(self):
+        super(DomainNameFieldTest, self).setUp()
+        self.field = common_types.DomainNameField()
+        self.coerce_good_values = [
+            (val, val)
+            for val in ('www.google.com', 'hostname', '1abc.com')
+        ]
+        self.coerce_bad_values = ['x' * (dns_ext.FQDN_MAX_LEN + 1), 10, []]
         self.to_primitive_values = self.coerce_good_values
         self.from_primitive_values = self.coerce_good_values
 
@@ -220,3 +246,23 @@ class IpProtocolEnumFieldTest(test_base.BaseTestCase, TestField):
     def test_stringify(self):
         for in_val, out_val in self.coerce_good_values:
             self.assertEqual("'%s'" % in_val, self.field.stringify(in_val))
+
+
+class UUIDFieldTest(test_base.BaseTestCase, TestField):
+    def setUp(self):
+        super(UUIDFieldTest, self).setUp()
+        self.field = common_types.UUIDField()
+        self.coerce_good_values = [
+            ('f1d9cb3f-c263-45d3-907c-d12a9ef1629e',
+                'f1d9cb3f-c263-45d3-907c-d12a9ef1629e'),
+            ('7188f6637cbd4097a3b1d1bb7897c7c0',
+                '7188f6637cbd4097a3b1d1bb7897c7c0')]
+        self.coerce_bad_values = [
+            'f1d9cb3f-c263-45d3-907c-d12a9ef16zzz',
+            '7188f6637cbd4097a3b1d1bb7897']
+        self.to_primitive_values = self.coerce_good_values
+        self.from_primitive_values = self.coerce_good_values
+
+    def test_stringify(self):
+        for in_val, out_val in self.coerce_good_values:
+            self.assertEqual('%s' % in_val, self.field.stringify(in_val))

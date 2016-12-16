@@ -18,6 +18,7 @@ import contextlib
 
 import mock
 from neutron_lib import constants as const
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 import oslo_messaging
 from oslo_utils import netutils
@@ -33,7 +34,6 @@ from neutron import context
 from neutron.db import securitygroups_rpc_base as sg_db_rpc
 from neutron.extensions import allowedaddresspairs as addr_pair
 from neutron.extensions import securitygroup as ext_sg
-from neutron import manager
 from neutron.tests import base
 from neutron.tests import tools
 from neutron.tests.unit.extensions import test_securitygroup as test_sg
@@ -123,7 +123,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
         plugin = plugin or TEST_PLUGIN_CLASS
         set_firewall_driver(FIREWALL_NOOP_DRIVER)
         super(SGServerRpcCallBackTestCase, self).setUp(plugin)
-        self.notifier = manager.NeutronManager.get_plugin().notifier
+        self.notifier = directory.get_plugin().notifier
         self.rpc = securitygroups_rpc.SecurityGroupServerRpcCallback()
 
     def _test_security_group_port(self, device_owner, gw_ip,
@@ -284,7 +284,7 @@ class SGServerRpcCallBackTestCase(test_sg.SecurityGroupDBTestCase):
 
     @contextlib.contextmanager
     def _port_with_addr_pairs_and_security_group(self):
-        plugin_obj = manager.NeutronManager.get_plugin()
+        plugin_obj = directory.get_plugin()
         if ('allowed-address-pairs'
             not in plugin_obj.supported_extension_aliases):
             self.skipTest("Test depends on allowed-address-pairs extension")
@@ -1220,7 +1220,7 @@ class SecurityGroupAgentRpcTestCase(BaseSecurityGroupAgentRpcTestCase):
         self.agent.refresh_firewall = mock.Mock()
         self.agent.security_groups_provider_updated(None)
         self.agent.refresh_firewall.assert_has_calls(
-            [mock.call.refresh_firewall(None)])
+            [mock.call.refresh_firewall()])
 
     def test_refresh_firewall(self):
         self.agent.prepare_devices_filter(['fake_port_id'])
@@ -1344,7 +1344,7 @@ class SecurityGroupAgentEnhancedRpcTestCase(
         self.agent.refresh_firewall = mock.Mock()
         self.agent.security_groups_provider_updated(None)
         self.agent.refresh_firewall.assert_has_calls(
-            [mock.call.refresh_firewall(None)])
+            [mock.call.refresh_firewall()])
 
     def test_refresh_firewall_enhanced_rpc(self):
         self.agent.prepare_devices_filter(['fake_port_id'])
@@ -1489,8 +1489,15 @@ class SecurityGroupAgentRpcWithDeferredRefreshTestCase(
         self.assertTrue(self.agent.global_refresh_firewall)
 
     def test_security_groups_provider_updated_devices_specified(self):
+        self.agent.firewall.ports = {
+            'fake_device_1': {
+                'id': 'fake_port_id_1',
+                'device': 'fake_device_1'},
+            'fake_device_2': {
+                'id': 'fake_port_id_2',
+                'device': 'fake_device_2'}}
         self.agent.security_groups_provider_updated(
-            ['fake_device_1', 'fake_device_2'])
+            ['fake_port_id_1', 'fake_port_id_2'])
         self.assertFalse(self.agent.global_refresh_firewall)
         self.assertIn('fake_device_1', self.agent.devices_to_refilter)
         self.assertIn('fake_device_2', self.agent.devices_to_refilter)
@@ -1638,7 +1645,7 @@ class SecurityGroupAgentRpcWithDeferredRefreshTestCase(
         self.assertFalse(self.firewall.security_group_updated.called)
 
 
-class FakeSGNotifierAPI(sg_rpc.SecurityGroupAgentRpcApiMixin):
+class FakeSGNotifierAPI(securitygroups_rpc.SecurityGroupAgentRpcApiMixin):
     def __init__(self):
         self.topic = 'fake'
         target = oslo_messaging.Target(topic=self.topic, version='1.0')
@@ -2665,6 +2672,7 @@ class TestSecurityGroupAgentWithIptables(base.BaseTestCase):
                 oslo_messaging.UnsupportedVersion('1.2'))
 
         self.iptables = self.agent.firewall.iptables
+        self.ipconntrack = self.agent.firewall.ipconntrack
         # TODO(jlibosva) Get rid of mocking iptables execute and mock out
         # firewall instead
         self.iptables.use_ipv6 = True
@@ -2746,6 +2754,8 @@ class TestSecurityGroupAgentWithIptables(base.BaseTestCase):
             context=None, plugin_rpc=self.rpc,
             defer_refresh_firewall=defer_refresh_firewall)
         self._enforce_order_in_firewall(self.agent.firewall)
+        # don't mess with sysctl knobs in unit tests
+        self.agent.firewall._enabled_netfilter_for_bridges = True
 
     def _device(self, device, ip, mac_address, rule):
         return {'device': device,
@@ -2794,12 +2804,6 @@ class TestSecurityGroupAgentWithIptables(base.BaseTestCase):
             self.assertThat(kwargs['process_input'],
                             matchers.MatchesRegex(expected_regex))
 
-        expected = ['net.bridge.bridge-nf-call-arptables=1',
-                    'net.bridge.bridge-nf-call-ip6tables=1',
-                    'net.bridge.bridge-nf-call-iptables=1']
-        for e in expected:
-            self.utils_exec.assert_any_call(['sysctl', '-w', e],
-                                            run_as_root=True)
         self.assertEqual(exp_fw_sg_updated_call,
                          self.agent.firewall.security_group_updated.called)
 
@@ -2825,6 +2829,7 @@ class TestSecurityGroupAgentWithIptables(base.BaseTestCase):
             return_value='')
 
     def test_prepare_remove_port(self):
+        self.ipconntrack._device_zone_map = {}
         self.rpc.security_group_rules_for_devices.return_value = self.devices1
         self._replay_iptables(IPTABLES_FILTER_1, IPTABLES_FILTER_V6_1,
                               IPTABLES_RAW_DEFAULT)
@@ -2939,6 +2944,7 @@ class TestSecurityGroupAgentEnhancedRpcWithIptables(
                          'devices': devices_info2}
 
     def test_prepare_remove_port(self):
+        self.ipconntrack._device_zone_map = {}
         self.sg_info.return_value = self.devices_info1
         self._replay_iptables(IPTABLES_FILTER_1, IPTABLES_FILTER_V6_1,
                               IPTABLES_RAW_DEFAULT)
@@ -3005,6 +3011,7 @@ class TestSecurityGroupAgentEnhancedIpsetWithIptables(
                                                "execute").start()
 
     def test_prepare_remove_port(self):
+        self.ipconntrack._device_zone_map = {}
         self.sg_info.return_value = self.devices_info1
         self._replay_iptables(IPSET_FILTER_1, IPTABLES_FILTER_V6_1,
                               IPTABLES_RAW_DEFAULT)
@@ -3018,6 +3025,8 @@ class TestSecurityGroupAgentEnhancedIpsetWithIptables(
 
     def test_security_group_member_updated(self):
         self.sg_info.return_value = self.devices_info1
+        self.ipset._get_new_set_ips = mock.Mock(return_value=['10.0.0.3'])
+        self.ipset._get_deleted_set_ips = mock.Mock(return_value=[])
         self._replay_iptables(IPSET_FILTER_1, IPTABLES_FILTER_V6_1,
                               IPTABLES_RAW_DEFAULT)
         self._replay_iptables(IPSET_FILTER_1, IPTABLES_FILTER_V6_1,
@@ -3045,6 +3054,8 @@ class TestSecurityGroupAgentEnhancedIpsetWithIptables(
             2, self.agent.firewall.security_group_updated.call_count)
 
     def test_security_group_rule_updated(self):
+        self.ipset._get_new_set_ips = mock.Mock(return_value=['10.0.0.3'])
+        self.ipset._get_deleted_set_ips = mock.Mock(return_value=[])
         self.sg_info.return_value = self.devices_info2
         self._replay_iptables(IPSET_FILTER_2, IPTABLES_FILTER_V6_2,
                               IPTABLES_RAW_DEFAULT)
@@ -3123,8 +3134,11 @@ class TestSecurityGroupAgentWithOVSIptables(
             context=None, plugin_rpc=self.rpc,
             defer_refresh_firewall=defer_refresh_firewall)
         self._enforce_order_in_firewall(self.agent.firewall)
+        # don't mess with sysctl knobs in unit tests
+        self.agent.firewall._enabled_netfilter_for_bridges = True
 
     def test_prepare_remove_port(self):
+        self.ipconntrack._device_zone_map = {}
         self.rpc.security_group_rules_for_devices.return_value = self.devices1
         self._replay_iptables(IPTABLES_FILTER_1, IPTABLES_FILTER_V6_1,
                               IPTABLES_RAW_DEVICE_1)
@@ -3137,6 +3151,7 @@ class TestSecurityGroupAgentWithOVSIptables(
         self._verify_mock_calls()
 
     def test_security_group_member_updated(self):
+        self.ipconntrack._device_zone_map = {}
         self.rpc.security_group_rules_for_devices.return_value = self.devices1
         self._replay_iptables(IPTABLES_FILTER_1, IPTABLES_FILTER_V6_1,
                               IPTABLES_RAW_DEVICE_1)
@@ -3163,6 +3178,7 @@ class TestSecurityGroupAgentWithOVSIptables(
         self._verify_mock_calls()
 
     def test_security_group_rule_updated(self):
+        self.ipconntrack._device_zone_map = {}
         self.rpc.security_group_rules_for_devices.return_value = self.devices2
         self._replay_iptables(IPTABLES_FILTER_2, IPTABLES_FILTER_V6_2,
                               IPTABLES_RAW_DEVICE_2)

@@ -44,7 +44,14 @@ case $VENV in
 
     configure_host_for_func_testing
 
-    upgrade_ovs_if_necessary
+    # Kernel modules are not needed for functional job. They are needed only
+    # for fullstack because of bug present in Ubuntu Xenial kernel version
+    # that makes VXLAN local tunneling fail.
+    if [[ "$VENV" =~ "dsvm-functional" ]]; then
+        compile_modules=False
+        NEUTRON_OVERRIDE_OVS_BRANCH=v2.5.1
+    fi
+    upgrade_ovs_if_necessary $compile_modules
 
     load_conf_hook iptables_verify
     # Make the workspace owned by the stack user
@@ -53,12 +60,11 @@ case $VENV in
 
 "api"|"api-pecan"|"full-pecan"|"dsvm-scenario")
     load_rc_hook api_extensions
-    # NOTE(ihrachys): note the order of hook post-* sections is significant: [quotas] hook should
-    # go before other hooks modifying [DEFAULT]. See LP#1583214 for details.
     load_conf_hook quotas
     load_rc_hook dns
     load_rc_hook qos
     load_rc_hook trunk
+    load_conf_hook mtu
     load_conf_hook osprofiler
     if [[ "$VENV" =~ "dsvm-scenario" ]]; then
         load_conf_hook iptables_verify

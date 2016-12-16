@@ -19,12 +19,12 @@ import mock
 import netaddr
 from neutron_lib import constants
 from oslo_config import cfg
+from oslo_utils import fileutils
 
 from neutron.agent.common import config
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import external_process
 from neutron.common import constants as n_const
-from neutron.common import utils
 from neutron.conf.agent import dhcp as dhcp_config
 from neutron.conf import common as base_config
 from neutron.extensions import extra_dhcp_opt as edo_ext
@@ -512,6 +512,19 @@ class FakeV6SubnetStateless(object):
         self.ipv6_ra_mode = None
 
 
+class FakeV6SubnetStatelessBadPrefixLength(object):
+    def __init__(self):
+        self.id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
+        self.ip_version = 6
+        self.cidr = 'ffeb:3ba5:a17a:4ba3::/56'
+        self.gateway_ip = 'ffeb:3ba5:a17a:4ba3::1'
+        self.enable_dhcp = True
+        self.dns_nameservers = []
+        self.host_routes = []
+        self.ipv6_address_mode = constants.DHCPV6_STATELESS
+        self.ipv6_ra_mode = None
+
+
 class FakeV4SubnetNoGateway(FakeV4Subnet):
     def __init__(self):
         super(FakeV4SubnetNoGateway, self).__init__()
@@ -824,6 +837,14 @@ class FakeV6NetworkStatelessDHCP(object):
         self.namespace = 'qdhcp-ns'
 
 
+class FakeV6NetworkStatelessDHCPBadPrefixLength(object):
+    def __init__(self):
+        self.id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        self.subnets = [FakeV6SubnetStatelessBadPrefixLength()]
+        self.ports = [FakeV6PortExtraOpt()]
+        self.namespace = 'qdhcp-ns'
+
+
 class FakeNetworkWithV6SatelessAndV4DHCPSubnets(object):
     def __init__(self):
         self.id = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
@@ -876,7 +897,7 @@ class TestBase(TestConfBase):
         self.config_parse(self.conf)
         self.conf.set_override('state_path', '')
 
-        self.replace_p = mock.patch('neutron.common.utils.replace_file')
+        self.replace_p = mock.patch('neutron_lib.utils.file.replace_file')
         self.execute_p = mock.patch('neutron.agent.common.utils.execute')
         mock.patch('neutron.agent.linux.utils.execute').start()
         self.safe = self.replace_p.start()
@@ -937,11 +958,11 @@ class TestDhcpLocalProcess(TestBase):
         lp = LocalChild(self.conf, FakeV4Network())
         self.assertEqual(lp.get_conf_file_name('dev'), tpl)
 
-    @mock.patch.object(utils, 'ensure_dir')
+    @mock.patch.object(fileutils, 'ensure_tree')
     def test_ensure_dir_called(self, ensure_dir):
         LocalChild(self.conf, FakeV4Network())
         ensure_dir.assert_called_once_with(
-            '/dhcp/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+            '/dhcp/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', mode=0o755)
 
     def test_enable_already_active(self):
         with mock.patch.object(LocalChild, 'active') as patched:
@@ -952,7 +973,7 @@ class TestDhcpLocalProcess(TestBase):
             self.assertEqual(lp.called, ['restart'])
             self.assertFalse(self.mock_mgr.return_value.setup.called)
 
-    @mock.patch.object(utils, 'ensure_dir')
+    @mock.patch.object(fileutils, 'ensure_tree')
     def test_enable(self, ensure_dir):
         attrs_to_mock = dict(
             [(a, mock.DEFAULT) for a in
@@ -972,7 +993,7 @@ class TestDhcpLocalProcess(TestBase):
             self.assertEqual(lp.called, ['spawn'])
             self.assertTrue(mocks['interface_name'].__set__.called)
             ensure_dir.assert_called_with(
-                '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc')
+                '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc', mode=0o755)
 
     def _assert_disabled(self, lp):
         self.assertTrue(lp.process_monitor.unregister.called)
@@ -1036,7 +1057,7 @@ class TestDhcpLocalProcess(TestBase):
         self.assertEqual(lp.interface_name, 'tap0')
 
     def test_set_interface_name(self):
-        with mock.patch('neutron.common.utils.replace_file') as replace:
+        with mock.patch('neutron_lib.utils.file.replace_file') as replace:
             lp = LocalChild(self.conf, FakeDualNetwork())
             with mock.patch.object(lp, 'get_conf_file_name') as conf_file:
                 conf_file.return_value = '/interface'
@@ -1054,7 +1075,8 @@ class TestDnsmasq(TestBase):
 
     def _test_spawn(self, extra_options, network=FakeDualNetwork(),
                     max_leases=16777216, lease_duration=86400,
-                    has_static=True, no_resolv='--no-resolv'):
+                    has_static=True, no_resolv='--no-resolv',
+                    has_stateless=True):
         def mock_get_conf_file_name(kind):
             return '/dhcp/%s/%s' % (network.id, kind)
 
@@ -1087,7 +1109,7 @@ class TestDnsmasq(TestBase):
         if has_static:
             prefix = '--dhcp-range=set:tag%d,%s,static,%s%s'
             prefix6 = '--dhcp-range=set:tag%d,%s,static,%s,%s%s'
-        else:
+        elif has_stateless:
             prefix = '--dhcp-range=set:tag%d,%s,%s%s'
             prefix6 = '--dhcp-range=set:tag%d,%s,%s,%s%s'
         possible_leases = 0
@@ -1170,6 +1192,13 @@ class TestDnsmasq(TestBase):
         self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
                          network, has_static=False)
 
+    def test_spawn_no_dhcp_range_bad_prefix_length(self):
+        network = FakeV6NetworkStatelessDHCPBadPrefixLength()
+        subnet = FakeV6SubnetStatelessBadPrefixLength()
+        network.subnets = [subnet]
+        self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
+                         network, has_static=False, has_stateless=False)
+
     def test_spawn_cfg_dns_server(self):
         self.conf.set_override('dnsmasq_dns_servers', ['8.8.8.8'])
         self._test_spawn(['--conf-file=',
@@ -1204,7 +1233,7 @@ class TestDnsmasq(TestBase):
         self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
                          no_resolv='')
 
-    def test_spawn_cfg_with_local_resolv_overriden(self):
+    def test_spawn_cfg_with_local_resolv_overridden(self):
         self.conf.set_override('dnsmasq_local_resolv', True)
         self.conf.set_override('dnsmasq_dns_servers', ['8.8.8.8'])
 

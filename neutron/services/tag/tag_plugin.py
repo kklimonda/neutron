@@ -22,8 +22,9 @@ from sqlalchemy.orm import exc
 from neutron.api.v2 import attributes
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
+from neutron.db.models import tag as tag_model
 from neutron.db import models_v2
-from neutron.db import tag_db as tag_model
+from neutron.db import tag_db as tag_methods
 from neutron.extensions import tag as tag_ext
 
 
@@ -68,12 +69,13 @@ class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
         max_retries=db_api.MAX_RETRIES,
         exception_checker=lambda e: isinstance(e, db_exc.DBDuplicateEntry))
     def update_tags(self, context, resource, resource_id, body):
-        res = self._get_resource(context, resource, resource_id)
-        new_tags = set(body['tags'])
-        old_tags = {tag_db.tag for tag_db in res.standard_attr.tags}
-        tags_added = new_tags - old_tags
-        tags_removed = old_tags - new_tags
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
+            # We get and do all operations with objects in one session
+            res = self._get_resource(context, resource, resource_id)
+            new_tags = set(body['tags'])
+            old_tags = {tag_db.tag for tag_db in res.standard_attr.tags}
+            tags_added = new_tags - old_tags
+            tags_removed = old_tags - new_tags
             for tag_db in res.standard_attr.tags:
                 if tag_db.tag in tags_removed:
                     context.session.delete(tag_db)
@@ -89,7 +91,7 @@ class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
         if any(tag == tag_db.tag for tag_db in res.standard_attr.tags):
             return
         try:
-            with context.session.begin(subtransactions=True):
+            with db_api.context_manager.writer.using(context):
                 tag_db = tag_model.Tag(standard_attr_id=res.standard_attr_id,
                                        tag=tag)
                 context.session.add(tag_db)
@@ -99,7 +101,7 @@ class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
     @log_helpers.log_method_call
     def delete_tags(self, context, resource, resource_id):
         res = self._get_resource(context, resource, resource_id)
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             query = context.session.query(tag_model.Tag)
             query = query.filter_by(standard_attr_id=res.standard_attr_id)
             query.delete()
@@ -107,7 +109,7 @@ class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
     @log_helpers.log_method_call
     def delete_tag(self, context, resource, resource_id, tag):
         res = self._get_resource(context, resource, resource_id)
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             query = context.session.query(tag_model.Tag)
             query = query.filter_by(tag=tag,
                                     standard_attr_id=res.standard_attr_id)
@@ -121,4 +123,4 @@ class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
             resource, [_extend_tags_dict])
         common_db_mixin.CommonDbMixin.register_model_query_hook(
             model, "tag", None, None,
-            functools.partial(tag_model.apply_tag_filters, model))
+            functools.partial(tag_methods.apply_tag_filters, model))

@@ -12,20 +12,19 @@
 #    under the License.
 
 import itertools
+import uuid
 
 import netaddr
 from neutron_lib import constants as lib_constants
-from neutron_lib import exceptions
+
 from oslo_versionedobjects import fields as obj_fields
 import six
 
 from neutron._i18n import _
 from neutron.common import constants
-
-
-class NeutronRangeConstrainedIntegerInvalidLimit(exceptions.NeutronException):
-    message = _("Incorrect range limits specified: "
-                "start = %(start)s, end = %(end)s")
+from neutron.extensions import dns as dns_ext
+from neutron.objects import exceptions as o_exc
+from neutron.plugins.common import constants as plugin_constants
 
 
 class IPV6ModeEnumField(obj_fields.AutoTypedField):
@@ -38,7 +37,7 @@ class RangeConstrainedInteger(obj_fields.Integer):
             self._start = int(start)
             self._end = int(end)
         except (TypeError, ValueError):
-            raise NeutronRangeConstrainedIntegerInvalidLimit(
+            raise o_exc.NeutronRangeConstrainedIntegerInvalidLimit(
                 start=start, end=end)
         super(RangeConstrainedInteger, self).__init__(**kwargs)
 
@@ -74,8 +73,38 @@ class PortRangeField(obj_fields.AutoTypedField):
     AUTO_TYPE = PortRange()
 
 
+class VlanIdRange(RangeConstrainedInteger):
+    def __init__(self, **kwargs):
+        super(VlanIdRange, self).__init__(start=plugin_constants.MIN_VLAN_TAG,
+                                          end=plugin_constants.MAX_VLAN_TAG,
+                                          **kwargs)
+
+
+class VlanIdRangeField(obj_fields.AutoTypedField):
+    AUTO_TYPE = VlanIdRange()
+
+
 class ListOfIPNetworksField(obj_fields.AutoTypedField):
     AUTO_TYPE = obj_fields.List(obj_fields.IPNetwork())
+
+
+class SetOfUUIDsField(obj_fields.AutoTypedField):
+    AUTO_TYPE = obj_fields.Set(obj_fields.UUID())
+
+
+class DomainName(obj_fields.String):
+    def coerce(self, obj, attr, value):
+        if not isinstance(value, six.string_types):
+            msg = _("Field value %s is not a string") % value
+            raise ValueError(msg)
+        if len(value) > dns_ext.FQDN_MAX_LEN:
+            msg = _("Domain name %s is too long") % value
+            raise ValueError(msg)
+        return super(DomainName, self).coerce(obj, attr, value)
+
+
+class DomainNameField(obj_fields.AutoTypedField):
+    AUTO_TYPE = DomainName()
 
 
 class IntegerEnum(obj_fields.Integer):
@@ -162,6 +191,10 @@ class MACAddress(obj_fields.FieldType):
             raise ValueError(msg)
         return super(MACAddress, self).coerce(obj, attr, value)
 
+    @staticmethod
+    def to_primitive(obj, attr, value):
+        return str(value)
+
 
 class MACAddressField(obj_fields.AutoTypedField):
     AUTO_TYPE = MACAddress()
@@ -180,6 +213,20 @@ class IPNetwork(obj_fields.FieldType):
             raise ValueError(msg)
         return super(IPNetwork, self).coerce(obj, attr, value)
 
+    @staticmethod
+    def to_primitive(obj, attr, value):
+        return str(value)
+
 
 class IPNetworkField(obj_fields.AutoTypedField):
     AUTO_TYPE = IPNetwork()
+
+
+class UUID(obj_fields.UUID):
+    def coerce(self, obj, attr, value):
+        uuid.UUID(str(value))
+        return str(value)
+
+
+class UUIDField(obj_fields.AutoTypedField):
+    AUTO_TYPE = UUID()

@@ -1098,6 +1098,7 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         self.cache.assert_has_calls(
             [mock.call.get_port_by_id(fake_port2.id),
              mock.call.deleted_ports.add(fake_port2.id),
+             mock.call.get_port_by_id(fake_port2.id),
              mock.call.get_network_by_id(fake_network.id),
              mock.call.remove_port(fake_port2)])
         self.call_driver.assert_has_calls(
@@ -1444,18 +1445,20 @@ class TestDeviceManager(base.BaseTestCase):
                           'device_id': mock.ANY}})])
 
         if port == fake_ipv6_port:
-            expected_ips = ['169.254.169.254/16']
+            expected_ips = ['2001:db8::a8bb:ccff:fedd:ee99/64',
+                            '169.254.169.254/16']
         else:
             expected_ips = ['172.9.9.9/24', '169.254.169.254/16']
         expected = [
             mock.call.get_device_name(port),
+            mock.call.configure_ipv6_ra(net.namespace, 'default', 0),
             mock.call.init_l3(
                 'tap12345678-12',
                 expected_ips,
                 namespace=net.namespace)]
 
         if not device_is_ready:
-            expected.insert(1,
+            expected.insert(2,
                             mock.call.plug(net.id,
                                            port.id,
                                            'tap12345678-12',

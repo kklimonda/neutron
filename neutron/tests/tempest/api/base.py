@@ -109,6 +109,7 @@ class BaseNetworkTest(test.BaseTestCase):
         cls.admin_address_scopes = []
         cls.subnetpools = []
         cls.admin_subnetpools = []
+        cls.security_groups = []
 
     @classmethod
     def resource_cleanup(cls):
@@ -166,6 +167,11 @@ class BaseNetworkTest(test.BaseTestCase):
             for network in cls.admin_networks:
                 cls._try_delete_resource(cls.admin_client.delete_network,
                                          network['id'])
+
+            # Clean up security groups
+            for secgroup in cls.security_groups:
+                cls._try_delete_resource(cls.client.delete_security_group,
+                                         secgroup['id'])
 
             for subnetpool in cls.subnetpools:
                 cls._try_delete_resource(cls.client.delete_subnetpool,
@@ -343,6 +349,11 @@ class BaseNetworkTest(test.BaseTestCase):
         return interface
 
     @classmethod
+    def get_supported_qos_rule_types(cls):
+        body = cls.client.list_qos_rule_types()
+        return [rule_type['type'] for rule_type in body['rule_types']]
+
+    @classmethod
     def create_qos_policy(cls, name, description=None, shared=False,
                           tenant_id=None):
         """Wrapper utility that returns a test QoS policy."""
@@ -486,6 +497,18 @@ class BaseAdminNetworkTest(BaseNetworkTest):
         raise exceptions.InvalidConfiguration(message)
 
 
+def require_qos_rule_type(rule_type):
+    def decorator(f):
+        @functools.wraps(f)
+        def wrapper(self, *func_args, **func_kwargs):
+            if rule_type not in self.get_supported_qos_rule_types():
+                raise self.skipException(
+                    "%s rule type is required." % rule_type)
+            return f(self, *func_args, **func_kwargs)
+        return wrapper
+    return decorator
+
+
 def _require_sorting(f):
     @functools.wraps(f)
     def inner(self, *args, **kwargs):
@@ -594,7 +617,7 @@ class BaseSearchCriteriaTest(BaseNetworkTest):
         }
         body = self.list_method(**pagination_args)
         resources = self._extract_resources(body)
-        self.assertTrue(len(resources) >= len(self.resource_names))
+        self.assertGreaterEqual(len(resources), len(self.resource_names))
 
     def _test_list_pagination_iteratively(self, lister):
         # first, collect all resources for later comparison
@@ -709,7 +732,7 @@ class BaseSearchCriteriaTest(BaseNetworkTest):
                 self.plural_name, uri
             )
             resources_ = self._extract_resources(body)
-            self.assertTrue(page_size >= len(resources_))
+            self.assertGreaterEqual(page_size, len(resources_))
             resources.extend(reversed(resources_))
 
         self.assertSameOrder(expected_resources, reversed(resources))

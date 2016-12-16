@@ -17,22 +17,22 @@ import datetime
 import random
 import time
 
-import debtcollector
 from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
-from oslo_service import loopingcall
 from oslo_utils import timeutils
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
 
 from neutron._i18n import _, _LE, _LI, _LW
+from neutron.agent.common import utils as agent_utils
 from neutron.common import constants as n_const
 from neutron.common import utils
 from neutron import context as ncontext
 from neutron.db import agents_db
 from neutron.db.availability_zone import network as network_az
+from neutron.db.models import agent as agent_model
 from neutron.db.network_dhcp_agent_binding import models as ndab_model
 from neutron.extensions import agent as ext_agent
 from neutron.extensions import dhcpagentscheduler
@@ -71,38 +71,6 @@ AGENTS_SCHEDULER_OPTS = [
 cfg.CONF.register_opts(AGENTS_SCHEDULER_OPTS)
 
 
-class AgentStatusCheckWorker(neutron_worker.NeutronWorker):
-
-    def __init__(self, check_func, interval, initial_delay):
-        super(AgentStatusCheckWorker, self).__init__(worker_process_count=0)
-
-        self._check_func = check_func
-        self._loop = None
-        self._interval = interval
-        self._initial_delay = initial_delay
-
-    def start(self):
-        super(AgentStatusCheckWorker, self).start()
-        if self._loop is None:
-            self._loop = loopingcall.FixedIntervalLoopingCall(self._check_func)
-            self._loop.start(interval=self._interval,
-                             initial_delay=self._initial_delay)
-
-    def wait(self):
-        if self._loop is not None:
-            self._loop.wait()
-
-    def stop(self):
-        if self._loop is not None:
-            self._loop.stop()
-
-    def reset(self):
-        if self._loop is not None:
-            self.stop()
-            self.wait()
-            self.start()
-
-
 class AgentSchedulerDbMixin(agents_db.AgentDbMixin):
     """Common class for agent scheduler mixins."""
 
@@ -124,7 +92,7 @@ class AgentSchedulerDbMixin(agents_db.AgentDbMixin):
             #                   filter is set, only agents which are 'up'
             #                   (i.e. have a recent heartbeat timestamp)
             #                   are eligible, even if active is False
-            return not agents_db.AgentDbMixin.is_agent_down(
+            return not agent_utils.is_agent_down(
                 agent['heartbeat_timestamp'])
 
     def update_agent(self, context, id, agent):
@@ -148,28 +116,9 @@ class AgentSchedulerDbMixin(agents_db.AgentDbMixin):
         # neutron server first starts. random to offset multiple servers
         initial_delay = random.randint(interval, interval * 2)
 
-        check_worker = AgentStatusCheckWorker(function, interval,
-                                              initial_delay)
-
+        check_worker = neutron_worker.PeriodicWorker(function, interval,
+                                                     initial_delay)
         self.add_worker(check_worker)
-
-    @debtcollector.removals.remove(
-        message="This will be removed in the O cycle. "
-                "Please use 'add_agent_status_check_worker' instead."
-    )
-    def add_agent_status_check(self, function):
-        loop = loopingcall.FixedIntervalLoopingCall(function)
-        # TODO(enikanorov): make interval configurable rather than computed
-        interval = max(cfg.CONF.agent_down_time // 2, 1)
-        # add random initial delay to allow agents to check in after the
-        # neutron server first starts. random to offset multiple servers
-        initial_delay = random.randint(interval, interval * 2)
-        loop.start(interval=interval, initial_delay=initial_delay)
-
-        if hasattr(self, 'periodic_agent_loops'):
-            self.periodic_agent_loops.append(loop)
-        else:
-            self.periodic_agent_loops = [loop]
 
     def agent_dead_limit_seconds(self):
         return cfg.CONF.agent_down_time * 2
@@ -259,18 +208,6 @@ class DhcpAgentSchedulerDbMixin(dhcpagentscheduler
     """
 
     network_scheduler = None
-
-    @debtcollector.removals.remove(
-        message="This will be removed in the O cycle. "
-                "Please use 'add_periodic_dhcp_agent_status_check' instead."
-    )
-    def start_periodic_dhcp_agent_status_check(self):
-        if not cfg.CONF.allow_automatic_dhcp_failover:
-            LOG.info(_LI("Skipping periodic DHCP agent status check because "
-                         "automatic network rescheduling is disabled."))
-            return
-
-        self.add_agent_status_check(self.remove_networks_from_down_agents)
 
     def add_periodic_dhcp_agent_status_check(self):
         if not cfg.CONF.allow_automatic_dhcp_failover:
@@ -381,9 +318,9 @@ class DhcpAgentSchedulerDbMixin(dhcpagentscheduler
         try:
             down_bindings = (
                 context.session.query(ndab_model.NetworkDhcpAgentBinding).
-                join(agents_db.Agent).
-                filter(agents_db.Agent.heartbeat_timestamp < cutoff,
-                       agents_db.Agent.admin_state_up))
+                join(agent_model.Agent).
+                filter(agent_model.Agent.heartbeat_timestamp < cutoff,
+                       agent_model.Agent.admin_state_up))
             dhcp_notifier = self.agent_notifiers.get(constants.AGENT_TYPE_DHCP)
             dead_bindings = [b for b in
                              self._filter_bindings(context, down_bindings)]
@@ -452,9 +389,9 @@ class DhcpAgentSchedulerDbMixin(dhcpagentscheduler
             query = query.filter(
                 ndab_model.NetworkDhcpAgentBinding.network_id.in_(network_ids))
         if hosts:
-            query = query.filter(agents_db.Agent.host.in_(hosts))
+            query = query.filter(agent_model.Agent.host.in_(hosts))
         if admin_state_up is not None:
-            query = query.filter(agents_db.Agent.admin_state_up ==
+            query = query.filter(agent_model.Agent.admin_state_up ==
                                  admin_state_up)
 
         return [binding.dhcp_agent

@@ -34,7 +34,6 @@ from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import agent as l3_agent
 from neutron.agent.l3 import dvr_edge_router as dvr_router
 from neutron.agent.l3 import dvr_snat_ns
-from neutron.agent.l3 import ha
 from neutron.agent.l3 import legacy_router
 from neutron.agent.l3 import link_local_allocator as lla
 from neutron.agent.l3 import namespaces
@@ -51,6 +50,7 @@ from neutron.agent import rpc as agent_rpc
 from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron.conf.agent.l3 import config as l3_config
+from neutron.conf.agent.l3 import ha as ha_conf
 from neutron.conf import common as base_config
 from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_const
@@ -73,7 +73,7 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
         log.register_options(self.conf)
         self.conf.register_opts(agent_config.AGENT_STATE_OPTS, 'AGENT')
         l3_config.register_l3_agent_config_opts(l3_config.OPTS, self.conf)
-        self.conf.register_opts(ha.OPTS)
+        ha_conf.register_l3_agent_ha_opts(self.conf)
         agent_config.register_interface_driver_opts_helper(self.conf)
         agent_config.register_process_monitor_opts(self.conf)
         agent_config.register_availability_zone_opts_helper(self.conf)
@@ -91,7 +91,8 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
             'neutron.agent.linux.ip_lib.device_exists')
         self.device_exists = self.device_exists_p.start()
 
-        self.ensure_dir = mock.patch('neutron.common.utils.ensure_dir').start()
+        self.ensure_dir = mock.patch(
+            'oslo_utils.fileutils.ensure_tree').start()
 
         mock.patch('neutron.agent.linux.keepalived.KeepalivedManager'
                    '.get_full_config_file_path').start()
@@ -101,7 +102,7 @@ class BasicRouterOperationsFramework(base.BaseTestCase):
         self.utils_exec = self.utils_exec_p.start()
 
         self.utils_replace_file_p = mock.patch(
-            'neutron.common.utils.replace_file')
+            'neutron_lib.utils.file.replace_file')
         self.utils_replace_file = self.utils_replace_file_p.start()
 
         self.external_process_p = mock.patch(
@@ -191,7 +192,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
     def test_init_ha_conf(self):
         with mock.patch('os.path.dirname', return_value='/etc/ha/'):
             l3_agent.L3NATAgent(HOSTNAME, self.conf)
-            self.ensure_dir.assert_called_once_with('/etc/ha/')
+            self.ensure_dir.assert_called_once_with('/etc/ha/', mode=0o755)
 
     def test_enqueue_state_change_router_not_found(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
@@ -728,7 +729,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
     def test_ext_gw_updated_dvr_edge_router_host_mismatch(self):
         self._test_ext_gw_updated_dvr_edge_router(host_match=False)
 
-    def test_ext_gw_updated_dvr_dvr_edge_router_snat_rescheduled(self):
+    def test_ext_gw_updated_dvr_edge_router_snat_rescheduled(self):
         self._test_ext_gw_updated_dvr_edge_router(host_match=True,
                                                   snat_hosted_before=False)
 
@@ -1935,6 +1936,30 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         ns.create()
         ns.delete()
         self.mock_ip.netns.delete.assert_called_once_with("qrouter-bar")
+
+    def test_destroy_snat_namespace(self):
+        namespace = 'snat-bar'
+
+        self.mock_ip.get_namespaces.return_value = [namespace]
+        self.mock_ip.get_devices.return_value = [
+            l3_test_common.FakeDev('qg-aaaa'),
+            l3_test_common.FakeDev('sg-aaaa')]
+
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+
+        ns = dvr_snat_ns.SnatNamespace(
+            'bar', self.conf, agent.driver, agent.use_ipv6)
+        ns.create()
+
+        ns.delete()
+        calls = [mock.call('qg-aaaa',
+                           bridge=agent.conf.external_network_bridge,
+                           namespace=namespace,
+                           prefix=l3_agent.EXTERNAL_DEV_PREFIX),
+                 mock.call('sg-aaaa',
+                           namespace=namespace,
+                           prefix=dvr_snat_ns.SNAT_INT_DEV_PREFIX)]
+        self.mock_driver.unplug.assert_has_calls(calls, any_order=True)
 
     def _configure_metadata_proxy(self, enableflag=True):
         if not enableflag:

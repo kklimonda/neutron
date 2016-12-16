@@ -16,12 +16,13 @@ import datetime
 import six
 
 import mock
+from neutron_lib.plugins import directory
 from oslo_utils import timeutils
 
 from neutron import context
 from neutron.db import db_base_plugin_v2
+from neutron.db.models import tag as tag_model
 from neutron.db import models_v2
-from neutron.db import tag_db as tag_module
 from neutron.extensions import timestamp
 from neutron import manager
 from neutron.tests.unit.db import test_db_base_plugin_v2
@@ -55,15 +56,15 @@ class TimeStampChangedsinceTestCase(test_db_base_plugin_v2.
         ext_mgr = TimeStampExtensionManager()
         super(TimeStampChangedsinceTestCase, self).setUp(plugin=self.plugin,
                                                          ext_mgr=ext_mgr)
-        self.addCleanup(manager.NeutronManager.
-                        get_service_plugins()['timestamp'].
-                        unregister_db_events)
+        self.addCleanup(
+            directory.get_plugin('timestamp').unregister_db_events)
         self.addCleanup(manager.NeutronManager.clear_instance)
 
-    def setup_coreplugin(self, core_plugin=None):
+    def setup_coreplugin(self, core_plugin=None, load_plugins=True):
         super(TimeStampChangedsinceTestCase, self).setup_coreplugin(
-            self.plugin)
+            self.plugin, load_plugins=False)
         self.patched_default_svc_plugins.return_value = ['timestamp']
+        manager.init()
 
     def _get_resp_with_changed_since(self, resource_type, changed_since):
         query_params = 'changed_since=%s' % changed_since
@@ -227,7 +228,7 @@ class TimeStampChangedsinceTestCase(test_db_base_plugin_v2.
     def test_timestamp_fields_ignored_in_update(self):
         ctx = context.get_admin_context()
         with self.port() as port:
-            plugin = manager.NeutronManager.get_plugin()
+            plugin = directory.get_plugin()
             port = plugin.get_port(ctx, port['port']['id'])
             port['name'] = 'updated'
             port['created_at'] = '2011-04-06T14:34:23'
@@ -256,8 +257,8 @@ class TimeStampDBMixinTestCase(TimeStampChangedsinceTestCase):
         ctx = context.get_admin_context()
         for tag in tags:
             with ctx.session.begin(subtransactions=True):
-                tag_db = tag_module.Tag(standard_attr_id=standard_attr_id,
-                                        tag=tag)
+                tag_db = tag_model.Tag(standard_attr_id=standard_attr_id,
+                                       tag=tag)
                 ctx.session.add(tag_db)
 
     def test_update_timpestamp(self):

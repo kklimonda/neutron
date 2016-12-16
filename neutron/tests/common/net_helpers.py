@@ -74,6 +74,9 @@ CHILD_PROCESS_SLEEP = os.environ.get('OS_TEST_CHILD_PROCESS_SLEEP', 0.5)
 
 TRANSPORT_PROTOCOLS = (n_const.PROTO_NAME_TCP, n_const.PROTO_NAME_UDP)
 
+OVS_MANAGER_TEST_PORT_FIRST = 6610
+OVS_MANAGER_TEST_PORT_LAST = 6639
+
 
 def increment_ip_cidr(ip_cidr, offset=1):
     """Increment ip_cidr offset times.
@@ -189,7 +192,7 @@ def get_unused_port(used, start=1024, end=None):
     return random.choice(list(candidates - used))
 
 
-def get_free_namespace_port(protocol, namespace=None):
+def get_free_namespace_port(protocol, namespace=None, start=1024, end=None):
     """Return an unused port from given namespace
 
     WARNING: This function returns a port that is free at the execution time of
@@ -199,6 +202,10 @@ def get_free_namespace_port(protocol, namespace=None):
 
     :param protocol: Return free port for given protocol. Supported protocols
                      are 'tcp' and 'udp'.
+    :param namespace: Namespace in which free port has to be returned.
+    :param start: The starting port number.
+    :param end: The ending port number (free port that is returned would be
+                between (start, end) values.
     """
     if protocol == n_const.PROTO_NAME_TCP:
         param = '-tna'
@@ -211,7 +218,7 @@ def get_free_namespace_port(protocol, namespace=None):
     output = ip_wrapper.netns.execute(['ss', param])
     used_ports = _get_source_ports_from_ss_output(output)
 
-    return get_unused_port(used_ports)
+    return get_unused_port(used_ports, start, end)
 
 
 def create_patch_ports(source, destination):
@@ -233,6 +240,27 @@ def create_patch_ports(source, destination):
 
     source.add_patch_port(source_name, destination_name)
     destination.add_patch_port(destination_name, source_name)
+
+
+def create_vlan_interface(
+        namespace, port_name, mac_address, ip_address, vlan_tag):
+    """Create a VLAN interface in namespace with IP address.
+
+    :param namespace: Namespace in which VLAN interface should be created.
+    :param port_name: Name of the port to which VLAN should be added.
+    :param ip_address: IPNetwork instance containing the VLAN interface IP
+                       address.
+    :param vlan_tag: VLAN tag for VLAN interface.
+    """
+    ip_wrap = ip_lib.IPWrapper(namespace)
+    dev_name = "%s.%d" % (port_name, vlan_tag)
+    ip_wrap.add_vlan(dev_name, port_name, vlan_tag)
+    dev = ip_wrap.device(dev_name)
+    dev.addr.add(str(ip_address))
+    dev.link.set_address(mac_address)
+    dev.link.set_up()
+
+    return dev
 
 
 class RootHelperProcess(subprocess.Popen):
@@ -476,6 +504,12 @@ class NetcatTester(object):
         message = self.client_process.read_stdout(READ_TIMEOUT).strip()
 
         return message == testing_string
+
+    def test_no_connectivity(self, respawn=False):
+        try:
+            return not self.test_connectivity(respawn)
+        except RuntimeError:
+            return True
 
     def _spawn_nc_in_namespace(self, namespace, address, listen=False):
         cmd = ['nc', address, self.dst_port]

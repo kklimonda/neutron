@@ -23,6 +23,7 @@ import testtools
 
 from neutron.agent.common import config as a_cfg
 from neutron.agent import firewall
+from neutron.agent.linux import ip_conntrack
 from neutron.agent.linux import ipset_manager
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_firewall
@@ -94,9 +95,18 @@ class BaseIptablesFirewallTestCase(base.BaseTestCase):
             RAW_TABLE_OUTPUT.splitlines())
         self.firewall = iptables_firewall.IptablesFirewallDriver()
         self.firewall.iptables = self.iptables_inst
-
-
-class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
+        # don't mess with sysctl knobs in unit tests
+        self.firewall._enabled_netfilter_for_bridges = True
+        # initial data has 1, 2, and 9 in use, see RAW_TABLE_OUTPUT above.
+        self._dev_zone_map = {'61634509-31': 2, '8f46cf18-12': 9,
+                              '95c24827-02': 2, 'e804433b-61': 1}
+        get_rules_for_table_func = lambda x: RAW_TABLE_OUTPUT.split('\n')
+        filtered_ports = {port_id: self._fake_port()
+                          for port_id in self._dev_zone_map}
+        self.firewall.ipconntrack = ip_conntrack.IpConntrackManager(
+              get_rules_for_table_func, filtered_ports=filtered_ports,
+              unfiltered_ports=dict())
+        self.firewall.ipconntrack._device_zone_map = self._dev_zone_map
 
     def _fake_port(self):
         return {'device': 'tapfake_dev',
@@ -104,6 +114,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                 'network_id': 'fake_net',
                 'fixed_ips': [FAKE_IP['IPv4'],
                               FAKE_IP['IPv6']]}
+
+
+class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
 
     def test_prepare_port_filter_with_no_sg(self):
         port = self._fake_port()
@@ -1174,38 +1187,46 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                                                          protocol, direction):
         port = self._fake_port()
         port['security_groups'] = ['fake_sg_id']
-        self.firewall.sg_rules.setdefault('fake_sg_id', [])
-        self.firewall.sg_rules['fake_sg_id'].append(
-            {'direction': direction, 'remote_group_id': 'fake_sg_id2',
-             'ethertype': ethertype})
+        port['security_group_source_groups'] = ['fake_sg_id2']
+        port['security_group_rules'] = [{'security_group_id': 'fake_sg_id',
+                                         'direction': direction,
+                                         'remote_group_id': 'fake_sg_id2',
+                                         'ethertype': ethertype}]
+        self.firewall.filtered_ports = {port['device']: port}
 
-        self.firewall.filter_defer_apply_on()
-        self.firewall.devices_with_updated_sg_members['fake_sg_id2'] = [port]
         if ethertype == "IPv4":
-            self.firewall.pre_sg_members = {'fake_sg_id2': {
-                                            'IPv4': ['10.0.0.2', '10.0.0.3']}}
-            self.firewall.sg_members = {'fake_sg_id2': {
-                                            'IPv4': ['10.0.0.3']}}
             ethertype = "ipv4"
+            members_add = {'IPv4': ['10.0.0.2', '10.0.0.3']}
+            members_after_delete = {'IPv4': ['10.0.0.3']}
         else:
-            self.firewall.pre_sg_members = {'fake_sg_id2': {
-                                            'IPv6': ['fe80::2', 'fe80::3']}}
-            self.firewall.sg_members = {'fake_sg_id2': {
-                                            'IPv6': ['fe80::3']}}
             ethertype = "ipv6"
-        self.firewall.filter_defer_apply_off()
-        direction = '-d' if direction == 'ingress' else '-s'
-        remote_ip_direction = '-s' if direction == '-d' else '-d'
+            members_add = {'IPv6': ['fe80::2', 'fe80::3']}
+            members_after_delete = {'IPv6': ['fe80::3']}
+
+        # add ['10.0.0.2', '10.0.0.3'] or ['fe80::2', 'fe80::3']
+        self.firewall.security_group_updated('sg_member', ['fake_sg_id2'])
+        self.firewall.update_security_group_members(
+            'fake_sg_id2', members_add)
+
+        # delete '10.0.0.2' or 'fe80::2'
+        self.firewall.security_group_updated('sg_member', ['fake_sg_id2'])
+        self.firewall.update_security_group_members(
+            'fake_sg_id2', members_after_delete)
+
+        # check conntrack deletion from '10.0.0.1' to '10.0.0.2' or
+        # from 'fe80::1' to 'fe80::2'
         ips = {"ipv4": ['10.0.0.1', '10.0.0.2'],
                "ipv6": ['fe80::1', 'fe80::2']}
-        calls = [
-                     # initial data has 1, 2, and 9 in use, CT zone will start
-                     # at 10.
-                     mock.call(['conntrack', '-D', '-f', ethertype, direction,
-                                ips[ethertype][0], '-w', 10,
-                                remote_ip_direction, ips[ethertype][1]],
-                               run_as_root=True, check_exit_code=True,
-                               extra_ok_codes=[1])]
+        calls = []
+        for direction in ['ingress', 'egress']:
+            direction = '-d' if direction == 'ingress' else '-s'
+            remote_ip_direction = '-s' if direction == '-d' else '-d'
+            calls.append(mock.call(['conntrack', '-D', '-f', ethertype,
+                                    direction, ips[ethertype][0], '-w', 10,
+                                    remote_ip_direction, ips[ethertype][1]],
+                                   run_as_root=True, check_exit_code=True,
+                                   extra_ok_codes=[1]))
+
         self.utils_exec.assert_has_calls(calls)
 
     def test_user_sg_rules_deduped_before_call_to_iptables_manager(self):
@@ -1654,6 +1675,7 @@ class IptablesFirewallEnhancedIpsetTestCase(BaseIptablesFirewallTestCase):
         self.firewall.ipset.get_name.side_effect = (
             ipset_manager.IpsetManager.get_name)
         self.firewall.ipset.set_name_exists.return_value = True
+        self.firewall.ipset.set_members = mock.Mock(return_value=([], []))
 
     def _fake_port(self, sg_id=FAKE_SGID):
         return {'device': 'tapfake_dev',
@@ -1922,46 +1944,56 @@ class OVSHybridIptablesFirewallTestCase(BaseIptablesFirewallTestCase):
 
     def setUp(self):
         super(OVSHybridIptablesFirewallTestCase, self).setUp()
-        self.firewall = iptables_firewall.OVSHybridIptablesFirewallDriver()
-        # initial data has 1, 2, and 9 in use, see RAW_TABLE_OUTPUT above.
-        self._dev_zone_map = {'61634509-31': 2, '8f46cf18-12': 9,
-                              '95c24827-02': 2, 'e804433b-61': 1}
 
     def test__populate_initial_zone_map(self):
-        self.assertEqual(self._dev_zone_map, self.firewall._device_zone_map)
+        self.assertEqual(self._dev_zone_map,
+                   self.firewall.ipconntrack._device_zone_map)
 
     def test__generate_device_zone(self):
         # initial data has 1, 2, and 9 in use.
         # we fill from top up first.
-        self.assertEqual(10, self.firewall._generate_device_zone('test'))
+        self.assertEqual(10,
+                   self.firewall.ipconntrack._generate_device_zone('test'))
 
         # once it's maxed out, it scans for gaps
-        self.firewall._device_zone_map['someport'] = (
-            iptables_firewall.MAX_CONNTRACK_ZONES)
+        self.firewall.ipconntrack._device_zone_map['someport'] = (
+            ip_conntrack.MAX_CONNTRACK_ZONES)
         for i in range(3, 9):
-            self.assertEqual(i, self.firewall._generate_device_zone(i))
+            self.assertEqual(i,
+                   self.firewall.ipconntrack._generate_device_zone(i))
 
         # 9 and 10 are taken so next should be 11
-        self.assertEqual(11, self.firewall._generate_device_zone('p11'))
+        self.assertEqual(11,
+                   self.firewall.ipconntrack._generate_device_zone('p11'))
 
         # take out zone 1 and make sure it's selected
-        self.firewall._device_zone_map.pop('e804433b-61')
-        self.assertEqual(1, self.firewall._generate_device_zone('p1'))
+        self.firewall.ipconntrack._device_zone_map.pop('e804433b-61')
+        self.assertEqual(1,
+                   self.firewall.ipconntrack._generate_device_zone('p1'))
 
         # fill it up and then make sure an extra throws an error
         for i in range(1, 65536):
-            self.firewall._device_zone_map['dev-%s' % i] = i
+            self.firewall.ipconntrack._device_zone_map['dev-%s' % i] = i
         with testtools.ExpectedException(n_exc.CTZoneExhaustedError):
-            self.firewall._find_open_zone()
+            self.firewall.ipconntrack._find_open_zone()
 
         # with it full, try again, this should trigger a cleanup and return 1
-        self.assertEqual(1, self.firewall._generate_device_zone('p12'))
-        self.assertEqual({'p12': 1}, self.firewall._device_zone_map)
+        self.assertEqual(1,
+                   self.firewall.ipconntrack._generate_device_zone('p12'))
+        self.assertEqual({'p12': 1},
+                   self.firewall.ipconntrack._device_zone_map)
 
     def test_get_device_zone(self):
         # initial data has 1, 2, and 9 in use.
         self.assertEqual(10,
-                         self.firewall.get_device_zone('12345678901234567'))
+               self.firewall.ipconntrack.get_device_zone('12345678901234567'))
         # should have been truncated to 11 chars
         self._dev_zone_map.update({'12345678901': 10})
-        self.assertEqual(self._dev_zone_map, self.firewall._device_zone_map)
+        self.assertEqual(self._dev_zone_map,
+               self.firewall.ipconntrack._device_zone_map)
+
+    def test_multiple_firewall_with_common_conntrack(self):
+        self.firewall1 = iptables_firewall.OVSHybridIptablesFirewallDriver()
+        self.firewall2 = iptables_firewall.OVSHybridIptablesFirewallDriver()
+        self.assertEqual(id(self.firewall1.ipconntrack),
+                         id(self.firewall2.ipconntrack))

@@ -17,7 +17,6 @@ import copy
 import functools
 
 from neutron_lib import constants
-from oslo_config import cfg
 import pecan
 from pecan import request
 import six
@@ -115,10 +114,10 @@ class NeutronPecanController(object):
             self._mandatory_fields = set()
         self.allow_pagination = allow_pagination
         if self.allow_pagination is None:
-            self.allow_pagination = cfg.CONF.allow_pagination
+            self.allow_pagination = True
         self.allow_sorting = allow_sorting
         if self.allow_sorting is None:
-            self.allow_sorting = cfg.CONF.allow_sorting
+            self.allow_sorting = True
         self.native_pagination = api_common.is_native_pagination_supported(
             self.plugin)
         self.native_sorting = api_common.is_native_sorting_supported(
@@ -127,8 +126,8 @@ class NeutronPecanController(object):
 
         self.parent = parent_resource
         parent_resource = '_%s' % parent_resource if parent_resource else ''
-        self._parent_id_name = ('%s_id' % parent_resource
-                                if parent_resource else None)
+        self._parent_id_name = ('%s_id' % self.parent
+                                if self.parent else None)
         self._plugin_handlers = {
             self.LIST: 'get%s_%s' % (parent_resource, self.collection),
             self.SHOW: 'get%s_%s' % (parent_resource, self.resource)
@@ -150,7 +149,7 @@ class NeutronPecanController(object):
     def plugin(self):
         if not self._plugin:
             self._plugin = manager.NeutronManager.get_plugin_for_resource(
-                self.resource)
+                self.collection)
         return self._plugin
 
     @property

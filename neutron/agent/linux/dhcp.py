@@ -23,10 +23,12 @@ import time
 import netaddr
 from neutron_lib import constants
 from neutron_lib import exceptions
+from neutron_lib.utils import file as file_utils
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
+from oslo_utils import fileutils
 from oslo_utils import uuidutils
 import six
 
@@ -38,7 +40,6 @@ from neutron.agent.linux import iptables_manager
 from neutron.cmd.sanity import checks
 from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
-from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
 from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.ipam import utils as ipam_utils
@@ -183,7 +184,7 @@ class DhcpLocalProcess(DhcpBase):
                                                version, plugin)
         self.confs_dir = self.get_confs_dir(conf)
         self.network_conf_dir = os.path.join(self.confs_dir, network.id)
-        common_utils.ensure_dir(self.network_conf_dir)
+        fileutils.ensure_tree(self.network_conf_dir, mode=0o755)
 
     @staticmethod
     def get_confs_dir(conf):
@@ -208,7 +209,7 @@ class DhcpLocalProcess(DhcpBase):
         if self.active:
             self.restart()
         elif self._enable_dhcp():
-            common_utils.ensure_dir(self.network_conf_dir)
+            fileutils.ensure_tree(self.network_conf_dir, mode=0o755)
             interface_name = self.device_manager.setup(self.network)
             self.interface_name = interface_name
             self.spawn_process()
@@ -238,6 +239,9 @@ class DhcpLocalProcess(DhcpBase):
                         self.interface_name)
 
         ns_ip = ip_lib.IPWrapper(namespace=self.network.namespace)
+        if not ns_ip.netns.exists(self.network.namespace):
+            LOG.debug("Namespace already deleted: %s", self.network.namespace)
+            return
         try:
             ns_ip.netns.delete(self.network.namespace)
         except RuntimeError:
@@ -268,7 +272,7 @@ class DhcpLocalProcess(DhcpBase):
     @interface_name.setter
     def interface_name(self, value):
         interface_file_path = self.get_conf_file_name('interface')
-        common_utils.replace_file(interface_file_path, value)
+        file_utils.replace_file(interface_file_path, value)
 
     @property
     def active(self):
@@ -375,6 +379,11 @@ class Dnsmasq(DhcpLocalProcess):
                                ('set:', self._TAG_PREFIX % i,
                                 cidr.network, mode, lease))
                 else:
+                    if cidr.prefixlen < 64:
+                        LOG.debug('Ignoring subnet %(subnet)s, CIDR has '
+                                  'prefix length < 64: %(cidr)s',
+                                  {'subnet': subnet.id, 'cidr': cidr})
+                        continue
                     cmd.append('--dhcp-range=%s%s,%s,%s,%d,%s' %
                                ('set:', self._TAG_PREFIX % i,
                                 cidr.network, mode,
@@ -634,7 +643,7 @@ class Dnsmasq(DhcpLocalProcess):
             buf.write('%s %s %s * *\n' %
                       (timestamp, port.mac_address, ip_address))
         contents = buf.getvalue()
-        common_utils.replace_file(filename, contents)
+        file_utils.replace_file(filename, contents)
         LOG.debug('Done building initial lease file %s with contents:\n%s',
                   filename, contents)
         return filename
@@ -704,7 +713,7 @@ class Dnsmasq(DhcpLocalProcess):
                 buf.write('%s,%s,%s\n' %
                           (port.mac_address, name, ip_address))
 
-        common_utils.replace_file(filename, buf.getvalue())
+        file_utils.replace_file(filename, buf.getvalue())
         LOG.debug('Done building host file %s', filename)
         return filename
 
@@ -843,7 +852,7 @@ class Dnsmasq(DhcpLocalProcess):
             if alloc:
                 buf.write('%s\t%s %s\n' % (alloc.ip_address, fqdn, hostname))
         addn_hosts = self.get_conf_file_name('addn_hosts')
-        common_utils.replace_file(addn_hosts, buf.getvalue())
+        file_utils.replace_file(addn_hosts, buf.getvalue())
         return addn_hosts
 
     def _output_opts_file(self):
@@ -852,7 +861,7 @@ class Dnsmasq(DhcpLocalProcess):
         options += self._generate_opts_per_port(subnet_index_map)
 
         name = self.get_conf_file_name('opts')
-        common_utils.replace_file(name, '\n'.join(options))
+        file_utils.replace_file(name, '\n'.join(options))
         return name
 
     def _generate_opts_per_subnet(self):
@@ -1361,6 +1370,19 @@ class DeviceManager(object):
         self._update_dhcp_port(network, port)
         interface_name = self.get_interface_name(network, port)
 
+        # Disable acceptance of RAs in the namespace so we don't
+        # auto-configure an IPv6 address since we explicitly configure
+        # them on the device.  This must be done before any interfaces
+        # are plugged since it could receive an RA by the time
+        # plug() returns, so we have to create the namespace first.
+        # It must also be done in the case there is an existing IPv6
+        # address here created via SLAAC, since it will be deleted
+        # and added back statically in the call to init_l3() below.
+        if network.namespace:
+            ip_lib.IPWrapper().ensure_namespace(network.namespace)
+        self.driver.configure_ipv6_ra(network.namespace, 'default',
+                                      n_const.ACCEPT_RA_DISABLED)
+
         if ip_lib.ensure_device_is_ready(interface_name,
                                          namespace=network.namespace):
             LOG.debug('Reusing existing device: %s.', interface_name)
@@ -1378,10 +1400,9 @@ class DeviceManager(object):
         ip_cidrs = []
         for fixed_ip in port.fixed_ips:
             subnet = fixed_ip.subnet
-            if not ipv6_utils.is_auto_address_subnet(subnet):
-                net = netaddr.IPNetwork(subnet.cidr)
-                ip_cidr = '%s/%s' % (fixed_ip.ip_address, net.prefixlen)
-                ip_cidrs.append(ip_cidr)
+            net = netaddr.IPNetwork(subnet.cidr)
+            ip_cidr = '%s/%s' % (fixed_ip.ip_address, net.prefixlen)
+            ip_cidrs.append(ip_cidr)
 
         if self.driver.use_gateway_ips:
             # For each DHCP-enabled subnet, add that subnet's gateway

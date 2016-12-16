@@ -13,7 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api import extensions as api_extensions
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import directory
 
 from neutron._i18n import _
 from neutron.api import extensions
@@ -21,7 +23,6 @@ from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
 from neutron.conf import quota
 from neutron.db import rbac_db_models
-from neutron import manager
 from neutron.quota import resource_registry
 
 
@@ -81,7 +82,7 @@ RESOURCE_ATTRIBUTE_MAP = {
 quota.register_quota_opts(quota.rbac_quota_opts)
 
 
-class Rbac(extensions.ExtensionDescriptor):
+class Rbac(api_extensions.ExtensionDescriptor):
     """RBAC policy support."""
 
     @classmethod
@@ -104,9 +105,7 @@ class Rbac(extensions.ExtensionDescriptor):
     @classmethod
     def get_resources(cls):
         """Returns Ext Resources."""
-        plural_mappings = {'rbac_policies': 'rbac_policy'}
-        attr.PLURALS.update(plural_mappings)
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         params = RESOURCE_ATTRIBUTE_MAP['rbac_policies']
         collection_name = 'rbac-policies'
         resource_name = 'rbac_policy'

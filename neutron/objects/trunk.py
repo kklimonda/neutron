@@ -20,6 +20,8 @@ from oslo_versionedobjects import fields as obj_fields
 
 from neutron.db import api as db_api
 from neutron.objects import base
+from neutron.objects import common_types
+from neutron.objects import exceptions as o_exc
 from neutron.services.trunk import exceptions as t_exc
 from neutron.services.trunk import models
 
@@ -35,8 +37,8 @@ class SubPort(base.NeutronDbObject):
     foreign_keys = {'Trunk': {'trunk_id': 'id'}}
 
     fields = {
-        'port_id': obj_fields.UUIDField(),
-        'trunk_id': obj_fields.UUIDField(),
+        'port_id': common_types.UUIDField(),
+        'trunk_id': common_types.UUIDField(),
         'segmentation_type': obj_fields.StringField(),
         'segmentation_id': obj_fields.IntegerField(),
     }
@@ -72,7 +74,7 @@ class SubPort(base.NeutronDbObject):
                     raise t_exc.TrunkNotFound(trunk_id=self.trunk_id)
 
                 raise n_exc.PortNotFound(port_id=self.port_id)
-            except base.NeutronDbObjectDuplicateEntry:
+            except o_exc.NeutronDbObjectDuplicateEntry:
                 raise t_exc.DuplicateSubPort(
                     segmentation_type=self.segmentation_type,
                     segmentation_id=self.segmentation_id,
@@ -88,10 +90,10 @@ class Trunk(base.NeutronDbObject):
 
     fields = {
         'admin_state_up': obj_fields.BooleanField(),
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'tenant_id': obj_fields.StringField(),
         'name': obj_fields.StringField(),
-        'port_id': obj_fields.UUIDField(),
+        'port_id': common_types.UUIDField(),
         'status': obj_fields.StringField(),
         'sub_ports': obj_fields.ListOfObjectsField(SubPort.__name__),
     }

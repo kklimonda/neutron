@@ -15,8 +15,6 @@
 
 from neutron_lib import constants as lib_constants
 
-from neutron.common import _deprecate
-
 
 ROUTER_PORT_OWNERS = lib_constants.ROUTER_INTERFACE_OWNERS_SNAT + \
     (lib_constants.DEVICE_OWNER_ROUTER_GW,)
@@ -66,6 +64,11 @@ PROVISIONAL_IPV6_PD_PREFIX = '::/64'
 
 # Timeout in seconds for getting an IPv6 LLA
 LLA_TASK_TIMEOUT = 40
+
+# length of all device prefixes (e.g. qvo, tap, qvb)
+LINUX_DEV_PREFIX_LEN = 3
+# must be shorter than linux IFNAMSIZ (which is 16)
+LINUX_DEV_LEN = 14
 
 # Possible prefixes to partial port IDs in interface names used by the OVS,
 # Linux Bridge, and IVS VIF drivers in Nova and the neutron agents. See the
@@ -123,6 +126,18 @@ IP_ALLOWED_VERSIONS = [lib_constants.IP_VERSION_4, lib_constants.IP_VERSION_6]
 PORT_RANGE_MIN = 1
 PORT_RANGE_MAX = 65535
 
+# Configuration values for accept_ra sysctl, copied from linux kernel
+# networking (netdev) tree, file Documentation/networking/ip-sysctl.txt
+#
+# Possible values are:
+#         0 Do not accept Router Advertisements.
+#         1 Accept Router Advertisements if forwarding is disabled.
+#         2 Overrule forwarding behaviour. Accept Router Advertisements
+#           even if forwarding is enabled.
+ACCEPT_RA_DISABLED = 0
+ACCEPT_RA_WITHOUT_FORWARDING = 1
+ACCEPT_RA_WITH_FORWARDING = 2
+
 # Some components communicate using private address ranges, define
 # them all here. These address ranges should not cause any issues
 # even if they overlap since they are used in disjoint namespaces,
@@ -132,9 +147,3 @@ PRIVATE_CIDR_RANGE = '169.254.0.0/16'
 DVR_FIP_LL_CIDR = '169.254.64.0/18'
 L3_HA_NET_CIDR = '169.254.192.0/18'
 METADATA_CIDR = '169.254.169.254/32'
-
-
-# Neutron-lib migration shim. This will emit a deprecation warning on any
-# reference to constants that have been moved out of this module and into
-# the neutron_lib.constants module.
-_deprecate._MovedGlobals(lib_constants)

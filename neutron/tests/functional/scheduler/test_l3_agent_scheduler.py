@@ -21,7 +21,7 @@ from oslo_utils import uuidutils
 import testscenarios
 
 from neutron import context
-from neutron.db import external_net_db
+from neutron.db.models import external_net as ext_net_models
 from neutron.scheduler import l3_agent_scheduler
 from neutron.services.l3_router import l3_router_plugin
 from neutron.tests.common import helpers
@@ -89,7 +89,8 @@ class L3SchedulerBaseTest(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         for i in range(count):
             router = self.routers[i]
             agent = random.choice(self.l3_agents)
-            scheduler.bind_router(self.adminContext, router['id'], agent)
+            scheduler.bind_router(self.l3_plugin, self.adminContext,
+                                  router['id'], agent.id)
             hosting_agents.append(agent)
         return hosting_agents
 
@@ -531,7 +532,8 @@ class L3AZAutoScheduleTestCaseBase(L3AZSchedulerBaseTest):
             az = 'az%s' % i
             for j in range(self.scheduled_agent_count[i]):
                 agent = l3_agents[az][j + self.down_agent_count[i]]
-                scheduler.bind_router(self.adminContext, router['id'], agent)
+                scheduler.bind_router(self.l3_plugin, self.adminContext,
+                                      router['id'], agent.id)
 
         # activate down agent and call auto_schedule_routers
         activate_agent = l3_agents[self.agent_az][0]
@@ -590,7 +592,7 @@ class L3DVRSchedulerBaseTest(L3SchedulerBaseTest):
                                              {'network': network_dict})
         if external:
             with self.adminContext.session.begin():
-                network = external_net_db.ExternalNetwork(network_id=net_id)
+                network = ext_net_models.ExternalNetwork(network_id=net_id)
                 self.adminContext.session.add(network)
 
         return network
@@ -768,9 +770,10 @@ class L3DVRSchedulerTestCase(L3DVRSchedulerBaseTest):
 
     def _test_schedule_router(self):
         if self.router_already_hosted:
-            self.scheduler.bind_router(self.adminContext,
+            self.scheduler.bind_router(self.l3_plugin,
+                                       self.adminContext,
                                        self.router_to_schedule['id'],
-                                       self.l3_agents[0])
+                                       self.l3_agents[0].id)
 
         # schedule:
         actual_scheduled_agent = self.scheduler.schedule(
@@ -785,9 +788,10 @@ class L3DVRSchedulerTestCase(L3DVRSchedulerBaseTest):
 
     def _test_auto_schedule_routers(self):
         if self.router_already_hosted:
-            self.scheduler.bind_router(self.adminContext,
+            self.scheduler.bind_router(self.l3_plugin,
+                                       self.adminContext,
                                        self.router_to_schedule['id'],
-                                       self.l3_agents[0])
+                                       self.l3_agents[0].id)
         # schedule:
         hosting_before = self.l3_plugin.get_l3_agents_hosting_routers(
             self.adminContext, [self.router_to_schedule['id']])

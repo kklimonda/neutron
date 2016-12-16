@@ -24,7 +24,7 @@ from neutron._i18n import _
 
 interface_map = {
     'vsctl': 'neutron.agent.ovsdb.impl_vsctl.OvsdbVsctl',
-    'native': 'neutron.agent.ovsdb.impl_idl.OvsdbIdl',
+    'native': 'neutron.agent.ovsdb.impl_idl.NeutronOvsdbIdl',
 }
 
 OPTS = [
@@ -98,6 +98,36 @@ class API(object):
         :type log_errors:   bool
         :returns: A new transaction
         :rtype: :class:`Transaction`
+        """
+
+    @abc.abstractmethod
+    def add_manager(self, connection_uri):
+        """Create a command to add a Manager to the OVS switch
+
+        This API will add a new manager without overriding the existing ones.
+
+        :param connection_uri: target to which manager needs to be set
+        :type connection_uri: string, see ovs-vsctl manpage for format
+        :returns:           :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
+    def get_manager(self):
+        """Create a command to get Manager list from the OVS switch
+
+        :returns: :class:`Command` with list of Manager names result
+        """
+
+    @abc.abstractmethod
+    def remove_manager(self, connection_uri):
+        """Create a command to remove a Manager from the OVS switch
+
+        This API will remove the manager configured on the OVS switch.
+
+        :param connection_uri: target identifying the manager uri that
+                               needs to be removed.
+        :type connection_uri: string, see ovs-vsctl manpage for format
+        :returns:           :class:`Command` with no result
         """
 
     @abc.abstractmethod
@@ -208,6 +238,27 @@ class API(object):
         # TODO(twilson) Consider handling kwargs for arguments where order
         # doesn't matter. Though that would break the assert_called_once_with
         # unit tests
+
+    @abc.abstractmethod
+    def db_add(self, table, record, column, *values):
+        """Create a command to add a value to a record
+
+        Adds each value or key-value pair to column in record in table. If
+        column is a map, then each value will be a dict, otherwise a base type.
+        If key already exists in a map column, then the current value is not
+        replaced (use the set command to replace an existing value).
+
+        :param table:  The OVS table containing the record to be modified
+        :type table:   string
+        :param record: The record id (name/uuid) to modified
+        :type record:  string
+        :param column: The column name to be modified
+        :type column:  string
+        :param values: The values to be added to the column
+        :type values:  The base type of the column. If column is a map, then
+                       a dict containing the key name and the map's value type
+        :returns:     :class:`Command` with no result
+        """
 
     @abc.abstractmethod
     def db_clear(self, table, record, column):
@@ -381,4 +432,5 @@ def py_to_val(pyval):
     elif pyval == '':
         return '""'
     else:
-        return pyval
+        # NOTE(twilson) If a Command object, return its record_id as a value
+        return getattr(pyval, "record_id", pyval)

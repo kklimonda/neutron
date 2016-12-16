@@ -15,11 +15,11 @@
 import abc
 
 from neutron_lib.api import converters
+from neutron_lib.api import extensions
 from neutron_lib import exceptions as nexception
 import six
 
 from neutron._i18n import _
-from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import resource_helper
 from neutron.plugins.common import constants
@@ -49,8 +49,11 @@ RESOURCE_ATTRIBUTE_MAP = {
                'is_visible': True,
                'primary_key': True},
         'name': {'allow_post': True, 'allow_put': False,
+                 'validate': {'type:string': attr.NAME_MAX_LEN},
                  'is_visible': True, 'default': ''},
         'description': {'allow_post': True, 'allow_put': False,
+                        'validate': {
+                            'type:string': attr.LONG_DESCRIPTION_MAX_LEN},
                         'is_visible': True, 'default': ''},
         'tenant_id': {'allow_post': True, 'allow_put': False,
                       'required_by_policy': True,
@@ -111,7 +114,6 @@ class Metering(extensions.ExtensionDescriptor):
         """Returns Ext Resources."""
         plural_mappings = resource_helper.build_plural_mappings(
             {}, RESOURCE_ATTRIBUTE_MAP)
-        attr.PLURALS.update(plural_mappings)
         # PCM: Metering sets pagination and sorting to True. Do we have cfg
         # entries for these so can be read? Else, must pass in.
         return resource_helper.build_resource_info(plural_mappings,

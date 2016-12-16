@@ -18,13 +18,13 @@ import uuid
 import mock
 import netaddr
 from neutron_lib import constants
+from neutron_lib.plugins import directory
 import testtools
 
 from neutron import context
-from neutron.db import dns_db
 from neutron.extensions import dns
 from neutron.extensions import providernet as pnet
-from neutron import manager
+from neutron.objects import ports as port_obj
 from neutron.plugins.ml2 import config
 from neutron.plugins.ml2.extensions import dns_integration
 from neutron.services.externaldns.drivers.designate import driver
@@ -57,7 +57,7 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         super(DNSIntegrationTestCase, self).setUp()
         dns_integration.DNS_DRIVER = None
         dns_integration.subscribe()
-        self.plugin = manager.NeutronManager.get_plugin()
+        self.plugin = directory.get_plugin()
         config.cfg.CONF.set_override('dns_domain', self._domain)
 
     def _create_port_for_test(self, provider_net=True, dns_domain=True,
@@ -95,9 +95,7 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         self.assertEqual(201, res.status_int)
         port = self.deserialize(self.fmt, res)['port']
         ctx = context.get_admin_context()
-        dns_data_db = ctx.session.query(
-            dns_db.PortDNS).filter_by(
-            port_id=port['id']).one_or_none()
+        dns_data_db = port_obj.PortDNS.get_object(ctx, port_id=port['id'])
         return network['network'], port, dns_data_db
 
     def _create_subnet_for_test(self, network_id, cidr):
@@ -137,9 +135,7 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         self.assertEqual(200, res.status_int)
         port = self.deserialize(self.fmt, res)['port']
         ctx = context.get_admin_context()
-        dns_data_db = ctx.session.query(
-            dns_db.PortDNS).filter_by(
-            port_id=port['id']).one_or_none()
+        dns_data_db = port_obj.PortDNS.get_object(ctx, port_id=port['id'])
         return port, dns_data_db
 
     def _verify_port_dns(self, net, port, dns_data_db, dns_name=True,
@@ -183,13 +179,13 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
                                            V6UUID))
             mock_client.recordsets.create.assert_has_calls(expected,
                                                            any_order=True)
-            self.assertTrue(
-                len(mock_client.recordsets.create.call_args_list) ==
+            self.assertEqual(
+                len(mock_client.recordsets.create.call_args_list),
                 len(expected))
             mock_client.recordsets.delete.assert_has_calls(expected_delete,
                                                            any_order=True)
-            self.assertTrue(
-                len(mock_client.recordsets.delete.call_args_list) ==
+            self.assertEqual(
+                len(mock_client.recordsets.delete.call_args_list),
                 len(expected_delete))
             expected = []
             expected_delete = []
@@ -217,18 +213,18 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
                                                          in_addr_name))
             mock_admin_client.recordsets.create.assert_has_calls(
                 expected, any_order=True)
-            self.assertTrue(
-                len(mock_admin_client.recordsets.create.call_args_list) ==
+            self.assertEqual(
+                len(mock_admin_client.recordsets.create.call_args_list),
                 len(expected))
             mock_admin_client.recordsets.delete.assert_has_calls(
                 expected_delete, any_order=True)
-            self.assertTrue(
-                len(mock_admin_client.recordsets.delete.call_args_list) ==
+            self.assertEqual(
+                len(mock_admin_client.recordsets.delete.call_args_list),
                 len(expected_delete))
         else:
             if not dns_name:
                 self.assertEqual('', port[dns.DNSNAME])
-                self.assertTrue(dns_data_db is None)
+                self.assertIsNone(dns_data_db)
             self.assertFalse(mock_client.recordsets.create.call_args_list)
             self.assertFalse(
                 mock_admin_client.recordsets.create.call_args_list)

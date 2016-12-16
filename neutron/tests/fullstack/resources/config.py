@@ -54,7 +54,7 @@ class NeutronConfigFixture(ConfigFixture):
         super(NeutronConfigFixture, self).__init__(
             env_desc, host_desc, temp_dir, base_filename='neutron.conf')
 
-        service_plugins = ['router']
+        service_plugins = ['router', 'trunk']
         if env_desc.qos:
             service_plugins.append('qos')
 
@@ -154,10 +154,11 @@ class OVSConfigFixture(ConfigFixture):
                 'ovsdb_interface': host_desc.ovsdb_interface,
             },
             'securitygroup': {
-                'firewall_driver': 'noop',
+                'firewall_driver': host_desc.firewall_driver,
             },
             'agent': {
                 'l2_population': str(self.env_desc.l2_pop),
+                'arp_responder': str(self.env_desc.arp_responder),
             }
         })
 

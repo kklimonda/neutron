@@ -15,6 +15,7 @@
 import collections
 import netaddr
 from neutron_lib import constants as lib_constants
+from neutron_lib.utils import helpers
 from oslo_log import log as logging
 
 from neutron._i18n import _, _LE, _LW
@@ -56,7 +57,7 @@ class RouterInfo(object):
         # Invoke the setter for establishing initial SNAT action
         self.router = router
         self.use_ipv6 = use_ipv6
-        ns = namespaces.RouterNamespace(
+        ns = self.create_router_namespace_object(
             router_id, agent_conf, interface_driver, use_ipv6)
         self.router_namespace = ns
         self.ns_name = ns.name
@@ -93,6 +94,11 @@ class RouterInfo(object):
 
         self.router_namespace.create()
 
+    def create_router_namespace_object(
+            self, router_id, agent_conf, iface_driver, use_ipv6):
+        return namespaces.RouterNamespace(
+            router_id, agent_conf, iface_driver, use_ipv6)
+
     @property
     def router(self):
         return self._router
@@ -124,8 +130,8 @@ class RouterInfo(object):
         self._update_routing_table(operation, route, self.ns_name)
 
     def routes_updated(self, old_routes, new_routes):
-        adds, removes = common_utils.diff_list_of_dict(old_routes,
-                                                       new_routes)
+        adds, removes = helpers.diff_list_of_dict(old_routes,
+                                                  new_routes)
         for route in adds:
             LOG.debug("Added route entry is '%s'", route)
             # remove replaced route from deleted route
@@ -409,7 +415,7 @@ class RouterInfo(object):
             ip_lib.send_ip_addr_adv_notif(ns_name,
                                           interface_name,
                                           fixed_ip['ip_address'],
-                                          self.agent_conf)
+                                          self.agent_conf.send_arp_for_ha)
 
     def internal_network_added(self, port):
         network_id = port['network_id']
@@ -449,9 +455,9 @@ class RouterInfo(object):
             current_port = current_ports_dict.get(existing_port['id'])
             if current_port:
                 if (sorted(existing_port['fixed_ips'],
-                           key=common_utils.safe_sort_key) !=
+                           key=helpers.safe_sort_key) !=
                         sorted(current_port['fixed_ips'],
-                               key=common_utils.safe_sort_key)):
+                               key=helpers.safe_sort_key)):
                     updated_ports[current_port['id']] = current_port
         return updated_ports
 
@@ -620,7 +626,8 @@ class RouterInfo(object):
             return
 
         # There is no IPv6 gw_ip, use RouterAdvt for default route.
-        self.driver.configure_ipv6_ra(ns_name, interface_name)
+        self.driver.configure_ipv6_ra(ns_name, interface_name,
+                                      n_const.ACCEPT_RA_WITH_FORWARDING)
 
     def _external_gateway_added(self, ex_gw_port, interface_name,
                                 ns_name, preserve_ips):
@@ -662,7 +669,7 @@ class RouterInfo(object):
             ip_lib.send_ip_addr_adv_notif(ns_name,
                                           interface_name,
                                           fixed_ip['ip_address'],
-                                          self.agent_conf)
+                                          self.agent_conf.send_arp_for_ha)
 
     def is_v6_gateway_set(self, gateway_ips):
         """Check to see if list of gateway_ips has an IPv6 gateway.
@@ -825,10 +832,10 @@ class RouterInfo(object):
                 ex_gw_port)
             fip_statuses = self.configure_fip_addresses(interface_name)
 
-        except (n_exc.FloatingIpSetupException):
-                # All floating IPs must be put in error state
-                LOG.exception(_LE("Failed to process floating IPs."))
-                fip_statuses = self.put_fips_in_error_state()
+        except n_exc.FloatingIpSetupException:
+            # All floating IPs must be put in error state
+            LOG.exception(_LE("Failed to process floating IPs."))
+            fip_statuses = self.put_fips_in_error_state()
         finally:
             self.update_fip_statuses(agent, fip_statuses)
 

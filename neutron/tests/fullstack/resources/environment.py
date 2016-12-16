@@ -34,12 +34,13 @@ class EnvironmentDescription(object):
     Does the setup, as a whole, support tunneling? How about l2pop?
     """
     def __init__(self, network_type='vxlan', l2_pop=True, qos=False,
-                 mech_drivers='openvswitch,linuxbridge'):
+                 mech_drivers='openvswitch,linuxbridge', arp_responder=False):
         self.network_type = network_type
         self.l2_pop = l2_pop
         self.qos = qos
         self.network_range = None
         self.mech_drivers = mech_drivers
+        self.arp_responder = arp_responder
 
     @property
     def tunneling_enabled(self):
@@ -54,11 +55,13 @@ class HostDescription(object):
     """
     def __init__(self, l3_agent=False, of_interface='ovs-ofctl',
                  ovsdb_interface='vsctl',
-                 l2_agent_type=constants.AGENT_TYPE_OVS):
+                 l2_agent_type=constants.AGENT_TYPE_OVS,
+                 firewall_driver='noop'):
         self.l2_agent_type = l2_agent_type
         self.l3_agent = l3_agent
         self.of_interface = of_interface
         self.ovsdb_interface = ovsdb_interface
+        self.firewall_driver = firewall_driver
 
 
 class Host(fixtures.Fixture):

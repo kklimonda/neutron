@@ -18,6 +18,8 @@ import itertools
 import re
 
 from neutron_lib.api import converters
+from neutron_lib.api import extensions as api_extensions
+from neutron_lib.plugins import directory
 import six
 
 from neutron.api import extensions
@@ -25,7 +27,6 @@ from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
 from neutron.api.v2 import resource_helper
 from neutron.common import constants as common_constants
-from neutron import manager
 from neutron.objects.qos import rule as rule_object
 from neutron.plugins.common import constants
 from neutron.services.qos import qos_consts
@@ -51,15 +52,17 @@ RESOURCE_ATTRIBUTE_MAP = {
                'is_visible': True, 'primary_key': True},
         'name': {'allow_post': True, 'allow_put': True,
                  'is_visible': True, 'default': '',
-                 'validate': {'type:string': None}},
+                 'validate': {'type:string': attr.NAME_MAX_LEN}},
         'description': {'allow_post': True, 'allow_put': True,
                         'is_visible': True, 'default': '',
-                        'validate': {'type:string': None}},
+                        'validate':
+                            {'type:string': attr.LONG_DESCRIPTION_MAX_LEN}},
         'shared': {'allow_post': True, 'allow_put': True,
                    'is_visible': True, 'default': False,
                    'convert_to': converters.convert_to_boolean},
         'tenant_id': {'allow_post': True, 'allow_put': False,
                       'required_by_policy': True,
+                      'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
         'rules': {'allow_post': False, 'allow_put': False, 'is_visible': True},
     },
@@ -128,7 +131,7 @@ EXTENDED_ATTRIBUTES_2_0 = {
                                     'validate': {'type:uuid_or_none': None}}}}
 
 
-class Qos(extensions.ExtensionDescriptor):
+class Qos(api_extensions.ExtensionDescriptor):
     """Quality of Service API extension."""
 
     @classmethod
@@ -158,7 +161,6 @@ class Qos(extensions.ExtensionDescriptor):
         plural_mappings = resource_helper.build_plural_mappings(
             special_mappings, itertools.chain(RESOURCE_ATTRIBUTE_MAP,
                                            SUB_RESOURCE_ATTRIBUTE_MAP))
-        attr.PLURALS.update(plural_mappings)
 
         resources = resource_helper.build_resource_info(
                 plural_mappings,
@@ -167,7 +169,7 @@ class Qos(extensions.ExtensionDescriptor):
                 translate_name=True,
                 allow_bulk=True)
 
-        plugin = manager.NeutronManager.get_service_plugins()[constants.QOS]
+        plugin = directory.get_plugin(constants.QOS)
         for collection_name in SUB_RESOURCE_ATTRIBUTE_MAP:
             resource_name = collection_name[:-1]
             parent = SUB_RESOURCE_ATTRIBUTE_MAP[collection_name].get('parent')

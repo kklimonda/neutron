@@ -13,15 +13,16 @@
 #    under the License.
 
 from neutron_lib.api import converters
+from neutron_lib.api import extensions as api_extensions
 from neutron_lib.api import validators
 from neutron_lib import exceptions as nexception
+from neutron_lib.plugins import directory
 
 from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
 from neutron.api.v2 import resource_helper
-from neutron import manager
 from neutron.plugins.common import constants
 
 
@@ -74,8 +75,7 @@ class InvalidFlavorServiceType(nexception.InvalidInput):
 
 def _validate_flavor_service_type(validate_type, valid_values=None):
     """Ensure requested flavor service type plugin is loaded."""
-    plugins = manager.NeutronManager.get_service_plugins()
-    if validate_type not in plugins:
+    if not directory.get_plugin(validate_type):
         raise InvalidFlavorServiceType(service_type=validate_type)
 
 validators.add_validator('validate_flavor_service_type',
@@ -176,7 +176,7 @@ SUB_RESOURCE_ATTRIBUTE_MAP = {
 }
 
 
-class Flavors(extensions.ExtensionDescriptor):
+class Flavors(api_extensions.ExtensionDescriptor):
 
     @classmethod
     def get_name(cls):
@@ -199,13 +199,11 @@ class Flavors(extensions.ExtensionDescriptor):
         """Returns Ext Resources."""
         plural_mappings = resource_helper.build_plural_mappings(
             {}, RESOURCE_ATTRIBUTE_MAP)
-        attr.PLURALS.update(plural_mappings)
         resources = resource_helper.build_resource_info(
             plural_mappings,
             RESOURCE_ATTRIBUTE_MAP,
             constants.FLAVORS)
-        plugin = manager.NeutronManager.get_service_plugins()[
-            constants.FLAVORS]
+        plugin = directory.get_plugin(constants.FLAVORS)
         for collection_name in SUB_RESOURCE_ATTRIBUTE_MAP:
             # Special handling needed for sub-resources with 'y' ending
             # (e.g. proxies -> proxy)

@@ -21,6 +21,7 @@ import mock
 import netaddr
 from neutron_lib import constants as lib_constants
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_utils import importutils
 from oslo_utils import uuidutils
@@ -44,11 +45,11 @@ from neutron.db import l3_attrs_db
 from neutron.db import l3_db
 from neutron.db import l3_dvr_db
 from neutron.db import l3_dvrscheduler_db
+from neutron.db.models import l3 as l3_models
 from neutron.db import models_v2
 from neutron.extensions import external_net
 from neutron.extensions import l3
 from neutron.extensions import portbindings
-from neutron import manager
 from neutron.plugins.common import constants as service_constants
 from neutron.tests import base
 from neutron.tests.common import helpers
@@ -92,9 +93,9 @@ class L3NatExtensionTestCase(test_extensions_base.ExtensionTestCase):
     def setUp(self):
         super(L3NatExtensionTestCase, self).setUp()
         self._setUpExtension(
-            'neutron.extensions.l3.RouterPluginBase', None,
-            l3.RESOURCE_ATTRIBUTE_MAP, l3.L3, '',
-            allow_pagination=True, allow_sorting=True,
+            'neutron.services.l3_router.l3_router_plugin.L3RouterPlugin',
+            lib_constants.L3, l3.RESOURCE_ATTRIBUTE_MAP,
+            l3.L3, '', allow_pagination=True, allow_sorting=True,
             supported_extension_aliases=['router'],
             use_quota=True)
 
@@ -256,8 +257,7 @@ class TestL3NatBasePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             super(TestL3NatBasePlugin, self).delete_network(context, id)
 
     def delete_port(self, context, id, l3_port_check=True):
-        plugin = manager.NeutronManager.get_service_plugins().get(
-            service_constants.L3_ROUTER_NAT)
+        plugin = directory.get_plugin(lib_constants.L3)
         if plugin:
             if l3_port_check:
                 plugin.prevent_l3_port_deletion(context, id)
@@ -334,7 +334,7 @@ class L3NatTestCaseMixin(object):
         data = {'router': {'tenant_id': tenant_id}}
         if name:
             data['router']['name'] = name
-        if admin_state_up:
+        if admin_state_up is not None:
             data['router']['admin_state_up'] = admin_state_up
         for arg in (('admin_state_up', 'tenant_id', 'availability_zone_hints')
                     + (arg_list or ())):
@@ -871,6 +871,24 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                 self.assertNotEqual(fip1['ip_address'],
                                     fip2['ip_address'])
 
+    def test_router_concurrent_delete_upon_subnet_create(self):
+        with self.network() as n:
+            with self.subnet(network=n) as s1, self.router() as r:
+                self._set_net_external(n['network']['id'])
+                self._add_external_gateway_to_router(
+                    r['router']['id'],
+                    n['network']['id'],
+                    ext_ips=[{'subnet_id': s1['subnet']['id']}])
+                plugin = directory.get_plugin(lib_constants.L3)
+                mock.patch.object(
+                    plugin, 'update_router',
+                    side_effect=l3.RouterNotFound(router_id='1')).start()
+                # ensure the router disappearing doesn't interfere with subnet
+                # creation
+                self._create_subnet(self.fmt, net_id=n['network']['id'],
+                                    ip_version=6, cidr='2001:db8::/32',
+                                    expected_res_status=(exc.HTTPCreated.code))
+
     def test_router_update_gateway_upon_subnet_create_ipv6(self):
         with self.network() as n:
             with self.subnet(network=n) as s1, self.router() as r:
@@ -1243,7 +1261,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
 
     def test_router_add_interface_delete_port_after_failure(self):
         with self.router() as r, self.subnet(enable_dhcp=False) as s:
-            plugin = manager.NeutronManager.get_plugin()
+            plugin = directory.get_plugin()
             # inject a failure in the update port that happens at the end
             # to ensure the port gets deleted
             with mock.patch.object(
@@ -2044,8 +2062,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
             self.assertIsNotNone(body['floatingip']['router_id'])
 
     def test_create_floatingip_non_admin_context_agent_notification(self):
-        plugin = manager.NeutronManager.get_service_plugins()[
-            service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
         if not hasattr(plugin, 'l3_rpc_notifier'):
             self.skipTest("Plugin does not support l3_rpc_notifier")
 
@@ -2346,6 +2363,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                                         {'floatingip': {'port_id': port_id}})
                     fip_addr = fip['floatingip']['floating_ip_address']
                     fip_network_id = fip['floatingip']['floating_network_id']
+                    fip_id = fip['floatingip']['id']
                     router_id = body['floatingip']['router_id']
                     body = self._show('routers', router_id)
                     ext_gw_info = body['router']['external_gateway_info']
@@ -2359,6 +2377,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                                            floating_ip_address=fip_addr,
                                            floating_network_id=fip_network_id,
                                            last_known_router_id=None,
+                                           floating_ip_id=fip_id,
                                            router_id=router_id,
                                            next_hop=ext_fixed_ip['ip_address'])
 
@@ -2374,6 +2393,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                 with mock.patch.object(registry, 'notify') as notify:
                     fip_addr = fip['floatingip']['floating_ip_address']
                     fip_network_id = fip['floatingip']['floating_network_id']
+                    fip_id = fip['floatingip']['id']
                     router_id = body['floatingip']['router_id']
                     self._update('floatingips',
                                  fip['floatingip']['id'],
@@ -2387,6 +2407,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                                            floating_ip_address=fip_addr,
                                            floating_network_id=fip_network_id,
                                            last_known_router_id=router_id,
+                                           floating_ip_id=fip_id,
                                            router_id=None,
                                            next_hop=None)
 
@@ -2526,7 +2547,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                     None)
 
                 with mock.patch(plugin_class + '.create_port') as createport:
-                    createport.return_value = {'fixed_ips': []}
+                    createport.return_value = {'fixed_ips': [], 'id': '44'}
                     res = self._create_floatingip(
                         self.fmt, public_sub['subnet']['network_id'],
                         port_id=p['port']['id'])
@@ -2807,18 +2828,18 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
             internal_subnet, external_network_id):
         gw_port = orm.aliased(models_v2.Port, name="gw_port")
         routerport_qry = context.session.query(
-            l3_db.RouterPort.router_id,
+            l3_models.RouterPort.router_id,
             models_v2.IPAllocation.ip_address
         ).join(
             models_v2.Port, models_v2.IPAllocation
         ).filter(
             models_v2.Port.network_id == internal_port['network_id'],
-            l3_db.RouterPort.port_type.in_(
+            l3_models.RouterPort.port_type.in_(
                 lib_constants.ROUTER_INTERFACE_OWNERS
             ),
             models_v2.IPAllocation.subnet_id == internal_subnet['id']
         ).join(
-            gw_port, gw_port.device_id == l3_db.RouterPort.router_id
+            gw_port, gw_port.device_id == l3_models.RouterPort.router_id
         ).filter(
             gw_port.network_id == external_network_id,
         ).distinct()
@@ -2843,8 +2864,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
     def test_floatingip_via_router_interface_returns_201(self):
         # Override get_router_for_floatingip, as
         # networking-midonet's L3 service plugin would do.
-        plugin = manager.NeutronManager.get_service_plugins()[
-            service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
         with mock.patch.object(plugin, "get_router_for_floatingip",
             self._get_router_for_floatingip_without_device_owner_check):
             self._test_floatingip_via_router_interface(exc.HTTPCreated.code)
@@ -2984,8 +3004,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
             self.assertEqual(exc.HTTPConflict.code, res.status_int)
 
     def test_router_specify_id_backend(self):
-        plugin = manager.NeutronManager.get_service_plugins()[
-                    service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
         router_req = {'router': {'id': _uuid(), 'name': 'router',
                                  'tenant_id': 'foo',
                                  'admin_state_up': True}}
@@ -3008,7 +3027,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
             fip = self._make_floatingip(self.fmt, n['network']['id'])
             fip_set = netaddr.IPSet(netaddr.IPNetwork("192.168.1.0/24"))
             fip_ip = fip['floatingip']['floating_ip_address']
-            self.assertTrue(netaddr.IPAddress(fip_ip) in fip_set)
+            self.assertIn(netaddr.IPAddress(fip_ip), fip_set)
 
     def test_create_floatingip_with_assoc_to_ipv6_subnet(self):
         with self.subnet() as public_sub:
@@ -3040,8 +3059,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
 
     def test_create_router_gateway_fails_nested(self):
         # Force _update_router_gw_info failure
-        plugin = manager.NeutronManager.get_service_plugins()[
-            service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
         if not isinstance(plugin, l3_db.L3_NAT_dbonly_mixin):
             self.skipTest("Plugin is not L3_NAT_dbonly_mixin")
         ctx = context.Context('', 'foo')
@@ -3072,8 +3090,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
 
     def test_create_router_gateway_fails_nested_delete_router_failed(self):
         # Force _update_router_gw_info failure
-        plugin = manager.NeutronManager.get_service_plugins()[
-            service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
         if not isinstance(plugin, l3_db.L3_NAT_dbonly_mixin):
             self.skipTest("Plugin is not L3_NAT_dbonly_mixin")
         ctx = context.Context('', 'foo')
@@ -3110,8 +3127,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
 
     def test_router_add_interface_by_port_fails_nested(self):
         # Force _validate_router_port_info failure
-        plugin = manager.NeutronManager.get_service_plugins()[
-            service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
         if not isinstance(plugin, l3_db.L3_NAT_dbonly_mixin):
             self.skipTest("Plugin is not L3_NAT_dbonly_mixin")
         orig_update_port = self.plugin.update_port
@@ -3164,8 +3180,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
         """Test to make sure notification to routers occurs when the gateway
             ip address of a subnet of the external network is changed.
         """
-        plugin = manager.NeutronManager.get_service_plugins()[
-            service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
         if not hasattr(plugin, 'l3_rpc_notifier'):
             self.skipTest("Plugin does not support l3_rpc_notifier")
         # make sure the callback is registered.
@@ -3196,8 +3211,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                                                       ['fake_device'], None)
 
     def test__notify_subnetpool_address_scope_update(self):
-        plugin = manager.NeutronManager.get_service_plugins()[
-            service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
 
         tenant_id = _uuid()
         with mock.patch.object(
@@ -3225,6 +3239,72 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                 mock.ANY, mock.ANY, mock.ANY,
                 context=admin_ctx, subnetpool_id=subnetpool_id)
             chk_method.assert_called_with(admin_ctx, [router['router']['id']])
+
+    def test_janitor_clears_orphaned_floatingip_port(self):
+        plugin = directory.get_plugin(lib_constants.L3)
+        with self.network() as n:
+            # floating IP ports are initially created with a device ID of
+            # PENDING and are updated after the floating IP is actually
+            # created.
+            port_res = self._create_port(
+                self.fmt, n['network']['id'],
+                tenant_id=n['network']['tenant_id'], device_id='PENDING',
+                device_owner=lib_constants.DEVICE_OWNER_FLOATINGIP)
+            port = self.deserialize(self.fmt, port_res)
+            plugin._clean_garbage()
+            # first call should just have marked it as a candidate so port
+            # should still exist
+            port = self._show('ports', port['port']['id'])
+            self.assertEqual('PENDING', port['port']['device_id'])
+            # second call will delete the port since it has no associated
+            # floating IP
+            plugin._clean_garbage()
+            self._show('ports', port['port']['id'],
+                       expected_code=exc.HTTPNotFound.code)
+
+    def test_janitor_updates_port_device_id(self):
+        # if a server dies after the floating IP is created but before it
+        # updates the floating IP port device ID, the janitor will be
+        # responsible for updating the device ID to the correct value.
+        plugin = directory.get_plugin(lib_constants.L3)
+        with self.floatingip_with_assoc() as fip:
+            fip_port = self._list('ports',
+               query_params='device_owner=network:floatingip')['ports'][0]
+            # simulate a failed update by just setting the device_id of
+            # the fip port back to PENDING
+            data = {'port': {'device_id': 'PENDING'}}
+            self._update('ports', fip_port['id'], data)
+            plugin._clean_garbage()
+            # first call just marks as candidate, so it shouldn't be changed
+            port = self._show('ports', fip_port['id'])
+            self.assertEqual('PENDING', port['port']['device_id'])
+            # second call updates device ID to fip
+            plugin._clean_garbage()
+            # first call just marks as candidate, so it shouldn't be changed
+            port = self._show('ports', fip_port['id'])
+            self.assertEqual(fip['floatingip']['id'],
+                             port['port']['device_id'])
+
+    def test_janitor_doesnt_delete_if_fixed_in_interim(self):
+        # here we ensure that the janitor doesn't delete the port on the second
+        # call if the conditions have been fixed
+        plugin = directory.get_plugin(lib_constants.L3)
+        with self.network() as n:
+            port_res = self._create_port(
+                self.fmt, n['network']['id'],
+                tenant_id=n['network']['tenant_id'], device_id='PENDING',
+                device_owner=lib_constants.DEVICE_OWNER_FLOATINGIP)
+            port = self.deserialize(self.fmt, port_res)
+            plugin._clean_garbage()
+            # first call should just have marked it as a candidate so port
+            # should still exist
+            port = self._show('ports', port['port']['id'])
+            self.assertEqual('PENDING', port['port']['device_id'])
+            data = {'port': {'device_id': 'something_else'}}
+            self._update('ports', port['port']['id'], data)
+            # now that the device ID has changed, the janitor shouldn't delete
+            plugin._clean_garbage()
+            self._show('ports', port['port']['id'])
 
 
 class L3AgentDbTestCaseBase(L3NatTestCaseMixin):
@@ -3344,8 +3424,7 @@ class L3AgentDbTestCaseBase(L3NatTestCaseMixin):
         l3_rpc_agent_api_str = (
             'neutron.api.rpc.agentnotifiers.l3_rpc_agent_api.L3AgentNotifyAPI')
         with mock.patch(l3_rpc_agent_api_str):
-            plugin = manager.NeutronManager.get_service_plugins()[
-                service_constants.L3_ROUTER_NAT]
+            plugin = directory.get_plugin(lib_constants.L3)
             notifyApi = plugin.l3_rpc_notifier
             kargs = [item for item in args]
             kargs.append(notifyApi)
@@ -3513,8 +3592,7 @@ class L3NatDBIntAgentSchedulingTestCase(L3BaseForIntTests,
         self.adminContext = context.get_admin_context()
 
     def _assert_router_on_agent(self, router_id, agent_host):
-        plugin = manager.NeutronManager.get_service_plugins().get(
-            service_constants.L3_ROUTER_NAT)
+        plugin = directory.get_plugin(lib_constants.L3)
         agents = plugin.list_l3_agents_hosting_router(
             self.adminContext, router_id)['agents']
         self.assertEqual(1, len(agents))
@@ -3571,8 +3649,7 @@ class L3NatDBIntAgentSchedulingTestCase(L3BaseForIntTests,
             self._assert_router_on_agent(r['router']['id'], 'host2')
 
     def test_router_update_gateway_scheduling_not_supported(self):
-        plugin = manager.NeutronManager.get_service_plugins().get(
-            service_constants.L3_ROUTER_NAT)
+        plugin = directory.get_plugin(lib_constants.L3)
         mock.patch.object(plugin, 'router_supports_scheduling',
                           return_value=False).start()
         with self.router() as r:
@@ -3615,6 +3692,14 @@ class L3RpcCallbackTestCase(base.BaseTestCase):
         port = {'id': 'id', portbindings.HOST_ID: 'somehost'}
         self.l3_rpc_cb._ensure_host_set_on_port(None, None, port)
         self.assertFalse(self.l3_rpc_cb.plugin.update_port.called)
+
+    def test__ensure_host_set_on_port_bad_bindings(self):
+        for b in (portbindings.VIF_TYPE_BINDING_FAILED,
+                  portbindings.VIF_TYPE_UNBOUND):
+            port = {'id': 'id', portbindings.HOST_ID: 'somehost',
+                    portbindings.VIF_TYPE: b}
+            self.l3_rpc_cb._ensure_host_set_on_port(None, 'somehost', port)
+            self.assertTrue(self.l3_rpc_cb.plugin.update_port.called)
 
     def test__ensure_host_set_on_port_update_on_concurrent_delete(self):
         port_id = 'foo_port_id'
@@ -3678,10 +3763,12 @@ class TestL3DbOperationBounds(test_db_base_plugin_v2.DbOperationBoundMixin,
 
             def router_maker():
                 ext_info = {'network_id': s['subnet']['network_id']}
-                self._create_router(self.fmt,
+                res = self._create_router(
+                                    self.fmt,
                                     arg_list=('external_gateway_info',),
                                     external_gateway_info=ext_info,
                                     **self.kwargs)
+                return self.deserialize(self.fmt, res)
 
             self._assert_object_list_queries_constant(router_maker, 'routers')
 
@@ -3693,7 +3780,7 @@ class TestL3DbOperationBounds(test_db_base_plugin_v2.DbOperationBoundMixin,
             def float_maker():
                 port = self._make_port(
                     self.fmt, internal_net_id, **self.kwargs)
-                self._make_floatingip(
+                return self._make_floatingip(
                     self.fmt, flip['floatingip']['floating_network_id'],
                     port_id=port['port']['id'],
                     **self.kwargs)
@@ -3711,8 +3798,7 @@ class L3NatDBTestCaseMixin(object):
 
     def setUp(self):
         super(L3NatDBTestCaseMixin, self).setUp()
-        plugin = manager.NeutronManager.get_service_plugins()[
-            service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
         if not isinstance(plugin, l3_db.L3_NAT_dbonly_mixin):
             self.skipTest("Plugin is not L3_NAT_dbonly_mixin")
 
@@ -3721,8 +3807,7 @@ class L3NatDBTestCaseMixin(object):
         the exception is propagated.
         """
 
-        plugin = manager.NeutronManager.get_service_plugins()[
-            service_constants.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(lib_constants.L3)
         ctx = context.Context('', 'foo')
 
         class MyException(Exception):
@@ -3755,8 +3840,7 @@ class L3NatDBSepTestCase(L3BaseForSepTests, L3NatTestCaseBase,
     """Unit tests for a separate L3 routing service plugin."""
 
     def test_port_deletion_prevention_handles_missing_port(self):
-        pl = manager.NeutronManager.get_service_plugins().get(
-            service_constants.L3_ROUTER_NAT)
+        pl = directory.get_plugin(lib_constants.L3)
         self.assertIsNone(
             pl.prevent_l3_port_deletion(context.get_admin_context(), 'fakeid')
         )

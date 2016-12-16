@@ -16,11 +16,12 @@
 from neutron_lib.api import validators
 
 from neutron.api.v2 import attributes as attr
+from neutron.db import _utils as db_utils
 from neutron.db import db_base_plugin_v2
 
 from neutron.common import utils
 from neutron.extensions import allowedaddresspairs as addr_pair
-from neutron.objects import base as obj_base
+from neutron.objects import exceptions
 from neutron.objects.port.extensions import (allowedaddresspairs
     as obj_addr_pair)
 
@@ -49,7 +50,7 @@ class AllowedAddressPairsMixin(object):
                         mac_address=mac_address,
                         ip_address=ip_address)
                     pair_obj.create()
-        except obj_base.NeutronDbObjectDuplicateEntry:
+        except exceptions.NeutronDbObjectDuplicateEntry:
             raise addr_pair.DuplicateAddressPairInRequest(
                 mac_address=address_pair['mac_address'],
                 ip_address=address_pair['ip_address'])
@@ -86,11 +87,12 @@ class AllowedAddressPairsMixin(object):
             for pair in pairs:
                 pair.delete()
 
-    def _make_allowed_address_pairs_dict(self, allowed_address_pairs,
+    @staticmethod
+    def _make_allowed_address_pairs_dict(allowed_address_pairs,
                                          fields=None):
         res = {'mac_address': allowed_address_pairs['mac_address'],
                'ip_address': allowed_address_pairs['ip_address']}
-        return self._fields(res, fields)
+        return db_utils.resource_fields(res, fields)
 
     def _has_address_pairs(self, port):
         return (validators.is_attr_set(port['port'][addr_pair.ADDRESS_PAIRS])

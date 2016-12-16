@@ -15,7 +15,9 @@
 #
 
 import mock
+import netaddr
 from neutron_lib import constants
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_serialization import jsonutils
@@ -23,15 +25,19 @@ from oslo_utils import uuidutils
 import testscenarios
 from webob import exc
 
+from neutron.common import utils
 from neutron import context as nctx
 from neutron.db import api as db_api
-from neutron.db import external_net_db
 from neutron.db import l3_db
 from neutron.db import l3_gwmode_db
+from neutron.db.models import external_net as ext_net_models
+from neutron.db.models import l3 as l3_models
 from neutron.db import models_v2
 from neutron.extensions import l3
 from neutron.extensions import l3_ext_gw_mode
-from neutron import manager
+from neutron.objects import network as net_obj
+from neutron.objects import ports as port_obj
+from neutron.objects import subnet as subnet_obj
 from neutron.tests import base
 from neutron.tests.unit.db import test_db_base_plugin_v2
 from neutron.tests.unit.extensions import test_l3
@@ -126,19 +132,17 @@ class TestL3GwModeMixin(testlib_api.SqlTestCase):
         self.int_net_id = _uuid()
         self.int_sub_id = _uuid()
         self.tenant_id = 'the_tenant'
-        self.network = models_v2.Network(
+        self.network = net_obj.Network(
+            self.context,
             id=self.ext_net_id,
-            tenant_id=self.tenant_id,
+            project_id=self.tenant_id,
             admin_state_up=True,
             status=constants.NET_STATUS_ACTIVE)
-        self.net_ext = external_net_db.ExternalNetwork(
+        self.net_ext = ext_net_models.ExternalNetwork(
             network_id=self.ext_net_id)
-        self.context.session.add(self.network)
-        # The following is to avoid complaints from SQLite on
-        # foreign key violations
-        self.context.session.flush()
+        self.network.create()
         self.context.session.add(self.net_ext)
-        self.router = l3_db.Router(
+        self.router = l3_models.Router(
             id=_uuid(),
             name=None,
             tenant_id=self.tenant_id,
@@ -148,76 +152,81 @@ class TestL3GwModeMixin(testlib_api.SqlTestCase):
             gw_port_id=None)
         self.context.session.add(self.router)
         self.context.session.flush()
-        self.router_gw_port = models_v2.Port(
+        self.router_gw_port = port_obj.Port(
+            self.context,
             id=FAKE_GW_PORT_ID,
-            tenant_id=self.tenant_id,
+            project_id=self.tenant_id,
             device_id=self.router.id,
             device_owner=l3_db.DEVICE_OWNER_ROUTER_GW,
             admin_state_up=True,
             status=constants.PORT_STATUS_ACTIVE,
-            mac_address=FAKE_GW_PORT_MAC,
+            mac_address=netaddr.EUI(FAKE_GW_PORT_MAC),
             network_id=self.ext_net_id)
+        self.router_gw_port.create()
         self.router.gw_port_id = self.router_gw_port.id
         self.context.session.add(self.router)
-        self.context.session.add(self.router_gw_port)
         self.context.session.flush()
-        self.fip_ext_port = models_v2.Port(
+        self.fip_ext_port = port_obj.Port(
+            self.context,
             id=FAKE_FIP_EXT_PORT_ID,
-            tenant_id=self.tenant_id,
+            project_id=self.tenant_id,
             admin_state_up=True,
             device_id=self.router.id,
             device_owner=l3_db.DEVICE_OWNER_FLOATINGIP,
             status=constants.PORT_STATUS_ACTIVE,
-            mac_address=FAKE_FIP_EXT_PORT_MAC,
+            mac_address=netaddr.EUI(FAKE_FIP_EXT_PORT_MAC),
             network_id=self.ext_net_id)
-        self.context.session.add(self.fip_ext_port)
+        self.fip_ext_port.create()
         self.context.session.flush()
-        self.int_net = models_v2.Network(
+        self.int_net = net_obj.Network(
+            self.context,
             id=self.int_net_id,
-            tenant_id=self.tenant_id,
+            project_id=self.tenant_id,
             admin_state_up=True,
             status=constants.NET_STATUS_ACTIVE)
-        self.int_sub = models_v2.Subnet(
+        self.int_sub = subnet_obj.Subnet(self.context,
             id=self.int_sub_id,
-            tenant_id=self.tenant_id,
+            project_id=self.tenant_id,
             ip_version=4,
-            cidr='3.3.3.0/24',
-            gateway_ip='3.3.3.1',
+            cidr=utils.AuthenticIPNetwork('3.3.3.0/24'),
+            gateway_ip=netaddr.IPAddress('3.3.3.1'),
             network_id=self.int_net_id)
-        self.router_port = models_v2.Port(
+        self.router_port = port_obj.Port(
+            self.context,
             id=FAKE_ROUTER_PORT_ID,
-            tenant_id=self.tenant_id,
+            project_id=self.tenant_id,
             admin_state_up=True,
             device_id=self.router.id,
             device_owner=l3_db.DEVICE_OWNER_ROUTER_INTF,
             status=constants.PORT_STATUS_ACTIVE,
-            mac_address=FAKE_ROUTER_PORT_MAC,
+            mac_address=netaddr.EUI(FAKE_ROUTER_PORT_MAC),
             network_id=self.int_net_id)
         self.router_port_ip_info = models_v2.IPAllocation(
             port_id=self.router_port.id,
             network_id=self.int_net.id,
             subnet_id=self.int_sub_id,
             ip_address='3.3.3.1')
-        self.context.session.add(self.int_net)
-        self.context.session.add(self.int_sub)
-        self.context.session.add(self.router_port)
+        self.int_net.create()
+        self.int_sub.create()
+        self.router_port.create()
         self.context.session.add(self.router_port_ip_info)
         self.context.session.flush()
-        self.fip_int_port = models_v2.Port(
+        self.fip_int_port = port_obj.Port(
+            self.context,
             id=FAKE_FIP_INT_PORT_ID,
-            tenant_id=self.tenant_id,
+            project_id=self.tenant_id,
             admin_state_up=True,
             device_id='something',
             device_owner=constants.DEVICE_OWNER_COMPUTE_PREFIX + 'nova',
             status=constants.PORT_STATUS_ACTIVE,
-            mac_address=FAKE_FIP_INT_PORT_MAC,
+            mac_address=netaddr.EUI(FAKE_FIP_INT_PORT_MAC),
             network_id=self.int_net_id)
         self.fip_int_ip_info = models_v2.IPAllocation(
             port_id=self.fip_int_port.id,
             network_id=self.int_net.id,
             subnet_id=self.int_sub_id,
             ip_address='3.3.3.3')
-        self.fip = l3_db.FloatingIP(
+        self.fip = l3_models.FloatingIP(
             id=_uuid(),
             floating_ip_address='1.1.1.2',
             floating_network_id=self.ext_net_id,
@@ -225,7 +234,7 @@ class TestL3GwModeMixin(testlib_api.SqlTestCase):
             fixed_port_id=None,
             fixed_ip_address=None,
             router_id=None)
-        self.context.session.add(self.fip_int_port)
+        self.fip_int_port.create()
         self.context.session.add(self.fip_int_ip_info)
         self.context.session.add(self.fip)
         self.context.session.flush()
@@ -257,7 +266,7 @@ class TestL3GwModeMixin(testlib_api.SqlTestCase):
         try:
             self.assertEqual(FAKE_GW_PORT_ID,
                              router.gw_port.id)
-            self.assertEqual(FAKE_GW_PORT_MAC,
+            self.assertEqual(netaddr.EUI(FAKE_GW_PORT_MAC),
                              router.gw_port.mac_address)
         except AttributeError:
             self.assertIsNone(router.gw_port)
@@ -396,7 +405,7 @@ class ExtGwModeIntTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
         with self.router() as r, self.subnet() as s:
             ext_net_id = s['subnet']['network_id']
             self._set_net_external(ext_net_id)
-            plugin = manager.NeutronManager.get_plugin()
+            plugin = directory.get_plugin()
             with mock.patch.object(plugin, '_get_port',
                                    side_effect=ValueError()):
                 self._set_router_external_gateway(r['router']['id'],

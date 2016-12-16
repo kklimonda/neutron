@@ -125,28 +125,20 @@ stable branches.
 Releases
 --------
 
-It is suggested that sub-projects release new tarballs on PyPI from time to
-time, especially for stable branches. It will make the life of packagers and
-other consumers of your code easier.
-
-It is highly suggested that you do not strip pieces of the source tree (tests,
-executables, tools) before releasing on PyPI: those missing pieces may be
-needed to validate the package, or make the packaging easier or more complete.
-As a rule of thumb, don't strip anything from the source tree unless completely
-needed.
+It is suggested that sub-projects cut off new releases from time to time,
+especially for stable branches. It will make the life of packagers and other
+consumers of your code easier.
 
 Sub-Project Release Process
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Only members of the `neutron-release
-<https://review.openstack.org/#/admin/groups/150,members>`_ gerrit group can do
-the following release related tasks:
+All subproject releases are managed by `global OpenStack Release Managers team
+<https://review.openstack.org/#/admin/groups/11,members>`_. The
+`neutron-release team
+<https://review.openstack.org/#/admin/groups/150,members>`_ handles only the
+following operations:
 
-* Make releases
-* Create stable branches
 * Make stable branches end of life
-
-Make sure you talk to a member of neutron-release to perform these tasks.
 
 To release a sub-project, follow the following steps:
 
@@ -161,22 +153,18 @@ To release a sub-project, follow the following steps:
   <https://git.openstack.org/cgit/openstack/releases/tree/README.rst>`_ a patch
   to openstack/releases repository with the intended git hash. `The Neutron
   release liaison <https://wiki.openstack.org/wiki/CrossProjectLiaisons#Release_management>`_
-  should be added in Gerrit to the list of reviewers for the patch.
-* If the subproject is not `managed
-  <https://governance.openstack.org/reference/tags/release_managed.html>`_ by
-  OpenStack Release Team, a member of `neutron-release
-  <https://review.openstack.org/#/admin/groups/150,members>`_ `tags the release
-  <http://docs.openstack.org/infra/manual/drivers.html#tagging-a-release>`_ and
-  creates the needed stable branches, if needed.  Note: tagging will release
-  the code to PyPI. Note: new major tag versions should conform to SemVer
+  should be added in Gerrit to the list of reviewers for the patch.  Note: new
+  major tag versions should conform to `SemVer <http://semver.org/>`_
   requirements, meaning no year numbers should be used as a major version. The
   switch to SemVer is advised at earliest convenience for all new major
   releases.
-* The Neutron release liaison votes with +1 for the openstack/releases patch
-  that gives indication to release team the patch is ready to merge.
+* If your project is release:independent and it's the first release for
+  a branch, you should create the stable branch similarly to
+  `the patch for networking-midonet's stable/newton branch <https://review.openstack.org/#/c/404078/>`_.
+* The Neutron release liaison votes with +1 for the openstack/releases patch.
 * The releases will now be on PyPI. A sub-project owner should verify this by
   going to an URL similar to
-  `this <https://pypi.python.org/pypi/networking-odl>`_.
+  `this <https://pypi.python.org/simple/networking-odl>`_.
 * A sub-project owner should next go to Launchpad and release this version
   using the "Release Now" button for the release itself.
 * If a sub-project uses the "delay-release" option, a sub-project owner should
@@ -187,8 +175,6 @@ To release a sub-project, follow the following steps:
   <http://docs.openstack.org/releases/>`_.
 * A sub-project owner should add the next milestone to the Launchpad series, or
   if a new series is required, create the new series and a new milestone.
-* Finally a sub-project owner should send an email to the openstack-announce
-  mailing list announcing the new release.
 
 .. note::
 
