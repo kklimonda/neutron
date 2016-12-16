@@ -377,6 +377,8 @@ class TestMl2NetworksV2(test_plugin.TestNetworksV2,
 
     def test_create_network_segment_allocation_fails(self):
         plugin = directory.get_plugin()
+        mock.patch.object(db_api._retry_db_errors, 'max_retries',
+                          new=2).start()
         with mock.patch.object(
             plugin.type_manager, 'create_network_segments',
             side_effect=db_exc.RetryRequest(ValueError())
@@ -386,7 +388,8 @@ class TestMl2NetworksV2(test_plugin.TestNetworksV2,
             req = self.new_create_request('networks', data)
             res = req.get_response(self.api)
             self.assertEqual(500, res.status_int)
-            self.assertEqual(db_api.MAX_RETRIES + 1, f.call_count)
+            # 1 + retry count
+            self.assertEqual(3, f.call_count)
 
 
 class TestExternalNetwork(Ml2PluginV2TestCase):
@@ -679,10 +682,41 @@ class TestMl2DbOperationBounds(test_plugin.DbOperationBoundMixin,
 
     def test_port_list_queries_constant(self):
         self._assert_object_list_queries_constant(self.make_port, 'ports')
+        self._assert_object_list_queries_constant(self.make_port, 'ports',
+                                                  filters=['device_id'])
+        self._assert_object_list_queries_constant(self.make_port, 'ports',
+                                                  filters=['device_id',
+                                                           'device_owner'])
+        self._assert_object_list_queries_constant(self.make_port, 'ports',
+                                                  filters=['tenant_id',
+                                                           'name',
+                                                           'device_id'])
 
 
 class TestMl2DbOperationBoundsTenant(TestMl2DbOperationBounds):
     admin = False
+
+
+class TestMl2DbOperationBoundsTenantRbac(TestMl2DbOperationBoundsTenant):
+
+    def make_port_in_shared_network(self):
+        context_ = self._get_context()
+        # create shared network owned by the tenant; we use direct driver call
+        # because default policy does not allow users to create shared networks
+        net = self.driver.create_network(
+            context.get_admin_context(),
+            {'network': {'name': 'net1',
+                         'tenant_id': context_.tenant,
+                         'admin_state_up': True,
+                         'shared': True}})
+        # create port that belongs to another tenant
+        return self._make_port(
+            self.fmt, net['id'],
+            set_context=True, tenant_id='fake_tenant')
+
+    def test_port_list_in_shared_network_queries_constant(self):
+        self._assert_object_list_queries_constant(
+            self.make_port_in_shared_network, 'ports')
 
 
 class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):

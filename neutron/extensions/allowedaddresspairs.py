@@ -13,6 +13,7 @@
 #    under the License.
 
 from neutron_lib.api import converters
+from neutron_lib.api import extensions
 from neutron_lib.api import validators
 from neutron_lib import constants
 from neutron_lib import exceptions as nexception
@@ -20,8 +21,6 @@ from oslo_config import cfg
 import webob.exc
 
 from neutron._i18n import _
-from neutron.api import extensions
-from neutron.api.v2 import attributes as attr
 from neutron.conf.extensions import allowedaddresspairs as addr_pair
 
 addr_pair.register_allowed_address_pair_opts()
@@ -130,8 +129,6 @@ class Allowedaddresspairs(extensions.ExtensionDescriptor):
 
     def get_extended_resources(self, version):
         if version == "2.0":
-            attr.PLURALS.update({'allowed_address_pairs':
-                                 'allowed_address_pair'})
             return EXTENDED_ATTRIBUTES_2_0
         else:
             return {}

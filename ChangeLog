@@ -1,13 +1,70 @@
 CHANGES
 =======
 
+10.0.0.0b2
+----------
+
+* Restore extraroute dict after OVO change
+* Remove model_base deprecations
+* DSCP packet marking support in Linuxbridge agent
+* tempest: Fix qos extension check
+* Unplug external device when delete snat namespace
+* Revert "Squash revert to breaking changes"
+* Optimize trunk details extension hook
+* rally trunk port list
+* Get rid of DVR override of remove_router_interface
+* Check for unbound ports in L3 RPC handler
+* Fix some slow unit tests
+* Get rid of DVR override of add_router_interface
+* Remove redundant "dvr" in test name
+* Pass context and resource_type in RPC callback
+* Tempest tests uses only supported QoS rule types
+* Get rid of DVR override of _port_has_ipv6_address
+* Add filters support to constant queries test
+* SRIOV: don't block report_state with device count
+* OVO for VlanAllocation
+* Correctly configure IPv6 addresses on upgrades
+* Add janitor to cleanup orphaned fip ports
+* Make UUIDField actually validate UUIDs
+* Use Query.column_descriptions instead of private property
+* Remove fallback functions in agent/rpc
+* Convert filters to empty dict if None in DB's get_subnetpools()
+* stadium guidelines: Document stable branch creation
+* doc: Fix a warning
+* Expose [agent] extensions option into l3_agent.ini
+* Eliminate DVR inheritance of router create/update_db
+* Use ExtensionDescriptor from neutron-lib
+* Support alembic 0.8.9 in test_autogen_process_directives
+* Use Port OVO object in test_l3_ext_gw_mode
+* Refactoring config opts for ml2 plugin openvswitch
+* Don't compile OVS kernel modules for functional job
+* Update bug tag contacts due to absconsions
+* Functional tests: change assert to wait_until_true
+* Pecan: Remove get_resources() from get_pecan_resources()
+* Fix docs headers
+* Update DB lieutenant to Ann Taraday
+* Compare port_rule_masking() results with different approach
+* Use to_policy_values for policy enforcement
+* Skip larger than /64 subnets in DHCP agent
+* Refactoring config options for mech_sriov opts
+* Delete conntrack when remote ipset member removed
+* Migrate device_owner for router's interface
+* Remove allow_pagination and allow_sorting config options
+* Integration of RouterRoute OVO
+* tests: introduce update_obj_fields method in base objects test class
+* gate_hook: Remove a stale comment
+* Renamed all [AGENT] config sections into [agent]
 * Reuse plugin's update method for changing trunk status
+* Lock in DHCP agent based on network_id
+* Fix OSprofiler support
 * Introduce objects_exist method in neutron/objects/base.py
 * OVO: add SubnetServiceType object and code integration
 * Revert "Deprecate SR-IOV 'physical_device_mappings' config option"
+* Removed deprecated method
 * Integrate Address Scope OVO into DB
 * Add missing revises_on_change attribute
 * Redirect ExtensionDescriptor to neutron-lib
+* Remove PLURALS
 * Show team and repo badges on README
 * ovs-agent: Close ryu app on all exceptions
 * Get rid of DVR inheritance of _delete_current_gw_port
@@ -17,6 +74,7 @@ CHANGES
 * Capture NotFound Exceptions in subnet postcommit
 * Revert "DHCP agent: advertise SLAAC prefixes"
 * L3: Only send notifications if l3 plugin exists
+* Pecan: Minor Fix in startup
 * Squash revert to breaking changes
 * Remove REVERSED_PLURALS and get_resource_info()
 * Remove legacy oslo.messaging.notify.drivers
@@ -27,7 +85,9 @@ CHANGES
 * ovsdb: don't erase existing ovsdb managers
 * OVO for Provisioning Block DB Model
 * ovs-agent: Catch exceptions in agent_main_wrapper
+* functional: Remove unused l3 config
 * Updated from global requirements
+* Improve performance of _modify_rules
 * Refactoring config options for plugin l2pop opts
 * Refactoring config options for plugin macvtap opts
 * Refactoring config options for l2 agent ext opts
@@ -62,6 +122,7 @@ CHANGES
 * Elimination duplication of lots of DVR tests
 * Have qos object increment port/network revision
 * Update devref examples about alembic migrations
+* Trivial Fix - Update code to use Pike as the code name
 * Stop using deprecated CORS.set_latent()
 * L3 scheduler: add retry indicators for bind_router
 * Install OVS from git if current version < 2.5.1
@@ -83,10 +144,12 @@ CHANGES
 * Add a trunk rally test
 * Updated from global requirements
 * Use new enginefacade for servicetype_db
+* Remove floatingip address ignores ha_state
 * ovsfw: small cleanups to improve readability
 * Use new enginefacade for tag
 * Change import statement to not rename the module
 * Add unit tests for ip_lib.get_routing_table
+* policy: cache extracted parent fields for OwnerCheck
 * Changing arping command execute to accept 1 as extra OK code
 * l3-ha: Send gratuitous ARP when new floating IP is added
 * Make OVO exception NeutronDbObjectDuplicateEntry retriable
@@ -623,6 +686,7 @@ CHANGES
 * Adjust spacing in METADATA_PROXY_HANDLER_OPTS
 * Refactoring config options for plugin agent opts
 * Reduce DB hit when checking for trunk-able ports
+* Add API test for tag
 * Added tests for checking expand/contract branch upgrade
 * Don't pass argument sqlite_db in method set_defaults
 * SR-IOV: deprecate supported_pci_vendor_devs

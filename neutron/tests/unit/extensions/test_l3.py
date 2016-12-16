@@ -3240,6 +3240,72 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                 context=admin_ctx, subnetpool_id=subnetpool_id)
             chk_method.assert_called_with(admin_ctx, [router['router']['id']])
 
+    def test_janitor_clears_orphaned_floatingip_port(self):
+        plugin = directory.get_plugin(lib_constants.L3)
+        with self.network() as n:
+            # floating IP ports are initially created with a device ID of
+            # PENDING and are updated after the floating IP is actually
+            # created.
+            port_res = self._create_port(
+                self.fmt, n['network']['id'],
+                tenant_id=n['network']['tenant_id'], device_id='PENDING',
+                device_owner=lib_constants.DEVICE_OWNER_FLOATINGIP)
+            port = self.deserialize(self.fmt, port_res)
+            plugin._clean_garbage()
+            # first call should just have marked it as a candidate so port
+            # should still exist
+            port = self._show('ports', port['port']['id'])
+            self.assertEqual('PENDING', port['port']['device_id'])
+            # second call will delete the port since it has no associated
+            # floating IP
+            plugin._clean_garbage()
+            self._show('ports', port['port']['id'],
+                       expected_code=exc.HTTPNotFound.code)
+
+    def test_janitor_updates_port_device_id(self):
+        # if a server dies after the floating IP is created but before it
+        # updates the floating IP port device ID, the janitor will be
+        # responsible for updating the device ID to the correct value.
+        plugin = directory.get_plugin(lib_constants.L3)
+        with self.floatingip_with_assoc() as fip:
+            fip_port = self._list('ports',
+               query_params='device_owner=network:floatingip')['ports'][0]
+            # simulate a failed update by just setting the device_id of
+            # the fip port back to PENDING
+            data = {'port': {'device_id': 'PENDING'}}
+            self._update('ports', fip_port['id'], data)
+            plugin._clean_garbage()
+            # first call just marks as candidate, so it shouldn't be changed
+            port = self._show('ports', fip_port['id'])
+            self.assertEqual('PENDING', port['port']['device_id'])
+            # second call updates device ID to fip
+            plugin._clean_garbage()
+            # first call just marks as candidate, so it shouldn't be changed
+            port = self._show('ports', fip_port['id'])
+            self.assertEqual(fip['floatingip']['id'],
+                             port['port']['device_id'])
+
+    def test_janitor_doesnt_delete_if_fixed_in_interim(self):
+        # here we ensure that the janitor doesn't delete the port on the second
+        # call if the conditions have been fixed
+        plugin = directory.get_plugin(lib_constants.L3)
+        with self.network() as n:
+            port_res = self._create_port(
+                self.fmt, n['network']['id'],
+                tenant_id=n['network']['tenant_id'], device_id='PENDING',
+                device_owner=lib_constants.DEVICE_OWNER_FLOATINGIP)
+            port = self.deserialize(self.fmt, port_res)
+            plugin._clean_garbage()
+            # first call should just have marked it as a candidate so port
+            # should still exist
+            port = self._show('ports', port['port']['id'])
+            self.assertEqual('PENDING', port['port']['device_id'])
+            data = {'port': {'device_id': 'something_else'}}
+            self._update('ports', port['port']['id'], data)
+            # now that the device ID has changed, the janitor shouldn't delete
+            plugin._clean_garbage()
+            self._show('ports', port['port']['id'])
+
 
 class L3AgentDbTestCaseBase(L3NatTestCaseMixin):
 
@@ -3627,6 +3693,14 @@ class L3RpcCallbackTestCase(base.BaseTestCase):
         self.l3_rpc_cb._ensure_host_set_on_port(None, None, port)
         self.assertFalse(self.l3_rpc_cb.plugin.update_port.called)
 
+    def test__ensure_host_set_on_port_bad_bindings(self):
+        for b in (portbindings.VIF_TYPE_BINDING_FAILED,
+                  portbindings.VIF_TYPE_UNBOUND):
+            port = {'id': 'id', portbindings.HOST_ID: 'somehost',
+                    portbindings.VIF_TYPE: b}
+            self.l3_rpc_cb._ensure_host_set_on_port(None, 'somehost', port)
+            self.assertTrue(self.l3_rpc_cb.plugin.update_port.called)
+
     def test__ensure_host_set_on_port_update_on_concurrent_delete(self):
         port_id = 'foo_port_id'
         port = {
@@ -3689,10 +3763,12 @@ class TestL3DbOperationBounds(test_db_base_plugin_v2.DbOperationBoundMixin,
 
             def router_maker():
                 ext_info = {'network_id': s['subnet']['network_id']}
-                self._create_router(self.fmt,
+                res = self._create_router(
+                                    self.fmt,
                                     arg_list=('external_gateway_info',),
                                     external_gateway_info=ext_info,
                                     **self.kwargs)
+                return self.deserialize(self.fmt, res)
 
             self._assert_object_list_queries_constant(router_maker, 'routers')
 
@@ -3704,7 +3780,7 @@ class TestL3DbOperationBounds(test_db_base_plugin_v2.DbOperationBoundMixin,
             def float_maker():
                 port = self._make_port(
                     self.fmt, internal_net_id, **self.kwargs)
-                self._make_floatingip(
+                return self._make_floatingip(
                     self.fmt, flip['floatingip']['floating_network_id'],
                     port_id=port['port']['id'],
                     **self.kwargs)

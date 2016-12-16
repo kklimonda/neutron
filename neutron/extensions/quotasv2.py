@@ -14,6 +14,7 @@
 #    under the License.
 
 from neutron_lib.api import converters
+from neutron_lib.api import extensions as api_extensions
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
 from oslo_config import cfg
@@ -22,7 +23,6 @@ import webob
 
 from neutron._i18n import _
 from neutron.api import extensions
-from neutron.api.v2 import attributes
 from neutron.api.v2 import base
 from neutron.api.v2 import resource
 from neutron.common import constants as const
@@ -127,7 +127,7 @@ class QuotaSetsController(wsgi.Controller):
         return {self._resource_name: self._get_quotas(request, id)}
 
 
-class Quotasv2(extensions.ExtensionDescriptor):
+class Quotasv2(api_extensions.ExtensionDescriptor):
     """Quotas management support."""
 
     @classmethod
@@ -163,8 +163,6 @@ class Quotasv2(extensions.ExtensionDescriptor):
 
     @classmethod
     def get_pecan_resources(cls):
-        # NOTE: quotas in PLURALS is needed because get_resources never sets it
-        attributes.PLURALS[RESOURCE_COLLECTION] = RESOURCE_NAME
         # NOTE: plugin is not needed for quotas
         return [pecan_utils.PecanResourceExtension(
             RESOURCE_COLLECTION, controllers.QuotasController(), None)]

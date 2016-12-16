@@ -16,11 +16,11 @@
 import abc
 
 from neutron_lib.api import converters
+from neutron_lib.api import extensions
 from neutron_lib import exceptions as nexception
 import six
 
 from neutron._i18n import _
-from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import resource_helper
 from neutron.conf import quota
@@ -190,7 +190,6 @@ class L3(extensions.ExtensionDescriptor):
         plural_mappings = resource_helper.build_plural_mappings(
             {}, RESOURCE_ATTRIBUTE_MAP)
         plural_mappings['external_fixed_ips'] = 'external_fixed_ip'
-        attr.PLURALS.update(plural_mappings)
         action_map = {'router': {'add_router_interface': 'PUT',
                                  'remove_router_interface': 'PUT'}}
         return resource_helper.build_resource_info(plural_mappings,

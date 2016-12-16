@@ -14,6 +14,7 @@
 
 import abc
 
+from neutron_lib.api import extensions as api_extensions
 from neutron_lib.api import validators
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
@@ -22,7 +23,6 @@ import six
 
 from neutron._i18n import _
 from neutron.api import extensions
-from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
 
 
@@ -79,7 +79,7 @@ class AvailabilityZoneNotFound(exceptions.NotFound):
     message = _("AvailabilityZone %(availability_zone)s could not be found.")
 
 
-class Availability_zone(extensions.ExtensionDescriptor):
+class Availability_zone(api_extensions.ExtensionDescriptor):
     """Availability zone extension."""
 
     @classmethod
@@ -104,8 +104,6 @@ class Availability_zone(extensions.ExtensionDescriptor):
     @classmethod
     def get_resources(cls):
         """Returns Ext Resources."""
-        my_plurals = [(key, key[:-1]) for key in RESOURCE_ATTRIBUTE_MAP.keys()]
-        attr.PLURALS.update(dict(my_plurals))
         plugin = directory.get_plugin()
         params = RESOURCE_ATTRIBUTE_MAP.get(AVAILABILITY_ZONES)
         controller = base.create_resource(AVAILABILITY_ZONES,

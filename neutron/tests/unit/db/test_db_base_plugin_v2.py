@@ -130,8 +130,6 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
         cfg.CONF.set_override('base_mac', "12:34:56:78:90:ab")
         cfg.CONF.set_override('max_dns_nameservers', 2)
         cfg.CONF.set_override('max_subnet_host_routes', 2)
-        cfg.CONF.set_override('allow_pagination', True)
-        cfg.CONF.set_override('allow_sorting', True)
         self.api = router.APIRouter()
         # Set the default status
         self.net_create_status = 'ACTIVE'
@@ -149,9 +147,8 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
             native_pagination_attr_name = (
                 "_%s__native_pagination_support" %
                 directory.get_plugin().__class__.__name__)
-            return (cfg.CONF.allow_pagination and
-                    getattr(directory.get_plugin(),
-                            native_pagination_attr_name, False))
+            return getattr(directory.get_plugin(),
+                           native_pagination_attr_name, False)
 
         self._skip_native_pagination = not _is_native_pagination_support()
 
@@ -159,9 +156,8 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
             native_sorting_attr_name = (
                 "_%s__native_sorting_support" %
                 directory.get_plugin().__class__.__name__)
-            return (cfg.CONF.allow_sorting and
-                    getattr(directory.get_plugin(),
-                            native_sorting_attr_name, False))
+            return getattr(directory.get_plugin(),
+                           native_sorting_attr_name, False)
 
         self.plugin = directory.get_plugin()
         self._skip_native_sorting = not _is_native_sorting_support()
@@ -5545,6 +5541,18 @@ class TestSubnetPoolsV2(NeutronDbPluginV2TestCase):
         self.assertEqual(1, len(admin_res['subnetpools']))
         self.assertEqual(0, len(mortal_res['subnetpools']))
 
+    def test_list_subnetpools_filters_none(self):
+        subnet_pool = self._test_create_subnetpool(['10.10.10.0/24'],
+                                                   None,
+                                                   True,
+                                                   name=self._POOL_NAME,
+                                                   min_prefixlen='24',
+                                                   shared=True)
+        sp_list = self.plugin.get_subnetpools(
+            context.Context('', 'not-the-owner'))
+        self.assertEqual(1, len(sp_list))
+        self.assertEqual(subnet_pool['subnetpool']['id'], sp_list[0]['id'])
+
     def test_delete_subnetpool(self):
         subnetpool = self._test_create_subnetpool(['10.10.10.0/24'],
                                                   tenant_id=self._tenant_id,
@@ -6472,19 +6480,31 @@ class DbOperationBoundMixin(object):
         context_ = self._get_context()
         return {'set_context': True, 'tenant_id': context_.tenant}
 
-    def _list_and_count_queries(self, resource):
+    def _list_and_count_queries(self, resource, query_params=None):
+        kwargs = {'neutron_context': self._get_context()}
+        if query_params:
+            kwargs['query_params'] = query_params
+        # list once before tracking to flush out any quota recalculations.
+        # otherwise the first list after a create will be different than
+        # a subsequent list with no create.
+        self._list(resource, **kwargs)
         self._db_execute_count = 0
-        self.assertNotEqual([],
-                            self._list(resource,
-                                       neutron_context=self._get_context()))
+        self.assertNotEqual([], self._list(resource, **kwargs))
         query_count = self._db_execute_count
         # sanity check to make sure queries are being observed
         self.assertNotEqual(0, query_count)
         return query_count
 
-    def _assert_object_list_queries_constant(self, obj_creator, plural):
+    def _assert_object_list_queries_constant(self, obj_creator, plural,
+                                             filters=None):
         obj_creator()
         before_count = self._list_and_count_queries(plural)
         # one more thing shouldn't change the db query count
-        obj_creator()
-        self.assertEqual(before_count, self._list_and_count_queries(plural))
+        obj = list(obj_creator().values())[0]
+        after_count = self._list_and_count_queries(plural)
+        self.assertEqual(before_count, after_count)
+        # using filters shouldn't change the count either
+        if filters:
+            query_params = "&".join(["%s=%s" % (f, obj[f]) for f in filters])
+            after_count = self._list_and_count_queries(plural, query_params)
+            self.assertEqual(before_count, after_count)

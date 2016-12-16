@@ -347,6 +347,9 @@ neutron/conf/plugins/ml2/drivers/driver_type.py
 neutron/conf/plugins/ml2/drivers/l2pop.py
 neutron/conf/plugins/ml2/drivers/linuxbridge.py
 neutron/conf/plugins/ml2/drivers/macvtap.py
+neutron/conf/plugins/ml2/drivers/ovs_conf.py
+neutron/conf/plugins/ml2/drivers/mech_sriov/__init__.py
+neutron/conf/plugins/ml2/drivers/mech_sriov/agent_common.py
 neutron/conf/services/__init__.py
 neutron/conf/services/extdns_designate_driver.py
 neutron/conf/services/metering_agent.py
@@ -382,7 +385,6 @@ neutron/db/l3_dvrscheduler_db.py
 neutron/db/l3_gwmode_db.py
 neutron/db/l3_hamode_db.py
 neutron/db/l3_hascheduler_db.py
-neutron/db/model_base.py
 neutron/db/models_v2.py
 neutron/db/netmtu_db.py
 neutron/db/network_ip_availability_db.py
@@ -670,6 +672,9 @@ neutron/objects/db/api.py
 neutron/objects/extensions/__init__.py
 neutron/objects/extensions/port_security.py
 neutron/objects/extensions/standardattributes.py
+neutron/objects/plugins/__init__.py
+neutron/objects/plugins/ml2/__init__.py
+neutron/objects/plugins/ml2/vlanallocation.py
 neutron/objects/port/__init__.py
 neutron/objects/port/extensions/__init__.py
 neutron/objects/port/extensions/allowedaddresspairs.py
@@ -1116,6 +1121,7 @@ neutron/tests/tempest/api/test_service_type_management.py
 neutron/tests/tempest/api/test_subnetpools.py
 neutron/tests/tempest/api/test_subnetpools_negative.py
 neutron/tests/tempest/api/test_subnets.py
+neutron/tests/tempest/api/test_tag.py
 neutron/tests/tempest/api/test_timestamp.py
 neutron/tests/tempest/api/test_trunk.py
 neutron/tests/tempest/api/test_trunk_details.py
@@ -1275,13 +1281,13 @@ neutron/tests/unit/db/test_common_db_mixin.py
 neutron/tests/unit/db/test_db_base_plugin_common.py
 neutron/tests/unit/db/test_db_base_plugin_v2.py
 neutron/tests/unit/db/test_dvr_mac_db.py
+neutron/tests/unit/db/test_extraroute_db.py
 neutron/tests/unit/db/test_ipam_backend_mixin.py
 neutron/tests/unit/db/test_ipam_pluggable_backend.py
 neutron/tests/unit/db/test_l3_db.py
 neutron/tests/unit/db/test_l3_dvr_db.py
 neutron/tests/unit/db/test_l3_hamode_db.py
 neutron/tests/unit/db/test_migration.py
-neutron/tests/unit/db/test_model_base.py
 neutron/tests/unit/db/test_portsecurity_db.py
 neutron/tests/unit/db/test_portsecurity_db_common.py
 neutron/tests/unit/db/test_provisioning_blocks.py
@@ -1362,6 +1368,9 @@ neutron/tests/unit/objects/db/__init__.py
 neutron/tests/unit/objects/db/test_api.py
 neutron/tests/unit/objects/extensions/__init__.py
 neutron/tests/unit/objects/extensions/test_standardattributes.py
+neutron/tests/unit/objects/plugins/__init__.py
+neutron/tests/unit/objects/plugins/ml2/__init__.py
+neutron/tests/unit/objects/plugins/ml2/test_vlanallocation.py
 neutron/tests/unit/objects/port/__init__.py
 neutron/tests/unit/objects/port/extensions/__init__.py
 neutron/tests/unit/objects/port/extensions/test_allowedaddresspairs.py
@@ -1543,6 +1552,7 @@ releasenotes/notes/1500-default-mtu-b0d6e4ab193b62a4.yaml
 releasenotes/notes/1500-default-segment-mtu-54e2cf6aea9602d5.yaml
 releasenotes/notes/404-for-quota-tenant-2c09c16759269b21.yaml
 releasenotes/notes/Adds-http_proxy_to_wsgi-middleware-24e8271cbd94ffdf.yaml
+releasenotes/notes/Dscp-marking-for-linuxbridge-agent-e765d0d934fa4017.yaml
 releasenotes/notes/QoS-for-linuxbridge-agent-bdb13515aac4e555.yaml
 releasenotes/notes/access_as_external_rbac-455dc74b9fa22761.yaml
 releasenotes/notes/add-availability-zone-4440cf00be7c54ba.yaml
@@ -1584,6 +1594,7 @@ releasenotes/notes/deprecate_max_fixed_ips_per_port-5e80518cbf25cfd6.yaml
 releasenotes/notes/deprecate_neutron_debug-a578e0adfc9cff4c.yaml
 releasenotes/notes/deprecate_prevent_arp_spoofing_option-a09e673fc8f9fee4.yaml
 releasenotes/notes/deprecated-driver-e368e0befc9bee4c.yaml
+releasenotes/notes/dhcp-ipv6-address-update-ff18d1eb0c196bce.yaml
 releasenotes/notes/dhcp-lease-time-5c504c3730a4f9ea.yaml
 releasenotes/notes/direct-physical-vnic-878d15bdb758b70e.yaml
 releasenotes/notes/dnsmasq_dns_servers-d729c04887ce67b4.yaml
@@ -1595,6 +1606,7 @@ releasenotes/notes/enable-sorting-pagination-754390289d3311fa.yaml
 releasenotes/notes/end-to-end-mtu-00345fc4282cb8fb.yaml
 releasenotes/notes/fail-on-missing-extensions-bc332124b780875b.yaml
 releasenotes/notes/fdb_population-70d751c8c2e4395f.yaml
+releasenotes/notes/fip-janitor-53f0d42a7471c5ed.yaml
 releasenotes/notes/firewall_driver_not_needed_on_server-4159669ad834dea6.yaml
 releasenotes/notes/fix-mtu-for-existing-networks-5a476cde9bc46a53.yaml
 releasenotes/notes/hyperv-neutron-agent-decomposition-ae6a052aeb48c6ac.yaml
@@ -1624,6 +1636,7 @@ releasenotes/notes/physical_network-aware-dhcp-scheduling-94e9fadc7c7c5fec.yaml
 releasenotes/notes/pluggable-ipam-is-default-15c2ee15dc5b4a7b.yaml
 releasenotes/notes/project_id-d5ea7a42be428230.yaml
 releasenotes/notes/qos-min-egress-bw-rule-b1c80f5675a4c1c3.yaml
+releasenotes/notes/remove-allow-pagination-allow-sorting-ff23ca5ccb3007b9.yaml
 releasenotes/notes/remove-driver-60eb7e26d95f7322.yaml
 releasenotes/notes/remove-force_gateway_on_subnet-77cb79f0b35d0c6d.yaml
 releasenotes/notes/remove-network_device_mtu-option-a1a96e99dc7f0a02.yaml

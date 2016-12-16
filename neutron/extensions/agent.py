@@ -16,6 +16,7 @@
 import abc
 
 from neutron_lib.api import converters
+from neutron_lib.api import extensions as api_extensions
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
 import six
@@ -76,7 +77,7 @@ class MultipleAgentFoundByTypeHost(exceptions.Conflict):
                 "host=%(host)s found")
 
 
-class Agent(extensions.ExtensionDescriptor):
+class Agent(api_extensions.ExtensionDescriptor):
     """Agent management extension."""
 
     @classmethod
@@ -98,8 +99,6 @@ class Agent(extensions.ExtensionDescriptor):
     @classmethod
     def get_resources(cls):
         """Returns Ext Resources."""
-        my_plurals = [(key, key[:-1]) for key in RESOURCE_ATTRIBUTE_MAP.keys()]
-        attr.PLURALS.update(dict(my_plurals))
         plugin = directory.get_plugin()
         params = RESOURCE_ATTRIBUTE_MAP.get(RESOURCE_NAME + 's')
         controller = base.create_resource(RESOURCE_NAME + 's',

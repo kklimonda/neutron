@@ -37,6 +37,8 @@ import neutron.conf.plugins.ml2.drivers.agent
 import neutron.conf.plugins.ml2.drivers.driver_type
 import neutron.conf.plugins.ml2.drivers.linuxbridge
 import neutron.conf.plugins.ml2.drivers.macvtap
+import neutron.conf.plugins.ml2.drivers.mech_sriov.agent_common
+import neutron.conf.plugins.ml2.drivers.ovs_conf
 import neutron.conf.quota
 import neutron.conf.service
 import neutron.conf.services.metering_agent
@@ -55,7 +57,6 @@ import neutron.extensions.l3
 import neutron.extensions.securitygroup
 import neutron.plugins.ml2.config
 import neutron.plugins.ml2.drivers.mech_sriov.agent.common.config
-import neutron.plugins.ml2.drivers.openvswitch.agent.common.config
 import neutron.wsgi
 
 
@@ -156,13 +157,13 @@ def list_base_agent_opts():
              neutron.agent.common.config.INTERFACE_DRIVER_OPTS,
              neutron.conf.agent.ovs_conf.OPTS)
          ),
-        ('AGENT', neutron.agent.common.config.AGENT_STATE_OPTS),
+        ('agent', neutron.agent.common.config.AGENT_STATE_OPTS),
     ]
 
 
 def list_az_agent_opts():
     return [
-        ('AGENT', neutron.agent.common.config.AVAILABILITY_ZONE_OPTS),
+        ('agent', neutron.agent.common.config.AVAILABILITY_ZONE_OPTS),
     ]
 
 
@@ -203,7 +204,9 @@ def list_l3_agent_opts():
              neutron.conf.agent.l3.ha.OPTS,
              neutron.agent.linux.pd.OPTS,
              neutron.agent.linux.ra.OPTS)
-         )
+         ),
+        ('agent',
+         neutron.conf.agent.agent_extensions_manager.AGENT_EXT_MANAGER_OPTS),
     ]
 
 
@@ -227,7 +230,7 @@ def list_metadata_agent_opts():
              meta_conf.UNIX_DOMAIN_METADATA_PROXY_OPTS,
              neutron.conf.cache_utils.cache_opts)
          ),
-        ('AGENT', neutron.agent.common.config.AGENT_STATE_OPTS)
+        ('agent', neutron.agent.common.config.AGENT_STATE_OPTS)
     ]
 
 
@@ -260,14 +263,12 @@ def list_ovs_opts():
     return [
         ('ovs',
          itertools.chain(
-             neutron.plugins.ml2.drivers.openvswitch.agent.common.config.
-             ovs_opts,
+             neutron.conf.plugins.ml2.drivers.ovs_conf.ovs_opts,
              neutron.agent.ovsdb.api.OPTS)
          ),
         ('agent',
          itertools.chain(
-             neutron.plugins.ml2.drivers.openvswitch.agent.common.config.
-             agent_opts,
+             neutron.conf.plugins.ml2.drivers.ovs_conf.agent_opts,
              neutron.conf.agent.agent_extensions_manager.
              AGENT_EXT_MANAGER_OPTS)
          ),
@@ -279,7 +280,7 @@ def list_ovs_opts():
 def list_sriov_agent_opts():
     return [
         ('sriov_nic',
-         neutron.plugins.ml2.drivers.mech_sriov.agent.common.config.
+         neutron.conf.plugins.ml2.drivers.mech_sriov.agent_common.
          sriov_nic_opts),
         ('agent',
          neutron.conf.agent.agent_extensions_manager.AGENT_EXT_MANAGER_OPTS)

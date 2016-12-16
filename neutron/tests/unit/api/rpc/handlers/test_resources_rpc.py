@@ -25,6 +25,7 @@ from neutron.api.rpc.handlers import resources_rpc
 from neutron.common import topics
 from neutron import context
 from neutron.objects import base as objects_base
+from neutron.objects import common_types
 from neutron.tests import base
 
 
@@ -55,7 +56,7 @@ class FakeResource(BaseFakeResource):
     VERSION = TEST_VERSION
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'field': obj_fields.StringField()
     }
 
@@ -64,7 +65,7 @@ class FakeResource2(BaseFakeResource):
     VERSION = TEST_VERSION
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'field': obj_fields.StringField()
     }
 
@@ -286,7 +287,8 @@ class ResourcesPushRpcCallbackTestCase(ResourcesRpcBaseTestCase):
                             resource_list=[resource.obj_to_primitive()
                                            for resource in self.resource_objs],
                             event_type=TEST_EVENT)
-        reg_push_mock.assert_called_once_with(self.resource_objs[0].obj_name(),
+        reg_push_mock.assert_called_once_with(self.context,
+                                              self.resource_objs[0].obj_name(),
                                               self.resource_objs,
                                               TEST_EVENT)
 
@@ -299,6 +301,7 @@ class ResourcesPushRpcCallbackTestCase(ResourcesRpcBaseTestCase):
         self.callbacks.push(self.context,
                             resource=self.resource_objs[0].obj_to_primitive(),
                             event_type=TEST_EVENT)
-        reg_push_mock.assert_called_once_with(self.resource_objs[0].obj_name(),
+        reg_push_mock.assert_called_once_with(self.context,
+                                              self.resource_objs[0].obj_name(),
                                               [self.resource_objs[0]],
                                               TEST_EVENT)

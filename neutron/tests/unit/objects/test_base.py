@@ -20,6 +20,7 @@ import mock
 import netaddr
 from neutron_lib import exceptions as n_exc
 from oslo_db import exception as obj_exc
+from oslo_db.sqlalchemy import utils as db_utils
 from oslo_utils import timeutils
 from oslo_utils import uuidutils
 from oslo_versionedobjects import base as obj_base
@@ -31,7 +32,6 @@ from neutron.common import constants
 from neutron.common import utils
 from neutron import context
 from neutron.db import db_base_plugin_v2
-from neutron.db import model_base
 from neutron.db.models import external_net as ext_net_model
 from neutron.db.models import l3 as l3_model
 from neutron.db import standard_attr
@@ -79,9 +79,9 @@ class FakeSmallNeutronObject(base.NeutronDbObject):
     }
 
     fields = {
-        'field1': obj_fields.UUIDField(),
-        'field2': obj_fields.UUIDField(),
-        'field3': obj_fields.UUIDField(),
+        'field1': common_types.UUIDField(),
+        'field2': common_types.UUIDField(),
+        'field3': common_types.UUIDField(),
     }
 
 
@@ -100,7 +100,7 @@ class FakeSmallNeutronObjectWithMultipleParents(base.NeutronDbObject):
     }
 
     fields = {
-        'field1': obj_fields.UUIDField(),
+        'field1': common_types.UUIDField(),
         'field2': obj_fields.StringField(),
     }
 
@@ -115,7 +115,7 @@ class FakeParent(base.NeutronDbObject):
     primary_keys = ['field1', 'field2']
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'children': obj_fields.ListOfObjectsField(
             'FakeSmallNeutronObjectWithMultipleParents',
             nullable=True)
@@ -139,7 +139,7 @@ class FakeWeirdKeySmallNeutronObject(base.NeutronDbObject):
     }
 
     fields = {
-        'field1': obj_fields.UUIDField(),
+        'field1': common_types.UUIDField(),
         'field2': obj_fields.StringField(),
     }
 
@@ -152,7 +152,7 @@ class FakeNeutronDbObject(base.NeutronDbObject):
     db_model = FakeModel
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'field1': obj_fields.StringField(),
         'obj_field': obj_fields.ObjectField('FakeSmallNeutronObject',
                                             nullable=True)
@@ -175,7 +175,7 @@ class FakeNeutronObjectNonStandardPrimaryKey(base.NeutronDbObject):
     primary_keys = ['weird_key']
 
     fields = {
-        'weird_key': obj_fields.UUIDField(),
+        'weird_key': common_types.UUIDField(),
         'field1': obj_fields.StringField(),
         'obj_field': obj_fields.ListOfObjectsField(
             'FakeWeirdKeySmallNeutronObject'),
@@ -195,7 +195,7 @@ class FakeNeutronObjectCompositePrimaryKey(base.NeutronDbObject):
     primary_keys = ['weird_key', 'field1']
 
     fields = {
-        'weird_key': obj_fields.UUIDField(),
+        'weird_key': common_types.UUIDField(),
         'field1': obj_fields.StringField(),
         'obj_field': obj_fields.ListOfObjectsField(
             'FakeWeirdKeySmallNeutronObject')
@@ -215,8 +215,8 @@ class FakeNeutronObjectUniqueKey(base.NeutronDbObject):
     unique_keys = [['unique_key'], ['id2']]
 
     fields = {
-        'id': obj_fields.UUIDField(),
-        'id2': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
+        'id2': common_types.UUIDField(),
         'unique_key': obj_fields.StringField(),
         'field1': obj_fields.StringField(),
         'obj_field': obj_fields.ObjectField('FakeSmallNeutronObject',
@@ -242,7 +242,7 @@ class FakeNeutronObjectRenamedField(base.NeutronDbObject):
     primary_keys = ['id']
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'field_ovo': obj_fields.StringField(),
         'field2': obj_fields.StringField()
     }
@@ -262,7 +262,7 @@ class FakeNeutronObjectCompositePrimaryKeyWithId(base.NeutronDbObject):
     primary_keys = ['id', 'field1']
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'field1': obj_fields.StringField(),
         'obj_field': obj_fields.ListOfObjectsField('FakeSmallNeutronObject')
     }
@@ -282,8 +282,8 @@ class FakeNeutronObjectMultipleForeignKeys(base.NeutronDbObject):
     }
 
     fields = {
-        'field1': obj_fields.UUIDField(),
-        'field2': obj_fields.UUIDField(),
+        'field1': common_types.UUIDField(),
+        'field2': common_types.UUIDField(),
     }
 
 
@@ -295,7 +295,7 @@ class FakeNeutronObjectSyntheticField(base.NeutronDbObject):
     db_model = FakeModel
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'obj_field': obj_fields.ListOfObjectsField(
             'FakeNeutronObjectMultipleForeignKeys')
     }
@@ -311,7 +311,7 @@ class FakeNeutronObjectSyntheticField2(base.NeutronDbObject):
     db_model = FakeModel
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'obj_field': obj_fields.ObjectField('FakeSmallNeutronObject')
     }
 
@@ -326,9 +326,9 @@ class FakeNeutronObjectWithProjectId(base.NeutronDbObject):
     db_model = FakeModel
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'project_id': obj_fields.StringField(),
-        'field2': obj_fields.UUIDField(),
+        'field2': common_types.UUIDField(),
     }
 
 
@@ -338,9 +338,9 @@ class FakeNeutronObject(base.NeutronObject):
     VERSION = '1.0'
 
     fields = {
-        'id': obj_fields.UUIDField(),
+        'id': common_types.UUIDField(),
         'project_id': obj_fields.StringField(),
-        'field2': obj_fields.UUIDField(),
+        'field2': common_types.UUIDField(),
     }
 
     @classmethod
@@ -399,7 +399,7 @@ FIELD_TYPE_VALUE_GENERATOR_MAP = {
     obj_fields.IntegerField: tools.get_random_integer,
     obj_fields.StringField: tools.get_random_string,
     obj_fields.ListOfStringsField: tools.get_random_string_list,
-    obj_fields.UUIDField: uuidutils.generate_uuid,
+    common_types.UUIDField: uuidutils.generate_uuid,
     obj_fields.ObjectField: lambda: None,
     obj_fields.ListOfObjectsField: lambda: [],
     obj_fields.DictOfStringsField: get_random_dict_of_strings,
@@ -420,6 +420,7 @@ FIELD_TYPE_VALUE_GENERATOR_MAP = {
     common_types.IpProtocolEnumField: tools.get_random_ip_protocol,
     common_types.PortRangeField: tools.get_random_port,
     common_types.SetOfUUIDsField: get_set_of_random_uuids,
+    common_types.VlanIdRangeField: tools.get_random_vlan,
 }
 
 
@@ -479,7 +480,7 @@ class _BaseObjectTestCase(object):
         valid_field = [f for f in self._test_class.fields
                        if f not in self._test_class.synthetic_fields][0]
         self.valid_field_filter = {valid_field:
-                                   self.obj_fields[0][valid_field]}
+                                   self.obj_fields[-1][valid_field]}
         self.obj_registry = self.useFixture(
             fixture.VersionedObjectRegistryFixture())
         self.obj_registry.register(FakeSmallNeutronObject)
@@ -501,6 +502,41 @@ class _BaseObjectTestCase(object):
                 generator = FIELD_TYPE_VALUE_GENERATOR_MAP[type(field_obj)]
                 fields[field] = get_value(generator, ip_version)
         return obj_cls.modify_fields_to_db(fields)
+
+    def update_obj_fields(self, values_dict,
+                          db_objs=None, obj_fields=None, objs=None):
+        '''Update values for test objects with specific values.
+
+        The default behaviour is using random values for all fields of test
+        objects. Sometimes it's not practical, for example, when some fields,
+        often those referencing other objects, require non-random values (None
+        or UUIDs of valid objects). If that's the case, a test subclass may
+        call the method to override some field values for test objects.
+
+        Receives a single ``values_dict`` dict argument where keys are names of
+        test class fields, and values are either actual values for the keys, or
+        callables that will be used to generate different values for each test
+        object.
+
+        Note: if a value is a dict itself, the method will recursively update
+        corresponding embedded objects.
+        '''
+        for k, v in values_dict.items():
+            for db_obj, fields, obj in zip(
+                    db_objs or self.db_objs,
+                    obj_fields or self.obj_fields,
+                    objs or self.objs):
+                val = v() if callable(v) else v
+                db_obj_key = obj.fields_need_translation.get(k, k)
+                if isinstance(val, collections.Mapping):
+                    self.update_obj_fields(
+                        val, db_obj[db_obj_key], fields[k], obj[k])
+                else:
+                    db_obj[db_obj_key] = val
+                    fields[k] = val
+                    obj[k] = val
+            if k in self.valid_field_filter:
+                self.valid_field_filter[k] = val
 
     @classmethod
     def generate_object_keys(cls, obj_cls, field_names=None):
@@ -626,7 +662,7 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
                     self.assertTrue(self._is_test_class(obj))
                     self._check_equal(self.objs[0], obj)
                     get_object_mock.assert_called_once_with(
-                        self.context, self._test_class.db_model,
+                        mock.ANY, self._test_class.db_model,
                         **self._test_class.modify_fields_to_db(obj_keys))
 
     def _get_synthetic_fields_get_objects_calls(self, db_objs):
@@ -984,7 +1020,7 @@ class BaseDbObjectUniqueKeysTestCase(BaseObjectIfaceTestCase):
 class UniqueKeysTestCase(test_base.BaseTestCase):
 
     def test_class_creation(self):
-        m_get_unique_keys = mock.patch.object(model_base, 'get_unique_keys')
+        m_get_unique_keys = mock.patch.object(db_utils, 'get_unique_keys')
         with m_get_unique_keys as get_unique_keys:
             get_unique_keys.return_value = [['field1'],
                                             ['field2', 'db_field3']]
@@ -999,10 +1035,10 @@ class UniqueKeysTestCase(test_base.BaseTestCase):
                 primary_keys = ['id']
 
                 fields = {
-                    'id': obj_fields.UUIDField(),
-                    'field1': obj_fields.UUIDField(),
-                    'field2': obj_fields.UUIDField(),
-                    'field3': obj_fields.UUIDField(),
+                    'id': common_types.UUIDField(),
+                    'field1': common_types.UUIDField(),
+                    'field2': common_types.UUIDField(),
+                    'field3': common_types.UUIDField(),
                 }
 
                 fields_need_translation = {'field3': 'db_field3'}
@@ -1437,7 +1473,7 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
         iter_db_obj = iter(self.db_objs)
 
         def _create():
-            self._create_object_with_synthetic_fields(next(iter_db_obj))
+            return self._create_object_with_synthetic_fields(next(iter_db_obj))
 
         self._assert_object_list_queries_constant(_create, self._test_class)
 
