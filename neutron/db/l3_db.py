@@ -195,46 +195,21 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
             self._apply_dict_extend_functions(l3.ROUTERS, res, router)
         return db_utils.resource_fields(res, fields)
 
-    def filter_allocating_and_missing_routers(self, context, routers):
-        """Filter out routers that shouldn't go to the agent.
-
-        Any routers in the ALLOCATING state will be excluded by
-        this query because this indicates that the server is still
-        building necessary dependent sub-resources for the router and it
-        is not ready for consumption by the agent. It will also filter
-        out any routers that no longer exist to prevent conditions where
-        only part of a router's information was populated in sync_routers
-        due to it being deleted during the sync.
-        """
-        Router = l3_models.Router
-        router_ids = set(r['id'] for r in routers)
-        query = (context.session.query(Router.id).
-                 filter(
-                     Router.id.in_(router_ids),
-                     Router.status != n_const.ROUTER_STATUS_ALLOCATING))
-        valid_routers = set(r.id for r in query)
-        if router_ids - valid_routers:
-            LOG.debug("Removing routers that were either concurrently "
-                      "deleted or are in the ALLOCATING state: %s",
-                      (router_ids - valid_routers))
-        return [r for r in routers if r['id'] in valid_routers]
-
     def _create_router_db(self, context, router, tenant_id):
         """Create the DB object."""
+        router.setdefault('id', uuidutils.generate_uuid())
+        router['tenant_id'] = tenant_id
         registry.notify(resources.ROUTER, events.BEFORE_CREATE,
                         self, context=context, router=router)
         with context.session.begin(subtransactions=True):
             # pre-generate id so it will be available when
             # configuring external gw port
-            status = router.get('status', n_const.ROUTER_STATUS_ACTIVE)
-            router.setdefault('id', uuidutils.generate_uuid())
-            router['tenant_id'] = tenant_id
             router_db = l3_models.Router(
                 id=router['id'],
                 tenant_id=router['tenant_id'],
                 name=router['name'],
                 admin_state_up=router['admin_state_up'],
-                status=status,
+                status=n_const.ROUTER_STATUS_ACTIVE,
                 description=router.get('description'))
             context.session.add(router_db)
             registry.notify(resources.ROUTER, events.PRECOMMIT_CREATE,
@@ -453,6 +428,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                         context=context,
                         router=router,
                         network_id=old_network_id,
+                        new_network_id=new_network_id,
                         gateway_ips=gw_ips)
 
     def _delete_router_gw_port_db(self, context, router):
@@ -562,6 +538,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
 
         #TODO(nati) Refactor here when we have router insertion model
         router = self._ensure_router_not_in_use(context, id)
+        original = self._make_router_dict(router)
         self._delete_current_gw_port(context, id, router, None)
 
         router_ports = router.attached_ports.all()
@@ -571,8 +548,11 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                                           l3_port_check=False)
         with context.session.begin(subtransactions=True):
             registry.notify(resources.ROUTER, events.PRECOMMIT_DELETE,
-                            self, context=context, router_id=id)
+                            self, context=context, router_db=router,
+                            router_id=id)
             context.session.delete(router)
+        registry.notify(resources.ROUTER, events.AFTER_DELETE, self,
+                        context=context, router_id=id, original=original)
 
     @db_api.retry_if_session_inactive()
     def get_router(self, context, id, fields=None):
@@ -1232,17 +1212,6 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         if 'description' in fip:
             update['description'] = fip['description']
         floatingip_db.update(update)
-        next_hop = None
-        if router_id:
-            # NOTE(tidwellr) use admin context here
-            # tenant may not own the router and that's OK on a FIP association
-            router = self._get_router(context.elevated(), router_id)
-            gw_port = router.gw_port
-            for fixed_ip in gw_port.fixed_ips:
-                addr = netaddr.IPAddress(fixed_ip.ip_address)
-                if addr.version == constants.IP_VERSION_4:
-                    next_hop = fixed_ip.ip_address
-                    break
         return {'fixed_ip_address': internal_ip_address,
                 'fixed_port_id': port_id,
                 'router_id': router_id,
@@ -1250,7 +1219,6 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 'floating_ip_address': floatingip_db.floating_ip_address,
                 'floating_network_id': floatingip_db.floating_network_id,
                 'floating_ip_id': floatingip_db.id,
-                'next_hop': next_hop,
                 'context': context}
 
     def _is_ipv4_network(self, context, net_id):
@@ -1779,7 +1747,7 @@ class L3RpcNotifierMixin(object):
     # in each and every l3 plugin out there.
     def __new__(cls):
         L3RpcNotifierMixin._subscribe_callbacks()
-        return object.__new__(cls)
+        return super(L3RpcNotifierMixin, cls).__new__(cls)
 
     @staticmethod
     def _subscribe_callbacks():

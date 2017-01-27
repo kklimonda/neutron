@@ -24,7 +24,6 @@ import netaddr
 from neutron_lib import constants
 from neutron_lib import exceptions
 from neutron_lib.utils import file as file_utils
-from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
@@ -39,7 +38,6 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
 from neutron.cmd.sanity import checks
 from neutron.common import constants as n_const
-from neutron.common import exceptions as n_exc
 from neutron.common import utils as common_utils
 from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.ipam import utils as ipam_utils
@@ -390,11 +388,10 @@ class Dnsmasq(DhcpLocalProcess):
                                 cidr.prefixlen, lease))
                 possible_leases += cidr.size
 
-        if cfg.CONF.advertise_mtu:
-            mtu = getattr(self.network, 'mtu', 0)
-            # Do not advertise unknown mtu
-            if mtu > 0:
-                cmd.append('--dhcp-option-force=option:mtu,%d' % mtu)
+        mtu = getattr(self.network, 'mtu', 0)
+        # Do not advertise unknown mtu
+        if mtu > 0:
+            cmd.append('--dhcp-option-force=option:mtu,%d' % mtu)
 
         # Cap the limit because creating lots of subnets can inflate
         # this possible lease cap.
@@ -405,8 +402,8 @@ class Dnsmasq(DhcpLocalProcess):
         for server in self.conf.dnsmasq_dns_servers:
             cmd.append('--server=%s' % server)
 
-        if self.conf.dhcp_domain:
-            cmd.append('--domain=%s' % self.conf.dhcp_domain)
+        if self.conf.dns_domain:
+            cmd.append('--domain=%s' % self.conf.dns_domain)
 
         if self.conf.dhcp_broadcast_reply:
             cmd.append('--dhcp-broadcast')
@@ -596,8 +593,8 @@ class Dnsmasq(DhcpLocalProcess):
                     hostname = 'host-%s' % alloc.ip_address.replace(
                         '.', '-').replace(':', '-')
                     fqdn = hostname
-                    if self.conf.dhcp_domain:
-                        fqdn = '%s.%s' % (fqdn, self.conf.dhcp_domain)
+                    if self.conf.dns_domain:
+                        fqdn = '%s.%s' % (fqdn, self.conf.dns_domain)
                 yield (port, alloc, hostname, fqdn, no_dhcp, no_opts)
 
     def _get_port_extra_dhcp_opts(self, port):
@@ -888,9 +885,9 @@ class Dnsmasq(DhcpLocalProcess):
                 # dns-server submitted by the server
                 subnet_index_map[subnet.id] = i
 
-            if self.conf.dhcp_domain and subnet.ip_version == 6:
+            if self.conf.dns_domain and subnet.ip_version == 6:
                 options.append('tag:tag%s,option6:domain-search,%s' %
-                               (i, ''.join(self.conf.dhcp_domain)))
+                               (i, ''.join(self.conf.dns_domain)))
 
             gateway = subnet.gateway_ip
             host_routes = []
@@ -1073,26 +1070,27 @@ class Dnsmasq(DhcpLocalProcess):
         providing access to the metadata service via logical routers built
         with 3rd party backends.
         """
-        if conf.force_metadata:
-            # Only ipv4 subnet, with dhcp enabled, will use metadata proxy.
-            return any(s for s in network.subnets
-                       if s.ip_version == 4 and s.enable_dhcp)
+        # Only IPv4 subnets, with dhcp enabled, will use the metadata proxy.
+        v4_dhcp_subnets = [s for s in network.subnets
+                           if s.ip_version == 4 and s.enable_dhcp]
+        if not v4_dhcp_subnets:
+            return False
 
-        if conf.enable_metadata_network and conf.enable_isolated_metadata:
+        if conf.force_metadata:
+            return True
+
+        if not conf.enable_isolated_metadata:
+            return False
+
+        if conf.enable_metadata_network:
             # check if the network has a metadata subnet
             meta_cidr = netaddr.IPNetwork(METADATA_DEFAULT_CIDR)
             if any(netaddr.IPNetwork(s.cidr) in meta_cidr
                    for s in network.subnets):
                 return True
 
-        if not conf.enable_isolated_metadata:
-            return False
-
         isolated_subnets = cls.get_isolated_subnets(network)
-        # Only ipv4 isolated subnet, which has dhcp enabled, will use
-        # metadata proxy.
-        return any(isolated_subnets[s.id] for s in network.subnets
-                   if s.ip_version == 4 and s.enable_dhcp)
+        return any(isolated_subnets[s.id] for s in v4_dhcp_subnets)
 
 
 class DeviceManager(object):
@@ -1240,7 +1238,7 @@ class DeviceManager(object):
                         port.id, {'port': {'network_id': network.id,
                                            'device_id': device_id}})
                 except oslo_messaging.RemoteError as e:
-                    if e.exc_type == n_exc.DhcpPortInUse:
+                    if e.exc_type == 'DhcpPortInUse':
                         LOG.info(_LI("Skipping DHCP port %s as it is "
                                      "already in use"), port.id)
                         continue

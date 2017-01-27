@@ -32,7 +32,7 @@ class SubnetPool(base.NeutronDbObject):
 
     fields = {
         'id': common_types.UUIDField(),
-        'tenant_id': obj_fields.StringField(nullable=True),
+        'project_id': obj_fields.StringField(nullable=True),
         'name': obj_fields.StringField(nullable=True),
         'ip_version': common_types.IPVersionEnumField(),
         'default_prefixlen': common_types.IPNetworkPrefixLenField(),
@@ -46,7 +46,7 @@ class SubnetPool(base.NeutronDbObject):
         'prefixes': common_types.ListOfIPNetworksField(nullable=True)
     }
 
-    fields_no_update = ['id', 'tenant_id']
+    fields_no_update = ['id', 'project_id']
 
     synthetic_fields = ['prefixes']
 
@@ -119,10 +119,8 @@ class SubnetPool(base.NeutronDbObject):
             super(SubnetPool, self).update()
             if synthetic_changes:
                 if 'prefixes' in synthetic_changes:
-                    old = SubnetPoolPrefix.get_objects(
-                        self.obj_context, subnetpool_id=self.id)
-                    for prefix in old:
-                        prefix.delete()
+                    SubnetPoolPrefix.delete_objects(self.obj_context,
+                                                    subnetpool_id=self.id)
                     for prefix in self.prefixes:
                         prefix_obj = SubnetPoolPrefix(self.obj_context,
                                                       subnetpool_id=self.id,
@@ -139,7 +137,7 @@ class SubnetPoolPrefix(base.NeutronDbObject):
 
     fields = {
         'subnetpool_id': common_types.UUIDField(),
-        'cidr': obj_fields.IPNetworkField(),
+        'cidr': common_types.IPNetworkField(),
     }
 
     primary_keys = ['subnetpool_id', 'cidr']

@@ -31,7 +31,6 @@ from oslo_utils import importutils
 from oslo_utils import netutils
 from oslo_utils import uuidutils
 import six
-from sqlalchemy import event
 from sqlalchemy import orm
 import testtools
 from testtools import matchers
@@ -768,20 +767,20 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
         for k in expected_res:
             self.assertIn(k, observed_res[res_name])
             if isinstance(expected_res[k], list):
-                self.assertEqual(sorted(observed_res[res_name][k]),
-                                 sorted(expected_res[k]))
+                self.assertEqual(sorted(expected_res[k]),
+                                 sorted(observed_res[res_name][k]))
             else:
-                self.assertEqual(observed_res[res_name][k], expected_res[k])
+                self.assertEqual(expected_res[k], observed_res[res_name][k])
 
     def _validate_resource(self, resource, keys, res_name):
         for k in keys:
             self.assertIn(k, resource[res_name])
             if isinstance(keys[k], list):
                 self.assertEqual(
-                     sorted(resource[res_name][k], key=helpers.safe_sort_key),
-                     sorted(keys[k], key=helpers.safe_sort_key))
+                     sorted(keys[k], key=helpers.safe_sort_key),
+                     sorted(resource[res_name][k], key=helpers.safe_sort_key))
             else:
-                self.assertEqual(resource[res_name][k], keys[k])
+                self.assertEqual(keys[k], resource[res_name][k])
 
 
 class TestBasicGet(NeutronDbPluginV2TestCase):
@@ -6466,10 +6465,8 @@ class DbOperationBoundMixin(object):
         def _event_incrementer(*args, **kwargs):
             self._db_execute_count += 1
 
-        engine = db_api.context_manager.get_legacy_facade().get_engine()
-        event.listen(engine, 'after_execute', _event_incrementer)
-        self.addCleanup(event.remove, engine, 'after_execute',
-                        _event_incrementer)
+        engine = db_api.context_manager.writer.get_engine()
+        db_api.sqla_listen(engine, 'after_execute', _event_incrementer)
 
     def _get_context(self):
         if self.admin:

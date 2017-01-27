@@ -27,8 +27,8 @@ LOG = logging.getLogger(__name__)
 
 class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
 
-    def __init__(self, agent, host, *args, **kwargs):
-        super(DvrEdgeRouter, self).__init__(agent, host, *args, **kwargs)
+    def __init__(self, host, *args, **kwargs):
+        super(DvrEdgeRouter, self).__init__(host, *args, **kwargs)
         self.snat_namespace = dvr_snat_ns.SnatNamespace(
             self.router_id, self.agent_conf, self.driver, self.use_ipv6)
         self.snat_iptables_manager = None
@@ -112,7 +112,7 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
             sn_port['fixed_ips'],
             sn_port['mac_address'],
             interface_name,
-            dvr_snat_ns.SNAT_INT_DEV_PREFIX,
+            lib_constants.SNAT_INT_DEV_PREFIX,
             mtu=sn_port.get('mtu'))
 
     def _dvr_internal_network_removed(self, port):
@@ -130,7 +130,7 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
 
         snat_interface = self._get_snat_int_device_name(sn_port['id'])
         ns_name = self.snat_namespace.name
-        prefix = dvr_snat_ns.SNAT_INT_DEV_PREFIX
+        prefix = lib_constants.SNAT_INT_DEV_PREFIX
         if ip_lib.device_exists(snat_interface, namespace=ns_name):
             self.driver.unplug(snat_interface, namespace=ns_name,
                                prefix=prefix)
@@ -141,7 +141,7 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
             self.snat_namespace.name, port['network_id'],
             port['id'], port['fixed_ips'],
             port['mac_address'], interface_name,
-            dvr_snat_ns.SNAT_INT_DEV_PREFIX,
+            lib_constants.SNAT_INT_DEV_PREFIX,
             mtu=port.get('mtu'))
 
     def _create_dvr_gateway(self, ex_gw_port, gw_interface_name):
@@ -166,7 +166,7 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         return self.snat_namespace
 
     def _get_snat_int_device_name(self, port_id):
-        long_name = dvr_snat_ns.SNAT_INT_DEV_PREFIX + port_id
+        long_name = lib_constants.SNAT_INT_DEV_PREFIX + port_id
         return long_name[:self.driver.DEV_NAME_LEN]
 
     def _is_this_snat_host(self):
@@ -211,8 +211,8 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
                               "the router."), ns_name)
         super(DvrEdgeRouter, self).update_routing_table(operation, route)
 
-    def delete(self, agent):
-        super(DvrEdgeRouter, self).delete(agent)
+    def delete(self):
+        super(DvrEdgeRouter, self).delete()
         if self.snat_namespace.exists():
             self.snat_namespace.delete()
 
@@ -242,3 +242,18 @@ class DvrEdgeRouter(dvr_local_router.DvrLocalRouter):
         with self.snat_iptables_manager.defer_apply():
             self._add_address_scope_mark(
                 self.snat_iptables_manager, ports_scopemark)
+
+    def _delete_stale_external_devices(self, interface_name):
+        if not self.snat_namespace.exists():
+            return
+
+        ns_ip = ip_lib.IPWrapper(namespace=self.snat_namespace.name)
+        for d in ns_ip.get_devices(exclude_loopback=True):
+            if (d.name.startswith(router.EXTERNAL_DEV_PREFIX) and
+                    d.name != interface_name):
+                LOG.debug('Deleting stale external router device: %s', d.name)
+                self.driver.unplug(
+                    d.name,
+                    bridge=self.agent_conf.external_network_bridge,
+                    namespace=self.snat_namespace.name,
+                    prefix=router.EXTERNAL_DEV_PREFIX)

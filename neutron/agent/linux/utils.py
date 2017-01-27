@@ -40,6 +40,7 @@ from six.moves import http_client as httplib
 
 from neutron._i18n import _, _LE
 from neutron.agent.common import config
+from neutron.agent.linux import xenapi_root_helper
 from neutron.common import utils
 from neutron import wsgi
 
@@ -65,8 +66,12 @@ class RootwrapDaemonHelper(object):
     def get_client(cls):
         with cls.__lock:
             if cls.__client is None:
-                cls.__client = client.Client(
-                    shlex.split(cfg.CONF.AGENT.root_helper_daemon))
+                if xenapi_root_helper.ROOT_HELPER_DAEMON_TOKEN == \
+                    cfg.CONF.AGENT.root_helper_daemon:
+                    cls.__client = xenapi_root_helper.XenAPIClient()
+                else:
+                    cls.__client = client.Client(
+                        shlex.split(cfg.CONF.AGENT.root_helper_daemon))
             return cls.__client
 
 
@@ -171,9 +176,11 @@ def get_interface_mac(interface):
     return ':'.join(["%02x" % b for b in iterbytes(info[MAC_START:MAC_END])])
 
 
-def find_child_pids(pid):
-    """Retrieve a list of the pids of child processes of the given pid."""
+def find_child_pids(pid, recursive=False):
+    """Retrieve a list of the pids of child processes of the given pid.
 
+    It can also find all children through the hierarchy if recursive=True
+    """
     try:
         raw_pids = execute(['ps', '--ppid', pid, '-o', 'pid='],
                            log_fail_as_error=False)
@@ -185,7 +192,58 @@ def find_child_pids(pid):
             if no_children_found:
                 ctxt.reraise = False
                 return []
-    return [x.strip() for x in raw_pids.split('\n') if x.strip()]
+    child_pids = [x.strip() for x in raw_pids.split('\n') if x.strip()]
+    if recursive:
+        for child in child_pids:
+            child_pids = child_pids + find_child_pids(child, True)
+    return child_pids
+
+
+def find_parent_pid(pid):
+    """Retrieve the pid of the parent process of the given pid.
+
+    If the pid doesn't exist in the system, this function will return
+    None
+    """
+    try:
+        ppid = execute(['ps', '-o', 'ppid=', pid],
+                       log_fail_as_error=False)
+    except ProcessExecutionError as e:
+        # Unexpected errors are the responsibility of the caller
+        with excutils.save_and_reraise_exception() as ctxt:
+            # Exception has already been logged by execute
+            no_such_pid = e.returncode == 1
+            if no_such_pid:
+                ctxt.reraise = False
+                return
+    return ppid.strip()
+
+
+def find_fork_top_parent(pid):
+    """Retrieve the pid of the top parent of the given pid through a fork.
+
+    This function will search the top parent with its same cmdline. If the
+    given pid has no parent, its own pid will be returned
+    """
+    while True:
+        ppid = find_parent_pid(pid)
+        if (ppid and ppid != pid and
+                pid_invoked_with_cmdline(ppid, get_cmdline_from_pid(pid))):
+            pid = ppid
+        else:
+            return pid
+
+
+def kill_process(pid, signal, run_as_root=False):
+    """Kill the process with the given pid using the given signal."""
+    try:
+        execute(['kill', '-%d' % signal, pid], run_as_root=run_as_root)
+    except ProcessExecutionError as ex:
+        # TODO(dalvarez): this check has i18n issues. Maybe we can use
+        # use gettext module setting a global locale or just pay attention
+        # to returncode instead of checking the ex message.
+        if 'No such process' not in str(ex):
+            raise
 
 
 def _get_conf_base(cfg_root, uuid, ensure_conf_dir):
@@ -349,7 +407,7 @@ class UnixDomainHttpProtocol(eventlet.wsgi.HttpProtocol):
     disable_nagle_algorithm = False
 
     def __init__(self, request, client_address, server):
-        if client_address == '':
+        if not client_address:
             client_address = ('<local>', 0)
         # base class is old-style, so super does not work properly
         eventlet.wsgi.HttpProtocol.__init__(self, request, client_address,

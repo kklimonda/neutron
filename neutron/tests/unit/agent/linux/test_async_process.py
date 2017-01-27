@@ -16,7 +16,6 @@ import signal
 
 import eventlet.event
 import eventlet.queue
-import eventlet.timeout
 import mock
 import testtools
 
@@ -88,7 +87,7 @@ class TestAsyncProcess(base.BaseTestCase):
         self.proc._is_running = True
         self.proc._kill_event = kill_event
         # Ensure the test times out eventually if the watcher loops endlessly
-        with eventlet.timeout.Timeout(5):
+        with self.assert_max_execution_time():
             with mock.patch.object(self.proc,
                                    '_handle_process_error') as func:
                 self.proc._watch_process(callback, kill_event)
@@ -198,19 +197,17 @@ class TestAsyncProcess(base.BaseTestCase):
             exc = RuntimeError(exception_message)
         else:
             exc = None
-        with mock.patch.object(utils, 'execute',
-                               side_effect=exc) as mock_execute:
+        with mock.patch.object(utils, 'kill_process',
+                               side_effect=exc) as mock_kill_process:
             actual = self.proc._kill_process(pid, kill_signal)
 
         self.assertEqual(expected, actual)
-        mock_execute.assert_called_with(['kill', '-%d' % kill_signal, pid],
-                                        run_as_root=self.proc.run_as_root)
+        mock_kill_process.assert_called_with(pid,
+                                             kill_signal,
+                                             self.proc.run_as_root)
 
     def test__kill_process_returns_true_for_valid_pid(self):
         self._test__kill_process('1', True)
-
-    def test__kill_process_returns_true_for_stale_pid(self):
-        self._test__kill_process('1', True, 'No such process')
 
     def test__kill_process_returns_false_for_execute_exception(self):
         self._test__kill_process('1', False, 'Invalid')

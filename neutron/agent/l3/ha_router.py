@@ -14,6 +14,7 @@
 
 import os
 import shutil
+import signal
 
 import netaddr
 from neutron_lib import constants as n_consts
@@ -31,6 +32,7 @@ from neutron.extensions import portbindings
 LOG = logging.getLogger(__name__)
 HA_DEV_PREFIX = 'ha-'
 IP_MONITOR_PROCESS_SERVICE = 'ip_monitor'
+SIGTERM_TIMEOUT = 10
 
 
 class HaRouterNamespace(namespaces.RouterNamespace):
@@ -342,7 +344,12 @@ class HaRouter(router.RouterInfo):
         pm = self._get_state_change_monitor_process_manager()
         process_monitor.unregister(
             self.router_id, IP_MONITOR_PROCESS_SERVICE)
-        pm.disable()
+        pm.disable(sig=str(int(signal.SIGTERM)))
+        try:
+            common_utils.wait_until_true(lambda: not pm.active,
+                                         timeout=SIGTERM_TIMEOUT)
+        except common_utils.WaitTimeout:
+            pm.disable(sig=str(int(signal.SIGKILL)))
 
     def update_initial_state(self, callback):
         ha_device = ip_lib.IPDevice(
@@ -393,14 +400,14 @@ class HaRouter(router.RouterInfo):
                                namespace=self.ns_name,
                                prefix=router.EXTERNAL_DEV_PREFIX)
 
-    def delete(self, agent):
+    def delete(self):
         self.destroy_state_change_monitor(self.process_monitor)
         self.disable_keepalived()
         self.ha_network_removed()
-        super(HaRouter, self).delete(agent)
+        super(HaRouter, self).delete()
 
-    def process(self, agent):
-        super(HaRouter, self).process(agent)
+    def process(self):
+        super(HaRouter, self).process()
 
         self.ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
         if (self.ha_port and

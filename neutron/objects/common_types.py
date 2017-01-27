@@ -16,13 +16,14 @@ import uuid
 
 import netaddr
 from neutron_lib import constants as lib_constants
+from neutron_lib.db import constants as lib_db_const
 
+from oslo_serialization import jsonutils
 from oslo_versionedobjects import fields as obj_fields
 import six
 
 from neutron._i18n import _
 from neutron.common import constants
-from neutron.extensions import dns as dns_ext
 from neutron.objects import exceptions as o_exc
 from neutron.plugins.common import constants as plugin_constants
 
@@ -64,13 +65,17 @@ class IPNetworkPrefixLenField(obj_fields.AutoTypedField):
 
 
 class PortRange(RangeConstrainedInteger):
-    def __init__(self, **kwargs):
-        super(PortRange, self).__init__(start=constants.PORT_RANGE_MIN,
+    def __init__(self, start=constants.PORT_RANGE_MIN, **kwargs):
+        super(PortRange, self).__init__(start=start,
                                         end=constants.PORT_RANGE_MAX, **kwargs)
 
 
 class PortRangeField(obj_fields.AutoTypedField):
     AUTO_TYPE = PortRange()
+
+
+class PortRangeWith0Field(obj_fields.AutoTypedField):
+    AUTO_TYPE = PortRange(start=0)
 
 
 class VlanIdRange(RangeConstrainedInteger):
@@ -97,7 +102,7 @@ class DomainName(obj_fields.String):
         if not isinstance(value, six.string_types):
             msg = _("Field value %s is not a string") % value
             raise ValueError(msg)
-        if len(value) > dns_ext.FQDN_MAX_LEN:
+        if len(value) > lib_db_const.FQDN_FIELD_SIZE:
             msg = _("Domain name %s is too long") % value
             raise ValueError(msg)
         return super(DomainName, self).coerce(obj, attr, value)
@@ -158,6 +163,11 @@ class FlowDirectionEnumField(obj_fields.AutoTypedField):
     AUTO_TYPE = obj_fields.Enum(valid_values=constants.VALID_DIRECTIONS)
 
 
+class IpamAllocationStatusEnumField(obj_fields.AutoTypedField):
+    AUTO_TYPE = obj_fields.Enum(
+        valid_values=constants.VALID_IPAM_ALLOCATION_STATUSES)
+
+
 class EtherTypeEnumField(obj_fields.AutoTypedField):
     AUTO_TYPE = obj_fields.Enum(valid_values=constants.VALID_ETHERTYPES)
 
@@ -198,6 +208,43 @@ class MACAddress(obj_fields.FieldType):
 
 class MACAddressField(obj_fields.AutoTypedField):
     AUTO_TYPE = MACAddress()
+
+
+class DictOfMiscValues(obj_fields.FieldType):
+    """DictOfMiscValues custom field
+
+    This custom field is handling dictionary with miscellaneous value types,
+    including integer, float, boolean and list and nested dictionaries.
+    """
+    @staticmethod
+    def coerce(obj, attr, value):
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, six.string_types):
+            try:
+                return jsonutils.loads(value)
+            except Exception:
+                msg = _("Field value %s is not stringified JSON") % value
+                raise ValueError(msg)
+        msg = (_("Field value %s is not type of dict or stringified JSON")
+               % value)
+        raise ValueError(msg)
+
+    @staticmethod
+    def from_primitive(obj, attr, value):
+        return DictOfMiscValues.coerce(obj, attr, value)
+
+    @staticmethod
+    def to_primitive(obj, attr, value):
+        return jsonutils.dumps(value)
+
+    @staticmethod
+    def stringify(value):
+        return jsonutils.dumps(value)
+
+
+class DictOfMiscValuesField(obj_fields.AutoTypedField):
+    AUTO_TYPE = DictOfMiscValues
 
 
 class IPNetwork(obj_fields.FieldType):

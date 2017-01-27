@@ -12,13 +12,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import eventlet
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 
 from neutron._i18n import _LE
 from neutron.agent.linux import async_process
 from neutron.agent.ovsdb import api as ovsdb
+from neutron.common import utils
 
 
 LOG = logging.getLogger(__name__)
@@ -33,14 +33,20 @@ class OvsdbMonitor(async_process.AsyncProcess):
     """Manages an invocation of 'ovsdb-client monitor'."""
 
     def __init__(self, table_name, columns=None, format=None,
-                 respawn_interval=None):
-
-        cmd = ['ovsdb-client', 'monitor', table_name]
+                 respawn_interval=None, ovsdb_connection=None):
+        if ovsdb_connection:
+            # if ovsdb connection is configured (e.g. tcp:ip:port), use it,
+            # and there is no need to run as root
+            cmd = ['ovsdb-client', 'monitor', ovsdb_connection, table_name]
+            run_as_root = False
+        else:
+            cmd = ['ovsdb-client', 'monitor', table_name]
+            run_as_root = True
         if columns:
             cmd.append(','.join(columns))
         if format:
             cmd.append('--format=%s' % format)
-        super(OvsdbMonitor, self).__init__(cmd, run_as_root=True,
+        super(OvsdbMonitor, self).__init__(cmd, run_as_root=run_as_root,
                                            respawn_interval=respawn_interval,
                                            log_output=True,
                                            die_on_error=True)
@@ -54,12 +60,13 @@ class SimpleInterfaceMonitor(OvsdbMonitor):
     since the previous access.
     """
 
-    def __init__(self, respawn_interval=None):
+    def __init__(self, respawn_interval=None, ovsdb_connection=None):
         super(SimpleInterfaceMonitor, self).__init__(
             'Interface',
             columns=['name', 'ofport', 'external_ids'],
             format='json',
             respawn_interval=respawn_interval,
+            ovsdb_connection=ovsdb_connection
         )
         self.new_events = {'added': [], 'removed': []}
 
@@ -113,6 +120,4 @@ class SimpleInterfaceMonitor(OvsdbMonitor):
     def start(self, block=False, timeout=5):
         super(SimpleInterfaceMonitor, self).start()
         if block:
-            with eventlet.timeout.Timeout(timeout):
-                while not self.is_active():
-                    eventlet.sleep()
+            utils.wait_until_true(self.is_active)

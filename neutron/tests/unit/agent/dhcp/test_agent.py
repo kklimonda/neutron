@@ -68,7 +68,8 @@ fake_subnet2 = dhcp.DictModel(dict(id='dddddddd-dddd-dddd-dddddddddddd',
 
 fake_subnet3 = dhcp.DictModel(dict(id='bbbbbbbb-1111-2222-bbbbbbbbbbbb',
                               network_id='12345678-1234-5678-1234567890ab',
-                              cidr='192.168.1.1/24', enable_dhcp=True))
+                              cidr='192.168.1.1/24', enable_dhcp=True,
+                              ip_version=4))
 
 fake_ipv6_subnet = dhcp.DictModel(dict(id='bbbbbbbb-1111-2222-bbbbbbbbbbbb',
                               network_id='12345678-1234-5678-1234567890ab',
@@ -81,7 +82,7 @@ fake_meta_subnet = dhcp.DictModel(dict(id='bbbbbbbb-1111-2222-bbbbbbbbbbbb',
                                   network_id='12345678-1234-5678-1234567890ab',
                                   cidr='169.254.169.252/30',
                                   gateway_ip='169.254.169.253',
-                                  enable_dhcp=True))
+                                  enable_dhcp=True, ip_version=4))
 
 fake_fixed_ip1 = dhcp.DictModel(dict(id='', subnet_id=fake_subnet1.id,
                                 ip_address='172.9.9.9'))
@@ -251,43 +252,37 @@ class TestDhcpAgent(base.BaseTestCase):
             dhcp_agent.DhcpAgentWithStateReport, 'start_ready_ports_loop',
             autospec=True).start()
         with mock.patch.object(dhcp_agent.DhcpAgentWithStateReport,
-                               'sync_state',
-                               autospec=True) as mock_sync_state:
-            with mock.patch.object(dhcp_agent.DhcpAgentWithStateReport,
-                                   'periodic_resync',
-                                   autospec=True) as mock_periodic_resync:
-                with mock.patch(state_rpc_str) as state_rpc:
-                    with mock.patch.object(sys, 'argv') as sys_argv:
-                        sys_argv.return_value = [
-                            'dhcp', '--config-file',
-                            base.etcdir('neutron.conf')]
-                        cfg.CONF.register_opts(dhcp_config.DHCP_AGENT_OPTS)
-                        config.register_interface_driver_opts_helper(cfg.CONF)
-                        config.register_agent_state_opts_helper(cfg.CONF)
-                        cfg.CONF.register_opts(interface.OPTS)
-                        common_config.init(sys.argv[1:])
-                        agent_mgr = dhcp_agent.DhcpAgentWithStateReport(
-                            'testhost')
-                        eventlet.greenthread.sleep(1)
-                        agent_mgr.after_start()
-                        mock_sync_state.assert_called_once_with(agent_mgr)
-                        mock_periodic_resync.assert_called_once_with(agent_mgr)
-                        mock_start_ready.assert_called_once_with(agent_mgr)
-                        state_rpc.assert_has_calls(
-                            [mock.call(mock.ANY),
-                             mock.call().report_state(mock.ANY, mock.ANY,
-                                                      mock.ANY)])
+                               'periodic_resync',
+                               autospec=True) as mock_periodic_resync:
+            with mock.patch(state_rpc_str) as state_rpc:
+                with mock.patch.object(sys, 'argv') as sys_argv:
+                    sys_argv.return_value = [
+                        'dhcp', '--config-file',
+                        base.etcdir('neutron.conf')]
+                    cfg.CONF.register_opts(dhcp_config.DHCP_AGENT_OPTS)
+                    config.register_interface_driver_opts_helper(cfg.CONF)
+                    config.register_agent_state_opts_helper(cfg.CONF)
+                    cfg.CONF.register_opts(interface.OPTS)
+                    common_config.init(sys.argv[1:])
+                    agent_mgr = dhcp_agent.DhcpAgentWithStateReport(
+                        'testhost')
+                    eventlet.greenthread.sleep(1)
+                    agent_mgr.after_start()
+                    mock_periodic_resync.assert_called_once_with(agent_mgr)
+                    mock_start_ready.assert_called_once_with(agent_mgr)
+                    state_rpc.assert_has_calls(
+                        [mock.call(mock.ANY),
+                         mock.call().report_state(mock.ANY, mock.ANY,
+                                                  mock.ANY)])
 
     def test_run_completes_single_pass(self):
         with mock.patch(DEVICE_MANAGER):
             dhcp = dhcp_agent.DhcpAgent(HOSTNAME)
             attrs_to_mock = dict(
                 [(a, mock.DEFAULT) for a in
-                 ['sync_state', 'periodic_resync',
-                  'start_ready_ports_loop']])
+                 ['periodic_resync', 'start_ready_ports_loop']])
             with mock.patch.multiple(dhcp, **attrs_to_mock) as mocks:
                 dhcp.run()
-                mocks['sync_state'].assert_called_once_with()
                 mocks['periodic_resync'].assert_called_once_with()
                 mocks['start_ready_ports_loop'].assert_called_once_with()
 
@@ -955,7 +950,7 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
     def test_subnet_create_restarts_with_dhcp_disabled(self):
         payload = dict(subnet=dhcp.DictModel(
               dict(network_id=fake_network.id, enable_dhcp=False,
-                   cidr='99.99.99.0/24')))
+                   cidr='99.99.99.0/24', ip_version=4)))
         self.cache.get_network_by_id.return_value = fake_network
         new_net = copy.deepcopy(fake_network)
         new_net.subnets.append(payload['subnet'])

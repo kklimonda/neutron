@@ -27,6 +27,7 @@ Alessio Ababilov <aababilo@yahoo-inc.com>
 Alessio Ababilov <aababilov@griddynamics.com>
 Alex Holden <alex@alexjonasholden.com>
 Alex Oughton <alex.oughton@rackspace.com>
+Alex Stafeyev <alexo101087@gmail.com>
 Alexander Ignatov <aignatov@mirantis.com>
 Alexander Ignatyev <aignatyev@mirantis.com>
 Alexander Maretskiy <amaretskiy@mirantis.com>
@@ -52,6 +53,7 @@ Angus Lees <gus@inodes.org>
 Anh Tran <anhtt@vn.fujitsu.com>
 Anindita Das <anindita.das@intel.com>
 Ankur Gupta <ankur.gupta@intel.com>
+Ann <akamyshnikova@mirantis.com>
 Ann Kamyshnikova <akamyshnikova@mirantis.com>
 Ante Karamatic <ante.karamatic@canonical.com>
 Anthony Chow <vCloudernBeer@gmail.com>
@@ -82,6 +84,7 @@ Bence Romsics <bence.romsics@ericsson.com>
 Benedikt Trefzer <benedikt.trefzer@cirrax.com>
 Bernard Cafarelli <bcafarel@redhat.com>
 Bernhard M. Wiedemann <bwiedemann@suse.de>
+Bertrand Lallau <bertrand.lallau@gmail.com>
 Bertrand Lallau <bertrand.lallau@thalesgroup.com>
 Bhagyashri Shewale <bhagyashri.shewale@nttdata.com>
 Bhuvan Arumugam <bhuvan@apache.org>
@@ -139,9 +142,11 @@ Dan Florea <dflorea@cisco.com>
 Dan Prince <dprince@redhat.com>
 Dan Wendlandt <dan@nicira.com>
 Dane LeBlanc <leblancd@cisco.com>
+Daniel Alvarez <dalvarez@redhat.com>
 Daniel Gollub <d.gollub@telekom.de>
 Daniel Mellado <dmellado@redhat.com>
 Darek Smigiel (dasm) <smigiel.dariusz@gmail.com>
+Darek Smigiel <smigiel.dariusz@gmail.com>
 Dariusz Smigiel (dasm) <dariusz.smigiel@intel.com>
 Dariusz Smigiel (dasm) <smigiel.dariusz@gmail.com>
 Dariusz Smigiel <smigiel.dariusz@gmail.com>
@@ -161,6 +166,7 @@ David-gb <David_zhw1982@163.com>
 Dazhao <dzyu@cn.ibm.com>
 Debo <dedutta@cisco.com>
 Deepak N <deepak.n@thoughtworks.com>
+Denis Buliga <dbuliga@cloudbasesolutions.com>
 Derek Higgins <derekh@redhat.com>
 Dermot Tynan <tynan@hp.com>
 Dhanashree Gosavi <dhgosavi@cisco.com>
@@ -222,6 +228,7 @@ Gordon Chung <chungg@ca.ibm.com>
 Gordon Chung <gord@live.ca>
 Graham Hayes <graham.hayes@hpe.com>
 Guilherme Salgado <gsalgado@gmail.com>
+Gyorgy Szombathelyi <gyurco@freemail.hu>
 Gábor Antal <antal@inf.u-szeged.hu>
 Ha Van Tu <tuhv@vn.fujitsu.com>
 Haim Daniel <hdaniel@redhat.com>
@@ -297,10 +304,12 @@ Jeremy Hanmer <jeremy@dreamhost.com>
 Jeremy McDermond <mcdermj@xenotropic.com>
 Jeremy Stanley <fungi@yuggoth.org>
 Jerry Zhao <xyzjerry@gmail.com>
+Jesse <jesse@easystack.cn>
 Jesse Andrews <anotherjesse@gmail.com>
 Jiajun Liu <jiajun@unitedstack.com>
 Jian Wen <jian.wen@canonical.com>
 Jian Wen <wenjian@letv.com>
+Jianghua Wang <jianghua.wang@citrix.com>
 Jianing Yang <jianingy@unitedstack.com>
 JieLee <JieLi2087@126.com>
 Joe Gordon <joe.gordon0@gmail.com>
@@ -376,7 +385,9 @@ Lianghwa Jou <lianghwajou@gmail.com>
 Liping Mao <limao@cisco.com>
 LipingMao <limao@cisco.com>
 LiuNanke <nanke.liu@easystack.cn>
+Liuyuanfeng <liu.yuanfeng@zte.com.cn>
 Livnat Peer <lpeer@redhat.com>
+Lizhixin <lizhixin@awcloud.com>
 Lorin Hochstein <lorin@nimbisservices.com>
 Louis Taylor <louis@kragniz.eu>
 Lubosz Kosnik <lubosz.kosnik@intel.com>
@@ -611,6 +622,7 @@ Sergey Vilgelm <svilgelm@mirantis.com>
 Sergio Cazzolato <sergio.j.cazzolato@intel.com>
 Shane Wang <shane.wang@intel.com>
 Shang Yong <shangyong@letv.com>
+Shaohe Feng <shaohe.feng@intel.com>
 Shashank Hegde <shashank@arista.com>
 Shashank Hegde <shashank@aristanetworks.com>
 Shashank Kumar Shankar <shashank.kumar.shankar@intel.com>
@@ -714,6 +726,7 @@ Wei Wang <wangwei@unitedstack.com>
 WeiHu <hwhu@cn.ibm.com>
 Weidong Shao <weidong.shao@huawei.com>
 Wenxin Wang <stieizc.33@gmail.com>
+Wim De Clercq <Wim.De_Clercq@alcatel-lucent.com>
 Wlodzimierz Borkowski <wlodek.borkowski@gmail.com>
 Wu Wenxiang <wu.wenxiang@99cloud.net>
 Xiaolin Zhang <zhangxiaolins@gmail.com>
@@ -728,6 +741,7 @@ YanXingan <yanxingan@cmss.chinamobile.com>
 Yang Yu <yangyu@vmware.com>
 Yang Yu <yuyangbj@cn.ibm.com>
 YangLei <yanglyy@cn.ibm.com>
+Yannick Thomas <ythomas1.ext@orange.com>
 Yatin Kumbhare <yatinkumbhare@gmail.com>
 Yi Zhao <zhaoyi@cmss.chinamobile.com>
 Ying Liu <yinliu2@cisco.com>
@@ -812,6 +826,7 @@ hyunsun <hyunsun.moon@gmail.com>
 imran malik <imran.malik@emc.com>
 ivan-zhu <bozhu@linux.vnet.ibm.com>
 jasonrad <jason.walker@radware.com>
+jeckxie <xiexiaozhe@inspur.com>
 jingliuqing <lawrancejing@gmail.com>
 joe@midokura.com <ih@ih.defaultdomain>
 john_a_joyce <joycej@cisco.com>
@@ -868,6 +883,7 @@ salvatore <salv.orlando@gmail.com>
 sanuptpm <sanuptpm@gmail.com>
 sayalilunkad <sayali.lunkad@suse.com>
 shashi.kant <shashi.kant@nectechnologies.in>
+shihanzhang <ayshihanzhang@gmail.com>
 shihanzhang <shihanzhang@huawei.com>
 shmcfarl <shmcfarl@gmail.com>
 shu,xinxin <xinxin.shu@intel.com>

@@ -25,7 +25,6 @@ from oslo_versionedobjects import fields as obj_fields
 import six
 
 from neutron._i18n import _
-from neutron.api.v2 import attributes
 from neutron.db import api as db_api
 from neutron.db import standard_attr
 from neutron.objects.db import api as obj_db_api
@@ -124,7 +123,6 @@ class NeutronObject(obj_base.VersionedObject,
                     dict_[field_name].to_dict() if value else None)
             else:
                 dict_[field_name] = field.to_primitive(self, field_name, value)
-        attributes.populate_project_info(dict_)
         return dict_
 
     @classmethod
@@ -174,6 +172,13 @@ class NeutronObject(obj_base.VersionedObject,
     def get_objects(cls, context, _pager=None, validate_filters=True,
                     **kwargs):
         raise NotImplementedError()
+
+    @classmethod
+    def delete_objects(cls, context, validate_filters=True, **kwargs):
+        objs = cls.get_objects(context, validate_filters, **kwargs)
+        for obj in objs:
+            obj.delete()
+        return len(objs)
 
     def create(self):
         raise NotImplementedError()
@@ -252,6 +257,9 @@ class DeclarativeObject(abc.ABCMeta):
 
         if (hasattr(cls, 'has_standard_attributes') and
                 cls.has_standard_attributes()):
+            setattr(cls, 'standard_attr_id',
+                    property(lambda x: x.db_obj.standard_attr_id
+                             if x.db_obj else None))
             standardattributes.add_standard_attributes(cls)
         # Instantiate extra filters per class
         cls.extra_filter_names = set(cls.extra_filter_names)
@@ -271,11 +279,12 @@ class NeutronDbObject(NeutronObject):
     unique_keys = []
 
     # this is a dict to store the association between the foreign key and the
-    # corresponding key in the main table, e.g. port extension have 'port_id'
-    # as foreign key, that is associated with the key 'id' of the table Port,
-    # so foreign_keys = {'port_id': 'id'}. The assumption is the association is
-    # the same for all object fields. E.g. all the port extension will use
-    # 'port_id' as key.
+    # corresponding key in the main table for a synthetic field of a specific
+    # class, e.g. port extension has 'port_id' as foreign key, that is
+    # associated with the key 'id' of the table Port for the synthetic
+    # field of class Port. So foreign_keys = {'Port': {'port_id': 'id'}}.
+    # The assumption is the association is the same for all object fields.
+    # E.g. all the port extension will use 'port_id' as key.
     foreign_keys = {}
 
     fields_no_update = []
@@ -432,6 +441,23 @@ class NeutronDbObject(NeutronObject):
             return [cls._load_object(context, db_obj) for db_obj in db_objs]
 
     @classmethod
+    def delete_objects(cls, context, validate_filters=True, **kwargs):
+        """
+        Delete objects that match filtering criteria from DB.
+
+        :param context:
+        :param validate_filters: Raises an error in case of passing an unknown
+                                 filter
+        :param kwargs: multiple keys defined by key=value pairs
+        :return: Number of entries deleted
+        """
+        if validate_filters:
+            cls.validate_filters(**kwargs)
+        with db_api.autonested_transaction(context.session):
+            return obj_db_api.delete_objects(
+                context, cls.db_model, **cls.modify_fields_to_db(kwargs))
+
+    @classmethod
     def is_accessible(cls, context, db_obj):
         return (context.is_admin or
                 context.tenant_id == db_obj.tenant_id)
@@ -443,18 +469,27 @@ class NeutronDbObject(NeutronObject):
         return str(value)
 
     @staticmethod
-    def filter_to_json_str(value):
+    def filter_to_json_str(value, default=None):
         def _dict_to_json(v):
-            return jsonutils.dumps(
-                collections.OrderedDict(
-                    sorted(v.items(), key=lambda t: t[0])
-                ) if v else {}
+            return (
+                jsonutils.dumps(
+                    collections.OrderedDict(
+                        sorted(v.items(), key=lambda t: t[0])
+                    )
+                ) if v else default
             )
 
         if isinstance(value, list):
             return [_dict_to_json(val) for val in value]
         v = _dict_to_json(value)
         return v
+
+    @staticmethod
+    def load_json_from_str(field, default=None):
+        value = field or default
+        if value:
+            value = jsonutils.loads(value)
+        return value
 
     def _get_changed_persistent_fields(self):
         fields = self.obj_get_changes()

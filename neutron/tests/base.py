@@ -23,10 +23,8 @@ import gc
 import inspect
 import os
 import os.path
-import sys
 import weakref
 
-from debtcollector import moves
 import eventlet.timeout
 import fixtures
 import mock
@@ -48,8 +46,8 @@ from neutron.callbacks import manager as registry_manager
 from neutron.callbacks import registry
 from neutron.common import config
 from neutron.common import rpc as n_rpc
-from neutron.common import utils
 from neutron.db import agentschedulers_db
+from neutron.db import api as db_api
 from neutron import manager
 from neutron import policy
 from neutron.quota import resource_registry
@@ -71,16 +69,6 @@ def etcdir(*p):
 
 def fake_use_fatal_exceptions(*args):
     return True
-
-
-for _name in ('get_related_rand_names',
-              'get_rand_name',
-              'get_rand_device_name',
-              'get_related_rand_device_names'):
-    setattr(sys.modules[__name__], _name, moves.moved_function(
-        getattr(utils, _name), _name, __name__,
-        message='use "neutron.common.utils.%s" instead' % _name,
-        version='Newton', removal_version='Ocata'))
 
 
 def bool_from_env(key, strict=False, default=False):
@@ -308,6 +296,7 @@ class BaseTestCase(DietTestCase):
         policy.init()
         self.addCleanup(policy.reset)
         self.addCleanup(resource_registry.unregister_all_resources)
+        self.addCleanup(db_api.sqla_remove_all)
         self.addCleanup(rpc_consumer_reg.clear)
 
     def get_new_temp_dir(self):

@@ -20,10 +20,7 @@ ROUTER_PORT_OWNERS = lib_constants.ROUTER_INTERFACE_OWNERS_SNAT + \
     (lib_constants.DEVICE_OWNER_ROUTER_GW,)
 
 ROUTER_STATUS_ACTIVE = 'ACTIVE'
-# NOTE(kevinbenton): a BUILD status for routers could be added in the future
-# for agents to indicate when they are wiring up the ports. The following is
-# to indicate when the server is busy building sub-components of a router
-ROUTER_STATUS_ALLOCATING = 'ALLOCATING'
+ROUTER_STATUS_ERROR = 'ERROR'
 
 DEVICE_ID_RESERVED_DHCP_PORT = "reserved_dhcp_port"
 
@@ -35,8 +32,6 @@ SNAT_ROUTER_INTF_KEY = '_snat_router_interfaces'
 HA_NETWORK_NAME = 'HA network tenant %s'
 HA_SUBNET_NAME = 'HA subnet tenant %s'
 HA_PORT_NAME = 'HA port tenant %s'
-MINIMUM_MINIMUM_AGENTS_FOR_HA = 1
-DEFAULT_MINIMUM_AGENTS_FOR_HA = 2
 HA_ROUTER_STATE_ACTIVE = 'active'
 HA_ROUTER_STATE_STANDBY = 'standby'
 
@@ -147,3 +142,9 @@ PRIVATE_CIDR_RANGE = '169.254.0.0/16'
 DVR_FIP_LL_CIDR = '169.254.64.0/18'
 L3_HA_NET_CIDR = '169.254.192.0/18'
 METADATA_CIDR = '169.254.169.254/32'
+
+# The only defined IpamAllocation status at this stage is 'ALLOCATED'.
+# More states will be available in the future - e.g.: RECYCLABLE
+IPAM_ALLOCATION_STATUS_ALLOCATED = 'ALLOCATED'
+
+VALID_IPAM_ALLOCATION_STATUSES = (IPAM_ALLOCATION_STATUS_ALLOCATED,)

@@ -104,7 +104,7 @@ class AsyncProcess(object):
         """Launch a process and monitor it asynchronously.
 
         :param block: Block until the process has started.
-        :raises eventlet.timeout.Timeout if blocking is True and the process
+        :raises utils.WaitTimeout if blocking is True and the process
                 did not start in time.
         """
         LOG.debug('Launching async process [%s].', self.cmd)
@@ -122,7 +122,7 @@ class AsyncProcess(object):
         :param block: Block until the process has stopped.
         :param kill_signal: Number of signal that will be sent to the process
                             when terminating the process
-        :raises eventlet.timeout.Timeout if blocking is True and the process
+        :raises utils.WaitTimeout if blocking is True and the process
                 did not stop in time.
         """
         if self._is_running:
@@ -175,15 +175,11 @@ class AsyncProcess(object):
         try:
             # A process started by a root helper will be running as
             # root and need to be killed via the same helper.
-            utils.execute(['kill', '-%d' % kill_signal, pid],
-                          run_as_root=self.run_as_root)
-        except Exception as ex:
-            stale_pid = (isinstance(ex, RuntimeError) and
-                         'No such process' in str(ex))
-            if not stale_pid:
-                LOG.exception(_LE('An error occurred while killing [%s].'),
-                              self.cmd)
-                return False
+            utils.kill_process(pid, kill_signal, self.run_as_root)
+        except Exception:
+            LOG.exception(_LE('An error occurred while killing [%s].'),
+                          self.cmd)
+            return False
 
         if self._process:
             self._process.wait()

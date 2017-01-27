@@ -18,17 +18,14 @@ import functools
 import netaddr
 from neutron_lib.api import validators
 from neutron_lib import constants
-from neutron_lib.db import utils as db_utils
 from neutron_lib import exceptions as exc
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as os_db_exc
-from oslo_db.sqlalchemy import utils as sa_utils
 from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import uuidutils
 from sqlalchemy import and_
-from sqlalchemy import event
 from sqlalchemy import not_
 
 from neutron._i18n import _, _LE, _LI
@@ -86,11 +83,14 @@ def _check_subnet_not_used(context, subnet_id):
 
 
 def _update_subnetpool_dict(orig_pool, new_pool):
-    keys_to_update = (
-        set(orig_pool.fields.keys()) - set(orig_pool.synthetic_fields))
-    updated = {k: new_pool.get(k, orig_pool[k]) for k in keys_to_update}
+    updated = dict((k, v) for k, v in orig_pool.to_dict().items()
+                   if k not in orig_pool.synthetic_fields)
 
-    new_prefixes = new_pool.get('prefixes', constants.ATTR_NOT_SPECIFIED)
+    new_pool = new_pool.copy()
+    new_prefixes = new_pool.pop('prefixes', constants.ATTR_NOT_SPECIFIED)
+    for k, v in new_pool.items():
+        if k not in orig_pool.fields_no_update:
+            updated[k] = v
     if new_prefixes is not constants.ATTR_NOT_SPECIFIED:
         orig_ip_set = netaddr.IPSet(orig_pool.prefixes)
         new_ip_set = netaddr.IPSet(new_prefixes)
@@ -135,12 +135,12 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             # NOTE(arosen) These event listeners are here to hook into when
             # port status changes and notify nova about their change.
             self.nova_notifier = nova.Notifier.get_instance()
-            event.listen(models_v2.Port, 'after_insert',
-                         self.nova_notifier.send_port_status)
-            event.listen(models_v2.Port, 'after_update',
-                         self.nova_notifier.send_port_status)
-            event.listen(models_v2.Port.status, 'set',
-                         self.nova_notifier.record_port_status_changed)
+            db_api.sqla_listen(models_v2.Port, 'after_insert',
+                               self.nova_notifier.send_port_status)
+            db_api.sqla_listen(models_v2.Port, 'after_update',
+                               self.nova_notifier.send_port_status)
+            db_api.sqla_listen(models_v2.Port.status, 'set',
+                               self.nova_notifier.record_port_status_changed)
         for e in (events.BEFORE_CREATE, events.BEFORE_UPDATE,
                   events.BEFORE_DELETE):
             registry.subscribe(self.validate_network_rbac_policy_change,
@@ -403,10 +403,11 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         with context.session.begin(subtransactions=True):
             network = self._get_network(context, id)
 
-            context.session.query(models_v2.Port).filter_by(
-                network_id=id).filter(
-                models_v2.Port.device_owner.
-                in_(AUTO_DELETE_PORT_OWNERS)).delete(synchronize_session=False)
+            auto_delete_ports = context.session.query(
+                models_v2.Port).filter_by(network_id=id).filter(
+                models_v2.Port.device_owner.in_(AUTO_DELETE_PORT_OWNERS))
+            for port in auto_delete_ports:
+                context.session.delete(port)
 
             port_in_use = context.session.query(models_v2.Port).filter_by(
                 network_id=id).first()
@@ -1040,15 +1041,13 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
     def create_subnetpool(self, context, subnetpool):
         sp = subnetpool['subnetpool']
         sp_reader = subnet_alloc.SubnetPoolReader(sp)
-        if sp_reader.address_scope_id is constants.ATTR_NOT_SPECIFIED:
-            sp_reader.address_scope_id = None
         if sp_reader.is_default:
             self._check_default_subnetpool_exists(context,
                                                   sp_reader.ip_version)
         self._validate_address_scope_id(context, sp_reader.address_scope_id,
                                         id, sp_reader.prefixes,
                                         sp_reader.ip_version)
-        pool_args = {'tenant_id': sp['tenant_id'],
+        pool_args = {'project_id': sp['tenant_id'],
                      'id': sp_reader.id,
                      'name': sp_reader.name,
                      'ip_version': sp_reader.ip_version,
@@ -1292,34 +1291,22 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         port = self._get_port(context, id)
         return self._make_port_dict(port, fields)
 
-    def _get_ports_query(self, context, filters=None, sorts=None, limit=None,
-                         marker_obj=None, page_reverse=False):
+    def _get_ports_query(self, context, filters=None, *args, **kwargs):
         Port = models_v2.Port
         IPAllocation = models_v2.IPAllocation
 
-        if not filters:
-            filters = {}
-
-        query = self._model_query(context, Port)
-
+        filters = filters or {}
         fixed_ips = filters.pop('fixed_ips', {})
+        query = self._get_collection_query(context, Port, filters=filters,
+                                           *args, **kwargs)
         ip_addresses = fixed_ips.get('ip_address')
         subnet_ids = fixed_ips.get('subnet_id')
-        if ip_addresses or subnet_ids:
-            query = query.join(Port.fixed_ips)
-            if ip_addresses:
-                query = query.filter(IPAllocation.ip_address.in_(ip_addresses))
-            if subnet_ids:
-                query = query.filter(IPAllocation.subnet_id.in_(subnet_ids))
-
-        query = self._apply_filters_to_query(query, Port, filters, context)
-        if sorts:
-            sort_keys = db_utils.get_and_validate_sort_keys(sorts, Port)
-            sort_dirs = db_utils.get_sort_dirs(sorts, page_reverse)
-            query = sa_utils.paginate_query(query, Port, limit,
-                                            marker=marker_obj,
-                                            sort_keys=sort_keys,
-                                            sort_dirs=sort_dirs)
+        if ip_addresses:
+            query = query.filter(
+                Port.fixed_ips.any(IPAllocation.ip_address.in_(ip_addresses)))
+        if subnet_ids:
+            query = query.filter(
+                Port.fixed_ips.any(IPAllocation.subnet_id.in_(subnet_ids)))
         return query
 
     @db_api.retry_if_session_inactive()

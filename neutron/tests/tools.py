@@ -18,7 +18,6 @@ import datetime
 import os
 import platform
 import random
-import string
 import time
 import warnings
 
@@ -202,12 +201,8 @@ class UnorderedList(list):
         return not self == other
 
 
-def get_random_string(n=10):
-    return ''.join(random.choice(string.ascii_lowercase) for _ in range(n))
-
-
 def get_random_string_list(i=3, n=5):
-    return [get_random_string(n) for _ in range(0, i)]
+    return [helpers.get_random_string(n) for _ in range(0, i)]
 
 
 def get_random_boolean():
@@ -239,8 +234,8 @@ def get_random_prefixlen(version=4):
     return random.randint(0, maxlen)
 
 
-def get_random_port():
-    return random.randint(n_const.PORT_RANGE_MIN, n_const.PORT_RANGE_MAX)
+def get_random_port(start=n_const.PORT_RANGE_MIN):
+    return random.randint(start, n_const.PORT_RANGE_MAX)
 
 
 def get_random_vlan():
@@ -294,6 +289,10 @@ def get_random_flow_direction():
 
 def get_random_ether_type():
     return random.choice(n_const.VALID_ETHERTYPES)
+
+
+def get_random_ipam_status():
+    return random.choice(n_const.VALID_IPAM_ALLOCATION_STATUSES)
 
 
 def get_random_ip_protocol():

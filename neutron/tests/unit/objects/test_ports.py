@@ -13,9 +13,7 @@
 from oslo_utils import uuidutils
 import testscenarios
 
-from neutron.db.models import securitygroup as sg_models
 from neutron.objects import base as obj_base
-from neutron.objects.db import api as obj_db_api
 from neutron.objects import network
 from neutron.objects import ports
 from neutron.objects.qos import policy
@@ -110,9 +108,9 @@ class PortBindingVifDetailsTestCase(testscenarios.WithScenarios,
             self.context, **obj._get_composite_keys())
         self.assertEqual(vif_details, obj.vif_details)
 
-        vif_details['item1'] = 'val2'
+        vif_details['item1'] = 1.23
         del vif_details['item2']
-        vif_details['item3'] = 'val3'
+        vif_details['item3'] = True
 
         obj.vif_details = vif_details
         obj.update()
@@ -123,6 +121,9 @@ class PortBindingVifDetailsTestCase(testscenarios.WithScenarios,
 
         obj.vif_details = None
         obj.update()
+        # here the obj is reloaded from DB,
+        # so we test if vif_details is still none
+        self.assertIsNone(obj.vif_details)
 
         obj = self._test_class.get_object(
             self.context, **obj._get_composite_keys())
@@ -132,7 +133,7 @@ class PortBindingVifDetailsTestCase(testscenarios.WithScenarios,
         # the null case for vif_details in our db model is an
         # empty string. add that here to simulate it correctly
         # in the tests
-        kwargs = self.get_random_fields()
+        kwargs = self.get_random_db_fields()
         kwargs['vif_details'] = ''
         db_obj = self._test_class.db_model(**kwargs)
         obj_fields = self._test_class.modify_fields_from_db(db_obj)
@@ -215,10 +216,6 @@ class PortDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
                            testlib_api.SqlTestCase):
 
     _test_class = ports.Port
-
-    def _create_test_security_group(self):
-        return obj_db_api.create_object(
-            self.context, sg_models.SecurityGroup, {})
 
     def setUp(self):
         super(PortDbObjectTestCase, self).setUp()
