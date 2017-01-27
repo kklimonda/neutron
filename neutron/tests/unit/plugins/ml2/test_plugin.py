@@ -14,7 +14,6 @@
 #    under the License.
 
 import functools
-import uuid
 
 import fixtures
 import mock
@@ -486,7 +485,6 @@ class TestMl2NetworksWithVlanTransparencyAndMTU(
                                return_value=True):
             config.cfg.CONF.set_override('path_mtu', 1000, group='ml2')
             config.cfg.CONF.set_override('global_physnet_mtu', 1000)
-            config.cfg.CONF.set_override('advertise_mtu', True)
             network_req = self.new_create_request('networks', self.data)
             res = network_req.get_response(self.api)
             self.assertEqual(201, res.status_int)
@@ -1113,7 +1111,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
         plugin = directory.get_plugin()
         with self.port() as port:
             port_db, binding = ml2_db.get_locked_port_and_binding(
-                ctx.session, port['port']['id'])
+                ctx, port['port']['id'])
             with mock.patch('neutron.plugins.ml2.plugin.'
                             'db.get_locked_port_and_binding') as lock:
                 lock.side_effect = [db_exc.DBDeadlock,
@@ -1150,7 +1148,6 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                     do_request)
 
     def _test_operation_resillient_to_ipallocation_failure(self, func):
-        from sqlalchemy import event
 
         class IPAllocationsGrenade(object):
             insert_ip_called = False
@@ -1168,13 +1165,9 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                     raise db_exc.DBDuplicateEntry()
 
         listener = IPAllocationsGrenade()
-        engine = db_api.context_manager.get_legacy_facade().get_engine()
-        event.listen(engine, 'before_cursor_execute', listener.execute)
-        event.listen(engine, 'commit', listener.commit)
-        self.addCleanup(event.remove, engine, 'before_cursor_execute',
-                        listener.execute)
-        self.addCleanup(event.remove, engine, 'commit',
-                        listener.commit)
+        engine = db_api.context_manager.writer.get_engine()
+        db_api.sqla_listen(engine, 'before_cursor_execute', listener.execute)
+        db_api.sqla_listen(engine, 'commit', listener.commit)
         func()
         # make sure that the grenade went off during the commit
         self.assertTrue(listener.except_raised)
@@ -1537,7 +1530,7 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
         # create a port and delete it so we have an expired mechanism context
         with self.port() as port:
             plugin = directory.get_plugin()
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'test'
             mech_context = driver_context.PortContext(
@@ -1558,7 +1551,7 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
     def _create_port_and_bound_context(self, port_vif_type, bound_vif_type):
         with self.port() as port:
             plugin = directory.get_plugin()
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'fake_host'
             binding['vif_type'] = port_vif_type
@@ -1658,7 +1651,7 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
     def test_update_port_binding_host_id_none(self):
         with self.port() as port:
             plugin = directory.get_plugin()
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'test'
             mech_context = driver_context.PortContext(
@@ -1675,7 +1668,7 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
     def test_update_port_binding_host_id_not_changed(self):
         with self.port() as port:
             plugin = directory.get_plugin()
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'test'
             mech_context = driver_context.PortContext(
@@ -1741,6 +1734,20 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
                 self.context, 'foo_port_id', {'port': port})
         self.assertFalse(mock_dist.called)
 
+    def test__bind_port_original_port_set(self):
+        plugin = directory.get_plugin()
+        plugin.mechanism_manager = mock.Mock()
+        mock_port = {'id': 'port_id'}
+        context = mock.Mock()
+        context.network.current = {'id': 'net_id'}
+        context.original = mock_port
+        with mock.patch.object(plugin, '_update_port_dict_binding'), \
+            mock.patch.object(segments_db, 'get_network_segments',
+                              return_value=[]):
+            new_context = plugin._bind_port(context)
+            self.assertEqual(mock_port, new_context.original)
+            self.assertFalse(new_context == context)
+
 
 class TestMl2PortBindingNoSG(TestMl2PortBinding):
     HAS_PORT_FILTER = False
@@ -1775,7 +1782,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1')
+            self.context, network_id, 'physnet1')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet1',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
@@ -1786,7 +1793,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment2)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, segmentation_id='1234')
+            self.context, network_id, segmentation_id='1234')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet3',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
@@ -1804,14 +1811,14 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1')
+            self.context, network_id, 'physnet1')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet1',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
         dynamic_segmentation_id = dynamic_segment[driver_api.SEGMENTATION_ID]
         self.assertGreater(dynamic_segmentation_id, 0)
         dynamic_segment1 = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1')
+            self.context, network_id, 'physnet1')
         dynamic_segment1_id = dynamic_segment1[driver_api.SEGMENTATION_ID]
         self.assertEqual(dynamic_segmentation_id, dynamic_segment1_id)
         segment2 = {driver_api.NETWORK_TYPE: 'vlan',
@@ -1819,7 +1826,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment2)
         dynamic_segment2 = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet2')
+            self.context, network_id, 'physnet2')
         dynamic_segmentation2_id = dynamic_segment2[driver_api.SEGMENTATION_ID]
         self.assertNotEqual(dynamic_segmentation_id, dynamic_segmentation2_id)
 
@@ -1835,16 +1842,16 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1')
+            self.context, network_id, 'physnet1')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet1',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
         dynamic_segmentation_id = dynamic_segment[driver_api.SEGMENTATION_ID]
         self.assertGreater(dynamic_segmentation_id, 0)
         self.driver.type_manager.release_dynamic_segment(
-            self.context.session, dynamic_segment[driver_api.ID])
+            self.context, dynamic_segment[driver_api.ID])
         self.assertIsNone(segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1'))
+            self.context, network_id, 'physnet1'))
 
     def test_create_network_provider(self):
         data = {'network': {'name': 'net1',
@@ -1972,7 +1979,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet2')
+            self.context, network_id, 'physnet2')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet2',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
@@ -1985,9 +1992,9 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
             res = req.get_response(self.api)
             self.assertEqual(2, rs.call_count)
         self.assertEqual([], segments_db.get_network_segments(
-            self.context.session, network_id))
+            self.context, network_id))
         self.assertIsNone(segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet2'))
+            self.context, network_id, 'physnet2'))
 
     def test_release_segment_no_type_driver(self):
         data = {'network': {'name': 'net1',
@@ -2009,7 +2016,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
             with mock.patch('neutron.plugins.ml2.managers.segments_db') as db:
                 db.get_network_segments.return_value = (segment,)
                 self.driver.type_manager.release_network_segments(
-                    self.context.session, network_id)
+                    self.context, network_id)
 
                 log.error.assert_called_once_with(
                     "Failed to release segment '%s' because "
@@ -2123,8 +2130,7 @@ class TestMl2HostsNetworkAccess(Ml2PluginV2TestCase):
 class DHCPOptsTestCase(test_dhcpopts.TestExtraDhcpOpt):
 
     def setUp(self, plugin=None):
-        super(test_dhcpopts.ExtraDhcpOptDBTestCase, self).setUp(
-            plugin=PLUGIN_NAME)
+        super(DHCPOptsTestCase, self).setUp(plugin=PLUGIN_NAME)
 
 
 class Ml2PluginV2FaultyDriverTestCase(test_plugin.NeutronDbPluginV2TestCase):
@@ -2149,7 +2155,7 @@ class TestFaultyMechansimDriver(Ml2PluginV2FaultyDriverTestCase):
                                'create_network_postcommit',
                                side_effect=(exc.InvalidInput(
                                                 error_message=err_msg))):
-            tenant_id = str(uuid.uuid4())
+            tenant_id = uuidutils.generate_uuid()
             data = {'network': {'name': 'net1',
                                 'tenant_id': tenant_id}}
             req = self.new_create_request('networks', data)
@@ -2682,10 +2688,9 @@ class TestML2Segments(Ml2PluginV2TestCase):
         with self.network() as network:
             network = network['network']
 
-        for stale_seg in segments_db.get_network_segments(self.context.session,
+        for stale_seg in segments_db.get_network_segments(self.context,
                                                           network['id']):
-            segments_db.delete_network_segment(self.context.session,
-                                               stale_seg['id'])
+            segments_db.delete_network_segment(self.context, stale_seg['id'])
 
         for seg in [seg1, seg2, seg3]:
             seg['network_id'] = network['id']
@@ -2727,7 +2732,7 @@ class TestML2Segments(Ml2PluginV2TestCase):
         ml2_db.subscribe()
         plugin = directory.get_plugin()
         with self.port(device_owner=fake_owner_compute) as port:
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'host-ovs-no_filter'
             mech_context = driver_context.PortContext(
@@ -2736,7 +2741,7 @@ class TestML2Segments(Ml2PluginV2TestCase):
                 binding, None)
             plugin._bind_port_if_needed(mech_context)
             segment = segments_db.get_network_segments(
-                self.context.session, port['port']['network_id'])[0]
+                self.context, port['port']['network_id'])[0]
             segment['network_id'] = port['port']['network_id']
             self.assertRaises(c_exc.CallbackFailure, registry.notify,
                               resources.SEGMENT, events.BEFORE_DELETE,

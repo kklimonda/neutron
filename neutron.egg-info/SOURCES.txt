@@ -29,7 +29,6 @@ devstack/lib/macvtap_agent
 devstack/lib/ml2
 devstack/lib/ovs
 devstack/lib/qos
-devstack/lib/rally
 devstack/lib/trunk
 devstack/lib/ml2_drivers/sriovnicswitch
 doc/Makefile
@@ -110,7 +109,9 @@ etc/neutron/rootwrap.d/ipset-firewall.filters
 etc/neutron/rootwrap.d/iptables-firewall.filters
 etc/neutron/rootwrap.d/l3.filters
 etc/neutron/rootwrap.d/linuxbridge-plugin.filters
+etc/neutron/rootwrap.d/netns-cleanup.filters
 etc/neutron/rootwrap.d/openvswitch-plugin.filters
+etc/neutron/rootwrap.d/privsep.filters
 etc/oslo-config-generator/dhcp_agent.ini
 etc/oslo-config-generator/l3_agent.ini
 etc/oslo-config-generator/linuxbridge_agent.ini
@@ -118,7 +119,6 @@ etc/oslo-config-generator/macvtap_agent.ini
 etc/oslo-config-generator/metadata_agent.ini
 etc/oslo-config-generator/metering_agent.ini
 etc/oslo-config-generator/ml2_conf.ini
-etc/oslo-config-generator/ml2_conf_sriov.ini
 etc/oslo-config-generator/neutron.conf
 etc/oslo-config-generator/openvswitch_agent.ini
 etc/oslo-config-generator/sriov_agent.ini
@@ -167,6 +167,7 @@ neutron/agent/l2/l2_agent_extensions_manager.py
 neutron/agent/l2/extensions/__init__.py
 neutron/agent/l2/extensions/fdb_population.py
 neutron/agent/l2/extensions/qos.py
+neutron/agent/l2/extensions/qos_linux.py
 neutron/agent/l3/__init__.py
 neutron/agent/l3/agent.py
 neutron/agent/l3/dvr.py
@@ -214,8 +215,10 @@ neutron/agent/linux/polling.py
 neutron/agent/linux/ra.py
 neutron/agent/linux/tc_lib.py
 neutron/agent/linux/utils.py
+neutron/agent/linux/xenapi_root_helper.py
 neutron/agent/linux/openvswitch_firewall/__init__.py
 neutron/agent/linux/openvswitch_firewall/constants.py
+neutron/agent/linux/openvswitch_firewall/exceptions.py
 neutron/agent/linux/openvswitch_firewall/firewall.py
 neutron/agent/linux/openvswitch_firewall/rules.py
 neutron/agent/metadata/__init__.py
@@ -328,6 +331,7 @@ neutron/conf/agent/dhcp.py
 neutron/conf/agent/l2_ext_fdb_population.py
 neutron/conf/agent/ovs_conf.py
 neutron/conf/agent/securitygroups_rpc.py
+neutron/conf/agent/xenapi_conf.py
 neutron/conf/agent/database/__init__.py
 neutron/conf/agent/database/agents_db.py
 neutron/conf/agent/l3/__init__.py
@@ -520,6 +524,7 @@ neutron/db/migration/alembic_migrations/versions/newton/expand/a5648cfeeadf_add_
 neutron/db/migration/alembic_migrations/versions/newton/expand/a963b38d82f4_add_dns_name_to_portdnses.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/c415aab1c048_add_revisions_column.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/d3435b514502_add_device_id_index_to_port.py
+neutron/db/migration/alembic_migrations/versions/ocata/expand/929c968efe70_add_pk_version_table.py
 neutron/db/migration/models/__init__.py
 neutron/db/migration/models/head.py
 neutron/db/models/README
@@ -652,10 +657,13 @@ neutron/objects/README.rst
 neutron/objects/__init__.py
 neutron/objects/address_scope.py
 neutron/objects/agent.py
+neutron/objects/auto_allocate.py
 neutron/objects/base.py
 neutron/objects/common_types.py
 neutron/objects/exceptions.py
+neutron/objects/flavor.py
 neutron/objects/floatingip.py
+neutron/objects/ipam.py
 neutron/objects/network.py
 neutron/objects/ports.py
 neutron/objects/provisioning_blocks.py
@@ -674,7 +682,12 @@ neutron/objects/extensions/port_security.py
 neutron/objects/extensions/standardattributes.py
 neutron/objects/plugins/__init__.py
 neutron/objects/plugins/ml2/__init__.py
+neutron/objects/plugins/ml2/base.py
+neutron/objects/plugins/ml2/flatallocation.py
+neutron/objects/plugins/ml2/geneveallocation.py
+neutron/objects/plugins/ml2/greallocation.py
 neutron/objects/plugins/ml2/vlanallocation.py
+neutron/objects/plugins/ml2/vxlanallocation.py
 neutron/objects/port/__init__.py
 neutron/objects/port/extensions/__init__.py
 neutron/objects/port/extensions/allowedaddresspairs.py
@@ -716,6 +729,7 @@ neutron/plugins/ml2/driver_api.py
 neutron/plugins/ml2/driver_context.py
 neutron/plugins/ml2/managers.py
 neutron/plugins/ml2/models.py
+neutron/plugins/ml2/ovo_rpc.py
 neutron/plugins/ml2/plugin.py
 neutron/plugins/ml2/rpc.py
 neutron/plugins/ml2/common/__init__.py
@@ -816,6 +830,10 @@ neutron/plugins/ml2/extensions/__init__.py
 neutron/plugins/ml2/extensions/dns_integration.py
 neutron/plugins/ml2/extensions/port_security.py
 neutron/plugins/ml2/extensions/qos.py
+neutron/privileged/__init__.py
+neutron/privileged/agent/__init__.py
+neutron/privileged/agent/linux/__init__.py
+neutron/privileged/agent/linux/ip_lib.py
 neutron/quota/__init__.py
 neutron/quota/resource.py
 neutron/quota/resource_registry.py
@@ -878,6 +896,7 @@ neutron/services/revisions/revision_plugin.py
 neutron/services/segments/__init__.py
 neutron/services/segments/db.py
 neutron/services/segments/exceptions.py
+neutron/services/segments/placement_client.py
 neutron/services/segments/plugin.py
 neutron/services/tag/__init__.py
 neutron/services/tag/tag_plugin.py
@@ -929,6 +948,7 @@ neutron/tests/common/l3_test_common.py
 neutron/tests/common/machine_fixtures.py
 neutron/tests/common/net_helpers.py
 neutron/tests/common/agents/__init__.py
+neutron/tests/common/agents/fullstack_dhcp_agent.py
 neutron/tests/common/agents/l2_extensions.py
 neutron/tests/common/agents/l3_agent.py
 neutron/tests/common/agents/ovs_agent.py
@@ -941,15 +961,18 @@ neutron/tests/contrib/README
 neutron/tests/contrib/functional-testing.filters
 neutron/tests/contrib/gate_hook.sh
 neutron/tests/contrib/post_test_hook.sh
-neutron/tests/contrib/hooks/api_extensions
+neutron/tests/contrib/hooks/api_all_extensions
+neutron/tests/contrib/hooks/api_dvrskip_extensions
 neutron/tests/contrib/hooks/dns
 neutron/tests/contrib/hooks/iptables_verify
 neutron/tests/contrib/hooks/mtu
 neutron/tests/contrib/hooks/osprofiler
+neutron/tests/contrib/hooks/ovsfw
 neutron/tests/contrib/hooks/pecan
 neutron/tests/contrib/hooks/qos
 neutron/tests/contrib/hooks/quotas
 neutron/tests/contrib/hooks/trunk
+neutron/tests/contrib/hooks/ubuntu_image
 neutron/tests/etc/api-paste.ini.test
 neutron/tests/etc/neutron.conf
 neutron/tests/etc/neutron_test.conf
@@ -959,6 +982,7 @@ neutron/tests/fullstack/README
 neutron/tests/fullstack/__init__.py
 neutron/tests/fullstack/base.py
 neutron/tests/fullstack/test_connectivity.py
+neutron/tests/fullstack/test_dhcp_agent.py
 neutron/tests/fullstack/test_l3_agent.py
 neutron/tests/fullstack/test_qos.py
 neutron/tests/fullstack/test_securitygroup.py
@@ -1015,6 +1039,8 @@ neutron/tests/functional/agent/linux/test_tc_lib.py
 neutron/tests/functional/agent/linux/test_utils.py
 neutron/tests/functional/agent/linux/bin/__init__.py
 neutron/tests/functional/agent/linux/bin/ipt_binname.py
+neutron/tests/functional/agent/linux/openvswitch_firewall/__init__.py
+neutron/tests/functional/agent/linux/openvswitch_firewall/test_firewall.py
 neutron/tests/functional/agent/ovsdb/__init__.py
 neutron/tests/functional/agent/ovsdb/test_impl_idl.py
 neutron/tests/functional/agent/ovsdb/native/__init__.py
@@ -1024,6 +1050,7 @@ neutron/tests/functional/agent/windows/test_ip_lib.py
 neutron/tests/functional/api/__init__.py
 neutron/tests/functional/api/test_policies.py
 neutron/tests/functional/cmd/__init__.py
+neutron/tests/functional/cmd/process_spawn.py
 neutron/tests/functional/cmd/test_ipset_cleanup.py
 neutron/tests/functional/cmd/test_linuxbridge_cleanup.py
 neutron/tests/functional/cmd/test_netns_cleanup.py
@@ -1107,6 +1134,7 @@ neutron/tests/tempest/api/test_floating_ips_negative.py
 neutron/tests/tempest/api/test_metering_extensions.py
 neutron/tests/tempest/api/test_metering_negative.py
 neutron/tests/tempest/api/test_network_ip_availability.py
+neutron/tests/tempest/api/test_network_ip_availability_negative.py
 neutron/tests/tempest/api/test_networks.py
 neutron/tests/tempest/api/test_networks_negative.py
 neutron/tests/tempest/api/test_ports.py
@@ -1146,6 +1174,7 @@ neutron/tests/tempest/scenario/base.py
 neutron/tests/tempest/scenario/constants.py
 neutron/tests/tempest/scenario/exceptions.py
 neutron/tests/tempest/scenario/test_basic.py
+neutron/tests/tempest/scenario/test_dvr.py
 neutron/tests/tempest/scenario/test_qos.py
 neutron/tests/tempest/scenario/test_trunk.py
 neutron/tests/tempest/services/__init__.py
@@ -1215,6 +1244,7 @@ neutron/tests/unit/agent/linux/test_pd.py
 neutron/tests/unit/agent/linux/test_polling.py
 neutron/tests/unit/agent/linux/test_tc_lib.py
 neutron/tests/unit/agent/linux/test_utils.py
+neutron/tests/unit/agent/linux/test_xenapi_root_helper.py
 neutron/tests/unit/agent/linux/openvswitch_firewall/__init__.py
 neutron/tests/unit/agent/linux/openvswitch_firewall/test_firewall.py
 neutron/tests/unit/agent/linux/openvswitch_firewall/test_rules.py
@@ -1349,9 +1379,12 @@ neutron/tests/unit/notifiers/test_nova.py
 neutron/tests/unit/objects/__init__.py
 neutron/tests/unit/objects/test_address_scope.py
 neutron/tests/unit/objects/test_agent.py
+neutron/tests/unit/objects/test_auto_allocate.py
 neutron/tests/unit/objects/test_base.py
 neutron/tests/unit/objects/test_common_types.py
+neutron/tests/unit/objects/test_flavor.py
 neutron/tests/unit/objects/test_floatingip.py
+neutron/tests/unit/objects/test_ipam.py
 neutron/tests/unit/objects/test_network.py
 neutron/tests/unit/objects/test_objects.py
 neutron/tests/unit/objects/test_ports.py
@@ -1370,7 +1403,11 @@ neutron/tests/unit/objects/extensions/__init__.py
 neutron/tests/unit/objects/extensions/test_standardattributes.py
 neutron/tests/unit/objects/plugins/__init__.py
 neutron/tests/unit/objects/plugins/ml2/__init__.py
+neutron/tests/unit/objects/plugins/ml2/test_flatallocation.py
+neutron/tests/unit/objects/plugins/ml2/test_geneveallocation.py
+neutron/tests/unit/objects/plugins/ml2/test_greallocation.py
 neutron/tests/unit/objects/plugins/ml2/test_vlanallocation.py
+neutron/tests/unit/objects/plugins/ml2/test_vxlanallocation.py
 neutron/tests/unit/objects/port/__init__.py
 neutron/tests/unit/objects/port/extensions/__init__.py
 neutron/tests/unit/objects/port/extensions/test_allowedaddresspairs.py
@@ -1392,6 +1429,7 @@ neutron/tests/unit/plugins/ml2/test_driver_context.py
 neutron/tests/unit/plugins/ml2/test_ext_portsecurity.py
 neutron/tests/unit/plugins/ml2/test_extension_driver_api.py
 neutron/tests/unit/plugins/ml2/test_managers.py
+neutron/tests/unit/plugins/ml2/test_ovo_rpc.py
 neutron/tests/unit/plugins/ml2/test_plugin.py
 neutron/tests/unit/plugins/ml2/test_port_binding.py
 neutron/tests/unit/plugins/ml2/test_rpc.py
@@ -1561,8 +1599,10 @@ releasenotes/notes/add-dhcp_release6-ff1b8d62fd7fe76d.yaml
 releasenotes/notes/add-get-me-a-network-56321aeef5389001.yaml
 releasenotes/notes/add-integration-with-external-dns-f56ec8a4993b1fc4.yaml
 releasenotes/notes/add-ip-protocols-in-sg-60467a073e771aee.yaml
+releasenotes/notes/add-minimum-bandwidth-support-linuxbridge-9dc9d4458d8affef.yaml
 releasenotes/notes/add-minimum-bandwidth-support-sriov-63664b89f4dd1c1b.yaml
 releasenotes/notes/add-osprofiler-support-7fc2de3001187075.yaml
+releasenotes/notes/add-placement-api-configuration-options-f1611d0909bf6166.yaml
 releasenotes/notes/add-port-ip-allocation-attr-294a580641998240.yaml
 releasenotes/notes/add-port-rebinding-chance-33178b9abacf5804.yaml
 releasenotes/notes/add-rbac-qos-8b1154ee756c66df.yaml
@@ -1581,6 +1621,7 @@ releasenotes/notes/config-wsgi-pool-size-a4c06753b79fee6d.yaml
 releasenotes/notes/correlate-address-scope-with-network-ea16e16b0154ac21.yaml
 releasenotes/notes/default-local-dns-a1c3fa1451f228fa.yaml
 releasenotes/notes/default-subnetpool-semantics-1cdc5cdde2be88c2.yaml
+releasenotes/notes/deprecate-SRIOV-physical_device_mappings-67dd3317181eb513.yaml
 releasenotes/notes/deprecate-advertise-mtu-51e3f78475a14efc.yaml
 releasenotes/notes/deprecate-allow-sorting-allow-pagination-4549c92a74cfe15d.yaml
 releasenotes/notes/deprecate-force_gateway_on_subnet-376855c4e66f4e11.yaml
@@ -1594,6 +1635,9 @@ releasenotes/notes/deprecate_max_fixed_ips_per_port-5e80518cbf25cfd6.yaml
 releasenotes/notes/deprecate_neutron_debug-a578e0adfc9cff4c.yaml
 releasenotes/notes/deprecate_prevent_arp_spoofing_option-a09e673fc8f9fee4.yaml
 releasenotes/notes/deprecated-driver-e368e0befc9bee4c.yaml
+releasenotes/notes/designate-driver-keystonev3-8e70d152e84388e0.yaml
+releasenotes/notes/dhcp-domain-removed-cc5bc6e2129fdf7f.yaml
+releasenotes/notes/dhcp-for-service-subnets-06f03d902f2fb738.yaml
 releasenotes/notes/dhcp-ipv6-address-update-ff18d1eb0c196bce.yaml
 releasenotes/notes/dhcp-lease-time-5c504c3730a4f9ea.yaml
 releasenotes/notes/direct-physical-vnic-878d15bdb758b70e.yaml
@@ -1620,6 +1664,7 @@ releasenotes/notes/linuxbridge_vxlan_arp_responder-e9ea91552e1b62a7.yaml
 releasenotes/notes/macvtap-l2-agent-2b551d8ec341196d.yaml
 releasenotes/notes/macvtap_assigned_vf_check-f4d07660ffd82a24.yaml
 releasenotes/notes/mtu-selection-and-advertisement-ab29f9ec43140224.yaml
+releasenotes/notes/netns_cleanup_kill_procs-af88d8c47c07dd9c.yaml
 releasenotes/notes/network_ip_availability-d64bd7032b3c15ee.yaml
 releasenotes/notes/new-vif-type-for-pf-passthrough-33ec560b9b5d246f.yaml
 releasenotes/notes/of_interface-native-by-default-0c07bdbd7365230a.yaml
@@ -1636,9 +1681,11 @@ releasenotes/notes/physical_network-aware-dhcp-scheduling-94e9fadc7c7c5fec.yaml
 releasenotes/notes/pluggable-ipam-is-default-15c2ee15dc5b4a7b.yaml
 releasenotes/notes/project_id-d5ea7a42be428230.yaml
 releasenotes/notes/qos-min-egress-bw-rule-b1c80f5675a4c1c3.yaml
+releasenotes/notes/remove-advertise_mtu-28933264714453c4.yaml
 releasenotes/notes/remove-allow-pagination-allow-sorting-ff23ca5ccb3007b9.yaml
 releasenotes/notes/remove-driver-60eb7e26d95f7322.yaml
 releasenotes/notes/remove-force_gateway_on_subnet-77cb79f0b35d0c6d.yaml
+releasenotes/notes/remove-min-l3-agents-per-router-27aef7d91dec0348.yaml
 releasenotes/notes/remove-network_device_mtu-option-a1a96e99dc7f0a02.yaml
 releasenotes/notes/remove-quota_items-d50b4672dd31ea3e.yaml
 releasenotes/notes/remove-router_id-b3732089f8f1faa1.yaml
@@ -1654,6 +1701,7 @@ releasenotes/notes/sriov_allow_use_many_nics_for_one_physnet-3570aa67a60ce6c4.ya
 releasenotes/notes/sriov_show_l2_agent_extensions-ca852e155a529e99.yaml
 releasenotes/notes/timestamp_format_change-73eda78566b4690b.yaml
 releasenotes/notes/use-keystoneauth-24f309566001a16b.yaml
+releasenotes/notes/use-pyroute2-in-ip-lib-558bfea8f14d1fea.yaml
 releasenotes/notes/vlan-aware-vms-aka-trunk-3341cc75ba1bf5b4.yaml
 releasenotes/source/README.rst
 releasenotes/source/conf.py

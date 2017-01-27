@@ -46,9 +46,9 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
 
     __native_bulk_support = True
 
-    def create_security_group_bulk(self, context, security_group_rule):
+    def create_security_group_bulk(self, context, security_groups):
         return self._create_bulk('security_group', context,
-                                 security_group_rule)
+                                 security_groups)
 
     def _registry_notify(self, res, event, id=None, exc_cls=None, **kwargs):
         # NOTE(armax): a callback exception here will prevent the request
@@ -83,6 +83,11 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
 
         if not default_sg:
             self._ensure_default_security_group(context, tenant_id)
+        else:
+            existing_def_sg_id = self._get_default_sg_id(context, tenant_id)
+            if existing_def_sg_id is not None:
+                # default already exists, return it
+                return self.get_security_group(context, existing_def_sg_id)
 
         with db_api.autonested_transaction(context.session):
             security_group_db = sg_models.SecurityGroup(id=s.get('id') or (
@@ -311,11 +316,19 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
                 res_rule_dict = self._create_security_group_rule(
                     context, rule_dict, validate=False)
                 ret.append(res_rule_dict)
-            return ret
+        for rdict in ret:
+            registry.notify(
+                resources.SECURITY_GROUP_RULE, events.AFTER_CREATE, self,
+                context=context, security_group_rule=rdict)
+        return ret
 
     @db_api.retry_if_session_inactive()
     def create_security_group_rule(self, context, security_group_rule):
-        return self._create_security_group_rule(context, security_group_rule)
+        res = self._create_security_group_rule(context, security_group_rule)
+        registry.notify(
+            resources.SECURITY_GROUP_RULE, events.AFTER_CREATE, self,
+            context=context, security_group_rule=res)
+        return res
 
     def _create_security_group_rule(self, context, security_group_rule,
                                     validate=True):
@@ -351,12 +364,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
             self._registry_notify(resources.SECURITY_GROUP_RULE,
                               events.PRECOMMIT_CREATE,
                               exc_cls=ext_sg.SecurityGroupConflict, **kwargs)
-        res_rule_dict = self._make_security_group_rule_dict(db)
-        kwargs['security_group_rule'] = res_rule_dict
-        registry.notify(
-            resources.SECURITY_GROUP_RULE, events.AFTER_CREATE, self,
-            **kwargs)
-        return res_rule_dict
+        return self._make_security_group_rule_dict(db)
 
     def _get_ip_proto_number(self, protocol):
         if protocol is None:
@@ -661,27 +669,30 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         port[ext_sg.SECURITYGROUPS] = (security_group_ids and
                                        list(security_group_ids) or [])
 
-    def _ensure_default_security_group(self, context, tenant_id):
-        """Create a default security group if one doesn't exist.
-
-        :returns: the default security group id for given tenant.
-        """
+    def _get_default_sg_id(self, context, tenant_id):
         try:
             query = self._model_query(context, sg_models.DefaultSecurityGroup)
             default_group = query.filter_by(tenant_id=tenant_id).one()
             return default_group['security_group_id']
         except exc.NoResultFound:
-            security_group = {
-                'security_group':
-                    {'name': 'default',
-                     'tenant_id': tenant_id,
-                     'description': _('Default security group')}
-            }
-            # starting a transaction before create to avoid db retries
-            with context.session.begin(subtransactions=True):
-                sg_id = self.create_security_group(
-                    context, security_group, default_sg=True)['id']
-            return sg_id
+            pass
+
+    def _ensure_default_security_group(self, context, tenant_id):
+        """Create a default security group if one doesn't exist.
+
+        :returns: the default security group id for given tenant.
+        """
+        existing = self._get_default_sg_id(context, tenant_id)
+        if existing is not None:
+            return existing
+        security_group = {
+            'security_group':
+                {'name': 'default',
+                 'tenant_id': tenant_id,
+                 'description': _('Default security group')}
+        }
+        return self.create_security_group(context, security_group,
+                                          default_sg=True)['id']
 
     def _get_security_groups_on_port(self, context, port):
         """Check that all security groups on port belong to tenant.

@@ -28,6 +28,7 @@ import sys
 import time
 import uuid
 
+import debtcollector
 from debtcollector import removals
 import eventlet
 from eventlet.green import subprocess
@@ -56,6 +57,17 @@ LOG = logging.getLogger(__name__)
 SYNCHRONIZED_PREFIX = 'neutron-'
 
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
+
+
+class WaitTimeout(Exception, eventlet.TimeoutError):
+    """Default exception coming from wait_until_true() function.
+
+    The reason is that eventlet.TimeoutError inherits from BaseException and
+    testtools.TestCase consumes only Exceptions. Which means in case
+    TimeoutError is raised, test runner stops and exits while it still has test
+    cases scheduled for execution.
+    """
+    pass
 
 
 @removals.remove(
@@ -148,12 +160,6 @@ def get_random_mac(base_mac):
     if base_mac[3] != '00':
         mac[3] = int(base_mac[3], 16)
     return ':'.join(["%02x" % x for x in mac])
-
-
-@removals.remove(
-    message="Use get_random_string from neutron_lib.utils.helpers")
-def get_random_string(length):
-    return helpers.get_random_string(length)
 
 
 def get_dhcp_agent_device_id(network_id, host):
@@ -321,6 +327,24 @@ def replace_file(file_name, data, file_mode=0o644):
     file_utils.replace_file(file_name, data, file_mode=file_mode)
 
 
+class _SilentDriverManager(driver.DriverManager):
+    """The lamest of hacks to allow us to pass a kwarg to DriverManager parent.
+
+    DriverManager doesn't accept the warn_on_missing_entrypoint param
+    to pass to its parent on __init__ so we mirror the __init__ here and bypass
+    the one in DriverManager in order to silence the warnings.
+    TODO(kevinbenton): remove once Ia6f5f749fc2f73ca6091fa6d58506fddb058902a
+    is released or we stop supporting loading by class path.
+    """
+    def __init__(self, namespace, name):
+        p = super(driver.DriverManager, self)  # pylint: disable=bad-super-call
+        p.__init__(
+            namespace=namespace, names=[name],
+            on_load_failure_callback=self._default_on_load_failure,
+            warn_on_missing_entrypoint=False
+        )
+
+
 def load_class_by_alias_or_classname(namespace, name):
     """Load class using stevedore alias or the class name
     :param namespace: namespace where the alias is defined
@@ -334,7 +358,7 @@ def load_class_by_alias_or_classname(namespace, name):
         raise ImportError(_("Class not found."))
     try:
         # Try to resolve class by alias
-        mgr = driver.DriverManager(namespace, name)
+        mgr = _SilentDriverManager(namespace, name)
         class_to_load = mgr.driver
     except RuntimeError:
         e1_info = sys.exc_info()
@@ -694,7 +718,8 @@ def transaction_guard(f):
     return inner
 
 
-def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
+def wait_until_true(predicate, timeout=60, sleep=1, exception=None,
+                    initial_sleep=0):
     """
     Wait until callable predicate is evaluated as True
 
@@ -702,12 +727,27 @@ def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
     Best practice is to instantiate predicate with functools.partial()
     :param timeout: Timeout in seconds how long should function wait.
     :param sleep: Polling interval for results in seconds.
-    :param exception: Exception class for eventlet.Timeout.
-    (see doc for eventlet.Timeout for more information)
+    :param exception: Exception instance to raise on timeout. If None is passed
+                      (default) then WaitTimeout exception is raised.
     """
-    with eventlet.timeout.Timeout(timeout, exception):
-        while not predicate():
-            eventlet.sleep(sleep)
+    try:
+        eventlet.sleep(initial_sleep)
+        with eventlet.timeout.Timeout(timeout):
+            while not predicate():
+                eventlet.sleep(sleep)
+    except eventlet.TimeoutError:
+        if exception is None:
+            debtcollector.deprecate(
+                "Raising eventlet.TimeoutError by default has been deprecated",
+                message="wait_until_true() now raises WaitTimeout error by "
+                        "default.",
+                version="Ocata",
+                removal_version="Pike")
+            exception = WaitTimeout("Timed out after %d seconds" % timeout)
+        #NOTE(jlibosva): In case None is passed exception is instantiated on
+        #                the line above.
+        #pylint: disable=raising-bad-type
+        raise exception
 
 
 class _AuthenticBase(object):

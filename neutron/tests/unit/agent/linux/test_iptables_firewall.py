@@ -125,7 +125,6 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                  mock.call.add_rule(
                      'sg-fallback', '-j DROP',
                      comment=ic.UNMATCH_DROP),
-                 mock.call.remove_chain('sg-chain'),
                  mock.call.add_chain('sg-chain'),
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule('FORWARD',
@@ -183,7 +182,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
+                     '-p udp -m udp --sport 67 --dport 68 -j DROP',
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
@@ -981,7 +980,6 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      'sg-fallback',
                      '-j DROP',
                      comment=ic.UNMATCH_DROP),
-                 mock.call.remove_chain('sg-chain'),
                  mock.call.add_chain('sg-chain'),
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule('FORWARD',
@@ -1054,7 +1052,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                 comment=None))
             calls.append(mock.call.add_rule(
                 'ofake_dev',
-                '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
+                '-p udp -m udp --sport 67 --dport 68 -j DROP',
                 comment=None))
         if ethertype == 'IPv6':
             calls.append(mock.call.add_rule('ofake_dev',
@@ -1066,11 +1064,11 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                                             '-p ipv6-icmp -j RETURN',
                                             comment=None))
             calls.append(mock.call.add_rule('ofake_dev', '-p udp -m udp '
-                                            '--sport 546 -m udp --dport 547 '
+                                            '--sport 546 --dport 547 '
                                             '-j RETURN', comment=None))
             calls.append(mock.call.add_rule(
                 'ofake_dev',
-                '-p udp -m udp --sport 547 -m udp --dport 546 -j DROP',
+                '-p udp -m udp --sport 547 --dport 546 -j DROP',
                 comment=None))
 
         calls += [
@@ -1253,7 +1251,6 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      'sg-fallback',
                      '-j DROP',
                      comment=ic.UNMATCH_DROP),
-                 mock.call.remove_chain('sg-chain'),
                  mock.call.add_chain('sg-chain'),
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule(
@@ -1316,7 +1313,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
+                     '-p udp -m udp --sport 67 --dport 68 -j DROP',
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
@@ -1393,7 +1390,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
+                     '-p udp -m udp --sport 67 --dport 68 -j DROP',
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
@@ -1415,6 +1412,38 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                  mock.call.add_chain('sg-chain')]
 
         self.v4filter_inst.assert_has_calls(calls)
+
+    def test_delete_conntrack_from_delete_port(self):
+        port = self._fake_port()
+        port['security_groups'] = ['fake_sg_id']
+        self.firewall.filtered_ports = {'tapfake_dev': port}
+        self.firewall.devices_with_updated_sg_members['fake_sg_id2'
+                                                      ] = ['tapfake_dev']
+        new_port = copy.deepcopy(port)
+        new_port['security_groups'] = ['fake_sg_id2']
+        new_port['device'] = ['tapfake_dev2']
+        new_port['fixed_ips'] = ['10.0.0.2', 'fe80::2']
+        self.firewall.sg_members['fake_sg_id2'] = {'IPv4': ['10.0.0.2'],
+                                                   'IPv6': ['fe80::2']}
+        self.firewall.remove_port_filter(port)
+        calls = [
+                     mock.call(['conntrack', '-D', '-f', 'ipv4', '-d',
+                                '10.0.0.1', '-w', 10],
+                               run_as_root=True, check_exit_code=True,
+                               extra_ok_codes=[1]),
+                     mock.call(['conntrack', '-D', '-f', 'ipv4', '-s',
+                                '10.0.0.1', '-w', 10],
+                               run_as_root=True, check_exit_code=True,
+                               extra_ok_codes=[1]),
+                     mock.call(['conntrack', '-D', '-f', 'ipv6', '-d',
+                                'fe80::1', '-w', 10],
+                               run_as_root=True, check_exit_code=True,
+                               extra_ok_codes=[1]),
+                     mock.call(['conntrack', '-D', '-f', 'ipv6', '-s',
+                                'fe80::1', '-w', 10],
+                               run_as_root=True, check_exit_code=True,
+                               extra_ok_codes=[1])]
+        self.utils_exec.assert_has_calls(calls)
 
     def test_remove_unknown_port(self):
         port = self._fake_port()
@@ -1462,7 +1491,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         self.firewall.prepare_port_filter(port_prepare)
         self.firewall.update_port_filter(port_update)
         self.firewall.remove_port_filter(port_update)
-        chain_applies.assert_has_calls([mock.call.remove({}, {}),
+        chain_applies.assert_has_calls([
                                 mock.call.setup({'d1': port_prepare}, {}),
                                 mock.call.remove({'d1': port_prepare}, {}),
                                 mock.call.setup({'d1': port_update}, {}),
@@ -1476,8 +1505,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         self.firewall.prepare_port_filter(port)
         with self.firewall.defer_apply():
             self.firewall.remove_port_filter(port)
-        chain_applies.assert_has_calls([mock.call.remove({}, {}),
-                                        mock.call.setup(device2port, {}),
+        chain_applies.assert_has_calls([mock.call.setup(device2port, {}),
                                         mock.call.remove(device2port, {}),
                                         mock.call.setup({}, {})])
 
@@ -1512,7 +1540,6 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                  mock.call.add_rule(
                      'sg-fallback', '-j DROP',
                      comment=ic.UNMATCH_DROP),
-                 mock.call.remove_chain('sg-chain'),
                  mock.call.add_chain('sg-chain'),
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule('FORWARD',
@@ -1573,7 +1600,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
+                     '-p udp -m udp --sport 67 --dport 68 -j DROP',
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
@@ -1597,7 +1624,6 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                  mock.call.add_rule(
                      'sg-fallback', '-j DROP',
                      comment=ic.UNMATCH_DROP),
-                 mock.call.remove_chain('sg-chain'),
                  mock.call.add_chain('sg-chain'),
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule('FORWARD',
@@ -1652,7 +1678,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',
-                     '-p udp -m udp --sport 67 -m udp --dport 68 -j DROP',
+                     '-p udp -m udp --sport 67 --dport 68 -j DROP',
                      comment=None),
                  mock.call.add_rule(
                      'ofake_dev',

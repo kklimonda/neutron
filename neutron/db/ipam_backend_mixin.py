@@ -146,14 +146,12 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         return new_routes
 
     def _update_subnet_dns_nameservers(self, context, id, s):
-        old_dns_list = self._get_dns_by_subnet(context, id)
         new_dns_addr_list = s["dns_nameservers"]
 
         # NOTE(changzhi) delete all dns nameservers from db
         # when update subnet's DNS nameservers. And store new
         # nameservers with order one by one.
-        for dns in old_dns_list:
-            dns.delete()
+        subnet_obj.DNSNameServer.delete_objects(context, subnet_id=id)
 
         for order, server in enumerate(new_dns_addr_list):
             dns = subnet_obj.DNSNameServer(context,
@@ -182,10 +180,8 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         return result_pools
 
     def _update_subnet_service_types(self, context, subnet_id, s):
-        old_types = subnet_obj.SubnetServiceType.get_objects(
-            context, subnet_id=subnet_id)
-        for service_type in old_types:
-            service_type.delete()
+        subnet_obj.SubnetServiceType.delete_objects(context,
+                                                    subnet_id=subnet_id)
         updated_types = s.pop('service_types')
         for service_type in updated_types:
             new_type = subnet_obj.SubnetServiceType(context,
@@ -599,12 +595,18 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
 
     def _query_filter_service_subnets(self, query, service_type):
         # TODO(korzen) use SubnetServiceType OVO here
+        Subnet = models_v2.Subnet
         ServiceType = sst_model.SubnetServiceType
         query = query.add_entity(ServiceType)
         query = query.outerjoin(ServiceType)
-        query = query.filter(or_(ServiceType.service_type.is_(None),
-                                 ServiceType.service_type == service_type))
-        return query.from_self(models_v2.Subnet)
+        query = query.filter(or_(
+            ServiceType.service_type.is_(None),
+            ServiceType.service_type == service_type,
+            # Allow DHCP ports to be created on subnets of any
+            # service type when DHCP is enabled on the subnet.
+            and_(Subnet.enable_dhcp.is_(True),
+                 service_type == const.DEVICE_OWNER_DHCP)))
+        return query.from_self(Subnet)
 
     @staticmethod
     def _query_filter_by_segment_host_mapping(query, host):

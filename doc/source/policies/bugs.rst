@@ -78,7 +78,9 @@ from screening these.
 
 Finally, the PTL will work with the deputy to produce a brief summary of the
 issues of the week to be shared with the larger team during the weekly IRC
-meeting and tracked in the meeting notes.
+meeting and tracked in the meeting notes. If for some reason the deputy is not
+going to attend the team meeting to report, the deputy should consider sending
+a brief report to the openstack-dev@ mailing list in advance of the meeting.
 
 
 Getting Ready to Serve as the Neutron Bug Deputy
@@ -136,7 +138,7 @@ called Neutron `stadium <http://governance.openstack.org/reference/projects/neut
 Because of that, their release is managed centrally by the Neutron
 release team; requests for releases need to be funnelled and screened
 properly before they can happen. Release request process is described `here
-<http://docs.openstack.org/developer/neutron/stadium/sub_project_guidelines.html#sub-project-release-process>`_.
+<http://docs.openstack.org/developer/neutron/stadium/guidelines.html#releases>`_.
 
 
 .. _guidelines:
@@ -409,8 +411,6 @@ more will be added over time if needed.
 | py34_                         | Issues affecting the Python 3 porting   | Cedric Brandily      |
 +-------------------------------+-----------------------------------------+----------------------+
 | qos_                          | A bug affecting ML2/QoS                 | Miguel Ajo           |
-+-------------------------------+-----------------------------------------+----------------------+
-| release_                      | A request from a subproject             | Darek Smigiel        |
 +-------------------------------+-----------------------------------------+----------------------+
 | rfe_                          | Feature enhancements being screened     | Drivers Team         |
 +-------------------------------+-----------------------------------------+----------------------+
@@ -708,14 +708,6 @@ QoS
 
 * `QoS - All bugs <https://bugs.launchpad.net/neutron/+bugs?field.tag=qos>`_
 * `QoS - In progress <https://bugs.launchpad.net/neutron/+bugs?field.status%3Alist=INPROGRESS&field.tag=qos>`_
-
-.. _release:
-
-Requests from Stadium Subprojects
-+++++++++++++++++++++++++++++++++
-
-* `Requests from Stadium Subprojects - All bugs <https://bugs.launchpad.net/neutron/+bugs?field.tag=release>`_
-* `Requests from Stadium Subprojects - In progress <https://bugs.launchpad.net/neutron/+bugs?field.status%3Alist=INPROGRESS&field.tag=release>`_
 
 .. _rfe:
 

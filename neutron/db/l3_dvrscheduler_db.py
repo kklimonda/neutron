@@ -81,7 +81,7 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
         When a new dvr service port is created, this function will
         schedule a dvr router to new compute node if needed and notify
         l3 agent on that node.
-        The 'dest_host' will provide the destinaton host of the port in
+        The 'dest_host' will provide the destination host of the port in
         case of service port migration.
         """
         port_host = dest_host or port[portbindings.HOST_ID]
@@ -183,7 +183,7 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
             for port in int_ports:
                 dvr_binding = (ml2_db.
                                get_distributed_port_binding_by_host(
-                                   context.session, port['id'], port_host))
+                                   context, port['id'], port_host))
                 if dvr_binding:
                     # unbind this port from router
                     dvr_binding['router_id'] = None

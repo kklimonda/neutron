@@ -29,6 +29,7 @@ from neutron._i18n import _, _LE, _LW
 from neutron.agent.common import utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils as common_utils
+from neutron.privileged.agent.linux import ip_lib as privileged
 
 LOG = logging.getLogger(__name__)
 
@@ -202,6 +203,15 @@ class IPWrapper(SubProcessBase):
         """Create a Linux dummy interface with the given name."""
         self._as_root([], 'link', ('add', name, 'type', 'dummy'))
         return IPDevice(name, namespace=self.namespace)
+
+    def add_ifb(self, name):
+        """Create a Linux IFB type interface with the given name."""
+        self._as_root([], 'link', ('add', name, 'type', 'ifb'))
+        return IPDevice(name, namespace=self.namespace)
+
+    def del_ifb(self, name):
+        """Delete a Linux IFB type interface with the given name."""
+        self._as_root([], 'link', ('del', name))
 
     def ensure_namespace(self, name):
         if not self.netns.exists(name):
@@ -817,20 +827,25 @@ class IPRoute(SubProcessBase):
 class IpNeighCommand(IpDeviceCommandBase):
     COMMAND = 'neigh'
 
-    def add(self, ip_address, mac_address):
-        ip_version = get_ip_version(ip_address)
-        self._as_root([ip_version],
-                      ('replace', ip_address,
-                       'lladdr', mac_address,
-                       'nud', 'permanent',
-                       'dev', self.name))
+    def add(self, ip_address, mac_address, **kwargs):
+        add_neigh_entry(ip_address,
+                        mac_address,
+                        self.name,
+                        self._parent.namespace,
+                        **kwargs)
 
-    def delete(self, ip_address, mac_address):
-        ip_version = get_ip_version(ip_address)
-        self._as_root([ip_version],
-                      ('del', ip_address,
-                       'lladdr', mac_address,
-                       'dev', self.name))
+    def delete(self, ip_address, mac_address, **kwargs):
+        delete_neigh_entry(ip_address,
+                           mac_address,
+                           self.name,
+                           self._parent.namespace,
+                           **kwargs)
+
+    def dump(self, ip_version, **kwargs):
+        return dump_neigh_entries(ip_version,
+                                  self.name,
+                                  self._parent.namespace,
+                                  **kwargs)
 
     def show(self, ip_version):
         options = [ip_version]
@@ -847,6 +862,7 @@ class IpNeighCommand(IpDeviceCommandBase):
         :param ip_version: Either 4 or 6 for IPv4 or IPv6 respectively
         :param ip_address: The prefix selecting the neighbours to flush
         """
+        # NOTE(haleyb): There is no equivalent to 'flush' in pyroute2
         self._as_root([ip_version], ('flush', 'to', ip_address))
 
 
@@ -935,39 +951,8 @@ def get_device_mac(device_name, namespace=None):
     return IPDevice(device_name, namespace=namespace).link.address
 
 
-_IP_ROUTE_PARSE_KEYS = {
-    'via': 'nexthop',
-    'dev': 'device',
-    'scope': 'scope'
-}
-
-
-def _parse_ip_route_line(line):
-    """Parse a line output from ip route.
-    Example for output from 'ip route':
-    default via 192.168.3.120 dev wlp3s0  proto static  metric 1024
-    10.0.0.0/8 dev tun0  proto static  scope link  metric 1024
-    10.0.1.0/8 dev tun1  proto static  scope link  metric 1024 linkdown
-    The first column is the destination, followed by key/value pairs and flags.
-    @param line A line output from ip route
-    @return: a dictionary representing a route.
-    """
-    line = line.split()
-    result = {
-        'destination': line[0],
-        'nexthop': None,
-        'device': None,
-        'scope': None
-    }
-    idx = 1
-    while idx < len(line):
-        field = _IP_ROUTE_PARSE_KEYS.get(line[idx])
-        if not field:
-            idx = idx + 1
-        else:
-            result[field] = line[idx + 1]
-            idx = idx + 2
-    return result
+NetworkNamespaceNotFound = privileged.NetworkNamespaceNotFound
+NetworkInterfaceNotFound = privileged.NetworkInterfaceNotFound
 
 
 def get_routing_table(ip_version, namespace=None):
@@ -981,14 +966,63 @@ def get_routing_table(ip_version, namespace=None):
                                'device': device_name,
                                'scope': scope}
     """
+    # oslo.privsep turns lists to tuples in its IPC code. Change it back
+    return list(privileged.get_routing_table(ip_version, namespace))
 
-    ip_wrapper = IPWrapper(namespace=namespace)
-    table = ip_wrapper.netns.execute(
-        ['ip', '-%s' % ip_version, 'route'],
-        check_exit_code=True)
 
-    return [_parse_ip_route_line(line)
-            for line in table.split('\n') if line.strip()]
+# NOTE(haleyb): These neighbour functions live outside the IpNeighCommand
+# class since not all callers require it.
+def add_neigh_entry(ip_address, mac_address, device, namespace=None, **kwargs):
+    """Add a neighbour entry.
+
+    :param ip_address: IP address of entry to add
+    :param mac_address: MAC address of entry to add
+    :param device: Device name to use in adding entry
+    :param namespace: The name of the namespace in which to add the entry
+    """
+    ip_version = get_ip_version(ip_address)
+    privileged.add_neigh_entry(ip_version,
+                               ip_address,
+                               mac_address,
+                               device,
+                               namespace,
+                               **kwargs)
+
+
+def delete_neigh_entry(ip_address, mac_address, device, namespace=None,
+                       **kwargs):
+    """Delete a neighbour entry.
+
+    :param ip_address: IP address of entry to delete
+    :param mac_address: MAC address of entry to delete
+    :param device: Device name to use in deleting entry
+    :param namespace: The name of the namespace in which to delete the entry
+    """
+    ip_version = get_ip_version(ip_address)
+    privileged.delete_neigh_entry(ip_version,
+                                  ip_address,
+                                  mac_address,
+                                  device,
+                                  namespace,
+                                  **kwargs)
+
+
+def dump_neigh_entries(ip_version, device=None, namespace=None, **kwargs):
+    """Dump all neighbour entries.
+
+    :param ip_version: IP version of entries to show (4 or 6)
+    :param device: Device name to use in dumping entries
+    :param namespace: The name of the namespace in which to dump the entries
+    :param kwargs: Callers add any filters they use as kwargs
+    :return: a list of dictionaries, each representing a neighbour.
+    The dictionary format is: {'dst': ip_address,
+                               'lladdr': mac_address,
+                               'device': device_name}
+    """
+    return list(privileged.dump_neigh_entries(ip_version,
+                                              device,
+                                              namespace,
+                                              **kwargs))
 
 
 def ensure_device_is_ready(device_name, namespace=None):

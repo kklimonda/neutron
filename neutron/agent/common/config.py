@@ -14,8 +14,10 @@
 #    under the License.
 
 import os
+import shlex
 
 from oslo_config import cfg
+from oslo_privsep import priv_context
 
 from neutron._i18n import _
 from neutron.common import config
@@ -40,7 +42,11 @@ ROOT_HELPER_OPTS = [
     # Having a bool use_rootwrap_daemon option precludes specifying the
     # rootwrap daemon command, which may be necessary for Xen?
     cfg.StrOpt('root_helper_daemon',
-               help=_('Root helper daemon application to use when possible.')),
+               help=_("Root helper daemon application to use when possible. "
+                      "For the agent which needs to execute commands in Dom0 "
+                      "in the hypervisor of XenServer, this item should be "
+                      "set to 'xenapi_root_helper', so that it will keep a "
+                      "XenAPI session to pass commands to Dom0.")),
 ]
 
 AGENT_STATE_OPTS = [
@@ -169,3 +175,7 @@ def setup_conf():
 
 # add a logging setup method here for convenience
 setup_logging = config.setup_logging
+
+
+def setup_privsep():
+    priv_context.init(root_helper=shlex.split(get_root_helper(cfg.CONF)))

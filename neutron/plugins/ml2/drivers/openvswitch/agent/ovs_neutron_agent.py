@@ -40,6 +40,7 @@ from neutron.agent.common import ovs_lib
 from neutron.agent.common import polling
 from neutron.agent.common import utils
 from neutron.agent.l2 import l2_agent_extensions_manager as ext_manager
+from neutron.agent.linux import xenapi_root_helper
 from neutron.agent import rpc as agent_rpc
 from neutron.agent import securitygroups_rpc as agent_sg_rpc
 from neutron.api.rpc.callbacks import resources
@@ -47,9 +48,11 @@ from neutron.api.rpc.handlers import dvr_rpc
 from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
 from neutron.callbacks import events as callback_events
 from neutron.callbacks import registry
+from neutron.callbacks import resources as callback_resources
 from neutron.common import config
 from neutron.common import constants as c_const
 from neutron.common import topics
+from neutron.conf.agent import xenapi_conf
 from neutron import context
 from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_const
@@ -800,17 +803,26 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         port_info = self.int_br.get_ports_attributes(
             "Port", columns=["name", "tag", "other_config"],
             ports=port_names, if_exists=True)
-        info_by_port = {x['name']: [x['tag'], x['other_config']]
-                        for x in port_info}
+        info_by_port = {
+            x['name']: {
+                'tag': x['tag'],
+                'other_config': x['other_config'] or {}
+            }
+            for x in port_info
+        }
         for port_detail in need_binding_ports:
             try:
                 lvm = self.vlan_manager.get(port_detail['network_id'])
             except vlanmanager.MappingNotFound:
                 continue
             port = port_detail['vif_port']
-            cur_info = info_by_port.get(port.port_name)
-            if cur_info is not None and cur_info[0] != lvm.vlan:
-                other_config = cur_info[1] or {}
+            try:
+                cur_info = info_by_port[port.port_name]
+            except KeyError:
+                continue
+            other_config = cur_info['other_config']
+            if (cur_info['tag'] != lvm.vlan or
+                    other_config.get('tag') != lvm.vlan):
                 other_config['tag'] = str(lvm.vlan)
                 self.int_br.set_db_attribute(
                     "Port", port.port_name, "other_config", other_config)
@@ -1957,6 +1969,11 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                                  self.patch_tun_ofport)
                     self.dvr_agent.reset_dvr_parameters()
                     self.dvr_agent.setup_dvr_flows()
+                # notify that OVS has restarted
+                registry.notify(
+                    callback_resources.AGENT,
+                    callback_events.OVS_RESTARTED,
+                    self)
                 # restart the polling manager so that it will signal as added
                 # all the current ports
                 # REVISIT (rossella_s) Define a method "reset" in
@@ -2132,8 +2149,11 @@ def validate_tunnel_config(tunnel_types, local_ip):
 
 
 def prepare_xen_compute():
-    is_xen_compute_host = 'rootwrap-xen-dom0' in cfg.CONF.AGENT.root_helper
+    is_xen_compute_host = 'rootwrap-xen-dom0' in cfg.CONF.AGENT.root_helper \
+        or xenapi_root_helper.ROOT_HELPER_DAEMON_TOKEN == \
+        cfg.CONF.AGENT.root_helper_daemon
     if is_xen_compute_host:
+        xenapi_conf.register_xenapi_opts()
         # Force ip_lib to always use the root helper to ensure that ip
         # commands target xen dom0 rather than domU.
         cfg.CONF.register_opts(ip_lib.OPTS)

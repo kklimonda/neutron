@@ -16,6 +16,7 @@
 import contextlib
 import copy
 
+from debtcollector import removals
 from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_db import api as oslo_db_api
@@ -28,6 +29,8 @@ import osprofiler.sqlalchemy
 from pecan import util as p_util
 import six
 import sqlalchemy
+from sqlalchemy import event  # noqa
+from sqlalchemy import exc as sql_exc
 from sqlalchemy.orm import exc
 import traceback
 
@@ -200,11 +203,24 @@ def exc_to_retry(etypes):
 
 #TODO(akamyshnikova): when all places in the code, which use sessions/
 # connections will be updated, this won't be needed
+@removals.remove(version='Ocata', removal_version='Pike',
+                 message="Usage of legacy facade is deprecated. Use "
+                         "get_reader_session or get_writer_session instead.")
 def get_session(autocommit=True, expire_on_commit=False, use_slave=False):
     """Helper method to grab session."""
     return context_manager.get_legacy_facade().get_session(
         autocommit=autocommit, expire_on_commit=expire_on_commit,
         use_slave=use_slave)
+
+
+def get_reader_session():
+    """Helper to get reader session"""
+    return context_manager.reader.get_sessionmaker()()
+
+
+def get_writer_session():
+    """Helper to get writer session"""
+    return context_manager.writer.get_sessionmaker()()
 
 
 @contextlib.contextmanager
@@ -216,3 +232,32 @@ def autonested_transaction(sess):
         session_context = sess.begin(subtransactions=True)
     with session_context as tx:
         yield tx
+
+
+_REGISTERED_SQLA_EVENTS = []
+
+
+def sqla_listen(*args):
+    """Wrapper to track subscribers for test teardowns.
+
+    SQLAlchemy has no "unsubscribe all" option for its event listener
+    framework so we need to keep track of the subscribers by having
+    them call through here for test teardowns.
+    """
+    event.listen(*args)
+    _REGISTERED_SQLA_EVENTS.append(args)
+
+
+def sqla_remove(*args):
+    event.remove(*args)
+    _REGISTERED_SQLA_EVENTS.remove(args)
+
+
+def sqla_remove_all():
+    for args in _REGISTERED_SQLA_EVENTS:
+        try:
+            event.remove(*args)
+        except sql_exc.InvalidRequestError:
+            # already removed
+            pass
+    del _REGISTERED_SQLA_EVENTS[:]

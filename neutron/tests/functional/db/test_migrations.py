@@ -23,7 +23,7 @@ from oslo_db.sqlalchemy import test_migrations
 from oslotest import base as oslotest_base
 import six
 import sqlalchemy
-from sqlalchemy import event
+from sqlalchemy import event  # noqa
 from sqlalchemy.sql import ddl as sqla_ddl
 import subprocess
 
@@ -491,7 +491,7 @@ class TestWalkDowngrade(oslotest_base.BaseTestCase):
 
 
 class _TestWalkMigrations(object):
-    '''This will add framework for testing schema migarations
+    '''This will add framework for testing schema migration
        for different backends.
 
     '''

@@ -343,6 +343,7 @@ class APIv2TestCase(APIv2TestBase):
         res = self.api.get(_get_path('networks'),
                            {'limit': 'abc'}, expect_errors=True)
         self.assertEqual(exc.HTTPBadRequest.code, res.status_int)
+        self.assertIn('abc', res)
 
     def test_limit_with_infinite_pagination_max_limit(self):
         instance = self.plugin.return_value
@@ -1611,6 +1612,11 @@ class FiltersTestCase(base.BaseTestCase):
         expect_val = {'foo': [4], 'bar': ['3'], 'baz': ['2'], 'qux': ['1']}
         actual_val = api_common.get_filters(request, attr_info)
         self.assertEqual(expect_val, actual_val)
+
+    def test_attr_info_with_base_db_attributes(self):
+        path = '/?__contains__=1&__class__=2'
+        request = webob.Request.blank(path)
+        self.assertEqual({}, api_common.get_filters(request, {}))
 
 
 class CreateResourceTestCase(base.BaseTestCase):

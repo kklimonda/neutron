@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from oslo_log import log
+
 from tempest.common import waiters
 from tempest.lib.common import ssh
 from tempest.lib.common.utils import data_utils
@@ -22,6 +24,8 @@ from neutron.tests.tempest import config
 from neutron.tests.tempest.scenario import constants
 
 CONF = config.CONF
+
+LOG = log.getLogger(__name__)
 
 
 class BaseTempestTestCase(base_api.BaseNetworkTest):
@@ -124,11 +128,15 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
         cls.create_secgroup_rules(rule_list, secgroup_id=secgroup_id)
 
     @classmethod
-    def create_router_and_interface(cls, subnet_id):
-        router = cls.create_router(
-            data_utils.rand_name('router'), admin_state_up=True,
-            external_network_id=CONF.network.public_network_id)
-        cls.create_router_interface(router['id'], subnet_id)
+    def create_router_by_client(cls, is_admin=False, **kwargs):
+        kwargs.update({'router_name': data_utils.rand_name('router'),
+                       'admin_state_up': True,
+                       'external_network_id': CONF.network.public_network_id})
+        if not is_admin:
+            router = cls.create_router(**kwargs)
+        else:
+            router = cls.create_admin_router(**kwargs)
+        LOG.debug("Created router %s", router['name'])
         cls.routers.append(router)
         return router
 
@@ -146,20 +154,25 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
         ssh_client.test_connection_auth()
 
     @classmethod
-    def setup_network_and_server(cls):
-        """Creating network resources and a server.
+    def setup_network_and_server(cls, router=None, **kwargs):
+        """Create network resources and a server.
 
         Creating a network, subnet, router, keypair, security group
         and a server.
         """
         cls.network = cls.create_network()
+        LOG.debug("Created network %s", cls.network['name'])
         cls.subnet = cls.create_subnet(cls.network)
+        LOG.debug("Created subnet %s", cls.subnet['id'])
 
         secgroup = cls.manager.network_client.create_security_group(
             name=data_utils.rand_name('secgroup-'))
+        LOG.debug("Created security group %s",
+                  secgroup['security_group']['name'])
         cls.security_groups.append(secgroup['security_group'])
-
-        cls.create_router_and_interface(cls.subnet['id'])
+        if not router:
+            router = cls.create_router_by_client(**kwargs)
+        cls.create_router_interface(router['id'], cls.subnet['id'])
         cls.keypair = cls.create_keypair()
         cls.create_loginable_secgroup_rule(
             secgroup_id=secgroup['security_group']['id'])

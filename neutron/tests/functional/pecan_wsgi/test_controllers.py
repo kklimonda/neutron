@@ -229,6 +229,7 @@ class TestQuotasController(test_functional.PecanFunctionalTest):
         response = self.app.delete(url, headers={'X-Project-Id': 'admin',
                                                  'X-Roles': 'admin'})
         self.assertEqual(204, response.status_int)
+        self.assertFalse(response.body)
         # As DELETE does not return a body we need another GET
         response = self.app.get(url, headers={'X-Project-Id': 'foo'})
         self.assertEqual(200, response.status_int)
@@ -261,6 +262,7 @@ class TestQuotasController(test_functional.PecanFunctionalTest):
         response = self.app.delete(url, headers={'X-Project-Id': 'admin',
                                                  'X-Roles': 'admin'})
         self.assertEqual(204, response.status_int)
+        self.assertFalse(response.body)
         response = self.app.get(self.base_url,
                                 headers={'X-Project-Id': 'admin',
                                          'X-Roles': 'admin'})
@@ -268,6 +270,23 @@ class TestQuotasController(test_functional.PecanFunctionalTest):
         json_body = jsonutils.loads(response.body)
         for qs in json_body['quotas']:
             self.assertNotEqual('foo', qs['tenant_id'])
+
+    def test_quotas_get_defaults(self):
+        response = self.app.get('%s/foo/default.json' % self.base_url,
+                                headers={'X-Project-Id': 'admin',
+                                         'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        # As quota limits have not been updated, expect default values
+        json_body = jsonutils.loads(response.body)
+        self._verify_default_limits(json_body)
+
+    def test_get_tenant_info(self):
+        response = self.app.get('%s/tenant.json' % self.base_url,
+                                headers={'X-Project-Id': 'admin',
+                                         'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        json_body = jsonutils.loads(response.body)
+        self.assertEqual('admin', json_body['tenant']['tenant_id'])
 
 
 class TestResourceController(TestRootController):
@@ -388,6 +407,7 @@ class TestResourceController(TestRootController):
         response = self.app.delete('/v2.0/ports/%s.json' % self.port['id'],
                                    headers={'X-Project-Id': 'tenid'})
         self.assertEqual(response.status_int, 204)
+        self.assertFalse(response.body)
 
     def test_plugin_initialized(self):
         self.assertIsNotNone(manager.NeutronManager._instance)
@@ -819,6 +839,7 @@ class TestL3AgentShimControllers(test_functional.PecanFunctionalTest):
             '/v2.0/agents/%(a)s/l3-routers/%(n)s.json' % {
                 'a': self.agent.id, 'n': self.router['id']}, headers=headers)
         self.assertEqual(204, response.status_int)
+        self.assertFalse(response.body)
         response = self.app.get(
             '/v2.0/routers/%s/l3-agents.json' % self.router['id'],
             headers=headers)
@@ -938,6 +959,7 @@ class TestParentSubresourceController(test_functional.PecanFunctionalTest):
         policy._ENFORCER.set_rules(
             oslo_policy.Rules.from_dict(
                 {'get_fake_duplicate': '',
+                 'get_fake_duplicates': '',
                  'get_meh_meh_fake_duplicates': ''}),
             overwrite=False)
         self.addCleanup(policy.reset)
@@ -961,7 +983,22 @@ class TestParentSubresourceController(test_functional.PecanFunctionalTest):
 
     def test_get_parent_resource_and_duplicate_subresources(self):
         url = '/v2.0/{0}/something/{1}'.format(self.collection,
-                                             self.fake_collection)
+                                               self.fake_collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({'fake_duplicates': [{'fake': 'something'}]},
+                         resp.json)
+
+    def test_get_child_resource_policy_check(self):
+        policy.reset()
+        policy.init()
+        policy._ENFORCER.set_rules(
+            oslo_policy.Rules.from_dict(
+                {'get_meh_meh_fake_duplicates': ''}
+            )
+        )
+        url = '/v2.0/{0}/something/{1}'.format(self.collection,
+                                               self.fake_collection)
         resp = self.app.get(url)
         self.assertEqual(200, resp.status_int)
         self.assertEqual({'fake_duplicates': [{'fake': 'something'}]},
