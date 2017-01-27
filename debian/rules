@@ -43,5 +43,5 @@ get-orig-source:
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
-	OS_TEST_PATH=./neutron/tests/unit ostestr
+	./run_tests.sh -N -P
 endif

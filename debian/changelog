@@ -1,3 +1,11 @@
+neutron (2:10.0.0~b3-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream milestone for OpenStack Ocata.
+  * d/control: Align (build-)depends with upstream.
+  * d/rules: Run the run_tests.sh script.
+
+ -- Chuck Short <zulcss@ubuntu.com>  Fri, 27 Jan 2017 10:07:09 -0500
+
 neutron (2:10.0.0~b2-0ubuntu2) zesty; urgency=medium
 
   [ Chuck Short ]
