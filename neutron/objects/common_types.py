@@ -24,6 +24,7 @@ import six
 
 from neutron._i18n import _
 from neutron.common import constants
+from neutron.common import utils
 from neutron.objects import exceptions as o_exc
 from neutron.plugins.common import constants as plugin_constants
 
@@ -185,6 +186,10 @@ class IpProtocolEnum(obj_fields.Enum):
             **kwargs)
 
 
+class PortBindingStatusEnumField(obj_fields.AutoTypedField):
+    AUTO_TYPE = obj_fields.Enum(valid_values=constants.PORT_BINDING_STATUSES)
+
+
 class IpProtocolEnumField(obj_fields.AutoTypedField):
     AUTO_TYPE = IpProtocolEnum()
 
@@ -204,6 +209,14 @@ class MACAddress(obj_fields.FieldType):
     @staticmethod
     def to_primitive(obj, attr, value):
         return str(value)
+
+    @staticmethod
+    def from_primitive(obj, attr, value):
+        try:
+            return utils.AuthenticEUI(value)
+        except Exception:
+            msg = _("Field value %s is not a netaddr.EUI") % value
+            raise ValueError(msg)
 
 
 class MACAddressField(obj_fields.AutoTypedField):
@@ -263,6 +276,14 @@ class IPNetwork(obj_fields.FieldType):
     @staticmethod
     def to_primitive(obj, attr, value):
         return str(value)
+
+    @staticmethod
+    def from_primitive(obj, attr, value):
+        try:
+            return utils.AuthenticIPNetwork(value)
+        except Exception:
+            msg = _("Field value %s is not a netaddr.IPNetwork") % value
+            raise ValueError(msg)
 
 
 class IPNetworkField(obj_fields.AutoTypedField):

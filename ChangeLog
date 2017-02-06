@@ -1,12 +1,59 @@
 CHANGES
 =======
 
+10.0.0.0rc1
+-----------
+
+* Add Loki service plugin for optional DB havoc
+* Use bytes for python3 friendly os.write
+* Updated from global requirements
+* Use addCleanup instead of tearDown
+* Remove --omit argument in run_tests.sh
+* Integration of Provisioning Block OVO
+* Add support for Keepalived VRRP health check
+* Use socket.AF_INET6 in ip_lib tests
+* Update bug triaging policy for documentation
+* Remove duplicated and unused code in iptables_firewall
+* Add IPv6 Prefix Delegation support for DVR
+* Fix port update for service subnets
+* Update in-tree code to use new neighbour functions
+* functional: Check for processes only if there are any
+* Fix link in QoS devref
+* Clear conntrack entries without zones if CT zones are not used
+* Fix iptables rules for Prefix Delegated subnets
+* policies: Replace Joe's graphite graphs with Grafana
+* Init privsep on l3 agent start
+* Display deprecation warning in test only once
+* Kill the metadata proxy process unconditionally
+* Always acquire network.id lock in dhcp port update
+* Fix WaitTimeout string representations
+* Addressing L3 HA keepalived failures in functional tests
+* Stop passing datapath as 'may_exist' argument
+* Retry on routerport delete race
+* Do not raise an error deleting neighbour entry
+* [Live Migration] Extend ml2_port_binding table
+* Fix some pylint errors in IPAM tests
+* Use weakrefs for common_db_mixin callbacks
+* Add bulk pull OVO interface
+* Handle attempt to enable br_netfilter in namespace
+
 10.0.0.0b3
 ----------
 
+* Check arg type for SegmentTypeDriver functions
+* Add missing port UPDATE event to ML2
+* Fixes to allow OVO deserializion of ports/networks
+* Add missing module-level SUBNET ref
+* ovsfw: Refresh OFPort when necessary
+* Fix a bad docstring in provisioning blocks module
+* Transition qos notification driver into qos driver
+* OVS: merge the required OpenFlow version rather than replace
 * Adjust psutil usage for psutil > 2
 * Allow all migration of routers
+* Set access_policy for messaging's dispatcher
+* Elminate join for network owner filter
 * Always add unique sort keys when sorting
+* Allow the other nic to allocate VMs post PCI-PT VM creation
 * Change neighbour commands to use pyroute2
 * Routed networks IPv4 inventory in Nova GRP
 * Correctly set project_name
@@ -22,6 +69,7 @@ CHANGES
 * Updated from global requirements
 * OVO for Ipam(Allocation,Subnet,Pool)
 * Remove get_router_cidrs method of dvr_edge_ha router
+* Use plugin directory fixture
 * openvswitch agent: add OVS_RESTARTED event
 * Stop using legacy facade
 * XenAPI: Support daemon mode for rootwrap
@@ -34,10 +82,16 @@ CHANGES
 * Add a ReST client for placement API
 * Add OVO for AutoAllocatedTopology
 * Fix typos
+* Fix broken Windows compatibility in ovs_lib
+* Add IPLink class to Windows ip_lib implementation
 * Support ovsdb-client monitor with remote connection
 * Protect against non-determinstic sort
 * Remove deprecated min_l3_agents_per_router
+* Include port_security check in fullstack tests
+* Revert "Setup firewall filters only for required ports"
+* test_l3: Enable native pagination and sort
 * Revert "Protect against non-determinstic sort"
+* Multiple tweaks for Ocata release notes
 * L3: Add in missing translation
 * Fix broken links in devref
 * Rename a test method
@@ -54,6 +108,7 @@ CHANGES
 * Only migrate ports on DVR migration
 * Protect against non-determinstic sort
 * Decompose router extra attr processing
+* Use unique subnetpools in SubnetPoolPrefixDbObjectTestCase
 * Fix netns_cleanup interrupted on rwd I/O
 * Don't emit SG rule AFTER events until TX closed
 * Updated from global requirements
@@ -64,6 +119,7 @@ CHANGES
 * Added UT for floating ips with dns
 * Centralize creation of security group test obj
 * Suppress annoying "Could not load" stevedore warnings
+* adds support for vhost user reconnect
 * Clean up _get_ports_query
 * Get rid of additional fixed_ip filter join
 * Remove advertise_mtu config option
@@ -96,6 +152,7 @@ CHANGES
 * Add DictOfMiscValuesField in OVO for dict usage
 * SR-IOV: Remove physical_device_mappings depreciation warning
 * Fix a typo in iptables_manager.py
+* DB: remove deprecated oslo_db warnings
 * Fullstack tests for DHCP agent HA
 * Remove greenlet useless requirement
 * Fix pylint warning in test_l3_hamode_db.py
@@ -213,6 +270,7 @@ CHANGES
 * Refactoring config opts for ml2 plugin openvswitch
 * Don't compile OVS kernel modules for functional job
 * Update bug tag contacts due to absconsions
+* configure_for_func_testing.sh: Remove neutron-legacy inclusion
 * configure_for_func_testing.sh: Source lib/neutron as well
 * Functional tests: change assert to wait_until_true
 * revise doc: support_extension_aliases to supported_extension_aliases
@@ -405,6 +463,7 @@ CHANGES
 * Add OVO for dns Objects
 * Fix test_unwatch_log() to cleanup after itself
 * Updated from global requirements
+* TrivialFix: Modify the spelling mistake
 * Rename ipv6_utils.is_enabled()
 * Handle db_add in transaction for new objects
 * [TrivialFix] Replace 'assertTrue(a in b)' with 'assertIn(a, b)'
@@ -860,6 +919,7 @@ CHANGES
 * Increase rally network/port count and add quotas
 * Extensions: fix file mode permissions
 * Update the homepage with developer documentation page
+* ML2: Lower log level of "Host filtering is disabled" message
 * Don't create another plugin instance in ML2 tests
 * Relocate AddressScope DB model
 * Enable ra on gateway when add gateway to HA router
@@ -927,6 +987,7 @@ CHANGES
 * pep8: fixed F821 violation in a unit test
 * Add devref for Relocating DB models
 * Handle deleted ports when creating a list of fdb entries
+* Remove unused params named "context" in filter_attributes
 * Set bridge_name in OVS trunk port's vif_details
 * ml2: allow retry on retriabable db error by precommit
 * Rollback router intf port update if csnat update fails

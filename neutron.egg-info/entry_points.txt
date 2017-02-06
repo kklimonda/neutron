@@ -89,6 +89,7 @@ message_queue = neutron.services.qos.notification_drivers.message_queue:RpcQosSe
 auto_allocate = neutron.services.auto_allocate.plugin:Plugin
 dummy = neutron.tests.unit.dummy_plugin:DummyServicePlugin
 flavors = neutron.services.flavors.flavors_plugin:FlavorsPlugin
+loki = neutron.services.loki.loki_plugin:LokiPlugin
 metering = neutron.services.metering.metering_plugin:MeteringPlugin
 network_ip_availability = neutron.services.network_ip_availability.plugin:NetworkIPAvailabilityPlugin
 qos = neutron.services.qos.qos_plugin:QoSPlugin

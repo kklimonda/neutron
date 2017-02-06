@@ -31,6 +31,7 @@ from neutron.agent.dhcp import agent as dhcp_agent
 from neutron.agent import dhcp_agent as entry
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import interface
+from neutron.agent.metadata import driver as metadata_driver
 from neutron.common import config as common_config
 from neutron.common import constants as n_const
 from neutron.common import utils
@@ -470,6 +471,20 @@ class TestDhcpAgent(base.BaseTestCase):
         dhcp.configure_dhcp_for_network(fake_network)
         self.assertEqual({fake_port1.id}, dhcp.dhcp_ready_ports)
 
+    def test_dhcp_metadata_destroy(self):
+        cfg.CONF.set_override('force_metadata', True)
+        cfg.CONF.set_override('enable_isolated_metadata', False)
+        with mock.patch.object(metadata_driver,
+                               'MetadataDriver') as md_cls:
+            dhcp = dhcp_agent.DhcpAgent(HOSTNAME)
+            dhcp.configure_dhcp_for_network(fake_network)
+            md_cls.spawn_monitored_metadata_proxy.assert_called_once_with(
+                mock.ANY, mock.ANY, mock.ANY, mock.ANY,
+                network_id=fake_network.id)
+            dhcp.disable_dhcp_helper(fake_network.id)
+            md_cls.destroy_monitored_metadata_proxy.assert_called_once_with(
+                mock.ANY, fake_network.id, mock.ANY)
+
     def test_report_state_revival_logic(self):
         dhcp = dhcp_agent.DhcpAgentWithStateReport(HOSTNAME)
         with mock.patch.object(dhcp.state_rpc,
@@ -781,12 +796,9 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         self.cache.assert_has_calls(
             [mock.call.get_network_by_id(fake_network.id)])
         self.call_driver.assert_called_once_with('disable', fake_network)
-        if isolated_metadata:
-            self.external_process.assert_has_calls([
-                self._process_manager_constructor_call(ns=None),
-                mock.call().disable()])
-        else:
-            self.assertFalse(self.external_process.call_count)
+        self.external_process.assert_has_calls([
+            self._process_manager_constructor_call(ns=None),
+            mock.call().disable()])
 
     def test_disable_dhcp_helper_known_network_isolated_metadata(self):
         self._disable_dhcp_helper_known_network(isolated_metadata=True)
@@ -813,13 +825,10 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         self.call_driver.assert_called_once_with('disable', fake_network)
         self.cache.assert_has_calls(
             [mock.call.get_network_by_id(fake_network.id)])
-        if isolated_metadata:
-            self.external_process.assert_has_calls([
-                self._process_manager_constructor_call(ns=None),
-                mock.call().disable()
-            ])
-        else:
-            self.assertFalse(self.external_process.call_count)
+        self.external_process.assert_has_calls([
+            self._process_manager_constructor_call(ns=None),
+            mock.call().disable()
+        ])
 
     def test_disable_dhcp_helper_driver_failure_isolated_metadata(self):
         self._disable_dhcp_helper_driver_failure(isolated_metadata=True)
@@ -1024,6 +1033,14 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
              mock.call.put_port(mock.ANY)])
         self.call_driver.assert_called_once_with('reload_allocations',
                                                  fake_network)
+
+    def test_port_update_end_grabs_lock(self):
+        payload = dict(port=fake_port2)
+        self.cache.get_network_by_id.return_value = None
+        self.cache.get_port_by_id.return_value = fake_port2
+        with mock.patch('neutron.agent.dhcp.agent._net_lock') as nl:
+            self.dhcp.port_update_end(None, payload)
+            nl.assert_called_once_with(fake_port2.network_id)
 
     def test_port_update_change_ip_on_port(self):
         payload = dict(port=fake_port1)

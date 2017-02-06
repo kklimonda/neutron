@@ -46,6 +46,7 @@ doc/source/devref/client_command_extensions.rst
 doc/source/devref/contribute.rst
 doc/source/devref/db_layer.rst
 doc/source/devref/db_models.rst
+doc/source/devref/db_transient_failure_injection.rst
 doc/source/devref/development.environment.rst
 doc/source/devref/dns_order.rst
 doc/source/devref/effective_neutron.rst
@@ -525,6 +526,7 @@ neutron/db/migration/alembic_migrations/versions/newton/expand/a963b38d82f4_add_
 neutron/db/migration/alembic_migrations/versions/newton/expand/c415aab1c048_add_revisions_column.py
 neutron/db/migration/alembic_migrations/versions/newton/expand/d3435b514502_add_device_id_index_to_port.py
 neutron/db/migration/alembic_migrations/versions/ocata/expand/929c968efe70_add_pk_version_table.py
+neutron/db/migration/alembic_migrations/versions/ocata/expand/a9c43481023c_extend_ml2_port_bindings.py
 neutron/db/migration/models/__init__.py
 neutron/db/migration/models/head.py
 neutron/db/models/README
@@ -871,6 +873,8 @@ neutron/services/l3_router/service_providers/dvr.py
 neutron/services/l3_router/service_providers/dvrha.py
 neutron/services/l3_router/service_providers/ha.py
 neutron/services/l3_router/service_providers/single_node.py
+neutron/services/loki/__init__.py
+neutron/services/loki/loki_plugin.py
 neutron/services/metering/__init__.py
 neutron/services/metering/metering_plugin.py
 neutron/services/metering/agents/__init__.py
@@ -886,6 +890,15 @@ neutron/services/network_ip_availability/plugin.py
 neutron/services/qos/__init__.py
 neutron/services/qos/qos_consts.py
 neutron/services/qos/qos_plugin.py
+neutron/services/qos/drivers/__init__.py
+neutron/services/qos/drivers/base.py
+neutron/services/qos/drivers/manager.py
+neutron/services/qos/drivers/linuxbridge/__init__.py
+neutron/services/qos/drivers/linuxbridge/driver.py
+neutron/services/qos/drivers/openvswitch/__init__.py
+neutron/services/qos/drivers/openvswitch/driver.py
+neutron/services/qos/drivers/sriov/__init__.py
+neutron/services/qos/drivers/sriov/driver.py
 neutron/services/qos/notification_drivers/__init__.py
 neutron/services/qos/notification_drivers/manager.py
 neutron/services/qos/notification_drivers/message_queue.py
@@ -1534,10 +1547,11 @@ neutron/tests/unit/services/metering/drivers/test_iptables.py
 neutron/tests/unit/services/qos/__init__.py
 neutron/tests/unit/services/qos/base.py
 neutron/tests/unit/services/qos/test_qos_plugin.py
+neutron/tests/unit/services/qos/drivers/__init__.py
+neutron/tests/unit/services/qos/drivers/test_manager.py
 neutron/tests/unit/services/qos/notification_drivers/__init__.py
 neutron/tests/unit/services/qos/notification_drivers/dummy.py
 neutron/tests/unit/services/qos/notification_drivers/test_manager.py
-neutron/tests/unit/services/qos/notification_drivers/test_message_queue.py
 neutron/tests/unit/services/revisions/__init__.py
 neutron/tests/unit/services/revisions/test_revision_plugin.py
 neutron/tests/unit/services/trunk/__init__.py
@@ -1599,6 +1613,7 @@ releasenotes/notes/add-dhcp_release6-ff1b8d62fd7fe76d.yaml
 releasenotes/notes/add-get-me-a-network-56321aeef5389001.yaml
 releasenotes/notes/add-integration-with-external-dns-f56ec8a4993b1fc4.yaml
 releasenotes/notes/add-ip-protocols-in-sg-60467a073e771aee.yaml
+releasenotes/notes/add-keepalived-vrrp-healt-check-f23ed7c853151484.yaml
 releasenotes/notes/add-minimum-bandwidth-support-linuxbridge-9dc9d4458d8affef.yaml
 releasenotes/notes/add-minimum-bandwidth-support-sriov-63664b89f4dd1c1b.yaml
 releasenotes/notes/add-osprofiler-support-7fc2de3001187075.yaml
@@ -1637,7 +1652,6 @@ releasenotes/notes/deprecate_prevent_arp_spoofing_option-a09e673fc8f9fee4.yaml
 releasenotes/notes/deprecated-driver-e368e0befc9bee4c.yaml
 releasenotes/notes/designate-driver-keystonev3-8e70d152e84388e0.yaml
 releasenotes/notes/dhcp-domain-removed-cc5bc6e2129fdf7f.yaml
-releasenotes/notes/dhcp-for-service-subnets-06f03d902f2fb738.yaml
 releasenotes/notes/dhcp-ipv6-address-update-ff18d1eb0c196bce.yaml
 releasenotes/notes/dhcp-lease-time-5c504c3730a4f9ea.yaml
 releasenotes/notes/direct-physical-vnic-878d15bdb758b70e.yaml
@@ -1680,6 +1694,7 @@ releasenotes/notes/path-mtu-back-to-zero-e4f9e8bdd8317ad4.yaml
 releasenotes/notes/physical_network-aware-dhcp-scheduling-94e9fadc7c7c5fec.yaml
 releasenotes/notes/pluggable-ipam-is-default-15c2ee15dc5b4a7b.yaml
 releasenotes/notes/project_id-d5ea7a42be428230.yaml
+releasenotes/notes/qos-drivers-refactor-16ece9984958f8a4.yaml
 releasenotes/notes/qos-min-egress-bw-rule-b1c80f5675a4c1c3.yaml
 releasenotes/notes/remove-advertise_mtu-28933264714453c4.yaml
 releasenotes/notes/remove-allow-pagination-allow-sorting-ff23ca5ccb3007b9.yaml
@@ -1702,6 +1717,7 @@ releasenotes/notes/sriov_show_l2_agent_extensions-ca852e155a529e99.yaml
 releasenotes/notes/timestamp_format_change-73eda78566b4690b.yaml
 releasenotes/notes/use-keystoneauth-24f309566001a16b.yaml
 releasenotes/notes/use-pyroute2-in-ip-lib-558bfea8f14d1fea.yaml
+releasenotes/notes/vhost-user-reconnect-7650134520022e7d.yaml
 releasenotes/notes/vlan-aware-vms-aka-trunk-3341cc75ba1bf5b4.yaml
 releasenotes/source/README.rst
 releasenotes/source/conf.py

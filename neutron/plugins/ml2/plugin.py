@@ -236,10 +236,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 return
         self.update_port_status(context, port_id, const.PORT_STATUS_ACTIVE)
 
-    @property
-    def supported_qos_rule_types(self):
-        return self.mechanism_manager.supported_qos_rule_types
-
     @log_helpers.log_method_call
     def _start_rpc_notifiers(self):
         """Initialize RPC notifiers for agents."""
@@ -531,6 +527,14 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             # just finished, whether that transaction committed new
             # results or discovered concurrent port state changes.
             # Also, Trigger notification for successful binding commit.
+            kwargs = {
+                'context': plugin_context,
+                'port': port,
+                'mac_address_updated': False,
+                'original_port': oport,
+            }
+            registry.notify(resources.PORT, events.AFTER_UPDATE,
+                            self, **kwargs)
             self.mechanism_manager.update_port_postcommit(cur_context)
             need_notify = True
             try_again = False
