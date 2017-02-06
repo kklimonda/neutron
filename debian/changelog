@@ -1,8 +1,11 @@
-neutron (2:10.0.0~b3-0ubuntu2) UNRELEASED; urgency=medium
+neutron (2:10.0.0~rc1-0ubuntu1) UNRELEASED; urgency=medium
 
   * debian/control: Add python-weakrefmethod. 
+  * New upstream milestone for Ocata.
+  * debian/patches/fix-unittest-db.patch: Specify the sqlite
+    database.
 
- -- Chuck Short <zulcss@ubuntu.com>  Wed, 01 Feb 2017 13:00:23 -0500
+ -- Chuck Short <zulcss@ubuntu.com>  Mon, 06 Feb 2017 13:03:35 -0500
 
 neutron (2:10.0.0~b3-0ubuntu1) zesty; urgency=medium
 
