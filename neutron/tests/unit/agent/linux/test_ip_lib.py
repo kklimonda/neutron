@@ -20,12 +20,15 @@ import netaddr
 from neutron_lib import exceptions
 import pyroute2
 from pyroute2.netlink.rtnl import ndmsg
+from pyroute2 import NetlinkError
+import socket
 import testtools
 
 from neutron.agent.common import utils  # noqa
 from neutron.agent.linux import ip_lib
 from neutron.common import exceptions as n_exc
 from neutron import privileged
+from neutron.privileged.agent.linux import ip_lib as priv_lib
 from neutron.tests import base
 
 NETNS_SAMPLE = [
@@ -1495,7 +1498,7 @@ class TestGetRoutingTable(base.BaseTestCase):
             'metrics': {},
             'oif': 2,
             'dst_len': 64,
-            'family': 10,
+            'family': socket.AF_INET6,
             'proto': 2,
             'tos': 0,
             'dst': '1111:1111:1111:1111::/64',
@@ -1514,7 +1517,7 @@ class TestGetRoutingTable(base.BaseTestCase):
             'metrics': {},
             'oif': 2,
             'dst_len': 64,
-            'family': 10,
+            'family': socket.AF_INET6,
             'proto': 3,
             'tos': 0,
             'dst': '1111:1111:1111:1112::/64',
@@ -1641,6 +1644,12 @@ class TestIpNeighCommand(TestIPCmdBase):
             lladdr='cc:dd:ee:ff:ab:cd',
             family=2,
             ifindex=1)
+
+    @mock.patch.object(priv_lib, '_run_iproute')
+    def test_delete_entry_not_exist(self, mock_run_iproute):
+        # trying to delete a non-existent entry shouldn't raise an error
+        mock_run_iproute.side_effect = NetlinkError(errno.ENOENT, None)
+        self.neigh_cmd.delete('192.168.45.100', 'cc:dd:ee:ff:ab:cd')
 
     @mock.patch.object(pyroute2, 'NetNS')
     def test_dump_entries(self, mock_netns):

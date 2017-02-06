@@ -105,11 +105,20 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         # enabled by default or not (Ubuntu - yes, Redhat - no, for
         # example).
         LOG.debug("Enabling netfilter for bridges")
-        entries = utils.execute(['sysctl', '-N', 'net.bridge'],
-                                run_as_root=True).splitlines()
+        try:
+            entries = utils.execute(
+                ['sysctl', '-N', 'net.bridge'], run_as_root=True,
+                log_fail_as_error=False).splitlines()
+        except utils.ProcessExecutionError:
+            LOG.info(_LI("Process is probably running in namespace or "
+                         "kernel module br_netfilter is not loaded. "
+                         "Please ensure that netfilter options for bridge "
+                         "are enabled to provide working security groups."))
+            return
+
         for proto in ('ip', 'ip6'):
             knob = 'net.bridge.bridge-nf-call-%stables' % proto
-            if 'net.bridge.bridge-nf-call-%stables' % proto not in entries:
+            if knob not in entries:
                 raise SystemExit(
                     _("sysctl value %s not present on this system.") % knob)
             enabled = utils.execute(['sysctl', '-b', knob])
@@ -324,9 +333,6 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
             self._remove_rule_from_chain_v4v6('FORWARD', jump_rule, jump_rule)
 
         if direction == firewall.EGRESS_DIRECTION:
-            jump_rule = ['-m physdev --%s %s --physdev-is-bridged '
-                         '-j ACCEPT' % (self.IPTABLES_DIRECTION[direction],
-                                        device)]
             if add:
                 self._add_rules_to_chain_v4v6('INPUT', jump_rule, jump_rule,
                                               comment=ic.PORT_SEC_ACCEPT)
@@ -868,7 +874,6 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
 
 
 class OVSHybridIptablesFirewallDriver(IptablesFirewallDriver):
-    OVS_HYBRID_TAP_PREFIX = constants.TAP_DEVICE_PREFIX
     OVS_HYBRID_PLUG_REQUIRED = True
 
     def _port_chain_name(self, port, direction):

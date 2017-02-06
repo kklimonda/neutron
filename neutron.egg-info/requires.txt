@@ -17,8 +17,8 @@ tenacity>=3.2.1
 ryu>=4.9
 SQLAlchemy<1.1.0,>=1.0.10
 WebOb>=1.6.0
-keystoneauth1>=2.17.0
-alembic>=0.8.4
+keystoneauth1>=2.18.0
+alembic>=0.8.10
 six>=1.9.0
 stevedore>=1.17.1
 oslo.cache>=1.5.0
@@ -41,7 +41,8 @@ oslo.versionedobjects>=1.17.0
 osprofiler>=1.4.0
 ovs>=2.6.1
 pyroute2>=0.4.12
-python-novaclient!=2.33.0,>=2.29.0
+weakrefmethod>=1.0.2
+python-novaclient!=7.0.0,>=6.0.0
 python-designateclient>=1.5.0
 
 [:(python_version!='2.7')]

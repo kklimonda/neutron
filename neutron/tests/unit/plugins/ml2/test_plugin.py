@@ -58,7 +58,6 @@ from neutron.plugins.ml2 import managers
 from neutron.plugins.ml2 import models
 from neutron.plugins.ml2 import plugin as ml2_plugin
 from neutron.services.l3_router import l3_router_plugin
-from neutron.services.qos import qos_consts
 from neutron.services.revisions import revision_plugin
 from neutron.services.segments import db as segments_plugin_db
 from neutron.services.segments import plugin as segments_plugin
@@ -158,54 +157,6 @@ class TestMl2BulkToggleWithoutBulkless(Ml2PluginV2TestCase):
 
     def test_bulk_enabled_with_bulk_drivers(self):
         self.assertFalse(self._skip_native_bulk)
-
-
-class TestMl2SupportedQosRuleTypes(Ml2PluginV2TestCase):
-
-    def test_empty_driver_list(self, *mocks):
-        mech_drivers_mock = mock.PropertyMock(return_value=[])
-        with mock.patch.object(self.driver.mechanism_manager,
-                               'ordered_mech_drivers',
-                               new_callable=mech_drivers_mock):
-            self.assertEqual(
-                [], self.driver.mechanism_manager.supported_qos_rule_types)
-
-    def test_no_rule_types_in_common(self):
-        self.assertEqual(
-            [], self.driver.mechanism_manager.supported_qos_rule_types)
-
-    @mock.patch.object(mech_logger.LoggerMechanismDriver,
-                       'supported_qos_rule_types',
-                       new_callable=mock.PropertyMock,
-                       create=True)
-    @mock.patch.object(mech_test.TestMechanismDriver,
-                       'supported_qos_rule_types',
-                       new_callable=mock.PropertyMock,
-                       create=True)
-    def test_rule_type_in_common(self, *mocks):
-        # make sure both plugins have the same supported qos rule types
-        for mock_ in mocks:
-            mock_.return_value = qos_consts.VALID_RULE_TYPES
-        for rule in qos_consts.VALID_RULE_TYPES:
-            self.assertIn(
-                rule,
-                self.driver.mechanism_manager.supported_qos_rule_types)
-
-    @mock.patch.object(mech_test.TestMechanismDriver,
-                       'supported_qos_rule_types',
-                       new_callable=mock.PropertyMock,
-                       return_value=qos_consts.VALID_RULE_TYPES,
-                       create=True)
-    @mock.patch.object(mech_logger.LoggerMechanismDriver,
-                       '_supports_port_binding',
-                       new_callable=mock.PropertyMock,
-                       return_value=False)
-    def test_rule_types_with_driver_that_does_not_implement_binding(self,
-                                                                    *mocks):
-        for rule in qos_consts.VALID_RULE_TYPES:
-            self.assertIn(
-                rule,
-                self.driver.mechanism_manager.supported_qos_rule_types)
 
 
 class TestMl2BasicGet(test_plugin.TestBasicGet,
@@ -1049,6 +1000,23 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
             # check that notifier was still triggered
             self.assertTrue(notify.call_counts)
+
+    def test_registry_notify_after_port_binding(self):
+        plugin = directory.get_plugin()
+        ctx = context.get_admin_context()
+        update_events = []
+        receiver = lambda *a, **k: update_events.append(k['port'])
+        registry.subscribe(receiver, resources.PORT,
+                           events.AFTER_UPDATE)
+        with self.port() as p:
+            port = {'port': {'binding:host_id': 'newhost'}}
+            plugin.update_port(ctx, p['port']['id'], port)
+        # updating in the host should result in two AFTER_UPDATE events.
+        # one to change the host_id, the second to commit a binding
+        self.assertEqual('newhost', update_events[0]['binding:host_id'])
+        self.assertEqual('unbound', update_events[0]['binding:vif_type'])
+        self.assertEqual('newhost', update_events[1]['binding:host_id'])
+        self.assertNotEqual('unbound', update_events[1]['binding:vif_type'])
 
     def test_check_if_compute_port_serviced_by_dvr(self):
         self.assertTrue(utils.is_dvr_serviced(DEVICE_OWNER_COMPUTE))
@@ -2572,16 +2540,25 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
             plugin = self._create_plugin_for_create_update_port()
             original_port = plugin._make_port_dict(original_port_db)
 
-            plugin.update_port(self.context, port_id, mock.MagicMock())
+            res = plugin.update_port(self.context, port_id, mock.MagicMock())
 
-            kwargs = {
+            first_update = {
                 'context': self.context,
                 'port': updated_port,
                 'mac_address_updated': True,
                 'original_port': original_port,
             }
-            self.notify.assert_called_once_with('port', 'after_update',
-                plugin, **kwargs)
+            bind_update = {
+                'context': self.context,
+                'port': res,
+                'mac_address_updated': False,
+                'original_port': original_port,
+            }
+            expected = [
+                mock.call('port', 'after_update', plugin, **first_update),
+                mock.call('port', 'after_update', plugin, **bind_update)
+            ]
+            self.notify.assert_has_calls(expected)
 
     def test_notify_outside_of_delete_transaction(self):
         self.notify.side_effect = (
