@@ -1,3 +1,10 @@
+neutron (2:10.0.0~rc1-0ubuntu2) UNRELEASED; urgency=medium
+
+  * d/patches/fix-db-path.patch: Dont use an in-memory sqlite
+    database for unit tests. 
+
+ -- Chuck Short <zulcss@ubuntu.com>  Mon, 20 Feb 2017 09:40:40 -0500
+
 neutron (2:10.0.0~rc1-0ubuntu1) zesty; urgency=medium
 
   * debian/control: Add python-weakrefmethod. 

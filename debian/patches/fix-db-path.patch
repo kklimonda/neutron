@@ -1,0 +1,13 @@
+Description: Dont use an in memory databse for unit tests.
+Author: Chuck Short
+Forwarded: not needed.
+diff -Naurp neutron-10.0.0.0rc1.orig/neutron/tests/etc/neutron.conf neutron-10.0.0.0rc1/neutron/tests/etc/neutron.conf
+--- neutron-10.0.0.0rc1.orig/neutron/tests/etc/neutron.conf	2017-02-03 20:04:08.000000000 -0500
++++ neutron-10.0.0.0rc1/neutron/tests/etc/neutron.conf	2017-02-20 09:36:25.010302770 -0500
+@@ -23,5 +23,5 @@ rpc_backend = fake
+ lock_path = $state_path/lock
+ 
+ [database]
+-connection = 'sqlite://'
++connection = 'sqlite:////tmp/sqlite.db'
+ 
