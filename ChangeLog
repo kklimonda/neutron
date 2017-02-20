@@ -1,6 +1,26 @@
 CHANGES
 =======
 
+10.0.0.0rc2
+-----------
+
+* Clean up ovsdb-native's use of verify()
+* Invert device_owner to avoid filtering too much
+* Switch to 'subquery' for 1-M relationships
+* DVR: Look at all SNAT ports for a subnet match
+* Pecan: Fix tags handling for pecan
+* Update UPPER_CONSTRAINTS_FILE for stable/ocata
+* Revert "Linux Bridge: driver support for QoS egress minimum bandwidth"
+* Update devref for enhanced tag mechanism
+* Skip reading config files from neutron.conf.d for the namespace proxy
+* Use only_contrib option for nova_client calls
+* Improve tunnel_sync
+* DVR: Add static routes to FIP namespace
+* Update .gitreview for stable/ocata
+* Terminate macvtap agent when physical_interface_mapping config not present
+* Enhance tag mechanism
+* Tag the alembic migration revisions for Ocata
+
 10.0.0.0rc1
 -----------
 

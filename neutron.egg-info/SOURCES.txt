@@ -618,6 +618,7 @@ neutron/extensions/standardattrdescription.py
 neutron/extensions/subnet_service_types.py
 neutron/extensions/subnetallocation.py
 neutron/extensions/tag.py
+neutron/extensions/tag_ext.py
 neutron/extensions/timestamp.py
 neutron/extensions/trunk.py
 neutron/extensions/trunk_details.py
@@ -1662,6 +1663,7 @@ releasenotes/notes/dvr-ovs-agent-6052a8d60fddde22.yaml
 releasenotes/notes/dvr-support-live-migration-b818b12bd9cbb518.yaml
 releasenotes/notes/enable-sorting-pagination-754390289d3311fa.yaml
 releasenotes/notes/end-to-end-mtu-00345fc4282cb8fb.yaml
+releasenotes/notes/enhance-tags-1f8915fe3e074069.yaml
 releasenotes/notes/fail-on-missing-extensions-bc332124b780875b.yaml
 releasenotes/notes/fdb_population-70d751c8c2e4395f.yaml
 releasenotes/notes/fip-janitor-53f0d42a7471c5ed.yaml
@@ -1714,6 +1716,7 @@ releasenotes/notes/sorting-pagination-extensions-e66e99e2a8f5e563.yaml
 releasenotes/notes/sriov-agent-num-vf-0-0c06424247e7efe0.yaml
 releasenotes/notes/sriov_allow_use_many_nics_for_one_physnet-3570aa67a60ce6c4.yaml
 releasenotes/notes/sriov_show_l2_agent_extensions-ca852e155a529e99.yaml
+releasenotes/notes/terminate-macvtap-agt-when-interface_mapping-not-present-3109faf3b44d366a.yaml
 releasenotes/notes/timestamp_format_change-73eda78566b4690b.yaml
 releasenotes/notes/use-keystoneauth-24f309566001a16b.yaml
 releasenotes/notes/use-pyroute2-in-ip-lib-558bfea8f14d1fea.yaml
