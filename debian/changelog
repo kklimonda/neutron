@@ -1,4 +1,4 @@
-neutron (2:10.0.0~rc2-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:10.0.0~rc2-0ubuntu1) zesty; urgency=medium
 
   * d/patches/fix-db-path.patch: Dont use an in-memory sqlite
     database for unit tests. 
