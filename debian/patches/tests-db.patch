@@ -1,0 +1,17 @@
+Description: Specifiy a test databsae, not use in memory database.
+Author: Chuck Short <zulcss@ubuntu.com>
+Forwarded: Not needed.
+diff --git a/neutron/tests/etc/neutron.conf b/neutron/tests/etc/neutron.conf
+index cb963f9..30247a9 100644
+--- a/neutron/tests/etc/neutron.conf
++++ b/neutron/tests/etc/neutron.conf
+@@ -23,5 +23,5 @@ rpc_backend = fake
+ lock_path = $state_path/lock
+ 
+ [database]
+-connection = 'sqlite://'
++connection = 'sqlite:////tmp/sqlite.db'
+ 
+-- 
+2.7.4
+
