@@ -1,9 +1,12 @@
-neutron (2:8.3.1~dev24-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:8.4.0-0ubuntu1) UNRELEASED; urgency=medium
 
-  * New upstream version.
+  [ Corey Bryant ]
   * d/p/check-namespace-before-getting-devices.patch: Dropped. Fixed upstream.
 
- -- Corey Bryant <corey.bryant@canonical.com>  Wed, 30 Nov 2016 16:13:28 -0500
+  [ Chuck Short ]
+  * New upstream stable point release for OpenStack Mitaka (LP: #1668313).
+
+ -- Chuck Short <zulcss@ubuntu.com>  Mon, 27 Feb 2017 12:36:12 -0500
 
 neutron (2:8.3.0-0ubuntu1.2) xenial; urgency=medium
 
