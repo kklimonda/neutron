@@ -1,6 +1,38 @@
 CHANGES
 =======
 
+8.4.0
+-----
+
+* Check for unbound ports in L3 RPC handler
+* Only send string values to OVSDB other_config column
+* XenAPI: add support for conntrack with XenServer
+* Support alembic 0.8.9 in test_autogen_process_directives
+* Truncate IPDevice's name to interface max size
+* ovs agent, native ARP response: set Eth src/dst
+* OVS agent: configure both OF10 and OF13
+* ovs-agent: Catch exceptions in agent_main_wrapper
+* Unplug external device when delete snat namespace
+* Check for l3 agents count before router update
+* Solve unexpected NoneType returned by _get_routers_can_schedule
+* Ignore gre0 and gretap0 devices in netns cleanup script
+* Allow more time for DB migration tests
+* Don't depend on translated strings for error check
+* callbacks: Make the value of FLOATING_IP match with api resource
+* Parse the output of ip route more robustly
+* Add unit tests for ip_lib.get_routing_table
+* Add L3 HA test with linux bridge
+* ovs-agent: Close ryu app on all exceptions
+* Reduce IP link show calls for SR-IOV scan loop
+* gate_hook: Add a no-op rally case
+* Use subqueries for rbac_entries and subnets<->network
+* DVR: Fix race condition in creation of fip gateway
+* Delete default route if no gateway in external net
+* Correctly print --limit value passed via API
+* Skip larger than /64 subnets in DHCP agent
+* Delete conntrack when remote ipset member removed
+* SRIOV: don't block report_state with device count
+* Use revision to discard stale DHCP updates
 * Changing arping command execute to accept 1 as extra OK code
 * l3-ha: Send gratuitous ARP when new floating IP is added
 * DVR: remove misleading error log
