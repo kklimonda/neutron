@@ -15,18 +15,20 @@
 from oslo_log import log as logging
 
 from neutron._i18n import _LE, _LI
-from neutron.agent.l2.extensions import qos_linux as qos
+from neutron.agent.l2.extensions import qos
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common import (
     exceptions as exc)
 from neutron.plugins.ml2.drivers.mech_sriov.agent import eswitch_manager as esm
-from neutron.services.qos.drivers.sriov import driver
+from neutron.plugins.ml2.drivers.mech_sriov.mech_driver import (
+    mech_driver)
 
 LOG = logging.getLogger(__name__)
 
 
-class QosSRIOVAgentDriver(qos.QosLinuxAgentDriver):
+class QosSRIOVAgentDriver(qos.QosAgentDriver):
 
-    SUPPORTED_RULES = driver.SUPPORTED_RULES
+    SUPPORTED_RULES = (
+        mech_driver.SriovNicSwitchMechanismDriver.supported_qos_rule_types)
 
     def __init__(self):
         super(QosSRIOVAgentDriver, self).__init__()
@@ -59,34 +61,5 @@ class QosSRIOVAgentDriver(qos.QosLinuxAgentDriver):
             except exc.SriovNicError:
                 LOG.exception(
                     _LE("Failed to set device %s max rate"), device)
-        else:
-            LOG.info(_LI("No device with MAC %s defined on agent."), device)
-
-    # TODO(ihrachys): those handlers are pretty similar, probably could make
-    # use of some code deduplication
-    def create_minimum_bandwidth(self, port, rule):
-        self.update_minimum_bandwidth(port, rule)
-
-    def update_minimum_bandwidth(self, port, rule):
-        pci_slot = port['profile'].get('pci_slot')
-        device = port['device']
-        self._set_vf_min_tx_rate(device, pci_slot, rule.min_kbps)
-
-    def delete_minimum_bandwidth(self, port):
-        pci_slot = port['profile'].get('pci_slot')
-        if port.get('device_owner') is None:
-            self.eswitch_mgr.clear_min_tx_rate(pci_slot)
-        else:
-            device = port['device']
-            self._set_vf_min_tx_rate(device, pci_slot)
-
-    def _set_vf_min_tx_rate(self, device, pci_slot, min_tx_kbps=0):
-        if self.eswitch_mgr.device_exists(device, pci_slot):
-            try:
-                self.eswitch_mgr.set_device_min_tx_rate(
-                    device, pci_slot, min_tx_kbps)
-            except exc.SriovNicError:
-                LOG.exception(
-                    _LE("Failed to set device %s min_tx_rate"), device)
         else:
             LOG.info(_LI("No device with MAC %s defined on agent."), device)

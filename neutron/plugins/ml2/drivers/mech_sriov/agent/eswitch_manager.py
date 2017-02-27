@@ -16,12 +16,11 @@
 import os
 import re
 
-from neutron_lib.utils import helpers
 from oslo_log import log as logging
 import six
 
 from neutron._i18n import _, _LE, _LW
-from neutron.agent.linux import ip_link_support
+from neutron.common import utils
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
 from neutron.plugins.ml2.drivers.mech_sriov.agent import pci_lib
@@ -63,10 +62,6 @@ class PciOsWrapper(object):
         return vf_list
 
     @classmethod
-    def pf_device_exists(cls, dev_name):
-        return os.path.isdir(cls.DEVICE_PATH % dev_name)
-
-    @classmethod
     def is_assigned_vf(cls, dev_name, vf_index, ip_link_show_output):
         """Check if VF is assigned.
 
@@ -79,19 +74,12 @@ class PciOsWrapper(object):
         @param vf_index: vf index
         @param ip_link_show_output: 'ip link show' output
         """
-
-        if not cls.pf_device_exists(dev_name):
-            # If the root PCI path does not exist, then the VF cannot
-            # actually have been allocated and there is no way we can
-            # manage it.
-            return False
-
         path = cls.PCI_PATH % (dev_name, vf_index)
 
         try:
             ifname_list = os.listdir(path)
         except OSError:
-            # PCI_PATH does not exist means that the DIRECT VF assigned
+            # PCI_PATH does not exist means that the DIRECT VF assigend
             return True
 
         # Note(moshele) kernel < 3.13 doesn't create symbolic link
@@ -181,40 +169,37 @@ class EmbSwitch(object):
         vf_index = self._get_vf_index(pci_slot)
         return self.pci_dev_wrapper.set_vf_state(vf_index, state)
 
-    def set_device_rate(self, pci_slot, rate_type, rate_kbps):
-        """Set device rate: rate (max_tx_rate), min_tx_rate
+    def set_device_max_rate(self, pci_slot, max_kbps):
+        """Set device max rate.
 
         @param pci_slot: Virtual Function address
-        @param rate_type: device rate name type. Could be 'rate' and
-                          'min_tx_rate'.
-        @param rate_kbps: device rate in kbps
+        @param max_kbps: device max rate in kbps
         """
         vf_index = self._get_vf_index(pci_slot)
-        #NOTE(ralonsoh): ip link sets rate in Mbps therefore we need to convert
-        #the rate_kbps value from kbps to Mbps.
-        #Zero means to disable the rate so the lowest rate available is 1Mbps.
-        #Floating numbers are not allowed
-        if rate_kbps > 0 and rate_kbps < 1000:
-            rate_mbps = 1
+        #(Note): ip link set max rate in Mbps therefore
+        #we need to convert the max_kbps to Mbps.
+        #Zero means to disable the rate so the lowest rate
+        #available is 1Mbps. Floating numbers are not allowed
+        if max_kbps > 0 and max_kbps < 1000:
+            max_mbps = 1
         else:
-            rate_mbps = helpers.round_val(rate_kbps / 1000.0)
+            max_mbps = utils.round_val(max_kbps / 1000.0)
 
         log_dict = {
-            'rate_mbps': rate_mbps,
-            'rate_kbps': rate_kbps,
-            'vf_index': vf_index,
-            'rate_type': rate_type
+            'max_rate': max_mbps,
+            'max_kbps': max_kbps,
+            'vf_index': vf_index
         }
-        if rate_kbps % 1000 != 0:
-            LOG.debug("'%(rate_type)s' for SR-IOV ports is counted in Mbps; "
-                      "setting %(rate_mbps)s Mbps limit for port %(vf_index)s "
-                      "instead of %(rate_kbps)s kbps",
+        if max_kbps % 1000 != 0:
+            LOG.debug("Maximum rate for SR-IOV ports is counted in Mbps; "
+                      "setting %(max_rate)s Mbps limit for port %(vf_index)s "
+                      "instead of %(max_kbps)s kbps",
                       log_dict)
         else:
-            LOG.debug("Setting %(rate_mbps)s Mbps limit for port %(vf_index)s",
+            LOG.debug("Setting %(max_rate)s Mbps limit for port %(vf_index)s",
                       log_dict)
 
-        return self.pci_dev_wrapper.set_vf_rate(vf_index, rate_type, rate_mbps)
+        return self.pci_dev_wrapper.set_vf_max_rate(vf_index, max_mbps)
 
     def _get_vf_index(self, pci_slot):
         vf_index = self.pci_slot_map.get(pci_slot)
@@ -316,25 +301,8 @@ class ESwitchManager(object):
         """
         embedded_switch = self._get_emb_eswitch(device_mac, pci_slot)
         if embedded_switch:
-            embedded_switch.set_device_rate(
-                pci_slot,
-                ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE,
-                max_kbps)
-
-    def set_device_min_tx_rate(self, device_mac, pci_slot, min_kbps):
-        """Set device min_tx_rate
-
-        Sets the device min_tx_rate in kbps
-        @param device_mac: device mac
-        @param pci_slot: pci slot
-        @param max_kbps: device min_tx_rate in kbps
-        """
-        embedded_switch = self._get_emb_eswitch(device_mac, pci_slot)
-        if embedded_switch:
-            embedded_switch.set_device_rate(
-                pci_slot,
-                ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_MIN_TX_RATE,
-                min_kbps)
+            embedded_switch.set_device_max_rate(pci_slot,
+                                                max_kbps)
 
     def set_device_state(self, device_mac, pci_slot, admin_state_up):
         """Set device state
@@ -362,26 +330,6 @@ class ESwitchManager(object):
             embedded_switch.set_device_spoofcheck(pci_slot,
                                                   enabled)
 
-    def _process_emb_switch_map(self, phys_net, dev_name, exclude_devices):
-        """Process emb_switch_map
-        @param phys_net: physical network
-        @param dev_name: device name
-        @param exclude_devices: PCI devices to ignore.
-        """
-        emb_switches = self.emb_switches_map.get(phys_net, [])
-        for switch in emb_switches:
-            if switch.dev_name == dev_name:
-                if not PciOsWrapper.pf_device_exists(dev_name):
-                    # If the device is given to the VM as PCI-PT
-                    # then delete the respective emb_switch from map
-                    self.emb_switches_map.get(phys_net).remove(switch)
-                return
-
-        # We don't know about this device at the moment, so add to the map.
-        if PciOsWrapper.pf_device_exists(dev_name):
-            self._create_emb_switch(phys_net, dev_name,
-                exclude_devices.get(dev_name, set()))
-
     def discover_devices(self, device_mappings, exclude_devices):
         """Discover which Virtual functions to manage.
 
@@ -393,8 +341,8 @@ class ESwitchManager(object):
             exclude_devices = {}
         for phys_net, dev_names in six.iteritems(device_mappings):
             for dev_name in dev_names:
-                self._process_emb_switch_map(phys_net, dev_name,
-                                             exclude_devices)
+                self._create_emb_switch(phys_net, dev_name,
+                                        exclude_devices.get(dev_name, set()))
 
     def _create_emb_switch(self, phys_net, dev_name, exclude_devices):
         embedded_switch = EmbSwitch(phys_net, dev_name, exclude_devices)
@@ -420,46 +368,26 @@ class ESwitchManager(object):
         return embedded_switch
 
     def clear_max_rate(self, pci_slot):
-        """Clear the VF "rate" parameter
+        """Clear the max rate
 
-        Clear the "rate" configuration from VF by setting it to 0.
+        Clear the max rate configuration from VF by setting it to 0
         @param pci_slot: VF PCI slot
         """
-        self._clear_rate(pci_slot,
-            ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE)
-
-    def clear_min_tx_rate(self, pci_slot):
-        """Clear the VF "min_tx_rate" parameter
-
-        Clear the "min_tx_rate" configuration from VF by setting it to 0.
-        @param pci_slot: VF PCI slot
-        """
-        self._clear_rate(pci_slot,
-            ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_MIN_TX_RATE)
-
-    def _clear_rate(self, pci_slot, rate_type):
-        """Clear the VF rate parameter specified in rate_type
-
-        Clear the rate configuration from VF by setting it to 0.
-        @param pci_slot: VF PCI slot
-        @param rate_type: rate to clear ('rate', 'min_tx_rate')
-        """
-        #NOTE(Moshe Levi): we don't use the self._get_emb_eswitch here, because
-        #when clearing the VF it may be not assigned. This happens when
-        #libvirt releases the VF back to the hypervisor on delete VM. Therefore
-        #we should just clear the VF rate according to pci_slot no matter
+        #(Note): we don't use the self._get_emb_eswitch here, because when
+        #clearing the VF it may be not assigned. This happens when libvirt
+        #releases the VF back to the hypervisor on delete VM. Therefore we
+        #should just clear the VF max rate according to pci_slot no matter
         #if VF is assigned or not.
         embedded_switch = self.pci_slot_map.get(pci_slot)
         if embedded_switch:
-            #NOTE(Moshe Levi): check the pci_slot is not assigned to some
-            #other port before resetting the rate.
+            #(Note): check the pci_slot is not assigned to some
+            # other port before resetting the max rate.
             if embedded_switch.get_pci_device(pci_slot) is None:
-                embedded_switch.set_device_rate(pci_slot, rate_type, 0)
+                embedded_switch.set_device_max_rate(pci_slot, 0)
             else:
                 LOG.warning(_LW("VF with PCI slot %(pci_slot)s is already "
-                                "assigned; skipping reset for '%(rate_type)s' "
-                                "device configuration parameter"),
-                            {'pci_slot': pci_slot, 'rate_type': rate_type})
+                                "assigned; skipping reset maximum rate"),
+                            {'pci_slot': pci_slot})
         else:
             LOG.error(_LE("PCI slot %(pci_slot)s has no mapping to Embedded "
                           "Switch; skipping"), {'pci_slot': pci_slot})

@@ -13,20 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib import constants
-from neutron_lib import exceptions
-from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
+from oslo_serialization import jsonutils
 import six
 
-from neutron.common import constants as n_const
+from neutron.common import constants
+from neutron.common import exceptions
 from neutron.common import utils
 from neutron import context as neutron_context
 from neutron.db import api as db_api
 from neutron.extensions import l3
 from neutron.extensions import portbindings
+from neutron import manager
+from neutron.plugins.common import constants as plugin_constants
 
 
 LOG = logging.getLogger(__name__)
@@ -51,13 +52,14 @@ class L3RpcCallback(object):
     @property
     def plugin(self):
         if not hasattr(self, '_plugin'):
-            self._plugin = directory.get_plugin()
+            self._plugin = manager.NeutronManager.get_plugin()
         return self._plugin
 
     @property
     def l3plugin(self):
         if not hasattr(self, '_l3plugin'):
-            self._l3plugin = directory.get_plugin(constants.L3)
+            self._l3plugin = manager.NeutronManager.get_service_plugins()[
+                plugin_constants.L3_ROUTER_NAT]
         return self._l3plugin
 
     def get_router_ids(self, context, host):
@@ -95,6 +97,9 @@ class L3RpcCallback(object):
         if utils.is_extension_supported(
             self.plugin, constants.PORT_BINDING_EXT_ALIAS):
             self._ensure_host_set_on_ports(context, host, routers)
+        LOG.debug("Routers returned to l3 agent:\n %s",
+                  utils.DelayedStringRenderer(jsonutils.dumps,
+                                              routers, indent=5))
         return routers
 
     def _ensure_host_set_on_ports(self, context, host, routers):
@@ -109,11 +114,10 @@ class L3RpcCallback(object):
                                               gw_port_host,
                                               router.get('gw_port'),
                                               router['id'])
-                for p in router.get(n_const.SNAT_ROUTER_INTF_KEY, []):
+                for p in router.get(constants.SNAT_ROUTER_INTF_KEY, []):
                     self._ensure_host_set_on_port(
                         context, gw_port_host, p, router['id'],
                         ha_router_port=router.get('ha'))
-
             else:
                 self._ensure_host_set_on_port(
                     context, host,
@@ -188,8 +192,8 @@ class L3RpcCallback(object):
             # Ports that are DVR interfaces have multiple bindings (based on
             # of hosts on which DVR router interfaces are spawned). Such
             # bindings are created/updated here by invoking
-            # update_distributed_port_binding
-            self.plugin.update_distributed_port_binding(context, port['id'],
+            # update_dvr_port_binding
+            self.plugin.update_dvr_port_binding(context, port['id'],
                                                 {'port':
                                                  {portbindings.HOST_ID: host,
                                                   'device_id': router_id}
@@ -208,7 +212,8 @@ class L3RpcCallback(object):
         return net_id
 
     def get_service_plugin_list(self, context, **kwargs):
-        return directory.get_plugins().keys()
+        plugins = manager.NeutronManager.get_service_plugins()
+        return plugins.keys()
 
     @db_api.retry_db_errors
     def update_floatingip_statuses(self, context, router_id, fip_statuses):

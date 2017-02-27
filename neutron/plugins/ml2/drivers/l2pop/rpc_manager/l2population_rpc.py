@@ -16,13 +16,12 @@
 import abc
 import itertools
 
-from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_log import helpers as log_helpers
 import six
 
+from neutron.common import constants as n_const
 from neutron.plugins.ml2.drivers.l2pop import rpc as l2pop_rpc
-from neutron.plugins.ml2.drivers.openvswitch.agent import vlanmanager
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -105,7 +104,6 @@ class L2populationRpcCallBackMixin(object):
         pass
 
 
-@six.add_metaclass(abc.ABCMeta)
 class L2populationRpcCallBackTunnelMixin(L2populationRpcCallBackMixin):
     '''Mixin class of L2-population call back for Tunnel.
 
@@ -223,19 +221,19 @@ class L2populationRpcCallBackTunnelMixin(L2populationRpcCallBackMixin):
         '''
         pass
 
-    def get_agent_ports(self, fdb_entries):
+    def get_agent_ports(self, fdb_entries, local_vlan_map):
         """Generator to yield port info.
 
-        For each known (i.e found in VLAN manager) network in
+        For each known (i.e found in local_vlan_map) network in
         fdb_entries, yield (lvm, fdb_entries[network_id]['ports']) pair.
 
         :param fdb_entries: l2pop fdb entries
+        :param local_vlan_map: A dict to map network_id to
+            the corresponding lvm entry.
         """
-        vlan_manager = vlanmanager.LocalVlanManager()
         for network_id, values in fdb_entries.items():
-            try:
-                lvm = vlan_manager.get(network_id)
-            except vlanmanager.MappingNotFound:
+            lvm = local_vlan_map.get(network_id)
+            if lvm is None:
                 continue
             agent_ports = values.get('ports')
             yield (lvm, agent_ports)
@@ -281,7 +279,8 @@ class L2populationRpcCallBackTunnelMixin(L2populationRpcCallBackMixin):
             getattr(self, method)(context, values)
 
     @log_helpers.log_method_call
-    def fdb_chg_ip_tun(self, context, br, fdb_entries, local_ip):
+    def fdb_chg_ip_tun(self, context, br, fdb_entries, local_ip,
+                       local_vlan_map):
         '''fdb update when an IP of a port is updated.
 
         The ML2 l2-pop mechanism driver sends an fdb update rpc message when an
@@ -305,12 +304,13 @@ class L2populationRpcCallBackTunnelMixin(L2populationRpcCallBackMixin):
                              PortInfo has .mac_address and .ip_address attrs.
 
         :param local_ip: local IP address of this agent.
+        :param local_vlan_map: A dict to map network_id to
+            the corresponding lvm entry.
         '''
-        vlan_manager = vlanmanager.LocalVlanManager()
+
         for network_id, agent_ports in fdb_entries.items():
-            try:
-                lvm = vlan_manager.get(network_id)
-            except vlanmanager.MappingNotFound:
+            lvm = local_vlan_map.get(network_id)
+            if not lvm:
                 continue
 
             for agent_ip, state in agent_ports.items():

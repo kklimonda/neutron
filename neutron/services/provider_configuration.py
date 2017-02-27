@@ -17,25 +17,26 @@ import importlib
 import itertools
 import os
 
-from neutron_lib.db import constants as db_const
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_log import versionutils
 import stevedore
 
 from neutron._i18n import _, _LW
-from neutron.conf.services import provider_configuration as prov_config
-from neutron.db import _utils as db_utils
+from neutron.api.v2 import attributes as attr
+from neutron.common import exceptions as n_exc
 
 LOG = logging.getLogger(__name__)
 
 SERVICE_PROVIDERS = 'neutron.service_providers'
 
-# TODO(HenryG): use MovedGlobals to deprecate this.
-serviceprovider_opts = prov_config.serviceprovider_opts
+serviceprovider_opts = [
+    cfg.MultiStrOpt('service_provider', default=[],
+                    help=_('Defines providers for advanced services '
+                           'using the format: '
+                           '<service_type>:<name>:<driver>[:default]'))
+]
 
-prov_config.register_service_provider_opts()
+cfg.CONF.register_opts(serviceprovider_opts, 'service_providers')
 
 
 class NeutronModule(object):
@@ -49,10 +50,10 @@ class NeutronModule(object):
         }
 
     def _import_or_none(self):
-        try:
-            return importlib.import_module(self.module_name)
-        except ImportError:
-            return None
+            try:
+                return importlib.import_module(self.module_name)
+            except ImportError:
+                return None
 
     def installed(self):
         LOG.debug("NeutronModule installed = %s", self.module_name)
@@ -65,17 +66,23 @@ class NeutronModule(object):
     def ini(self, neutron_dir=None):
         if self.repo['ini'] is None:
             ini_file = cfg.ConfigOpts()
-            prov_config.register_service_provider_opts(ini_file)
+            ini_file.register_opts(serviceprovider_opts, 'service_providers')
 
             if neutron_dir is not None:
                 neutron_dirs = [neutron_dir]
             else:
                 try:
-                    neutron_dirs = cfg.CONF.config_dirs
+                    neutron_dirs = cfg.CONF.config_dirs or ['/etc/neutron']
                 except cfg.NoSuchOptError:
-                    neutron_dirs = None
-                if not neutron_dirs:
+                    # handle older oslo.config versions (<= 3.8.0) that do not
+                    # support config_dirs property
                     neutron_dirs = ['/etc/neutron']
+                    try:
+                        config_dir = cfg.CONF.config_dir
+                        if config_dir:
+                            neutron_dirs = [config_dir]
+                    except cfg.NoSuchOptError:
+                        pass
 
             # load configuration from all matching files to reflect oslo.config
             # behaviour
@@ -117,17 +124,10 @@ class NeutronModule(object):
         if not providers:
             providers = self.ini().service_providers.service_provider
 
-            if providers:
-                versionutils.report_deprecated_feature(
-                    LOG,
-                    _LW('Implicit loading of service providers from '
-                        'neutron_*.conf files is deprecated and will be '
-                        'removed in Ocata release.'))
-
         return providers
 
 
-# global scope function that should be used in service APIs
+#global scope function that should be used in service APIs
 def normalize_provider_name(name):
     return name.lower()
 
@@ -160,10 +160,10 @@ def parse_service_provider_opt(service_module='neutron'):
 
     """Parse service definition opts and returns result."""
     def validate_name(name):
-        if len(name) > db_const.NAME_FIELD_SIZE:
+        if len(name) > attr.NAME_MAX_LEN:
             raise n_exc.Invalid(
                 _("Provider name %(name)s is limited by %(len)s characters")
-                % {'name': name, 'len': db_const.NAME_FIELD_SIZE})
+                % {'name': name, 'len': attr.NAME_MAX_LEN})
 
     neutron_mod = NeutronModule(service_module)
     svc_providers_opt = neutron_mod.service_providers()
@@ -266,11 +266,17 @@ class ProviderConfiguration(object):
                     return False
         return True
 
+    def _fields(self, resource, fields):
+        if fields:
+            return dict(((key, item) for key, item in resource.items()
+                         if key in fields))
+        return resource
+
     def get_service_providers(self, filters=None, fields=None):
-        return [db_utils.resource_fields({'service_type': k[0],
-                                          'name': k[1],
-                                          'driver': v['driver'],
-                                          'default': v['default']},
-                                         fields)
+        return [self._fields({'service_type': k[0],
+                              'name': k[1],
+                              'driver': v['driver'],
+                              'default': v['default']},
+                             fields)
                 for k, v in self.providers.items()
                 if self._check_entry(k, v, filters)]

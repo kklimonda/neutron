@@ -18,7 +18,6 @@ import os
 
 import mock
 
-from neutron.agent.linux import ip_link_support
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
 from neutron.plugins.ml2.drivers.mech_sriov.agent import eswitch_manager as esm
@@ -42,9 +41,6 @@ class TestCreateESwitchManager(base.BaseTestCase):
                         side_effect=exc.InvalidDeviceError(
                             dev_name="p6p1", reason="device" " not found")),\
                 mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                           "eswitch_manager.PciOsWrapper.pf_device_exists",
-                           return_value=True), \
-                mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
                            "eswitch_manager.PciOsWrapper.is_assigned_vf",
                            return_value=True):
             eswitch_mgr = esm.ESwitchManager()
@@ -58,9 +54,6 @@ class TestCreateESwitchManager(base.BaseTestCase):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
                         "eswitch_manager.PciOsWrapper.scan_vf_devices",
                         return_value=self.SCANNED_DEVICES),\
-                mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                           "eswitch_manager.PciOsWrapper.pf_device_exists",
-                           return_value=True), \
                 mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
                            "eswitch_manager.PciOsWrapper.is_assigned_vf",
                            return_value=True):
@@ -78,8 +71,6 @@ class TestESwitchManagerApi(base.BaseTestCase):
     PCI_SLOT = '0000:06:00.1'
     WRONG_MAC = '00:00:00:00:00:67'
     WRONG_PCI = "0000:06:00.6"
-    MAX_RATE = ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE
-    MIN_RATE = ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_MIN_TX_RATE
 
     def setUp(self):
         super(TestESwitchManagerApi, self).setUp()
@@ -98,34 +89,9 @@ class TestESwitchManagerApi(base.BaseTestCase):
                         "eswitch_manager.PciOsWrapper.scan_vf_devices",
                         return_value=self.SCANNED_DEVICES), \
                  mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                            "eswitch_manager.PciOsWrapper.pf_device_exists",
-                            return_value=True), \
-                 mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
                             "eswitch_manager.PciOsWrapper.is_assigned_vf",
                             return_value=True):
             eswitch_mgr.discover_devices(device_mappings, None)
-
-    def test_discover_devices_with_device(self):
-        device_mappings = {'physnet1': ['p6p1', 'p6p2']}
-        with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                        "eswitch_manager.PciOsWrapper.pf_device_exists",
-                        return_value=True), \
-            mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                       "eswitch_manager.ESwitchManager._create_emb_switch",
-                       ) as emb_switch:
-            self.eswitch_mgr.discover_devices(device_mappings, None)
-            self.assertTrue(emb_switch.called)
-
-    def test_discover_devices_without_device(self):
-        device_mappings = {'physnet1': ['p6p1', 'p6p2']}
-        with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                        "eswitch_manager.PciOsWrapper.pf_device_exists",
-                        return_value=False), \
-            mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                       "eswitch_manager.ESwitchManager._create_emb_switch",
-                       ) as emb_switch:
-            self.eswitch_mgr.discover_devices(device_mappings, None)
-            self.assertFalse(emb_switch.called)
 
     def test_get_assigned_devices_info(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
@@ -211,26 +177,13 @@ class TestESwitchManagerApi(base.BaseTestCase):
                         "eswitch_manager.EmbSwitch.get_pci_device",
                         return_value=self.ASSIGNED_MAC) as get_pci_mock,\
                 mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                           "eswitch_manager.EmbSwitch.set_device_rate")\
-                as set_device_rate_mock:
+                           "eswitch_manager.EmbSwitch.set_device_max_rate")\
+                as set_device_max_rate_mock:
             self.eswitch_mgr.set_device_max_rate(self.ASSIGNED_MAC,
                                                  self.PCI_SLOT, 1000)
             get_pci_mock.assert_called_once_with(self.PCI_SLOT)
-            set_device_rate_mock.assert_called_once_with(
-                self.PCI_SLOT, self.MAX_RATE, 1000)
-
-    def test_set_device_min_tx_rate(self):
-        with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                        "eswitch_manager.EmbSwitch.get_pci_device",
-                        return_value=self.ASSIGNED_MAC) as get_pci_mock,\
-                mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                           "eswitch_manager.EmbSwitch.set_device_rate")\
-                as set_device_rate_mock:
-            self.eswitch_mgr.set_device_min_tx_rate(self.ASSIGNED_MAC,
-                                                    self.PCI_SLOT, 1000)
-            get_pci_mock.assert_called_once_with(self.PCI_SLOT)
-            set_device_rate_mock.assert_called_once_with(
-                self.PCI_SLOT, self.MIN_RATE, 1000)
+            set_device_max_rate_mock.assert_called_once_with(
+                self.PCI_SLOT, 1000)
 
     def test_set_device_status_mismatch(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
@@ -279,94 +232,36 @@ class TestESwitchManagerApi(base.BaseTestCase):
                                              'device_mac': self.WRONG_MAC})
                 self.assertFalse(result)
 
-    def test_clear_max_rate(self):
-        with mock.patch('neutron.plugins.ml2.drivers.mech_sriov.agent.'
-                        'eswitch_manager.ESwitchManager._clear_rate') \
-                as clear_rate_mock:
-            self.eswitch_mgr.clear_max_rate(self.PCI_SLOT)
-            clear_rate_mock.assert_called_once_with(self.PCI_SLOT,
-                                                    self.MAX_RATE)
+    @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
+                "PciDeviceIPWrapper.get_assigned_macs",
+                return_value={})
+    @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
+                "pci_lib.PciDeviceIPWrapper.link_show",
+                return_value='')
+    @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
+                "eswitch_manager.EmbSwitch.set_device_max_rate")
+    def test_clear_max_rate_existing_pci_slot(self, max_rate_mock, *args):
+        self.eswitch_mgr.clear_max_rate(self.PCI_SLOT)
+        max_rate_mock.assert_called_once_with(self.PCI_SLOT, 0)
 
-    def test_clear_min_tx_rate(self):
-        with mock.patch('neutron.plugins.ml2.drivers.mech_sriov.agent.'
-                        'eswitch_manager.ESwitchManager._clear_rate') \
-                as clear_rate_mock:
-            self.eswitch_mgr.clear_min_tx_rate(self.PCI_SLOT)
-            clear_rate_mock.assert_called_once_with(self.PCI_SLOT,
-                                                    self.MIN_RATE)
+    @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
+                "PciDeviceIPWrapper.get_assigned_macs",
+                return_value={0: ASSIGNED_MAC})
+    @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
+                "pci_lib.PciDeviceIPWrapper.link_show",
+                return_value='')
+    @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
+                "eswitch_manager.EmbSwitch.set_device_max_rate")
+    def test_clear_max_rate_exist_and_assigned_pci(
+            self, max_rate_mock, *args):
+        self.eswitch_mgr.clear_max_rate(self.PCI_SLOT)
+        self.assertFalse(max_rate_mock.called)
 
-    def test_process_emb_switch_without_device(self):
-        device_mappings = {'physnet1': ['p6p1', 'p6p2']}
-        phys_net = 'physnet1'
-        dev_name = 'p6p1'
-        self._set_eswitch_manager(self.eswitch_mgr, device_mappings)
-        with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                        "eswitch_manager.PciOsWrapper.pf_device_exists",
-                        return_value=False), \
-            mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                       "eswitch_manager.ESwitchManager._create_emb_switch",
-                       ) as emb_switch:
-            self.eswitch_mgr._process_emb_switch_map(phys_net,
-                                                     dev_name, {})
-            self.assertFalse(emb_switch.called)
-
-    def test_process_emb_switch_with_device(self):
-        device_mappings = {'physnet1': ['p6p1', 'p6p2']}
-        phys_net = 'physnet1'
-        dev_name = 'p6p3'
-        self._set_eswitch_manager(self.eswitch_mgr, device_mappings)
-        with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                        "eswitch_manager.PciOsWrapper.pf_device_exists",
-                        return_value=True), \
-            mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                       "eswitch_manager.ESwitchManager._create_emb_switch",
-                       ) as emb_switch:
-            self.eswitch_mgr._process_emb_switch_map(phys_net,
-                                                     dev_name, {})
-            self.assertTrue(emb_switch.called)
-
-    def _test_clear_rate(self, rate_type, pci_slot, passed, mac_address):
-        with mock.patch('neutron.plugins.ml2.drivers.mech_sriov.agent.'
-                        'eswitch_manager.EmbSwitch.set_device_rate') \
-                as set_rate_mock, \
-                mock.patch('neutron.plugins.ml2.drivers.mech_sriov.agent.'
-                           'pci_lib.PciDeviceIPWrapper.get_assigned_macs',
-                           return_value=mac_address), \
-                mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                           "pci_lib.PciDeviceIPWrapper.link_show",
-                           return_value=''), \
-                mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                           "eswitch_manager.PciOsWrapper.pf_device_exists",
-                           return_value=True):
-            self.eswitch_mgr._clear_rate(pci_slot, rate_type)
-            if passed:
-                set_rate_mock.assert_called_once_with(pci_slot, rate_type, 0)
-            else:
-                self.assertFalse(set_rate_mock.called)
-
-    def test_clear_rate_max_rate_existing_pci_slot(self):
-        self._test_clear_rate(self.MAX_RATE, self.PCI_SLOT, passed=True,
-                              mac_address={})
-
-    def test_clear_rate_max_rate_exist_and_assigned_pci(self):
-        self._test_clear_rate(self.MAX_RATE, self.PCI_SLOT, passed=False,
-                              mac_address={0: self.ASSIGNED_MAC})
-
-    def test_clear_rate_max_rate_nonexisting_pci_slot(self):
-        self._test_clear_rate(self.MAX_RATE, self.WRONG_PCI, passed=False,
-                              mac_address={})
-
-    def test_clear_rate_min_tx_rate_existing_pci_slot(self):
-        self._test_clear_rate(self.MIN_RATE, self.PCI_SLOT, passed=True,
-                              mac_address={})
-
-    def test_clear_rate_min_tx_rate_exist_and_assigned_pci(self):
-        self._test_clear_rate(self.MIN_RATE, self.PCI_SLOT, passed=False,
-                              mac_address={0: self.ASSIGNED_MAC})
-
-    def test_clear_rate_min_tx_rate_nonexisting_pci_slot(self):
-        self._test_clear_rate(self.MIN_RATE, self.WRONG_PCI, passed=False,
-                              mac_address={})
+    @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
+                "eswitch_manager.EmbSwitch.set_device_max_rate")
+    def test_clear_max_rate_nonexisting_pci_slot(self, max_rate_mock):
+        self.eswitch_mgr.clear_max_rate(self.WRONG_PCI)
+        self.assertFalse(max_rate_mock.called)
 
 
 class TestEmbSwitch(base.BaseTestCase):
@@ -488,68 +383,48 @@ class TestEmbSwitch(base.BaseTestCase):
                               self.emb_switch.set_device_spoofcheck,
                               self.WRONG_PCI_SLOT, True)
 
-    def test_set_device_rate_ok(self):
+    def test_set_device_max_rate_ok(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
-                        "PciDeviceIPWrapper.set_vf_rate") as pci_lib_mock:
-            self.emb_switch.set_device_rate(
-                self.PCI_SLOT,
-                ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 2000)
-            pci_lib_mock.assert_called_with(
-                0, ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 2)
+                        "PciDeviceIPWrapper.set_vf_max_rate") as pci_lib_mock:
+            self.emb_switch.set_device_max_rate(self.PCI_SLOT, 2000)
+            pci_lib_mock.assert_called_with(0, 2)
 
     def test_set_device_max_rate_ok2(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
-                        "PciDeviceIPWrapper.set_vf_rate") as pci_lib_mock:
-            self.emb_switch.set_device_rate(
-                self.PCI_SLOT,
-                ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 99)
-            pci_lib_mock.assert_called_with(
-                0, ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 1)
+                        "PciDeviceIPWrapper.set_vf_max_rate") as pci_lib_mock:
+            self.emb_switch.set_device_max_rate(self.PCI_SLOT, 99)
+            pci_lib_mock.assert_called_with(0, 1)
 
     def test_set_device_max_rate_rounded_ok(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
-                        "PciDeviceIPWrapper.set_vf_rate") as pci_lib_mock:
-            self.emb_switch.set_device_rate(
-                self.PCI_SLOT,
-                ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 2001)
-            pci_lib_mock.assert_called_with(
-                0, ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 2)
+                        "PciDeviceIPWrapper.set_vf_max_rate") as pci_lib_mock:
+            self.emb_switch.set_device_max_rate(self.PCI_SLOT, 2001)
+            pci_lib_mock.assert_called_with(0, 2)
 
     def test_set_device_max_rate_rounded_ok2(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
-                        "PciDeviceIPWrapper.set_vf_rate") as pci_lib_mock:
-            self.emb_switch.set_device_rate(
-                self.PCI_SLOT,
-                ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 2499)
-            pci_lib_mock.assert_called_with(
-                0, ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 2)
+                        "PciDeviceIPWrapper.set_vf_max_rate") as pci_lib_mock:
+            self.emb_switch.set_device_max_rate(self.PCI_SLOT, 2499)
+            pci_lib_mock.assert_called_with(0, 2)
 
     def test_set_device_max_rate_rounded_ok3(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
-                        "PciDeviceIPWrapper.set_vf_rate") as pci_lib_mock:
-            self.emb_switch.set_device_rate(
-                self.PCI_SLOT,
-                ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 2500)
-            pci_lib_mock.assert_called_with(
-                0, ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 3)
+                        "PciDeviceIPWrapper.set_vf_max_rate") as pci_lib_mock:
+            self.emb_switch.set_device_max_rate(self.PCI_SLOT, 2500)
+            pci_lib_mock.assert_called_with(0, 3)
 
     def test_set_device_max_rate_disable(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
-                        "PciDeviceIPWrapper.set_vf_rate") as pci_lib_mock:
-            self.emb_switch.set_device_rate(
-                self.PCI_SLOT,
-                ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 0)
-            pci_lib_mock.assert_called_with(
-                0, ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 0)
+                        "PciDeviceIPWrapper.set_vf_max_rate") as pci_lib_mock:
+            self.emb_switch.set_device_max_rate(self.PCI_SLOT, 0)
+            pci_lib_mock.assert_called_with(0, 0)
 
     def test_set_device_max_rate_fail(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
-                        "PciDeviceIPWrapper.set_vf_rate"):
-            self.assertRaises(
-                exc.InvalidPciSlotError,
-                self.emb_switch.set_device_rate,
-                self.WRONG_PCI_SLOT,
-                ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE, 1000)
+                        "PciDeviceIPWrapper.set_vf_max_rate"):
+            self.assertRaises(exc.InvalidPciSlotError,
+                              self.emb_switch.set_device_max_rate,
+                              self.WRONG_PCI_SLOT, 1000)
 
     def test_get_pci_device(self):
         with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
@@ -637,13 +512,9 @@ class TestPciOsWrapper(base.BaseTestCase):
 
     @mock.patch("os.listdir", side_effect=OSError())
     def test_is_assigned_vf_true(self, *args):
-        with mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent."
-                        "eswitch_manager.PciOsWrapper.pf_device_exists",
-                        return_value=True):
-            self.assertTrue(esm.PciOsWrapper.is_assigned_vf(
-                self.DEV_NAME, self.VF_INDEX, ''))
+        self.assertTrue(esm.PciOsWrapper.is_assigned_vf(
+            self.DEV_NAME, self.VF_INDEX, ''))
 
-    @mock.patch("os.path.exists", return_value=True)
     @mock.patch("os.listdir", return_value=[DEV_NAME, "eth1"])
     @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
                 "PciDeviceIPWrapper.is_macvtap_assigned", return_value=False)
@@ -651,7 +522,6 @@ class TestPciOsWrapper(base.BaseTestCase):
         self.assertFalse(esm.PciOsWrapper.is_assigned_vf(
             self.DEV_NAME, self.VF_INDEX, ''))
 
-    @mock.patch("os.path.exists", return_value=True)
     @mock.patch("os.listdir", return_value=["eth0", "eth1"])
     @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
                 "PciDeviceIPWrapper.is_macvtap_assigned", return_value=True)
@@ -660,7 +530,6 @@ class TestPciOsWrapper(base.BaseTestCase):
         esm.PciOsWrapper.is_assigned_vf(self.DEV_NAME, self.VF_INDEX, '')
         mock_is_macvtap_assigned.called_with(self.VF_INDEX, "eth0")
 
-    @mock.patch("os.path.exists", return_value=True)
     @mock.patch("os.listdir", side_effect=OSError())
     @mock.patch("neutron.plugins.ml2.drivers.mech_sriov.agent.pci_lib."
                 "PciDeviceIPWrapper.is_macvtap_assigned")
@@ -668,18 +537,3 @@ class TestPciOsWrapper(base.BaseTestCase):
         self, mock_is_macvtap_assigned, *args):
         esm.PciOsWrapper.is_assigned_vf(self.DEV_NAME, self.VF_INDEX, '')
         self.assertFalse(mock_is_macvtap_assigned.called)
-
-    @mock.patch("os.path.exists", return_value=False)
-    @mock.patch("os.listdir", return_value=["eth0", "eth1"])
-    def test_is_assigned_vf_pf_disappeared(self, list_dir_mock, *args):
-        self.assertFalse(esm.PciOsWrapper.is_assigned_vf(
-            self.DEV_NAME, self.VF_INDEX, ''))
-        self.assertFalse(list_dir_mock.called)
-
-    def test_pf_device_exists_with_no_dir(self):
-        with mock.patch("os.path.isdir", return_value=False):
-            self.assertFalse(esm.PciOsWrapper.pf_device_exists('p6p1'))
-
-    def test_pf_device_exists_with_dir(self):
-        with mock.patch("os.path.isdir", return_value=True):
-            self.assertTrue(esm.PciOsWrapper.pf_device_exists('p6p1'))

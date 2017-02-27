@@ -14,8 +14,6 @@
 #    under the License.
 
 import mock
-from neutron_lib import constants
-from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_utils import uuidutils
 from webob import exc as web_exc
@@ -25,6 +23,7 @@ from neutron.api import extensions
 from neutron.api.v2 import router
 from neutron import context
 from neutron.extensions import providernet as pnet
+from neutron import manager
 from neutron import quota
 from neutron.tests import tools
 from neutron.tests.unit.api import test_extensions
@@ -61,15 +60,17 @@ class ProvidernetExtensionTestCase(testlib_api.WebTestCase):
         self.useFixture(tools.AttributeMapMemento())
 
         # Update the plugin and extensions path
-        self.setup_coreplugin(plugin, load_plugins=False)
+        self.setup_coreplugin(plugin)
+        cfg.CONF.set_override('allow_pagination', True)
+        cfg.CONF.set_override('allow_sorting', True)
         self._plugin_patcher = mock.patch(plugin, autospec=True)
         self.plugin = self._plugin_patcher.start()
         # Ensure Quota checks never fail because of mock
         instance = self.plugin.return_value
         instance.get_networks_count.return_value = 1
-        # Register mock plugin and enable the 'provider' extension
-        instance.supported_extension_aliases = ["provider"]
-        directory.add_plugin(constants.CORE, instance)
+        # Instantiate mock plugin and enable the 'provider' extension
+        manager.NeutronManager.get_plugin().supported_extension_aliases = (
+            ["provider"])
         ext_mgr = ProviderExtensionManager()
         self.ext_mdw = test_extensions.setup_extensions_middleware(ext_mgr)
         self.addCleanup(self._plugin_patcher.stop)
@@ -124,14 +125,12 @@ class ProvidernetExtensionTestCase(testlib_api.WebTestCase):
 
     def test_network_create_with_provider_attrs(self):
         ctx = context.get_admin_context()
-        tenant_id = 'an_admin'
-        ctx.tenant_id = tenant_id
+        ctx.tenant_id = 'an_admin'
         res, data = self._post_network_with_provider_attrs(ctx)
         instance = self.plugin.return_value
         exp_input = {'network': data}
         exp_input['network'].update({'admin_state_up': True,
-                                     'tenant_id': tenant_id,
-                                     'project_id': tenant_id,
+                                     'tenant_id': 'an_admin',
                                      'shared': False})
         instance.create_network.assert_called_with(mock.ANY,
                                                    network=exp_input)

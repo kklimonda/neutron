@@ -24,11 +24,10 @@ import mock
 from oslo_config import cfg
 import psutil
 
-from neutron.common import utils
-from neutron import manager
+from neutron.agent.linux import utils
 from neutron import service
 from neutron.tests import base
-from neutron import worker as neutron_worker
+from neutron import worker
 from neutron import wsgi
 
 
@@ -36,7 +35,7 @@ CONF = cfg.CONF
 
 # This message will be written to temporary file each time
 # start method is called.
-FAKE_START_MSG = b"start"
+FAKE_START_MSG = "start".encode("utf-8")
 
 TARGET_PLUGIN = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 
@@ -110,10 +109,7 @@ class TestNeutronServer(base.BaseTestCase):
 
         def safe_ppid(proc):
             try:
-                if psutil.version_info[0] == 1:
-                    return proc.ppid
-                else:
-                    return proc.ppid()
+                return proc.ppid
             except psutil.NoSuchProcess:
                 return None
 
@@ -227,7 +223,7 @@ class TestRPCServer(TestNeutronServer):
 
     def setUp(self):
         super(TestRPCServer, self).setUp()
-        self.setup_coreplugin('ml2', load_plugins=False)
+        self.setup_coreplugin(TARGET_PLUGIN)
         self._plugin_patcher = mock.patch(TARGET_PLUGIN, autospec=True)
         self.plugin = self._plugin_patcher.start()
         self.plugin.return_value.rpc_workers_supported = True
@@ -239,7 +235,7 @@ class TestRPCServer(TestNeutronServer):
         # receiving SIGHUP.
         with mock.patch("neutron.service.RpcWorker.start") as start_method:
             with mock.patch(
-                    "neutron_lib.plugins.directory.get_plugin"
+                    "neutron.manager.NeutronManager.get_plugin"
             ) as get_plugin:
                 start_method.side_effect = self._fake_start
                 get_plugin.return_value = self.plugin
@@ -248,8 +244,8 @@ class TestRPCServer(TestNeutronServer):
                 # not interested in state report workers specifically
                 CONF.set_override("rpc_state_report_workers", 0)
 
-                rpc_workers_launcher = service.start_rpc_workers()
-                rpc_workers_launcher.wait()
+                launcher = service.serve_rpc()
+                launcher.wait()
 
     def test_restart_rpc_on_sighup_multiple_workers(self):
         self._test_restart_service_on_sighup(service=self._serve_rpc,
@@ -261,19 +257,19 @@ class TestPluginWorker(TestNeutronServer):
 
     def setUp(self):
         super(TestPluginWorker, self).setUp()
-        self.setup_coreplugin('ml2', load_plugins=False)
+        self.setup_coreplugin(TARGET_PLUGIN)
         self._plugin_patcher = mock.patch(TARGET_PLUGIN, autospec=True)
         self.plugin = self._plugin_patcher.start()
-        manager.init()
 
     def _start_plugin(self, workers=1):
-        with mock.patch('neutron_lib.plugins.directory.get_plugin') as gp:
+        with mock.patch('neutron.manager.NeutronManager.get_plugin') as gp:
             gp.return_value = self.plugin
-            plugin_workers_launcher = service.start_plugins_workers()
-            plugin_workers_launcher.wait()
+            launchers = service.start_plugin_workers()
+            for launcher in launchers:
+                launcher.wait()
 
     def test_start(self):
-        class FakeWorker(neutron_worker.NeutronWorker):
+        class FakeWorker(worker.NeutronWorker):
             def start(self):
                 pass
 

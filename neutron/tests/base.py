@@ -16,24 +16,20 @@
 """Base test cases for all neutron tests.
 """
 
-import abc
 import contextlib
-import functools
 import gc
-import inspect
 import os
 import os.path
+import random
 import weakref
 
 import eventlet.timeout
 import fixtures
 import mock
-from neutron_lib import fixture
 from oslo_concurrency.fixture import lockutils
 from oslo_config import cfg
 from oslo_messaging import conffixture as messaging_conffixture
 from oslo_utils import excutils
-from oslo_utils import fileutils
 from oslo_utils import strutils
 from oslotest import base
 import six
@@ -42,23 +38,21 @@ import testtools
 from neutron._i18n import _
 from neutron.agent.linux import external_process
 from neutron.api.rpc.callbacks.consumer import registry as rpc_consumer_reg
-from neutron.api.rpc.callbacks.producer import registry as rpc_producer_reg
 from neutron.callbacks import manager as registry_manager
 from neutron.callbacks import registry
 from neutron.common import config
+from neutron.common import constants
 from neutron.common import rpc as n_rpc
 from neutron.db import agentschedulers_db
-from neutron.db import api as db_api
 from neutron import manager
 from neutron import policy
-from neutron.quota import resource_registry
 from neutron.tests import fake_notifier
 from neutron.tests import post_mortem_debug
 from neutron.tests import tools
 
 
 CONF = cfg.CONF
-CONF.import_opt('state_path', 'neutron.conf.common')
+CONF.import_opt('state_path', 'neutron.common.config')
 
 ROOTDIR = os.path.dirname(__file__)
 ETCDIR = os.path.join(ROOTDIR, 'etc')
@@ -72,28 +66,39 @@ def fake_use_fatal_exceptions(*args):
     return True
 
 
+def get_rand_name(max_length=None, prefix='test'):
+    """Return a random string.
+
+    The string will start with 'prefix' and will be exactly 'max_length'.
+    If 'max_length' is None, then exactly 8 random characters, each
+    hexadecimal, will be added. In case len(prefix) <= len(max_length),
+    ValueError will be raised to indicate the problem.
+    """
+
+    if max_length:
+        length = max_length - len(prefix)
+        if length <= 0:
+            raise ValueError("'max_length' must be bigger than 'len(prefix)'.")
+
+        suffix = ''.join(str(random.randint(0, 9)) for i in range(length))
+    else:
+        suffix = hex(random.randint(0x10000000, 0x7fffffff))[2:]
+    return prefix + suffix
+
+
+def get_rand_device_name(prefix='test'):
+    return get_rand_name(
+        max_length=constants.DEVICE_NAME_MAX_LEN, prefix=prefix)
+
+
 def bool_from_env(key, strict=False, default=False):
     value = os.environ.get(key)
     return strutils.bool_from_string(value, strict=strict, default=default)
 
 
-def setup_test_logging(config_opts, log_dir, log_file_path_template):
-    # Have each test log into its own log file
-    config_opts.set_override('debug', True)
-    fileutils.ensure_tree(log_dir, mode=0o755)
-    log_file = sanitize_log_path(
-        os.path.join(log_dir, log_file_path_template))
-    config_opts.set_override('log_file', log_file)
-    config_opts.set_override('use_stderr', False)
-    config.setup_logging()
-
-
 def sanitize_log_path(path):
     # Sanitize the string so that its log path is shell friendly
-    replace_map = {' ': '-', '(': '_', ')': '_'}
-    for s, r in six.iteritems(replace_map):
-        path = path.replace(s, r)
-    return path
+    return path.replace(' ', '-').replace('(', '_').replace(')', '_')
 
 
 class AttributeDict(dict):
@@ -109,32 +114,6 @@ class AttributeDict(dict):
         raise AttributeError(_("Unknown attribute '%s'.") % name)
 
 
-def _catch_timeout(f):
-    @functools.wraps(f)
-    def func(self, *args, **kwargs):
-        try:
-            return f(self, *args, **kwargs)
-        except eventlet.timeout.Timeout as e:
-            self.fail('Execution of this test timed out: %s' % e)
-    return func
-
-
-class _CatchTimeoutMetaclass(abc.ABCMeta):
-    def __init__(cls, name, bases, dct):
-        super(_CatchTimeoutMetaclass, cls).__init__(name, bases, dct)
-        for name, method in inspect.getmembers(
-                # NOTE(ihrachys): we should use isroutine because it will catch
-                # both unbound methods (python2) and functions (python3)
-                cls, predicate=inspect.isroutine):
-            if name.startswith('test_'):
-                setattr(cls, name, _catch_timeout(method))
-
-
-# Test worker cannot survive eventlet's Timeout exception, which effectively
-# kills the whole worker, with all test cases scheduled to it. This metaclass
-# makes all test cases convert Timeout exceptions into unittest friendly
-# failure mode (self.fail).
-@six.add_metaclass(_CatchTimeoutMetaclass)
 class DietTestCase(base.BaseTestCase):
     """Same great taste, less filling.
 
@@ -282,7 +261,7 @@ class BaseTestCase(DietTestCase):
         self.useFixture(ProcessMonitorFixture())
 
         self.useFixture(fixtures.MonkeyPatch(
-            'neutron_lib.exceptions.NeutronException.use_fatal_exceptions',
+            'neutron.common.exceptions.NeutronException.use_fatal_exceptions',
             fake_use_fatal_exceptions))
 
         self.useFixture(fixtures.MonkeyPatch(
@@ -292,15 +271,10 @@ class BaseTestCase(DietTestCase):
         self.setup_rpc_mocks()
         self.setup_config()
         self.setup_test_registry_instance()
-        # Give a private copy of the directory to each test.
-        self.useFixture(fixture.PluginDirectoryFixture())
 
         policy.init()
         self.addCleanup(policy.reset)
-        self.addCleanup(resource_registry.unregister_all_resources)
-        self.addCleanup(db_api.sqla_remove_all)
         self.addCleanup(rpc_consumer_reg.clear)
-        self.addCleanup(rpc_producer_reg.clear)
 
     def get_new_temp_dir(self):
         """Create a new temporary directory.
@@ -385,13 +359,11 @@ class BaseTestCase(DietTestCase):
         for k, v in six.iteritems(kw):
             CONF.set_override(k, v, group)
 
-    def setup_coreplugin(self, core_plugin=None, load_plugins=True):
+    def setup_coreplugin(self, core_plugin=None):
         cp = PluginFixture(core_plugin)
         self.useFixture(cp)
         self.patched_dhcp_periodic = cp.patched_dhcp_periodic
         self.patched_default_svc_plugins = cp.patched_default_svc_plugins
-        if load_plugins:
-            manager.init()
 
     def setup_notification_driver(self, notification_driver=None):
         self.addCleanup(fake_notifier.reset)
@@ -414,11 +386,11 @@ class PluginFixture(fixtures.Fixture):
         self.patched_default_svc_plugins = self.default_svc_plugins_p.start()
         self.dhcp_periodic_p = mock.patch(
             'neutron.db.agentschedulers_db.DhcpAgentSchedulerDbMixin.'
-            'add_periodic_dhcp_agent_status_check')
+            'start_periodic_dhcp_agent_status_check')
         self.patched_dhcp_periodic = self.dhcp_periodic_p.start()
         self.agent_health_check_p = mock.patch(
             'neutron.db.agentschedulers_db.DhcpAgentSchedulerDbMixin.'
-            'add_agent_status_check_worker')
+            'add_agent_status_check')
         self.agent_health_check = self.agent_health_check_p.start()
         # Plugin cleanup should be triggered last so that
         # test-specific cleanup has a chance to release references.

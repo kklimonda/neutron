@@ -15,16 +15,15 @@
 
 
 import os
-
 from pecan import set_config
 from pecan.testing import load_test_app
-import unittest2
+from unittest import TestCase
 
 
 __all__ = ['FunctionalTest']
 
 
-class FunctionalTest(unittest2.TestCase):
+class FunctionalTest(TestCase):
     """
     Used for functional tests where you need to test your
     literal application and its integration with the framework.
@@ -35,4 +34,6 @@ class FunctionalTest(unittest2.TestCase):
             os.path.dirname(__file__),
             'config.py'
         ))
-        self.addCleanup(set_config, {}, overwrite=True)
+
+    def tearDown(self):
+        set_config({}, overwrite=True)

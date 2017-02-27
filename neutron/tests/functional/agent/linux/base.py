@@ -14,6 +14,7 @@
 
 import testscenarios
 
+from neutron.tests import base as tests_base
 from neutron.tests.functional import base
 
 
@@ -23,6 +24,10 @@ ICMP_MARK_RULE = ('-j MARK --set-xmark %(value)s/%(mask)s'
                   % {'value': MARK_VALUE, 'mask': MARK_MASK})
 MARKED_BLOCK_RULE = '-m mark --mark %s -j DROP' % MARK_VALUE
 ICMP_BLOCK_RULE = '-p icmp -j DROP'
+
+
+#TODO(jschwarz): Move these two functions to neutron/tests/common/
+get_rand_name = tests_base.get_rand_name
 
 
 # Regarding MRO, it goes BaseOVSLinuxTestCase, WithScenarios,

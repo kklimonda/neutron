@@ -16,15 +16,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import uuid
+
 import mock
 from oslo_config import cfg
-from oslo_utils import uuidutils
 from webob import exc
 import webtest
 
 from neutron.api import extensions
 from neutron.api.v2 import attributes
-from neutron import manager
 from neutron import quota
 from neutron.tests import tools
 from neutron.tests.unit.api import test_extensions
@@ -55,8 +55,8 @@ class ExtensionTestCase(testlib_api.WebTestCase):
         # Create the default configurations
         self.config_parse()
 
-        # just stubbing core plugin with plugin
-        self.setup_coreplugin(plugin, load_plugins=False)
+        #just stubbing core plugin with plugin
+        self.setup_coreplugin(plugin)
         cfg.CONF.set_override('core_plugin', plugin)
         if service_type:
             cfg.CONF.set_override('service_plugins', [plugin])
@@ -66,16 +66,16 @@ class ExtensionTestCase(testlib_api.WebTestCase):
         instance = self.plugin.return_value
         if service_type:
             instance.get_plugin_type.return_value = service_type
-        manager.init()
-
         if supported_extension_aliases is not None:
             instance.supported_extension_aliases = supported_extension_aliases
         if allow_pagination:
+            cfg.CONF.set_override('allow_pagination', True)
             # instance.__native_pagination_support = True
             native_pagination_attr_name = ("_%s__native_pagination_support"
                                            % instance.__class__.__name__)
             setattr(instance, native_pagination_attr_name, True)
         if allow_sorting:
+            cfg.CONF.set_override('allow_sorting', True)
             # instance.__native_sorting_support = True
             native_sorting_attr_name = ("_%s__native_sorting_support"
                                         % instance.__class__.__name__)
@@ -108,7 +108,7 @@ class ExtensionTestCase(testlib_api.WebTestCase):
 
     def _test_entity_delete(self, entity):
         """Does the entity deletion based on naming convention."""
-        entity_id = uuidutils.generate_uuid()
+        entity_id = str(uuid.uuid4())
         path = self._resource_prefix + '/' if self._resource_prefix else ''
         path += self._plural_mappings.get(entity, entity + 's')
         if self._translate_resource_name:

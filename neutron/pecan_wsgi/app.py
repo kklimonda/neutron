@@ -14,20 +14,19 @@
 #    under the License.
 
 from keystonemiddleware import auth_token
-from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_middleware import cors
-from oslo_middleware import http_proxy_to_wsgi
 from oslo_middleware import request_id
 import pecan
 
 from neutron.api import versions
+from neutron.common import exceptions as n_exc
 from neutron.pecan_wsgi import hooks
 from neutron.pecan_wsgi import startup
 
 CONF = cfg.CONF
-CONF.import_opt('bind_host', 'neutron.conf.common')
-CONF.import_opt('bind_port', 'neutron.conf.common')
+CONF.import_opt('bind_host', 'neutron.common.config')
+CONF.import_opt('bind_port', 'neutron.common.config')
 
 
 def setup_app(*args, **kwargs):
@@ -51,7 +50,6 @@ def setup_app(*args, **kwargs):
         hooks.OwnershipValidationHook(),  # priority 125
         hooks.QuotaEnforcementHook(),  # priority 130
         hooks.NotifierHook(),  # priority 135
-        hooks.QueryParametersHook(),  # priority 139
         hooks.PolicyHook(),  # priority 140
     ]
 
@@ -81,24 +79,19 @@ def _wrap_app(app):
     # version can be unauthenticated so it goes outside of auth
     app = versions.Versions(app)
 
-    # handle cases where neutron-server is behind a proxy
-    app = http_proxy_to_wsgi.HTTPProxyToWSGI(app)
-
     # This should be the last middleware in the list (which results in
     # it being the first in the middleware chain). This is to ensure
     # that any errors thrown by other middleware, such as an auth
     # middleware - are annotated with CORS headers, and thus accessible
     # by the browser.
     app = cors.CORS(app, cfg.CONF)
-    cors.set_defaults(
+    app.set_latent(
         allow_headers=['X-Auth-Token', 'X-Identity-Status', 'X-Roles',
                        'X-Service-Catalog', 'X-User-Id', 'X-Tenant-Id',
-                       'X-OpenStack-Request-ID',
-                       'X-Trace-Info', 'X-Trace-HMAC'],
+                       'X-OpenStack-Request-ID'],
         allow_methods=['GET', 'PUT', 'POST', 'DELETE', 'PATCH'],
         expose_headers=['X-Auth-Token', 'X-Subject-Token', 'X-Service-Token',
-                        'X-OpenStack-Request-ID',
-                        'X-Trace-Info', 'X-Trace-HMAC']
+                        'X-OpenStack-Request-ID']
     )
 
     return app

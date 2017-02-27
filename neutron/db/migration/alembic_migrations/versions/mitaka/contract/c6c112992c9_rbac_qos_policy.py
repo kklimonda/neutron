@@ -25,6 +25,7 @@ from alembic import op
 from oslo_utils import uuidutils
 import sqlalchemy as sa
 
+from neutron.api.v2 import attributes as attrs
 from neutron.db import rbac_db_models
 
 # revision identifiers, used by Alembic.
@@ -36,9 +37,9 @@ depends_on = ('15e43b934f81',)
 qos_rbacs = sa.Table(
     'qospolicyrbacs', sa.MetaData(),
     sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('tenant_id', sa.String(length=255),
+    sa.Column('tenant_id', sa.String(length=attrs.TENANT_ID_MAX_LEN),
               nullable=True),
-    sa.Column('target_tenant', sa.String(length=255),
+    sa.Column('target_tenant', sa.String(length=attrs.TENANT_ID_MAX_LEN),
               nullable=False),
     sa.Column('action', sa.String(length=255), nullable=False),
     sa.Column('object_id', sa.String(length=36), nullable=False))
@@ -48,7 +49,7 @@ qos_rbacs = sa.Table(
 qos_policy = sa.Table('qos_policies', sa.MetaData(),
                       sa.Column('id', sa.String(length=36), nullable=False),
                       sa.Column('tenant_id',
-                                sa.String(length=255)),
+                                sa.String(length=attrs.TENANT_ID_MAX_LEN)),
                       sa.Column('shared', sa.Boolean(), nullable=False))
 
 

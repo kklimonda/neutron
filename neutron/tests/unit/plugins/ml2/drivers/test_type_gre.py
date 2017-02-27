@@ -14,6 +14,7 @@
 #    under the License.
 
 from neutron.plugins.common import constants as p_const
+from neutron.plugins.ml2 import config
 from neutron.plugins.ml2.drivers import type_gre
 from neutron.tests.unit.plugins.ml2.drivers import base_type_tunnel
 from neutron.tests.unit.plugins.ml2 import test_rpc
@@ -24,6 +25,16 @@ TUNNEL_IP_ONE = "10.10.10.10"
 TUNNEL_IP_TWO = "10.10.10.20"
 HOST_ONE = 'fake_host_one'
 HOST_TWO = 'fake_host_two'
+
+
+def _add_allocation(session, gre_id, allocated=False):
+    allocation = type_gre.GreAllocation(gre_id=gre_id, allocated=allocated)
+    allocation.save(session)
+
+
+def _get_allocation(session, gre_id):
+    return session.query(type_gre.GreAllocation).filter_by(
+        gre_id=gre_id).one()
 
 
 class GreTypeTest(base_type_tunnel.TunnelTypeTestMixin,
@@ -44,6 +55,30 @@ class GreTypeTest(base_type_tunnel.TunnelTypeTestMixin,
             elif endpoint['ip_address'] == base_type_tunnel.TUNNEL_IP_TWO:
                 self.assertEqual(base_type_tunnel.HOST_TWO, endpoint['host'])
 
+    def test_get_mtu(self):
+        config.cfg.CONF.set_override('global_physnet_mtu', 1500)
+        config.cfg.CONF.set_override('path_mtu', 1475, group='ml2')
+        self.driver.physnet_mtus = {'physnet1': 1450, 'physnet2': 1400}
+        self.assertEqual(1475 - p_const.GRE_ENCAP_OVERHEAD,
+                         self.driver.get_mtu('physnet1'))
+
+        config.cfg.CONF.set_override('global_physnet_mtu', 1425)
+        config.cfg.CONF.set_override('path_mtu', 1475, group='ml2')
+        self.driver.physnet_mtus = {'physnet1': 1400, 'physnet2': 1400}
+        self.assertEqual(1425 - p_const.GRE_ENCAP_OVERHEAD,
+                         self.driver.get_mtu('physnet1'))
+
+        config.cfg.CONF.set_override('global_physnet_mtu', 0)
+        config.cfg.CONF.set_override('path_mtu', 1475, group='ml2')
+        self.driver.physnet_mtus = {'physnet1': 1450, 'physnet2': 1425}
+        self.assertEqual(1475 - p_const.GRE_ENCAP_OVERHEAD,
+                         self.driver.get_mtu('physnet2'))
+
+        config.cfg.CONF.set_override('global_physnet_mtu', 0)
+        config.cfg.CONF.set_override('path_mtu', 0, group='ml2')
+        self.driver.physnet_mtus = {}
+        self.assertEqual(0, self.driver.get_mtu('physnet1'))
+
 
 class GreTypeMultiRangeTest(base_type_tunnel.TunnelTypeMultiRangeTestMixin,
                             testlib_api.SqlTestCase):
@@ -55,10 +90,3 @@ class GreTypeRpcCallbackTest(base_type_tunnel.TunnelRpcCallbackTestMixin,
                              testlib_api.SqlTestCase):
     DRIVER_CLASS = type_gre.GreTypeDriver
     TYPE = p_const.TYPE_GRE
-
-
-class GreTypeTunnelMTUTest(base_type_tunnel.TunnelTypeMTUTestMixin,
-                           testlib_api.SqlTestCase):
-    DRIVER_CLASS = type_gre.GreTypeDriver
-    TYPE = p_const.TYPE_GRE
-    ENCAP_OVERHEAD = p_const.GRE_ENCAP_OVERHEAD

@@ -63,33 +63,25 @@ The following are the current Neutron Lieutenants.
 +------------------------+---------------------------+----------------------+
 | Area                   | Lieutenant                | IRC nick             |
 +========================+===========================+======================+
-| API                    | Akihiro Motoki            | amotoki              |
-+------------------------+---------------------------+----------------------+
-| DB                     | Ann Taraday               | ataraday             |
+| API and DB             | Akihiro Motoki            | amotoki              |
+|                        +---------------------------+----------------------+
+|                        | Henry Gessau              | HenryG               |
 +------------------------+---------------------------+----------------------+
 | Built-In Control Plane | Kevin Benton              | kevinbenton          |
 +------------------------+---------------------------+----------------------+
 | Client                 | Akihiro Motoki            | amotoki              |
-|                        +---------------------------+----------------------+
-|                        | Abhishek Raut             | abhiraut             |
 +------------------------+---------------------------+----------------------+
-| Docs                   | John Davidge              | john-davidge         |
+| Docs                   | Edgar Magana              | emagana              |
 +------------------------+---------------------------+----------------------+
-| Infra                  | Nate Johnston             | njohnston            |
-|                        +---------------------------+----------------------+
-|                        | Armando Migliaccio        | armax                |
+| Infra                  | Armando Migliaccio        | armax                |
 |                        +---------------------------+----------------------+
 |                        | Doug Wiegley              | dougwig              |
 +------------------------+---------------------------+----------------------+
-| L3                     | Brian Haley               | haleyb               |
-+                        +---------------------------+----------------------+
-|                        | Miguel Lavalle            | mlavalle             |
+| L3                     | Carl Baldwin              | carl_baldwin         |
 +------------------------+---------------------------+----------------------+
-| Services               | Ryan Tidwell              | tidwellr             |
-|                        +---------------------------+----------------------+
-|                        | Nate Johnston             | njohnston            |
+| Services               | Doug Wiegley              | dougwig              |
 +------------------------+---------------------------+----------------------+
-| Testing                | Jakub Libosvar            | jlibosva             |
+| Testing                | Assaf Muller              | amuller              |
 +------------------------+---------------------------+----------------------+
 
 Some notes on the above:
@@ -97,7 +89,7 @@ Some notes on the above:
 * "Built-In Control Plane" means the L2 agents, DHCP agents, SGs, metadata
   agents and ML2.
 * The client includes commands installed server side.
-* L3 includes the L3 agent, DVR, Dynamic routing and IPAM.
+* L3 includes the L3 agent, DVR, and IPAM.
 * Services includes FWaaS, LBaaS, and VPNaaS.
 * Note these areas may change as the project evolves due to code refactoring,
   new feature areas, and libification of certain pieces of code.
@@ -112,17 +104,17 @@ updating the core review team for the sub-project's repositories.
 +------------------------+---------------------------+----------------------+
 | Area                   | Lieutenant                | IRC nick             |
 +========================+===========================+======================+
+| dragonflow             | Eran Gampel               | gampel               |
+|                        +---------------------------+----------------------+
+|                        | Gal Sagie                 | gsagie               |
++------------------------+---------------------------+----------------------+
 | networking-bgpvpn      | Mathieu Rohon             | matrohon             |
-| networking-bagpipe     +---------------------------+----------------------+
+|                        +---------------------------+----------------------+
 |                        | Thomas Morin              | tmorin               |
 +------------------------+---------------------------+----------------------+
-| net...-dynamic-routing | Ryan Tidwell              | tidwellr             |
-|                        +---------------------------+----------------------+
-|                        | Vikram Choudhary          | vikram               |
+| networking-calico      | Neil Jerram               | neiljerram           |
 +------------------------+---------------------------+----------------------+
-| neutron-fwaas          | Nate Johnston             | njohnston            |
-|                        +---------------------------+----------------------+
-|                        | Sridar Kandaswamy         | SridarK              |
+| networking-l2gw        | Sukhdev Kapur             | sukhdev              |
 +------------------------+---------------------------+----------------------+
 | networking-midonet     | Ryu Ishimoto              | ryu25                |
 |                        +---------------------------+----------------------+
@@ -130,16 +122,22 @@ updating the core review team for the sub-project's repositories.
 |                        +---------------------------+----------------------+
 |                        | YAMAMOTO Takashi          | yamamoto             |
 +------------------------+---------------------------+----------------------+
-| networking-odl         | Isaku Yamahata            | yamahata             |
+| networking-odl         | Flavio Fernandes          | flaviof              |
+|                        +---------------------------+----------------------+
+|                        | Kyle Mestery              | mestery              |
 +------------------------+---------------------------+----------------------+
-| networking-ofagent (*) | YAMAMOTO Takashi          | yamamoto             |
+| networking-ofagent     | YAMAMOTO Takashi          | yamamoto             |
++------------------------+---------------------------+----------------------+
+| networking-onos        | Vikram Choudhary          | vikram               |
+|                        +---------------------------+----------------------+
+|                        | Albert Dongfeng           | albert_dongfeng      |
 +------------------------+---------------------------+----------------------+
 | networking-ovn         | Russell Bryant            | russellb             |
 +------------------------+---------------------------+----------------------+
 | networking-sfc         | Cathy Zhang               | cathy                |
 +------------------------+---------------------------+----------------------+
-
-(*) To be retired after Ocata (mitaka last stable branch).
+| octavia                | German Eichberger         | xgerman              |
++------------------------+---------------------------+----------------------+
 
 Existing Core Reviewers
 -----------------------
@@ -184,13 +182,6 @@ merge rights to the following git repositories:
 Please note that as we adopt to the system above with core specialty in
 particular areas, we expect this broad core team to shrink as people naturally
 evolve into an area of specialization.
-
-Neutron Dynamic Routing Core Reviewer Team
-------------------------------------------
-Neutron `Dynamic Routing core reviewers <https://review.openstack.org/#/admin/groups/1366,members>`_
-have merge rights to the following git repositories:
-
-* `openstack/neutron-dynamic-routing <https://git.openstack.org/cgit/openstack/neutron-dynamic-routing/>`_
 
 Neutron FWaaS Core Reviewer Team
 --------------------------------

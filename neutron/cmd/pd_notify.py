@@ -17,7 +17,7 @@ import os
 import signal
 import sys
 
-from neutron_lib.utils import file as file_utils
+from neutron.common import utils
 
 
 def main():
@@ -32,7 +32,7 @@ def main():
     prefix = os.getenv('PREFIX1', "::")
 
     if operation == "add" or operation == "update":
-        file_utils.replace_file(prefix_fname, "%s/64" % prefix)
+        utils.replace_file(prefix_fname, "%s/64" % prefix)
     elif operation == "delete":
-        file_utils.replace_file(prefix_fname, "::/64")
+        utils.replace_file(prefix_fname, "::/64")
     os.kill(int(agent_pid), signal.SIGUSR1)

@@ -15,28 +15,24 @@
 import errno
 import itertools
 import os
-import six
 
 import netaddr
-from neutron_lib import exceptions
-from neutron_lib.utils import file as file_utils
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_utils import fileutils
 
 from neutron._i18n import _, _LE
 from neutron.agent.linux import external_process
-from neutron.common import constants
+from neutron.common import exceptions
+from neutron.common import utils as common_utils
 
 VALID_STATES = ['MASTER', 'BACKUP']
 VALID_AUTH_TYPES = ['AH', 'PASS']
 HA_DEFAULT_PRIORITY = 50
 PRIMARY_VIP_RANGE_SIZE = 24
+# TODO(amuller): Use L3 agent constant when new constants module is introduced.
+FIP_LL_SUBNET = '169.254.64.0/18'
 KEEPALIVED_SERVICE_NAME = 'keepalived'
-KEEPALIVED_EMAIL_FROM = 'neutron@openstack.local'
-KEEPALIVED_ROUTER_ID = 'neutron'
 GARP_MASTER_DELAY = 60
-HEALTH_CHECK_NAME = 'ha_health_check'
 
 LOG = logging.getLogger(__name__)
 
@@ -162,9 +158,7 @@ class KeepalivedInstance(object):
     def __init__(self, state, interface, vrouter_id, ha_cidrs,
                  priority=HA_DEFAULT_PRIORITY, advert_int=None,
                  mcast_src_ip=None, nopreempt=False,
-                 garp_master_delay=GARP_MASTER_DELAY,
-                 vrrp_health_check_interval=0,
-                 ha_conf_dir=None):
+                 garp_master_delay=GARP_MASTER_DELAY):
         self.name = 'VR_%s' % vrouter_id
 
         if state not in VALID_STATES:
@@ -182,16 +176,11 @@ class KeepalivedInstance(object):
         self.vips = []
         self.virtual_routes = KeepalivedInstanceRoutes()
         self.authentication = None
-        self.track_script = None
+        metadata_cidr = '169.254.169.254/32'
         self.primary_vip_range = get_free_range(
-            parent_range=constants.PRIVATE_CIDR_RANGE,
-            excluded_ranges=[constants.METADATA_CIDR,
-                             constants.DVR_FIP_LL_CIDR] + ha_cidrs,
+            parent_range='169.254.0.0/16',
+            excluded_ranges=[metadata_cidr, FIP_LL_SUBNET] + ha_cidrs,
             size=PRIMARY_VIP_RANGE_SIZE)
-
-        if vrrp_health_check_interval > 0:
-            self.track_script = KeepalivedTrackScript(
-                vrrp_health_check_interval, ha_conf_dir, self.vrouter_id)
 
     def set_authentication(self, auth_type, password):
         if auth_type not in VALID_AUTH_TYPES:
@@ -276,19 +265,12 @@ class KeepalivedInstance(object):
                                ['    }'])
 
     def build_config(self):
-        if self.track_script:
-            config = self.track_script.build_config_preamble()
-            self.track_script.routes = self.virtual_routes.gateway_routes
-            self.track_script.vips = self.vips
-        else:
-            config = []
-
-        config.extend(['vrrp_instance %s {' % self.name,
-                       '    state %s' % self.state,
-                       '    interface %s' % self.interface,
-                       '    virtual_router_id %s' % self.vrouter_id,
-                       '    priority %s' % self.priority,
-                       '    garp_master_delay %s' % self.garp_master_delay])
+        config = ['vrrp_instance %s {' % self.name,
+                  '    state %s' % self.state,
+                  '    interface %s' % self.interface,
+                  '    virtual_router_id %s' % self.vrouter_id,
+                  '    priority %s' % self.priority,
+                  '    garp_master_delay %s' % self.garp_master_delay]
 
         if self.nopreempt:
             config.append('    nopreempt')
@@ -315,9 +297,6 @@ class KeepalivedInstance(object):
         if len(self.virtual_routes):
             config.extend(self.virtual_routes.build_config())
 
-        if self.track_script:
-            config.extend(self.track_script.build_config())
-
         config.append('}')
 
         return config
@@ -339,11 +318,7 @@ class KeepalivedConf(object):
         return self.instances.get(vrouter_id)
 
     def build_config(self):
-        config = ['global_defs {',
-                  '    notification_email_from %s' % KEEPALIVED_EMAIL_FROM,
-                  '    router_id %s' % KEEPALIVED_ROUTER_ID,
-                  '}'
-                  ]
+        config = []
 
         for instance in self.instances.values():
             config.extend(instance.build_config())
@@ -382,13 +357,13 @@ class KeepalivedManager(object):
     def get_full_config_file_path(self, filename, ensure_conf_dir=True):
         conf_dir = self.get_conf_dir()
         if ensure_conf_dir:
-            fileutils.ensure_tree(conf_dir, mode=0o755)
+            common_utils.ensure_dir(conf_dir)
         return os.path.join(conf_dir, filename)
 
     def _output_config_file(self):
         config_str = self.config.get_config_str()
         config_path = self.get_full_config_file_path('keepalived.conf')
-        file_utils.replace_file(config_path, config_str)
+        common_utils.replace_file(config_path, config_str)
 
         return config_path
 
@@ -424,10 +399,6 @@ class KeepalivedManager(object):
             self._get_keepalived_process_callback(vrrp_pm, config_path))
 
         keepalived_pm.enable(reload_cfg=True)
-
-        for key, instance in six.iteritems(self.config.instances):
-            if instance.track_script:
-                instance.track_script.write_check_script()
 
         self.process_monitor.register(uuid=self.resource_id,
                                       service_name=KEEPALIVED_SERVICE_NAME,
@@ -476,81 +447,3 @@ class KeepalivedManager(object):
             return cmd
 
         return callback
-
-
-class KeepalivedTrackScript(KeepalivedConf):
-    """Track script generator for Keepalived"""
-
-    def __init__(self, interval, conf_dir, vr_id):
-        self.interval = interval
-        self.conf_dir = conf_dir
-        self.vr_id = vr_id
-        self.routes = []
-        self.vips = []
-
-    def build_config_preamble(self):
-        config = ['',
-                  'vrrp_script %s_%s {' % (HEALTH_CHECK_NAME, self.vr_id),
-                  '    script "%s"' % self._get_script_location(),
-                  '    interval %s' % self.interval,
-                  '    fall 2',
-                  '    rise 2',
-                  '}',
-                  '']
-
-        return config
-
-    def _is_needed(self):
-        """Check if track script is needed by checking amount of routes.
-
-        :return: True/False
-        """
-        return len(self.routes) > 0
-
-    def build_config(self):
-        if not self._is_needed():
-            return ''
-
-        config = ['    track_script {',
-                  '        %s_%s' % (HEALTH_CHECK_NAME, self.vr_id),
-                  '    }']
-
-        return config
-
-    def build_script(self):
-        return itertools.chain(['#!/bin/bash -eu'],
-                               ['%s' % self._check_ip_assigned()],
-                               ('%s' % self._add_ip_addr(route.nexthop)
-                                for route in self.routes if route.nexthop),
-                               )
-
-    def _add_ip_addr(self, ip_addr):
-        cmd = {
-            4: 'ping',
-            6: 'ping6',
-        }.get(netaddr.IPAddress(ip_addr).version)
-
-        return '%s -c 1 -w 1 %s 1>/dev/null || exit 1' % (cmd, ip_addr)
-
-    def _check_ip_assigned(self):
-        cmd = 'ip a | grep %s || exit 0'
-        return cmd % netaddr.IPNetwork(self.vips[0].ip_address).ip if len(
-            self.vips) else ''
-
-    def _get_script_str(self):
-        """Generates and returns bash script to verify connectivity.
-
-        :return: Bash script code
-        """
-        return '\n'.join(self.build_script())
-
-    def _get_script_location(self):
-        return os.path.join(self.conf_dir,
-                            'ha_check_script_%s.sh' % self.vr_id)
-
-    def write_check_script(self):
-        if not self._is_needed():
-            return
-
-        file_utils.replace_file(
-            self._get_script_location(), self._get_script_str(), 0o520)

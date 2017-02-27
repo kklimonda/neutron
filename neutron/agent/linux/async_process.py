@@ -17,7 +17,6 @@ import signal
 import eventlet
 import eventlet.event
 import eventlet.queue
-from neutron_lib.utils import helpers
 from oslo_log import log as logging
 
 from neutron._i18n import _, _LE
@@ -104,7 +103,7 @@ class AsyncProcess(object):
         """Launch a process and monitor it asynchronously.
 
         :param block: Block until the process has started.
-        :raises utils.WaitTimeout if blocking is True and the process
+        :raises eventlet.timeout.Timeout if blocking is True and the process
                 did not start in time.
         """
         LOG.debug('Launching async process [%s].', self.cmd)
@@ -114,7 +113,7 @@ class AsyncProcess(object):
             self._spawn()
 
         if block:
-            common_utils.wait_until_true(self.is_active)
+            utils.wait_until_true(self.is_active)
 
     def stop(self, block=False, kill_signal=signal.SIGKILL):
         """Halt the process and watcher threads.
@@ -122,7 +121,7 @@ class AsyncProcess(object):
         :param block: Block until the process has stopped.
         :param kill_signal: Number of signal that will be sent to the process
                             when terminating the process
-        :raises utils.WaitTimeout if blocking is True and the process
+        :raises eventlet.timeout.Timeout if blocking is True and the process
                 did not stop in time.
         """
         if self._is_running:
@@ -132,7 +131,7 @@ class AsyncProcess(object):
             raise AsyncProcessException(_('Process is not running.'))
 
         if block:
-            common_utils.wait_until_true(lambda: not self.is_active())
+            utils.wait_until_true(lambda: not self.is_active())
 
     def _spawn(self):
         """Spawn a process and its watchers."""
@@ -175,11 +174,15 @@ class AsyncProcess(object):
         try:
             # A process started by a root helper will be running as
             # root and need to be killed via the same helper.
-            utils.kill_process(pid, kill_signal, self.run_as_root)
-        except Exception:
-            LOG.exception(_LE('An error occurred while killing [%s].'),
-                          self.cmd)
-            return False
+            utils.execute(['kill', '-%d' % kill_signal, pid],
+                          run_as_root=self.run_as_root)
+        except Exception as ex:
+            stale_pid = (isinstance(ex, RuntimeError) and
+                         'No such process' in str(ex))
+            if not stale_pid:
+                LOG.exception(_LE('An error occurred while killing [%s].'),
+                              self.cmd)
+                return False
 
         if self._process:
             self._process.wait()
@@ -222,7 +225,7 @@ class AsyncProcess(object):
     def _read(self, stream, queue):
         data = stream.readline()
         if data:
-            data = helpers.safe_decode_utf8(data.strip())
+            data = common_utils.safe_decode_utf8(data.strip())
             queue.put(data)
             return data
 

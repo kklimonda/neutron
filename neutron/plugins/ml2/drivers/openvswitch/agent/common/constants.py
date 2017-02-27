@@ -127,7 +127,6 @@ EXTENSION_DRIVER_TYPE = 'ovs'
 OVS_DATAPATH_SYSTEM = 'system'
 OVS_DATAPATH_NETDEV = 'netdev'
 OVS_DPDK_VHOST_USER = 'dpdkvhostuser'
-OVS_DPDK_VHOST_USER_CLIENT = 'dpdkvhostuserclient'
 
 # default ovs vhost-user socket location
 VHOST_USER_SOCKET_DIR = '/var/run/openvswitch'
@@ -143,9 +142,3 @@ OPENFLOW14 = "OpenFlow14"
 
 # A placeholder for dead vlans.
 DEAD_VLAN_TAG = p_const.MAX_VLAN_TAG + 1
-
-# callback resource for setting 'bridge_name' in the 'binding:vif_details'
-OVS_BRIDGE_NAME = 'ovs_bridge_name'
-
-# callback resource for notifying to ovsdb handler
-OVSDB_RESOURCE = 'ovsdb'

@@ -14,10 +14,8 @@
 #    under the License.
 
 import os
-import shlex
 
 from oslo_config import cfg
-from oslo_privsep import priv_context
 
 from neutron._i18n import _
 from neutron.common import config
@@ -42,11 +40,7 @@ ROOT_HELPER_OPTS = [
     # Having a bool use_rootwrap_daemon option precludes specifying the
     # rootwrap daemon command, which may be necessary for Xen?
     cfg.StrOpt('root_helper_daemon',
-               help=_("Root helper daemon application to use when possible. "
-                      "For the agent which needs to execute commands in Dom0 "
-                      "in the hypervisor of XenServer, this item should be "
-                      "set to 'xenapi_root_helper', so that it will keep a "
-                      "XenAPI session to pass commands to Dom0.")),
+               help=_('Root helper daemon application to use when possible.')),
 ]
 
 AGENT_STATE_OPTS = [
@@ -70,12 +64,6 @@ IPTABLES_OPTS = [
                        "generated iptables rules that describe each rule's "
                        "purpose. System must support the iptables comments "
                        "module for addition of comments.")),
-    cfg.BoolOpt('debug_iptables_rules', default=False,
-                help=_("Duplicate every iptables difference calculation to "
-                       "ensure the format being generated matches the format "
-                       "of iptables-save. This option should not be turned "
-                       "on for production systems because it imposes a "
-                       "performance penalty.")),
 ]
 
 PROCESS_MONITOR_OPTS = [
@@ -95,14 +83,12 @@ AVAILABILITY_ZONE_OPTS = [
 ]
 
 EXT_NET_BRIDGE_OPTS = [
-    cfg.StrOpt('external_network_bridge', default='',
-               deprecated_for_removal=True,
+    cfg.StrOpt('external_network_bridge', default='br-ex',
                help=_("Name of bridge used for external network "
-                      "traffic. When this parameter is set, the L3 agent will "
-                      "plug an interface directly into an external bridge "
-                      "which will not allow any wiring by the L2 agent. Using "
-                      "this will result in incorrect port statuses. This "
-                      "option is deprecated and will be removed in Ocata."))
+                      "traffic. This should be set to an empty value for the "
+                      "Linux Bridge. When this parameter is set, each L3 "
+                      "agent can be associated with no more than one external "
+                      "network.")),
 ]
 
 
@@ -110,6 +96,8 @@ def get_log_args(conf, log_file_name, **kwargs):
     cmd_args = []
     if conf.debug:
         cmd_args.append('--debug')
+    if conf.verbose:
+        cmd_args.append('--verbose')
     if (conf.log_dir or conf.log_file):
         cmd_args.append('--log-file=%s' % log_file_name)
         log_dir = None
@@ -175,7 +163,3 @@ def setup_conf():
 
 # add a logging setup method here for convenience
 setup_logging = config.setup_logging
-
-
-def setup_privsep():
-    priv_context.init(root_helper=shlex.split(get_root_helper(cfg.CONF)))

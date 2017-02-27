@@ -10,11 +10,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import uuid
+
 import mock
-from neutron_lib.plugins import directory
-from oslo_utils import uuidutils
 
 from neutron import context
+from neutron import manager
 from neutron.plugins.ml2 import config
 from neutron.tests.unit.plugins.ml2.drivers import ext_test
 from neutron.tests.unit.plugins.ml2 import test_plugin
@@ -29,11 +30,11 @@ class ExtensionDriverTestCase(test_plugin.Ml2PluginV2TestCase):
                                      self._extension_drivers,
                                      group='ml2')
         super(ExtensionDriverTestCase, self).setUp()
-        self._plugin = directory.get_plugin()
+        self._plugin = manager.NeutronManager.get_plugin()
         self._ctxt = context.get_admin_context()
 
     def _verify_network_create(self, code, exc_reason):
-        tenant_id = uuidutils.generate_uuid()
+        tenant_id = str(uuid.uuid4())
         data = {'network': {'name': 'net1',
                             'tenant_id': tenant_id}}
         req = self.new_create_request('networks', data)
@@ -93,14 +94,14 @@ class ExtensionDriverTestCase(test_plugin.Ml2PluginV2TestCase):
             # Test list networks
             res = self._list('networks')
             val = res['networks'][0].get('network_extension')
-            self.assertEqual('default_network_extension', val)
+            self.assertEqual('Test_Network_Extension_extend', val)
 
             # Test network update
             data = {'network':
                     {'network_extension': 'Test_Network_Extension_Update'}}
             res = self._update('networks', network['network']['id'], data)
             val = res['network'].get('network_extension')
-            self.assertEqual('Test_Network_Extension_Update', val)
+            self.assertEqual('Test_Network_Extension_Update_update', val)
 
     def test_subnet_attr(self):
         with self.subnet() as subnet:
@@ -111,14 +112,14 @@ class ExtensionDriverTestCase(test_plugin.Ml2PluginV2TestCase):
             # Test list subnets
             res = self._list('subnets')
             val = res['subnets'][0].get('subnet_extension')
-            self.assertEqual('default_subnet_extension', val)
+            self.assertEqual('Test_Subnet_Extension_extend', val)
 
             # Test subnet update
             data = {'subnet':
                     {'subnet_extension': 'Test_Subnet_Extension_Update'}}
             res = self._update('subnets', subnet['subnet']['id'], data)
             val = res['subnet'].get('subnet_extension')
-            self.assertEqual('Test_Subnet_Extension_Update', val)
+            self.assertEqual('Test_Subnet_Extension_Update_update', val)
 
     def test_port_attr(self):
         with self.port() as port:
@@ -129,13 +130,13 @@ class ExtensionDriverTestCase(test_plugin.Ml2PluginV2TestCase):
             # Test list ports
             res = self._list('ports')
             val = res['ports'][0].get('port_extension')
-            self.assertEqual('default_port_extension', val)
+            self.assertEqual('Test_Port_Extension_extend', val)
 
             # Test port update
             data = {'port': {'port_extension': 'Test_Port_Extension_Update'}}
             res = self._update('ports', port['port']['id'], data)
             val = res['port'].get('port_extension')
-            self.assertEqual('Test_Port_Extension_Update', val)
+            self.assertEqual('Test_Port_Extension_Update_update', val)
 
     def test_extend_network_dict(self):
         with mock.patch.object(ext_test.TestExtensionDriver,
@@ -182,7 +183,7 @@ class DBExtensionDriverTestCase(test_plugin.Ml2PluginV2TestCase):
                                      self._extension_drivers,
                                      group='ml2')
         super(DBExtensionDriverTestCase, self).setUp()
-        self._plugin = directory.get_plugin()
+        self._plugin = manager.NeutronManager.get_plugin()
         self._ctxt = context.get_admin_context()
 
     def test_network_attr(self):

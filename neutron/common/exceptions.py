@@ -13,9 +13,25 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import sys
+
 from neutron_lib import exceptions as e
 
 from neutron._i18n import _
+from neutron.common import _deprecate
+
+
+class MultipleExceptions(Exception):
+    """Container for multiple exceptions encountered.
+
+    The API layer of Neutron will automatically unpack, translate,
+    filter, and combine the inner exceptions in any exception derived
+    from this class.
+    """
+
+    def __init__(self, exceptions, *args, **kwargs):
+        super(MultipleExceptions, self).__init__(*args, **kwargs)
+        self.inner_exceptions = exceptions
 
 
 class SubnetPoolNotFound(e.NotFound):
@@ -41,27 +57,16 @@ class NetworkQosBindingNotFound(e.NotFound):
                 "could not be found.")
 
 
-class PlacementEndpointNotFound(e.NotFound):
-    message = _("Placement API endpoint not found")
+class PolicyFileNotFound(e.NotFound):
+    message = _("Policy configuration policy.json could not be found.")
 
 
-class PlacementResourceProviderNotFound(e.NotFound):
-    message = _("Placement resource provider not found %(resource_provider)s.")
+class PolicyInitError(e.NeutronException):
+    message = _("Failed to init policy %(policy)s because %(reason)s.")
 
 
-class PlacementInventoryNotFound(e.NotFound):
-    message = _("Placement inventory not found for resource provider "
-                "%(resource_provider)s, resource class %(resource_class)s.")
-
-
-class PlacementAggregateNotFound(e.NotFound):
-    message = _("Aggregate not found for resource provider "
-                "%(resource_provider)s.")
-
-
-class PolicyRemoveAuthorizationError(e.NotAuthorized):
-    message = _("Failed to remove provided policy %(policy_id)s "
-                "because you are not authorized.")
+class PolicyCheckError(e.NeutronException):
+    message = _("Failed to check policy %(policy)s because %(reason)s.")
 
 
 class StateInvalid(e.BadRequest):
@@ -87,6 +92,11 @@ class DNSNameServersExhausted(e.BadRequest):
     # NOTE(xchenum): probably make sense to use quota exceeded exception?
     message = _("Unable to complete operation for %(subnet_id)s. "
                 "The number of DNS nameservers exceeds the limit %(quota)s.")
+
+
+class InvalidIpForNetwork(e.BadRequest):
+    message = _("IP address %(ip_address)s is not a valid IP "
+                "for any of the subnets on the specified network.")
 
 
 class FlatNetworkInUse(e.InUse):
@@ -119,11 +129,6 @@ class UnsupportedPortDeviceOwner(e.Conflict):
 class OverlappingAllocationPools(e.Conflict):
     message = _("Found overlapping allocation pools: "
                 "%(pool_1)s %(pool_2)s for subnet %(subnet_cidr)s.")
-
-
-class PlacementInventoryUpdateConflict(e.Conflict):
-    message = _("Placement inventory update conflict for resource provider "
-                "%(resource_provider)s, resource class %(resource_class)s.")
 
 
 class OutOfBoundsAllocationPool(e.BadRequest):
@@ -163,6 +168,10 @@ class InvalidExtensionEnv(e.BadRequest):
 
 class ExtensionsNotFound(e.NotFound):
     message = _("Extensions not found: %(extensions)s.")
+
+
+class InvalidContentType(e.NeutronException):
+    message = _("Invalid content type %(content_type)s.")
 
 
 class GatewayConflictWithAllocationPools(e.InUse):
@@ -244,6 +253,18 @@ class AbortSyncRouters(e.NeutronException):
     message = _("Aborting periodic_sync_routers_task due to an error.")
 
 
+# Shared *aas exceptions, pending them being refactored out of Neutron
+# proper.
+
+class FirewallInternalDriverError(e.NeutronException):
+    """Fwaas exception for all driver errors.
+
+    On any failure or exception in the driver, driver should log it and
+    raise this exception to the agent
+    """
+    message = _("%(driver)s: Internal driver error.")
+
+
 class MissingMinSubnetPoolPrefix(e.BadRequest):
     message = _("Unspecified minimum subnet pool prefix.")
 
@@ -312,6 +333,10 @@ class SubnetPoolQuotaExceeded(e.OverQuota):
     message = _("Per-tenant subnet pool prefix quota exceeded.")
 
 
+class DeviceNotFoundError(e.NeutronException):
+    message = _("Device '%(device_name)s' does not exist.")
+
+
 class NetworkSubnetPoolAffinityError(e.BadRequest):
     message = _("Subnets hosted on the same network must be allocated from "
                 "the same subnet pool.")
@@ -326,9 +351,15 @@ class CTZoneExhaustedError(e.NeutronException):
                 "be applied.")
 
 
-class TenantQuotaNotFound(e.NotFound):
-    message = _("Quota for tenant %(tenant_id)s could not be found.")
+# Neutron-lib migration shim. This will wrap any exceptionss that are moved
+# to that library in a deprecation warning, until they can be updated to
+# import directly from their new location.
+# If you're wondering why we bother saving _OLD_REF, it is because if we
+# do not, then the original module we are overwriting gets garbage collected,
+# and then you will find some super strange behavior with inherited classes
+# and the like. Saving a ref keeps it around.
 
-
-class TenantIdProjectIdFilterConflict(e.BadRequest):
-    message = _("Both tenant_id and project_id passed as filters.")
+# WARNING: THESE MUST BE THE LAST TWO LINES IN THIS MODULE
+_OLD_REF = sys.modules[__name__]
+sys.modules[__name__] = _deprecate._DeprecateSubset(globals(), e)
+# WARNING: THESE MUST BE THE LAST TWO LINES IN THIS MODULE

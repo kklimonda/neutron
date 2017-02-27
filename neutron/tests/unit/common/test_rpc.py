@@ -20,15 +20,15 @@ import mock
 from oslo_config import cfg
 import oslo_messaging as messaging
 from oslo_messaging import conffixture as messaging_conffixture
-from oslo_messaging.rpc import dispatcher
 import testtools
 
 from neutron.common import rpc
+from neutron import context
 from neutron.tests import base
 
 
 CONF = cfg.CONF
-CONF.import_opt('state_path', 'neutron.conf.common')
+CONF.import_opt('state_path', 'neutron.common.config')
 
 
 class RPCFixture(fixtures.Fixture):
@@ -75,9 +75,11 @@ class TestRPC(base.DietTestCase):
         rpc.init(conf)
 
         mock_exmods.assert_called_once_with()
-        mock_trans.assert_called_once_with(conf, allowed_remote_exmods=['foo'])
+        mock_trans.assert_called_once_with(conf, allowed_remote_exmods=['foo'],
+                                           aliases=rpc.TRANSPORT_ALIASES)
         mock_noti_trans.assert_called_once_with(conf,
-                                                allowed_remote_exmods=['foo'])
+                                                allowed_remote_exmods=['foo'],
+                                                aliases=rpc.TRANSPORT_ALIASES)
         mock_not.assert_called_once_with(noti_transport,
                                          serializer=serializer)
         self.assertIsNotNone(rpc.TRANSPORT)
@@ -168,10 +170,8 @@ class TestRPC(base.DietTestCase):
         server = rpc.get_server(tgt, ends, serializer='foo')
 
         mock_ser.assert_called_once_with('foo')
-        access_policy = dispatcher.LegacyRPCAccessPolicy
         mock_get.assert_called_once_with(rpc.TRANSPORT, tgt, ends,
-                                         'eventlet', ser,
-                                         access_policy=access_policy)
+                                         'eventlet', ser)
         self.assertEqual('server', server)
 
     def test_get_notifier(self):
@@ -234,51 +234,43 @@ class TestRequestContextSerializer(base.DietTestCase):
 
         context.to_dict.assert_called_once_with()
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context(self, m, n):
-        context_dict = {'foo': 'bar',
-                        'user_id': 1,
-                        'tenant_id': 1}
+    @mock.patch.object(context, 'Context')
+    def test_deserialize_context(self, mock_con):
+        context = mock.Mock()
+        context.copy.return_value = {'foo': 'bar',
+                                     'user_id': 1,
+                                     'tenant_id': 1}
 
-        c = self.ser.deserialize_context(context_dict)
+        self.ser.deserialize_context(context)
+        mock_con.assert_called_once_with(1, 1, foo='bar')
 
-        self.assertEqual(1, c.user_id)
-        self.assertEqual(1, c.project_id)
+    @mock.patch.object(context, 'Context')
+    def test_deserialize_context_no_user_id(self, mock_con):
+        context = mock.Mock()
+        context.copy.return_value = {'foo': 'bar',
+                                     'user': 1,
+                                     'tenant_id': 1}
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context_no_user_id(self, m, n):
-        context_dict = {'foo': 'bar',
-                        'user': 1,
-                        'tenant_id': 1}
+        self.ser.deserialize_context(context)
+        mock_con.assert_called_once_with(1, 1, foo='bar')
 
-        c = self.ser.deserialize_context(context_dict)
+    @mock.patch.object(context, 'Context')
+    def test_deserialize_context_no_tenant_id(self, mock_con):
+        context = mock.Mock()
+        context.copy.return_value = {'foo': 'bar',
+                                     'user_id': 1,
+                                     'project_id': 1}
 
-        self.assertEqual(1, c.user_id)
-        self.assertEqual(1, c.project_id)
+        self.ser.deserialize_context(context)
+        mock_con.assert_called_once_with(1, 1, foo='bar')
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context_no_tenant_id(self, m, n):
-        context_dict = {'foo': 'bar',
-                        'user_id': 1,
-                        'project_id': 1}
+    @mock.patch.object(context, 'Context')
+    def test_deserialize_context_no_ids(self, mock_con):
+        context = mock.Mock()
+        context.copy.return_value = {'foo': 'bar'}
 
-        c = self.ser.deserialize_context(context_dict)
-
-        self.assertEqual(1, c.user_id)
-        self.assertEqual(1, c.project_id)
-
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context_no_ids(self, m, n):
-        context_dict = {'foo': 'bar'}
-
-        c = self.ser.deserialize_context(context_dict)
-
-        self.assertIsNone(c.user_id)
-        self.assertIsNone(c.project_id)
+        self.ser.deserialize_context(context)
+        mock_con.assert_called_once_with(None, None, foo='bar')
 
 
 class ServiceTestCase(base.DietTestCase):

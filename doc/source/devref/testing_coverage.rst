@@ -52,32 +52,31 @@ such as what L2 agent to use or what type of routers to create.
 * X            - Absent or lacking
 * Patch number - Currently in review
 * A name       - That person has committed to work on an item
-* Implicit     - The code is executed, yet no assertions are made
 
 +------------------------+------------+------------+------------+------------+------------+------------+
 | Area                   | Unit       | Functional | API        | Fullstack  | Scenario   | Gate       |
 +========================+============+============+============+============+============+============+
-| DVR                    | V          | L3-V OVS-X | V          | X          | X          | V          |
+| DVR                    | Partial*   | L3-V OVS-X | V          | amuller    | X          | V          |
 +------------------------+------------+------------+------------+------------+------------+------------+
-| L3 HA                  | V          | V          | X          | 286087     | X          | X          |
+| L3 HA                  | V          | V          | X          | 196393     | X          | X          |
 +------------------------+------------+------------+------------+------------+------------+------------+
-| L2pop                  | V          | X          |            | Implicit   |            |            |
+| L2pop                  | V          | X          |            | X          |            |            |
 +------------------------+------------+------------+------------+------------+------------+------------+
 | DHCP HA                | V          |            |            | amuller    |            |            |
 +------------------------+------------+------------+------------+------------+------------+------------+
-| OVS ARP responder      | V          | X*         |            | Implicit   |            |            |
+| OVS ARP responder      | V          | X*         |            | X*         |            |            |
 +------------------------+------------+------------+------------+------------+------------+------------+
-| OVS agent              | V          | V          |            | V          |            | V          |
+| OVS agent              | V          | Partial    |            | V          |            | V          |
 +------------------------+------------+------------+------------+------------+------------+------------+
-| Linux Bridge agent     | V          | X          |            | V          |            | V          |
+| Linux Bridge agent     | V          | X          |            | X          |            | Non-voting |
 +------------------------+------------+------------+------------+------------+------------+------------+
 | Metering               | V          | X          | V          | X          |            |            |
 +------------------------+------------+------------+------------+------------+------------+------------+
-| DHCP agent             | V          | V          |            | amuller    |            | V          |
+| DHCP agent             | V          | 136834     |            | amuller    |            | V          |
 +------------------------+------------+------------+------------+------------+------------+------------+
 | rpc_workers            |            |            |            |            |            | X          |
 +------------------------+------------+------------+------------+------------+------------+------------+
-| Reference ipam driver  | V          |            |            |            |            | X          |
+| Reference ipam driver  | V          |            |            |            |            | X (?)      |
 +------------------------+------------+------------+------------+------------+------------+------------+
 | MTU advertisement      | V          |            |            | X          |            |            |
 +------------------------+------------+------------+------------+------------+------------+------------+
@@ -86,11 +85,15 @@ such as what L2 agent to use or what type of routers to create.
 | Prefix delegation      | V          | X          |            | X          |            |            |
 +------------------------+------------+------------+------------+------------+------------+------------+
 
+* DVR DB unit tests often assert that internal methods were called instead of
+  testing functionality. A lot of our unit tests are flawed in this way,
+  and DVR unit tests especially so. An attempt to remedy this was made
+  in patch 178880.
+* OVS ARP responder cannot be tested at the gate because the gate uses Ubuntu
+  14.04 that only packages OVS 2.0. OVS added ARP manipulation support in
+  version 2.1.
 * Prefix delegation doesn't have functional tests for the dibbler and pd
-  layers, nor for the L3 agent changes. This has been an area of repeated
-  regressions.
-* The functional job now compiles OVS 2.5 from source, enabling testing
-  features that we previously could not.
+  layers, nor for the L3 agent changes.
 
 Missing Infrastructure
 ----------------------
@@ -105,6 +108,7 @@ an action item, please contact amuller for more context and guidance.
   proposed in patch 162811. The goal is provide developers a light weight
   way to rapidly run tests that target the RPC layer, so that a patch that
   modifies an RPC method's signature could be verified quickly and locally.
-* Neutron currently runs a 'partial-grenade' job that verifies that an OVS
-  version from the latest stable release works with neutron-server from master.
-  We would like to expand this to DHCP and L3 agents as well.
+* Neutron currently does not test an in-place upgrade (Upgrading the server
+  first, followed by agents one machine at a time). We make sure that the RPC
+  layer remains backwards compatible manually via the review process but have
+  no CI that verifies this.

@@ -13,8 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib import constants
-from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_service import wsgi as base_wsgi
 import routes as routes_mapper
@@ -40,7 +38,7 @@ RESOURCES = {'network': 'networks',
 SUB_RESOURCES = {}
 COLLECTION_ACTIONS = ['index', 'create']
 MEMBER_ACTIONS = ['show', 'update', 'delete']
-REQUIREMENTS = {'id': constants.UUID_PATTERN, 'format': 'json'}
+REQUIREMENTS = {'id': attributes.UUID_PATTERN, 'format': 'json'}
 
 
 class Index(wsgi.Application):
@@ -74,8 +72,7 @@ class APIRouter(base_wsgi.Router):
 
     def __init__(self, **local_config):
         mapper = routes_mapper.Mapper()
-        manager.init()
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         ext_mgr = extensions.PluginAwareExtensionManager.get_instance()
         ext_mgr.extend_resources("2.0", attributes.RESOURCE_ATTRIBUTE_MAP)
 
@@ -84,10 +81,12 @@ class APIRouter(base_wsgi.Router):
 
         def _map_resource(collection, resource, params, parent=None):
             allow_bulk = cfg.CONF.allow_bulk
+            allow_pagination = cfg.CONF.allow_pagination
+            allow_sorting = cfg.CONF.allow_sorting
             controller = base.create_resource(
                 collection, resource, plugin, params, allow_bulk=allow_bulk,
-                parent=parent, allow_pagination=True,
-                allow_sorting=True)
+                parent=parent, allow_pagination=allow_pagination,
+                allow_sorting=allow_sorting)
             path_prefix = None
             if parent:
                 path_prefix = "/%s/{%s_id}/%s" % (parent['collection_name'],

@@ -13,11 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.plugins import directory
-
 from neutron.common import exceptions as n_exc
 from neutron.core_extensions import base
 from neutron.db import api as db_api
+from neutron import manager
 from neutron.objects.qos import policy as policy_object
 from neutron.plugins.common import constants as plugin_constants
 from neutron.services.qos import qos_consts
@@ -28,8 +27,8 @@ class QosCoreResourceExtension(base.CoreResourceExtension):
     @property
     def plugin_loaded(self):
         if not hasattr(self, '_plugin_loaded'):
-            self._plugin_loaded = (
-                plugin_constants.QOS in directory.get_plugins())
+            service_plugins = manager.NeutronManager.get_service_plugins()
+            self._plugin_loaded = plugin_constants.QOS in service_plugins
         return self._plugin_loaded
 
     def _get_policy_obj(self, context, policy_id):
@@ -38,23 +37,10 @@ class QosCoreResourceExtension(base.CoreResourceExtension):
             raise n_exc.QosPolicyNotFound(policy_id=policy_id)
         return obj
 
-    def _check_policy_change_permission(self, context, old_policy):
-        """An existing policy can be modified only if one of the following is
-        true:
-
-              the policy's tenant is the context's tenant
-              the policy is shared with the tenant
-
-        Using is_accessible expresses these conditions.
-        """
-        if not (policy_object.QosPolicy.is_accessible(context, old_policy)):
-            raise n_exc.PolicyRemoveAuthorizationError(policy_id=old_policy.id)
-
     def _update_port_policy(self, context, port, port_changes):
         old_policy = policy_object.QosPolicy.get_port_policy(
-            context.elevated(), port['id'])
+            context, port['id'])
         if old_policy:
-            self._check_policy_change_permission(context, old_policy)
             old_policy.detach_port(port['id'])
 
         qos_policy_id = port_changes.get(qos_consts.QOS_POLICY_ID)
@@ -65,9 +51,8 @@ class QosCoreResourceExtension(base.CoreResourceExtension):
 
     def _update_network_policy(self, context, network, network_changes):
         old_policy = policy_object.QosPolicy.get_network_policy(
-            context.elevated(), network['id'])
+            context, network['id'])
         if old_policy:
-            self._check_policy_change_permission(context, old_policy)
             old_policy.detach_network(network['id'])
 
         qos_policy_id = network_changes.get(qos_consts.QOS_POLICY_ID)

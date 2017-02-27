@@ -13,15 +13,35 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.db import model_base
 import sqlalchemy as sa
 from sqlalchemy import orm
 
-from neutron.common import constants
+from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.extensions import portbindings
 
 BINDING_PROFILE_LEN = 4095
+
+
+class NetworkSegment(model_base.BASEV2, model_base.HasId):
+    """Represent persistent state of a network segment.
+
+    A network segment is a portion of a neutron network with a
+    specific physical realization. A neutron network can consist of
+    one or more segments.
+    """
+
+    __tablename__ = 'ml2_network_segments'
+
+    network_id = sa.Column(sa.String(36),
+                           sa.ForeignKey('networks.id', ondelete="CASCADE"),
+                           nullable=False)
+    network_type = sa.Column(sa.String(32), nullable=False)
+    physical_network = sa.Column(sa.String(64))
+    segmentation_id = sa.Column(sa.Integer)
+    is_dynamic = sa.Column(sa.Boolean, default=False, nullable=False,
+                           server_default=sa.sql.false())
+    segment_index = sa.Column(sa.Integer, nullable=False, server_default='0')
 
 
 class PortBinding(model_base.BASEV2):
@@ -39,7 +59,7 @@ class PortBinding(model_base.BASEV2):
                         sa.ForeignKey('ports.id', ondelete="CASCADE"),
                         primary_key=True)
     host = sa.Column(sa.String(255), nullable=False, default='',
-                     server_default='', primary_key=True)
+                     server_default='')
     vnic_type = sa.Column(sa.String(64), nullable=False,
                           default=portbindings.VNIC_NORMAL,
                           server_default=portbindings.VNIC_NORMAL)
@@ -48,9 +68,6 @@ class PortBinding(model_base.BASEV2):
     vif_type = sa.Column(sa.String(64), nullable=False)
     vif_details = sa.Column(sa.String(4095), nullable=False, default='',
                             server_default='')
-    status = sa.Column(sa.String(16), nullable=False,
-                       default=constants.PORT_BINDING_STATUS_ACTIVE,
-                       server_default=constants.PORT_BINDING_STATUS_ACTIVE)
 
     # Add a relationship to the Port model in order to instruct SQLAlchemy to
     # eagerly load port bindings
@@ -78,27 +95,17 @@ class PortBindingLevel(model_base.BASEV2):
     level = sa.Column(sa.Integer, primary_key=True, autoincrement=False)
     driver = sa.Column(sa.String(64))
     segment_id = sa.Column(sa.String(36),
-                           sa.ForeignKey('networksegments.id',
+                           sa.ForeignKey('ml2_network_segments.id',
                                          ondelete="SET NULL"))
 
-    # Add a relationship to the Port model in order to instruct SQLAlchemy to
-    # eagerly load port bindings
-    port = orm.relationship(
-        models_v2.Port,
-        backref=orm.backref("binding_levels", lazy='subquery',
-                            cascade='delete'))
 
+class DVRPortBinding(model_base.BASEV2):
+    """Represent binding-related state of a DVR port.
 
-class DistributedPortBinding(model_base.BASEV2):
-    """Represent binding-related state of a Distributed Router(DVR, HA) port.
-
-    Port binding for all the ports associated to a Distributed router(DVR, HA)
-    identified by router_id. Currently DEVICE_OWNER_ROUTER_SNAT(DVR+HA router),
-    DEVICE_OWNER_DVR_INTERFACE, DEVICE_OWNER_HA_REPLICATED_INT are distributed
-    router ports.
+    Port binding for all the ports associated to a DVR identified by router_id.
     """
 
-    __tablename__ = 'ml2_distributed_port_bindings'
+    __tablename__ = 'ml2_dvr_port_bindings'
 
     port_id = sa.Column(sa.String(36),
                         sa.ForeignKey('ports.id', ondelete="CASCADE"),
@@ -119,6 +126,6 @@ class DistributedPortBinding(model_base.BASEV2):
     # eagerly load port bindings
     port = orm.relationship(
         models_v2.Port,
-        backref=orm.backref("distributed_port_binding",
-                            lazy='subquery',
+        backref=orm.backref("dvr_port_binding",
+                            lazy='joined',
                             cascade='delete'))

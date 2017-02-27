@@ -13,12 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import converters
-from neutron_lib.api import extensions
-from neutron_lib import constants
-from neutron_lib import exceptions as nexception
-
 from neutron._i18n import _
+from neutron.api import extensions
+from neutron.api.v2 import attributes as attr
+from neutron.common import exceptions as nexception
 
 
 # Extra Routes Exceptions
@@ -41,9 +39,8 @@ EXTENDED_ATTRIBUTES_2_0 = {
     'routers': {
         'routes': {'allow_post': False, 'allow_put': True,
                    'validate': {'type:hostroutes': None},
-                   'convert_to': converters.convert_none_to_empty_list,
-                   'is_visible': True,
-                   'default': constants.ATTR_NOT_SPECIFIED},
+                   'convert_to': attr.convert_none_to_empty_list,
+                   'is_visible': True, 'default': attr.ATTR_NOT_SPECIFIED},
     }
 }
 
@@ -68,6 +65,7 @@ class Extraroute(extensions.ExtensionDescriptor):
 
     def get_extended_resources(self, version):
         if version == "2.0":
+            attr.PLURALS.update({'routes': 'route'})
             return EXTENDED_ATTRIBUTES_2_0
         else:
             return {}

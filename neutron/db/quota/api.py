@@ -19,8 +19,8 @@ import sqlalchemy as sa
 from sqlalchemy.orm import exc as orm_exc
 from sqlalchemy import sql
 
-from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
+from neutron.db import common_db_mixin as common_db_api
 from neutron.db.quota import models as quota_models
 
 
@@ -40,7 +40,6 @@ class ReservationInfo(collections.namedtuple(
     """Information about a resource reservation."""
 
 
-@db_api.retry_if_session_inactive()
 def get_quota_usage_by_resource_and_tenant(context, resource, tenant_id,
                                            lock_for_update=False):
     """Return usage info for a given resource and tenant.
@@ -52,7 +51,7 @@ def get_quota_usage_by_resource_and_tenant(context, resource, tenant_id,
     :returns: a QuotaUsageInfo instance
     """
 
-    query = db_utils.model_query(context, quota_models.QuotaUsage)
+    query = common_db_api.model_query(context, quota_models.QuotaUsage)
     query = query.filter_by(resource=resource, tenant_id=tenant_id)
 
     if lock_for_update:
@@ -67,9 +66,8 @@ def get_quota_usage_by_resource_and_tenant(context, resource, tenant_id,
                           result.dirty)
 
 
-@db_api.retry_if_session_inactive()
 def get_quota_usage_by_resource(context, resource):
-    query = db_utils.model_query(context, quota_models.QuotaUsage)
+    query = common_db_api.model_query(context, quota_models.QuotaUsage)
     query = query.filter_by(resource=resource)
     return [QuotaUsageInfo(item.resource,
                            item.tenant_id,
@@ -77,9 +75,8 @@ def get_quota_usage_by_resource(context, resource):
                            item.dirty) for item in query]
 
 
-@db_api.retry_if_session_inactive()
 def get_quota_usage_by_tenant_id(context, tenant_id):
-    query = db_utils.model_query(context, quota_models.QuotaUsage)
+    query = common_db_api.model_query(context, quota_models.QuotaUsage)
     query = query.filter_by(tenant_id=tenant_id)
     return [QuotaUsageInfo(item.resource,
                            item.tenant_id,
@@ -87,7 +84,6 @@ def get_quota_usage_by_tenant_id(context, tenant_id):
                            item.dirty) for item in query]
 
 
-@db_api.retry_if_session_inactive()
 def set_quota_usage(context, resource, tenant_id,
                     in_use=None, delta=False):
     """Set resource quota usage.
@@ -102,7 +98,7 @@ def set_quota_usage(context, resource, tenant_id,
                   or a delta (default to False)
     """
     with db_api.autonested_transaction(context.session):
-        query = db_utils.model_query(context, quota_models.QuotaUsage)
+        query = common_db_api.model_query(context, quota_models.QuotaUsage)
         query = query.filter_by(resource=resource).filter_by(
             tenant_id=tenant_id)
         usage_data = query.first()
@@ -125,8 +121,6 @@ def set_quota_usage(context, resource, tenant_id,
                           usage_data.dirty)
 
 
-@db_api.retry_if_session_inactive()
-@db_api.context_manager.writer
 def set_quota_usage_dirty(context, resource, tenant_id, dirty=True):
     """Set quota usage dirty bit for a given resource and tenant.
 
@@ -135,13 +129,11 @@ def set_quota_usage_dirty(context, resource, tenant_id, dirty=True):
     :param dirty: the desired value for the dirty bit (defaults to True)
     :returns: 1 if the quota usage data were updated, 0 otherwise.
     """
-    query = db_utils.model_query(context, quota_models.QuotaUsage)
+    query = common_db_api.model_query(context, quota_models.QuotaUsage)
     query = query.filter_by(resource=resource).filter_by(tenant_id=tenant_id)
     return query.update({'dirty': dirty})
 
 
-@db_api.retry_if_session_inactive()
-@db_api.context_manager.writer
 def set_resources_quota_usage_dirty(context, resources, tenant_id, dirty=True):
     """Set quota usage dirty bit for a given tenant and multiple resources.
 
@@ -151,7 +143,7 @@ def set_resources_quota_usage_dirty(context, resources, tenant_id, dirty=True):
     :param dirty: the desired value for the dirty bit (defaults to True)
     :returns: the number of records for which the bit was actually set.
     """
-    query = db_utils.model_query(context, quota_models.QuotaUsage)
+    query = common_db_api.model_query(context, quota_models.QuotaUsage)
     query = query.filter_by(tenant_id=tenant_id)
     if resources:
         query = query.filter(quota_models.QuotaUsage.resource.in_(resources))
@@ -159,8 +151,6 @@ def set_resources_quota_usage_dirty(context, resources, tenant_id, dirty=True):
     return query.update({'dirty': dirty}, synchronize_session=False)
 
 
-@db_api.retry_if_session_inactive()
-@db_api.context_manager.writer
 def set_all_quota_usage_dirty(context, resource, dirty=True):
     """Set the dirty bit on quota usage for all tenants.
 
@@ -168,12 +158,11 @@ def set_all_quota_usage_dirty(context, resource, dirty=True):
     :returns: the number of tenants for which the dirty bit was
               actually updated
     """
-    query = db_utils.model_query(context, quota_models.QuotaUsage)
+    query = common_db_api.model_query(context, quota_models.QuotaUsage)
     query = query.filter_by(resource=resource)
     return query.update({'dirty': dirty})
 
 
-@db_api.retry_if_session_inactive()
 def create_reservation(context, tenant_id, deltas, expiration=None):
     # This method is usually called from within another transaction.
     # Consider using begin_nested
@@ -194,7 +183,6 @@ def create_reservation(context, tenant_id, deltas, expiration=None):
                                 for delta in resv.resource_deltas))
 
 
-@db_api.retry_if_session_inactive()
 def get_reservation(context, reservation_id):
     query = context.session.query(quota_models.Reservation).filter_by(
         id=reservation_id)
@@ -208,8 +196,6 @@ def get_reservation(context, reservation_id):
                                 for delta in resv.resource_deltas))
 
 
-@db_api.retry_if_session_inactive()
-@db_api.context_manager.writer
 def remove_reservation(context, reservation_id, set_dirty=False):
     delete_query = context.session.query(quota_models.Reservation).filter_by(
         id=reservation_id)
@@ -230,7 +216,6 @@ def remove_reservation(context, reservation_id, set_dirty=False):
     return num_deleted
 
 
-@db_api.retry_if_session_inactive()
 def get_reservations_for_resources(context, tenant_id, resources,
                                    expired=False):
     """Retrieve total amount of reservations for specified resources.
@@ -265,8 +250,6 @@ def get_reservations_for_resources(context, tenant_id, resources,
             for (resource, exp, total_reserved) in resv_query)
 
 
-@db_api.retry_if_session_inactive()
-@db_api.context_manager.writer
 def remove_expired_reservations(context, tenant_id=None):
     now = utcnow()
     resv_query = context.session.query(quota_models.Reservation)

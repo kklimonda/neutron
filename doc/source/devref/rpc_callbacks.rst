@@ -86,8 +86,8 @@ upgrade the server first and then upgrade the agents:
 
 :doc:`More information about the upgrade strategy <upgrade>`.
 
-We provide an automatic method which avoids manual pinning and unpinning
-of versions by the administrator which could be prone to error.
+The plan is to provide a semi-automatic method which avoids manual pinning and
+unpinning of versions by the administrator which could be prone to error.
 
 Resource pull requests
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -120,35 +120,33 @@ want the queues cleaned up.
 
 Leveraging agent state reports for object version discovery
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-We add a row to the agent db for tracking agent known objects and version
-numbers. This resembles the implementation of the configuration column.
+We would add a row to the agent db for tracking agent known objects and version
+numbers. This would resemble the implementation of the configuration column.
 
-Agents report at start not only their configuration now, but also
-their subscribed object type / version pairs, that are stored in the
-database and made available to any neutron-server requesting it::
+Agents would report at start not only their configuration now, but also
+their subscribed object type / version pairs, that would be stored in the
+database and would be available to any neutron-server requesting it::
 
-    'resource_versions': {'QosPolicy': '1.1',
-                          'SecurityGroup': '1.0',
-                          'Port': '1.0'}
+    'subscribed_versions': {'QoSPolicy': '1.1',
+                            'SecurityGroup': '1.0',
+                            'Port': '1.0'}
 
-There was a subset of Liberty agents depending on QosPolicy that required
-'QosPolicy': '1.0' if the qos plugin is installed. We were able to identify
-those by the binary name (included in the report):
+There's a subset of Liberty agents depending on QoSPolicy that will
+require 'QoSPolicy': '1.0' if the qos plugin is installed. We will be able
+to identify those by the binary name (included in the report):
 
 * 'neutron-openvswitch-agent'
 * 'neutron-sriov-nic-agent'
-
-This transition was handled in the Mitaka version, but it's not handled
-anymore in Newton, since only one major version step upgrades are supported.
 
 Version discovery
 +++++++++++++++++
 With the above mechanism in place and considering the exception of
 neutron-openvswitch-agent and neutron-sriov-agent requiring QoSpolicy 1.0,
-we discover the subset of versions to be sent on every push notification.
+we could discover the subset of versions to be sent on every push
+notification.
 
-Agents that are in down state are excluded from this calculation.
-We use an extended timeout for agents in this calculation to make sure
+Agents that are in down state would be excluded from this calculation.
+We would use an extended timeout for agents in this calculation to make sure
 we're on the safe side, specially if deployer marked agents with low
 timeouts.
 
@@ -167,16 +165,16 @@ The AgentDbMixin provides::
 
 Caching mechanism
 '''''''''''''''''
-The version subset per object is cached to avoid DB requests on every push
+The version subset per object will be cached to avoid DB requests on every push
 given that we assume that all old agents are already registered at the time of
 upgrade.
 
-Cached subset is re-evaluated (to cut down the version sets as agents
-upgrade) after neutron.api.rpc.callbacks.version_manager.VERSIONS_TTL.
+Cached subset will be re-evaluated (to cut down the version sets as agents
+upgrade) after configured TTL.
 
 As a fast path to update this cache on all neutron-servers when upgraded agents
 come up (or old agents revive after a long timeout or even a downgrade) the
-server registering the new status update notifies the other servers about
+server registering the new status update will notify the other servers about
 the new consumer resource versions via cast.
 
 All notifications for all calculated version sets must be sent, as non-upgraded
@@ -211,16 +209,16 @@ The agent code processing port updates may look like::
     from neutron.api.rpc.callbacks import resources
 
 
-    def process_resource_updates(context, resource_type, resource_list, event_type):
+    def process_resource_updates(resource_type, resource, event_type):
 
         # send to the right handler which will update any control plane
-        # details related to the updated resources...
+        # details related to the updated resource...
 
 
     def subscribe_resources():
-        registry.register(process_resource_updates, resources.SEC_GROUP)
+        registry.subscribe(process_resource_updates, resources.SEC_GROUP)
 
-        registry.register(process_resource_updates, resources.QOS_POLICY)
+        registry.subscribe(process_resource_updates, resources.QOS_POLICY)
 
     def port_update(port):
 
@@ -232,14 +230,13 @@ The agent code processing port updates may look like::
 
 The relevant function is:
 
-* register(callback, resource_type): subscribes callback to a resource type.
+* subscribe(callback, resource_type): subscribes callback to a resource type.
 
 
 The callback function will receive the following arguments:
 
-* context: the neutron context that triggered the notification.
 * resource_type: the type of resource which is receiving the update.
-* resource_list: list of resources which have been pushed by server.
+* resource: resource of supported object
 * event_type: will be one of CREATED, UPDATED, or DELETED, see
   neutron.api.rpc.callbacks.events for details.
 
@@ -264,21 +261,8 @@ Sending resource events
 -----------------------
 
 On the server side, resource updates could come from anywhere, a service plugin,
-an extension, anything that updates, creates, or destroys the resources and that
+an extension, anything that updates, creates, or destroys the resource and that
 is of any interest to subscribed agents.
-
-A callback is expected to receive a list of resources. When resources in the list
-belong to the same resource type, a single push RPC message is sent; if the list
-contains objects of different resource types, resources of each type are grouped
-and sent separately, one push RPC message per type. On the receiver side,
-resources in a list always belong to the same type. In other words, a server-side
-push of a list of heterogeneous objects will result into N messages on bus and
-N client-side callback invocations, where N is the number of unique resource
-types in the given list, e.g. L(A, A, B, C, C, C) would be fragmented into
-L1(A, A), L2(B), L3(C, C, C), and each list pushed separately.
-
-Note: there is no guarantee in terms of order in which separate resource lists
-will be delivered to consumers.
 
 The server/publisher side may look like::
 
@@ -288,17 +272,17 @@ The server/publisher side may look like::
     def create_qos_policy(...):
         policy = fetch_policy(...)
         update_the_db(...)
-        registry.push([policy], events.CREATED)
+        registry.push(policy, events.CREATED)
 
     def update_qos_policy(...):
         policy = fetch_policy(...)
         update_the_db(...)
-        registry.push([policy], events.UPDATED)
+        registry.push(policy, events.UPDATED)
 
     def delete_qos_policy(...):
         policy = fetch_policy(...)
         update_the_db(...)
-        registry.push([policy], events.DELETED)
+        registry.push(policy, events.DELETED)
 
 
 References

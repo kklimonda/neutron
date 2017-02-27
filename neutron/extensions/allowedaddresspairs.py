@@ -12,18 +12,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import converters
-from neutron_lib.api import extensions
-from neutron_lib.api import validators
-from neutron_lib import constants
-from neutron_lib import exceptions as nexception
 from oslo_config import cfg
 import webob.exc
 
 from neutron._i18n import _
-from neutron.conf.extensions import allowedaddresspairs as addr_pair
+from neutron.api import extensions
+from neutron.api.v2 import attributes as attr
+from neutron.common import exceptions as nexception
 
-addr_pair.register_allowed_address_pair_opts()
+allowed_address_pair_opts = [
+    #TODO(limao): use quota framework when it support quota for attributes
+    cfg.IntOpt('max_allowed_address_pair', default=10,
+               help=_("Maximum number of allowed address pairs")),
+]
+
+cfg.CONF.register_opts(allowed_address_pair_opts)
 
 
 class AllowedAddressPairsMissingIP(nexception.InvalidInput):
@@ -47,20 +50,18 @@ class AllowedAddressPairExhausted(nexception.BadRequest):
 
 def _validate_allowed_address_pairs(address_pairs, valid_values=None):
     unique_check = {}
-    if not isinstance(address_pairs, list):
+    try:
+        if len(address_pairs) > cfg.CONF.max_allowed_address_pair:
+            raise AllowedAddressPairExhausted(
+                quota=cfg.CONF.max_allowed_address_pair)
+    except TypeError:
         raise webob.exc.HTTPBadRequest(
             _("Allowed address pairs must be a list."))
-    if len(address_pairs) > cfg.CONF.max_allowed_address_pair:
-        raise AllowedAddressPairExhausted(
-            quota=cfg.CONF.max_allowed_address_pair)
 
     for address_pair in address_pairs:
-        msg = validators.validate_dict(address_pair)
-        if msg:
-            return msg
         # mac_address is optional, if not set we use the mac on the port
         if 'mac_address' in address_pair:
-            msg = validators.validate_mac_address(address_pair['mac_address'])
+            msg = attr._validate_mac_address(address_pair['mac_address'])
             if msg:
                 raise webob.exc.HTTPBadRequest(msg)
         if 'ip_address' not in address_pair:
@@ -83,26 +84,26 @@ def _validate_allowed_address_pairs(address_pairs, valid_values=None):
             raise webob.exc.HTTPBadRequest(msg)
 
         if '/' in ip_address:
-            msg = validators.validate_subnet(ip_address)
+            msg = attr._validate_subnet(ip_address)
         else:
-            msg = validators.validate_ip_address(ip_address)
+            msg = attr._validate_ip_address(ip_address)
         if msg:
             raise webob.exc.HTTPBadRequest(msg)
 
-validators.add_validator('validate_allowed_address_pairs',
-                         _validate_allowed_address_pairs)
+attr.validators['type:validate_allowed_address_pairs'] = (
+    _validate_allowed_address_pairs)
 
 ADDRESS_PAIRS = 'allowed_address_pairs'
 EXTENDED_ATTRIBUTES_2_0 = {
     'ports': {
         ADDRESS_PAIRS: {'allow_post': True, 'allow_put': True,
-                        'convert_to': converters.convert_none_to_empty_list,
+                        'convert_to': attr.convert_none_to_empty_list,
                         'convert_list_to':
-                        converters.convert_kvp_list_to_dict,
+                        attr.convert_kvp_list_to_dict,
                         'validate': {'type:validate_allowed_address_pairs':
                                      None},
                         'enforce_policy': True,
-                        'default': constants.ATTR_NOT_SPECIFIED,
+                        'default': attr.ATTR_NOT_SPECIFIED,
                         'is_visible': True},
     }
 }
@@ -129,6 +130,8 @@ class Allowedaddresspairs(extensions.ExtensionDescriptor):
 
     def get_extended_resources(self, version):
         if version == "2.0":
+            attr.PLURALS.update({'allowed_address_pairs':
+                                 'allowed_address_pair'})
             return EXTENDED_ATTRIBUTES_2_0
         else:
             return {}

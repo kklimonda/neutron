@@ -13,15 +13,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
 from sqlalchemy.orm import exc
 
 from neutron.callbacks import events
 from neutron.callbacks import exceptions as c_exc
 from neutron.callbacks import registry
-from neutron.db import _utils as db_utils
-from neutron.db import api as db_api
+from neutron.common import exceptions as n_exc
 from neutron.db import common_db_mixin
 from neutron.db import rbac_db_models as models
 from neutron.extensions import rbac as ext_rbac
@@ -36,7 +34,6 @@ class RbacPluginMixin(common_db_mixin.CommonDbMixin):
     object_type_cache = {}
     supported_extension_aliases = ['rbac-policies']
 
-    @db_api.retry_if_session_inactive()
     def create_rbac_policy(self, context, rbac_policy):
         e = rbac_policy['rbac_policy']
         try:
@@ -57,14 +54,12 @@ class RbacPluginMixin(common_db_mixin.CommonDbMixin):
             raise ext_rbac.DuplicateRbacPolicy()
         return self._make_rbac_policy_dict(db_entry)
 
-    @staticmethod
-    def _make_rbac_policy_dict(db_entry, fields=None):
+    def _make_rbac_policy_dict(self, db_entry, fields=None):
         res = {f: db_entry[f] for f in ('id', 'tenant_id', 'target_tenant',
                                         'action', 'object_id')}
         res['object_type'] = db_entry.object_type
-        return db_utils.resource_fields(res, fields)
+        return self._fields(res, fields)
 
-    @db_api.retry_if_session_inactive()
     def update_rbac_policy(self, context, id, rbac_policy):
         pol = rbac_policy['rbac_policy']
         entry = self._get_rbac_policy(context, id)
@@ -80,7 +75,6 @@ class RbacPluginMixin(common_db_mixin.CommonDbMixin):
             entry.update(pol)
         return self._make_rbac_policy_dict(entry)
 
-    @db_api.retry_if_session_inactive()
     def delete_rbac_policy(self, context, id):
         entry = self._get_rbac_policy(context, id)
         object_type = entry['object_type']
@@ -104,12 +98,10 @@ class RbacPluginMixin(common_db_mixin.CommonDbMixin):
         except exc.NoResultFound:
             raise ext_rbac.RbacPolicyNotFound(id=id, object_type=object_type)
 
-    @db_api.retry_if_session_inactive()
     def get_rbac_policy(self, context, id, fields=None):
         return self._make_rbac_policy_dict(
             self._get_rbac_policy(context, id), fields=fields)
 
-    @db_api.retry_if_session_inactive()
     def get_rbac_policies(self, context, filters=None, fields=None,
                           sorts=None, limit=None, page_reverse=False):
         filters = filters or {}

@@ -18,7 +18,6 @@ from oslo_utils import reflection
 from neutron._i18n import _LE
 from neutron.callbacks import events
 from neutron.callbacks import exceptions
-from neutron.db import api as db_api
 
 LOG = logging.getLogger(__name__)
 
@@ -107,7 +106,6 @@ class CallbacksManager(object):
                     del self._callbacks[resource][event][callback_id]
             del self._index[callback_id]
 
-    @db_api.reraise_as_retryrequest
     def notify(self, resource, event, trigger, **kwargs):
         """Notify all subscribed callback(s).
 
@@ -136,27 +134,22 @@ class CallbacksManager(object):
 
     def _notify_loop(self, resource, event, trigger, **kwargs):
         """The notification loop."""
+        LOG.debug("Notify callbacks for %(resource)s, %(event)s",
+                  {'resource': resource, 'event': event})
+
         errors = []
-        callbacks = list(self._callbacks[resource].get(event, {}).items())
-        LOG.debug("Notify callbacks %s for %s, %s",
-                  callbacks, resource, event)
+        callbacks = self._callbacks[resource].get(event, {}).items()
         # TODO(armax): consider using a GreenPile
         for callback_id, callback in callbacks:
             try:
+                LOG.debug("Calling callback %s", callback_id)
                 callback(resource, event, trigger, **kwargs)
             except Exception as e:
-                abortable_event = (
-                    event.startswith(events.BEFORE) or
-                    event.startswith(events.PRECOMMIT)
-                )
-                if not abortable_event:
-                    LOG.exception(_LE("Error during notification for "
-                                      "%(callback)s %(resource)s, %(event)s"),
-                                  {'callback': callback_id,
-                                   'resource': resource, 'event': event})
-                else:
-                    LOG.error(_LE("Callback %(callback)s raised %(error)s"),
-                              {'callback': callback_id, 'error': e})
+                LOG.exception(_LE("Error during notification for "
+                                  "%(callback)s %(resource)s, %(event)s"),
+                              {'callback': callback_id,
+                               'resource': resource,
+                               'event': event})
                 errors.append(exceptions.NotificationError(callback_id, e))
         return errors
 
@@ -171,6 +164,4 @@ def _get_id(callback):
     # TODO(armax): consider using something other than names
     # https://www.python.org/dev/peps/pep-3155/, but this
     # might be okay for now.
-    parts = (reflection.get_callable_name(callback),
-             str(hash(callback)))
-    return '-'.join(parts)
+    return reflection.get_callable_name(callback)

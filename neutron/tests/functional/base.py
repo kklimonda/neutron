@@ -19,25 +19,17 @@ from oslo_config import cfg
 
 from neutron.agent.common import config
 from neutron.agent.linux import utils
+from neutron.common import utils as common_utils
 from neutron.tests import base
 from neutron.tests.common import base as common_base
-from neutron.tests.common import helpers
 
 SUDO_CMD = 'sudo -n'
 
 # This is the directory from which infra fetches log files for functional tests
-DEFAULT_LOG_DIR = os.path.join(helpers.get_test_log_path(),
-                               'dsvm-functional-logs')
+DEFAULT_LOG_DIR = '/tmp/dsvm-functional-logs/'
 
 
-class BaseLoggingTestCase(base.BaseTestCase):
-    def setUp(self):
-        super(BaseLoggingTestCase, self).setUp()
-        base.setup_test_logging(
-            cfg.CONF, DEFAULT_LOG_DIR, "%s.txt" % self.id())
-
-
-class BaseSudoTestCase(BaseLoggingTestCase):
+class BaseSudoTestCase(base.BaseTestCase):
     """
     Base class for tests requiring invocation of commands via a root helper.
 
@@ -63,13 +55,20 @@ class BaseSudoTestCase(BaseLoggingTestCase):
         if not base.bool_from_env('OS_SUDO_TESTING'):
             self.skipTest('Testing with sudo is not enabled')
 
+        # Have each test log into its own log file
+        cfg.CONF.set_override('debug', True)
+        common_utils.ensure_dir(DEFAULT_LOG_DIR)
+        log_file = base.sanitize_log_path(
+            os.path.join(DEFAULT_LOG_DIR, "%s.log" % self.id()))
+        cfg.CONF.set_override('log_file', log_file)
+        config.setup_logging()
+
         config.register_root_helper(cfg.CONF)
         self.config(group='AGENT',
                     root_helper=os.environ.get('OS_ROOTWRAP_CMD', SUDO_CMD))
         self.config(group='AGENT',
                     root_helper_daemon=os.environ.get(
                         'OS_ROOTWRAP_DAEMON_CMD'))
-        config.setup_privsep()
 
     @common_base.no_skip_on_missing_deps
     def check_command(self, cmd, error_text, skip_msg, run_as_root=False):

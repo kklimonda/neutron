@@ -55,33 +55,29 @@ Neutron Internals
    services_and_agents
    api_layer
    ml2_ext_manager
-   calling_ml2_plugin
    quota
    api_extensions
    plugin-api
    db_layer
-   db_models
    policy
    rpc_api
    rpc_callbacks
    layer3
    l2_agents
-   agent_extensions
    ovs_vhostuser
    quality_of_service
    service_extensions
+   oslo-incubator
    callbacks
    dns_order
    external_dns_integration
    upgrade
    i18n
+   instrumentation
    address_scopes
    openvswitch_firewall
    network_ip_availability
    tag
-   provisioning_blocks
-   retries
-   l3_agent_extensions
 
 Testing
 -------
@@ -91,7 +87,6 @@ Testing
    fullstack_testing
    testing_coverage
    template_model_sync_test
-   db_transient_failure_injection
 
 Module Reference
 ----------------

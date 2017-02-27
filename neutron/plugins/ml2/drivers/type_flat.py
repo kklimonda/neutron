@@ -13,28 +13,44 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import exceptions as exc
 from oslo_config import cfg
+from oslo_db import exception as db_exc
 from oslo_log import log
 import six
+import sqlalchemy as sa
 
 from neutron._i18n import _, _LI, _LW
-from neutron.common import _deprecate
-from neutron.common import exceptions as n_exc
-from neutron.conf.plugins.ml2.drivers import driver_type
-from neutron.db.models.plugins.ml2 import flatallocation as type_flat_model
-from neutron.objects import exceptions as obj_base
-from neutron.objects.plugins.ml2 import flatallocation as flat_obj
+from neutron.common import exceptions as exc
+from neutron.db import model_base
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import helpers
 
 LOG = log.getLogger(__name__)
 
-driver_type.register_ml2_drivers_flat_opts()
+flat_opts = [
+    cfg.ListOpt('flat_networks',
+                default='*',
+                help=_("List of physical_network names with which flat "
+                       "networks can be created. Use default '*' to allow "
+                       "flat networks with arbitrary physical_network names. "
+                       "Use an empty list to disable flat networks."))
+]
+
+cfg.CONF.register_opts(flat_opts, "ml2_type_flat")
 
 
-_deprecate._moved_global('FlatAllocation', new_module=type_flat_model)
+class FlatAllocation(model_base.BASEV2):
+    """Represent persistent allocation state of a physical network.
+
+    If a record exists for a physical network, then that physical
+    network has been allocated as a flat network.
+    """
+
+    __tablename__ = 'ml2_flat_allocations'
+
+    physical_network = sa.Column(sa.String(64), nullable=False,
+                                 primary_key=True)
 
 
 class FlatTypeDriver(helpers.BaseTypeDriver):
@@ -91,39 +107,36 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
                 msg = _("%s prohibited for flat provider network") % key
                 raise exc.InvalidInput(error_message=msg)
 
-    def reserve_provider_segment(self, context, segment):
+    def reserve_provider_segment(self, session, segment):
         physical_network = segment[api.PHYSICAL_NETWORK]
-        try:
-            LOG.debug("Reserving flat network on physical "
-                      "network %s", physical_network)
-            alloc = flat_obj.FlatAllocation(
-                context,
-                physical_network=physical_network)
-            alloc.create()
-        except obj_base.NeutronDbObjectDuplicateEntry:
-            raise n_exc.FlatNetworkInUse(
-                physical_network=physical_network)
-        segment[api.MTU] = self.get_mtu(alloc.physical_network)
+        with session.begin(subtransactions=True):
+            try:
+                LOG.debug("Reserving flat network on physical "
+                          "network %s", physical_network)
+                alloc = FlatAllocation(physical_network=physical_network)
+                alloc.save(session)
+            except db_exc.DBDuplicateEntry:
+                raise exc.FlatNetworkInUse(
+                    physical_network=physical_network)
+            segment[api.MTU] = self.get_mtu(alloc.physical_network)
         return segment
 
-    def allocate_tenant_segment(self, context):
+    def allocate_tenant_segment(self, session):
         # Tenant flat networks are not supported.
         return
 
-    def release_segment(self, context, segment):
+    def release_segment(self, session, segment):
         physical_network = segment[api.PHYSICAL_NETWORK]
-        with context.session.begin(subtransactions=True):
-            obj = flat_obj.FlatAllocation.get_object(
-                context,
-                physical_network=physical_network)
-            if obj:
-                obj.delete()
-                LOG.debug("Releasing flat network on physical network %s",
-                          physical_network)
-            else:
-                LOG.warning(_LW(
-                    "No flat network found on physical network %s"),
-                    physical_network)
+        with session.begin(subtransactions=True):
+            count = (session.query(FlatAllocation).
+                     filter_by(physical_network=physical_network).
+                     delete())
+        if count:
+            LOG.debug("Releasing flat network on physical network %s",
+                      physical_network)
+        else:
+            LOG.warning(_LW("No flat network found on physical network %s"),
+                        physical_network)
 
     def get_mtu(self, physical_network):
         seg_mtu = super(FlatTypeDriver, self).get_mtu()
@@ -133,6 +146,3 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
         if physical_network in self.physnet_mtus:
             mtu.append(int(self.physnet_mtus[physical_network]))
         return min(mtu) if mtu else 0
-
-
-_deprecate._MovedGlobals()

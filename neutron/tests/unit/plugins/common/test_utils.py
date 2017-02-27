@@ -15,10 +15,8 @@
 import hashlib
 
 import mock
-from neutron_lib import constants
-import testtools
 
-from neutron.db import l3_db
+from neutron.common import constants
 from neutron.plugins.common import utils
 from neutron.tests import base
 
@@ -72,34 +70,3 @@ class TestUtils(base.BaseTestCase):
         self.assertEqual(12, len(utils.get_interface_name(LONG_NAME1,
                                                           prefix="pre-",
                                                           max_len=12)))
-
-    def test_delete_port_on_error(self):
-        core_plugin, context = mock.Mock(), mock.Mock()
-        port_id = 'pid'
-        with testtools.ExpectedException(ValueError):
-            with utils.delete_port_on_error(core_plugin, context, port_id):
-                raise ValueError()
-        core_plugin.delete_port.assert_called_once_with(context, port_id,
-                                                        l3_port_check=False)
-
-    def test_delete_port_on_error_fail_port_delete(self):
-        core_plugin, context = mock.Mock(), mock.Mock()
-        core_plugin.delete_port.side_effect = TypeError()
-        port_id = 'pid'
-        with testtools.ExpectedException(ValueError):
-            with utils.delete_port_on_error(core_plugin, context, port_id):
-                raise ValueError()
-        core_plugin.delete_port.assert_called_once_with(context, port_id,
-                                                        l3_port_check=False)
-
-    @mock.patch.object(l3_db.L3_NAT_dbonly_mixin, '_check_router_port')
-    def test_update_port_on_error(self, mock_check):
-        core_plugin, context = mock.Mock(), mock.Mock()
-        port = mock_check.return_value = {'device_owner': 'xxxxxxxx'}
-        revert_value = {'device_id': '', 'device_owner': port['device_owner']}
-        with testtools.ExpectedException(ValueError):
-            with utils.update_port_on_error(core_plugin,
-                                            context, 1, revert_value):
-                raise ValueError()
-        core_plugin.update_port.assert_called_once_with(
-            context, 1, {'port': revert_value})

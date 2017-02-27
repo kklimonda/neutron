@@ -10,30 +10,42 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import testtools
-
-import eventlet
+import os.path
+import stat
 
 from neutron.common import utils
 from neutron.tests import base
 
 
-class TestWaitUntilTrue(base.BaseTestCase):
-    def test_wait_until_true_predicate_succeeds(self):
-        utils.wait_until_true(lambda: True)
+class TestReplaceFile(base.BaseTestCase):
+    def setUp(self):
+        super(TestReplaceFile, self).setUp()
+        temp_dir = self.get_default_temp_dir().path
+        self.file_name = os.path.join(temp_dir, "new_file")
+        self.data = "data to copy"
 
-    def test_wait_until_true_predicate_fails(self):
-        with testtools.ExpectedException(utils.WaitTimeout):
-            utils.wait_until_true(lambda: False, 2)
+    def _verify_result(self, file_mode):
+        self.assertTrue(os.path.exists(self.file_name))
+        with open(self.file_name) as f:
+            content = f.read()
+        self.assertEqual(self.data, content)
+        mode = os.stat(self.file_name).st_mode
+        self.assertEqual(file_mode, stat.S_IMODE(mode))
 
-    def test_wait_until_true_predicate_fails_compatibility_test(self):
-        """This test makes sure that eventlet.TimeoutError can still be caught.
-        """
-        try:
-            utils.wait_until_true(lambda: False, 2)
-        except eventlet.TimeoutError:
-            return
-        except Exception:
-            pass
-        self.fail('wait_until_true() does not raise eventlet.TimeoutError '
-                  'compatible exception by default.')
+    def test_replace_file_default_mode(self):
+        file_mode = 0o644
+        utils.replace_file(self.file_name, self.data)
+        self._verify_result(file_mode)
+
+    def test_replace_file_custom_mode(self):
+        file_mode = 0o722
+        utils.replace_file(self.file_name, self.data, file_mode)
+        self._verify_result(file_mode)
+
+    def test_replace_file_custom_mode_twice(self):
+        file_mode = 0o722
+        utils.replace_file(self.file_name, self.data, file_mode)
+        self.data = "new data to copy"
+        file_mode = 0o777
+        utils.replace_file(self.file_name, self.data, file_mode)
+        self._verify_result(file_mode)

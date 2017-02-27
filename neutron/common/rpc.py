@@ -15,18 +15,16 @@
 #    under the License.
 
 import collections
+from debtcollector import removals
 import random
 import time
 
-from neutron_lib import exceptions as lib_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
-from oslo_messaging.rpc import dispatcher
 from oslo_messaging import serializer as om_serializer
 from oslo_service import service
 from oslo_utils import excutils
-from osprofiler import profiler
 
 from neutron._i18n import _LE, _LW
 from neutron.common import exceptions
@@ -42,10 +40,20 @@ NOTIFIER = None
 
 ALLOWED_EXMODS = [
     exceptions.__name__,
-    lib_exceptions.__name__,
 ]
 EXTRA_EXMODS = []
 
+
+TRANSPORT_ALIASES = {
+    'neutron.openstack.common.rpc.impl_fake': 'fake',
+    'neutron.openstack.common.rpc.impl_qpid': 'qpid',
+    'neutron.openstack.common.rpc.impl_kombu': 'rabbit',
+    'neutron.openstack.common.rpc.impl_zmq': 'zmq',
+    'neutron.rpc.impl_fake': 'fake',
+    'neutron.rpc.impl_qpid': 'qpid',
+    'neutron.rpc.impl_kombu': 'rabbit',
+    'neutron.rpc.impl_zmq': 'zmq',
+}
 
 # NOTE(salv-orlando): I am afraid this is a global variable. While not ideal,
 # they're however widely used throughout the code base. It should be set to
@@ -58,9 +66,10 @@ def init(conf):
     global TRANSPORT, NOTIFICATION_TRANSPORT, NOTIFIER
     exmods = get_allowed_exmods()
     TRANSPORT = oslo_messaging.get_transport(conf,
-                                             allowed_remote_exmods=exmods)
+                                             allowed_remote_exmods=exmods,
+                                             aliases=TRANSPORT_ALIASES)
     NOTIFICATION_TRANSPORT = oslo_messaging.get_notification_transport(
-        conf, allowed_remote_exmods=exmods)
+        conf, allowed_remote_exmods=exmods, aliases=TRANSPORT_ALIASES)
     serializer = RequestContextSerializer()
     NOTIFIER = oslo_messaging.Notifier(NOTIFICATION_TRANSPORT,
                                        serializer=serializer)
@@ -172,10 +181,8 @@ def get_client(target, version_cap=None, serializer=None):
 def get_server(target, endpoints, serializer=None):
     assert TRANSPORT is not None
     serializer = RequestContextSerializer(serializer)
-    access_policy = dispatcher.LegacyRPCAccessPolicy
     return oslo_messaging.get_rpc_server(TRANSPORT, target, endpoints,
-                                         'eventlet', serializer,
-                                         access_policy=access_policy)
+                                         'eventlet', serializer)
 
 
 def get_notifier(service=None, host=None, publisher_id=None):
@@ -204,26 +211,19 @@ class RequestContextSerializer(om_serializer.Serializer):
         return self._base.deserialize_entity(ctxt, entity)
 
     def serialize_context(self, ctxt):
-        _context = ctxt.to_dict()
-        prof = profiler.get()
-        if prof:
-            trace_info = {
-                "hmac_key": prof.hmac_key,
-                "base_id": prof.get_base_id(),
-                "parent_id": prof.get_id()
-            }
-            _context['trace_info'] = trace_info
-        return _context
+        return ctxt.to_dict()
 
     def deserialize_context(self, ctxt):
         rpc_ctxt_dict = ctxt.copy()
-        trace_info = rpc_ctxt_dict.pop("trace_info", None)
-        if trace_info:
-            profiler.init(**trace_info)
-        return context.Context.from_dict(rpc_ctxt_dict)
+        user_id = rpc_ctxt_dict.pop('user_id', None)
+        if not user_id:
+            user_id = rpc_ctxt_dict.pop('user', None)
+        tenant_id = rpc_ctxt_dict.pop('tenant_id', None)
+        if not tenant_id:
+            tenant_id = rpc_ctxt_dict.pop('project_id', None)
+        return context.Context(user_id, tenant_id, **rpc_ctxt_dict)
 
 
-@profiler.trace_cls("rpc")
 class Service(service.Service):
     """Service object for binaries running on hosts.
 
@@ -305,7 +305,8 @@ class VoidConnection(object):
 
 
 # functions
-def create_connection():
+@removals.removed_kwarg('new')
+def create_connection(new=True):
     # NOTE(salv-orlando): This is a clever interpretation of the factory design
     # patter aimed at preventing plugins from initializing RPC servers upon
     # initialization when they are running in the REST over HTTP API server.

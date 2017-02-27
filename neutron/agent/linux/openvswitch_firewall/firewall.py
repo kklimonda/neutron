@@ -14,16 +14,15 @@
 #    under the License.
 
 import netaddr
-from neutron_lib import constants as lib_const
 from oslo_log import log as logging
-from oslo_utils import netutils
 
-from neutron._i18n import _LE
+from neutron._i18n import _, _LE, _LW
 from neutron.agent import firewall
 from neutron.agent.linux.openvswitch_firewall import constants as ovsfw_consts
-from neutron.agent.linux.openvswitch_firewall import exceptions
 from neutron.agent.linux.openvswitch_firewall import rules
 from neutron.common import constants
+from neutron.common import exceptions
+from neutron.common import ipv6_utils
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants \
         as ovs_consts
 
@@ -55,21 +54,8 @@ def create_reg_numbers(flow_params):
     _replace_register(flow_params, ovsfw_consts.REG_NET, 'reg_net')
 
 
-def get_tag_from_other_config(bridge, port_name):
-    """Return tag stored in OVSDB other_config metadata.
-
-    :param bridge: OVSBridge instance where port is.
-    :param port_name: Name of the port.
-    :raises OVSFWTagNotFound: In case tag cannot be found in OVSDB.
-    """
-    other_config = None
-    try:
-        other_config = bridge.db_get_val(
-            'Port', port_name, 'other_config')
-        return int(other_config['tag'])
-    except (KeyError, TypeError, ValueError):
-        raise exceptions.OVSFWTagNotFound(
-            port_name=port_name, other_config=other_config)
+class OVSFWPortNotFound(exceptions.NeutronException):
+    message = _("Port %(port_id)s is not managed by this agent. ")
 
 
 class SecurityGroup(object):
@@ -99,8 +85,8 @@ class OFPort(object):
         self.id = port_dict['device']
         self.vlan_tag = vlan_tag
         self.mac = ovs_port.vif_mac
-        self.lla_address = str(netutils.get_ipv6_addr_by_EUI64(
-            lib_const.IPv6_LLA_PREFIX, self.mac))
+        self.lla_address = str(ipv6_utils.get_ipv6_addr_by_EUI64(
+            constants.IPV6_LLA_PREFIX, self.mac))
         self.ofport = ovs_port.ofport
         self.sec_groups = list()
         self.fixed_ips = port_dict.get('fixed_ips', [])
@@ -199,12 +185,18 @@ class OVSFirewallDriver(firewall.FirewallDriver):
         self._deferred = False
         self._drop_all_unmatched_flows()
 
+    def apply_port_filter(self, port):
+        """We never call this method
+
+        It exists here to override abstract method of parent abstract class.
+        """
+
     def security_group_updated(self, action_type, sec_group_ids,
                                device_ids=None):
-        """The current driver doesn't make use of this method.
+        """This method is obsolete
 
-        It exists here to avoid NotImplementedError raised from the parent
-        class's method.
+        The current driver only supports enhanced rpc calls into security group
+        agent. This method is never called from that place.
         """
 
     def _accept_flow(self, **flow):
@@ -236,38 +228,35 @@ class OVSFirewallDriver(firewall.FirewallDriver):
 
     @staticmethod
     def initialize_bridge(int_br):
-        int_br.add_protocols(*OVSFirewallDriver.REQUIRED_PROTOCOLS)
+        int_br.set_protocols(OVSFirewallDriver.REQUIRED_PROTOCOLS)
         return int_br.deferred(full_ordered=True)
 
     def _drop_all_unmatched_flows(self):
         for table in ovs_consts.OVS_FIREWALL_TABLES:
             self.int_br.br.add_flow(table=table, priority=0, actions='drop')
 
-    def get_ofport(self, port):
-        port_id = port['device']
-        return self.sg_port_map.ports.get(port_id)
-
     def get_or_create_ofport(self, port):
-        """Get ofport specified by port['device'], checking and reflecting
-        ofport changes.
-        If ofport is nonexistent, create and return one.
-        """
         port_id = port['device']
-        ovs_port = self.int_br.br.get_vif_port_by_id(port_id)
-        if not ovs_port:
-            raise exceptions.OVSFWPortNotFound(port_id=port_id)
-
         try:
             of_port = self.sg_port_map.ports[port_id]
         except KeyError:
-            port_vlan_id = get_tag_from_other_config(
-                self.int_br.br, ovs_port.port_name)
+            ovs_port = self.int_br.br.get_vif_port_by_id(port_id)
+            if not ovs_port:
+                raise OVSFWPortNotFound(port_id=port_id)
+
+            try:
+                other_config = self.int_br.br.db_get_val(
+                    'Port', ovs_port.port_name, 'other_config')
+                port_vlan_id = int(other_config['tag'])
+            except (KeyError, TypeError):
+                LOG.warning(_LW("Can't get tag for port %(port_id)s from its "
+                                "other_config: %(other_config)s"),
+                            port_id=port_id,
+                            other_config=other_config)
+                port_vlan_id = ovs_consts.DEAD_VLAN_TAG
             of_port = OFPort(port, ovs_port, port_vlan_id)
             self.sg_port_map.create_port(of_port, port)
         else:
-            if of_port.ofport != ovs_port.ofport:
-                self.sg_port_map.remove_port(of_port)
-                of_port = OFPort(port, ovs_port, of_port.vlan_tag)
             self.sg_port_map.update_port(of_port, port)
 
         return of_port
@@ -278,13 +267,13 @@ class OVSFirewallDriver(firewall.FirewallDriver):
     def prepare_port_filter(self, port):
         if not firewall.port_sec_enabled(port):
             return
-        old_of_port = self.get_ofport(port)
+        port_exists = self.is_port_managed(port)
         of_port = self.get_or_create_ofport(port)
-        if old_of_port:
+        if port_exists:
             LOG.error(_LE("Initializing port %s that was already "
                           "initialized."),
                       port['device'])
-            self.delete_all_port_flows(old_of_port)
+            self.delete_all_port_flows(of_port)
         self.initialize_port_flows(of_port)
         self.add_flows_from_rules(of_port)
 
@@ -301,10 +290,9 @@ class OVSFirewallDriver(firewall.FirewallDriver):
         elif not self.is_port_managed(port):
             self.prepare_port_filter(port)
             return
-        old_of_port = self.get_ofport(port)
         of_port = self.get_or_create_ofport(port)
         # TODO(jlibosva): Handle firewall blink
-        self.delete_all_port_flows(old_of_port)
+        self.delete_all_port_flows(of_port)
         self.initialize_port_flows(of_port)
         self.add_flows_from_rules(of_port)
 
@@ -316,7 +304,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
 
         """
         if self.is_port_managed(port):
-            of_port = self.get_ofport(port)
+            of_port = self.get_or_create_ofport(port)
             self.delete_all_port_flows(of_port)
             self.sg_port_map.remove_port(of_port)
 
@@ -379,14 +367,14 @@ class OVSFirewallDriver(firewall.FirewallDriver):
         self._initialize_ingress(port)
 
     def _initialize_egress_ipv6_icmp(self, port):
-        for icmp_type in firewall.ICMPV6_ALLOWED_TYPES:
+        for icmp_type in constants.ICMPV6_ALLOWED_TYPES:
             self._add_flow(
                 table=ovs_consts.BASE_EGRESS_TABLE,
                 priority=95,
                 in_port=port.ofport,
                 reg_port=port.ofport,
                 dl_type=constants.ETHERTYPE_IPV6,
-                nw_proto=lib_const.PROTO_NUM_IPV6_ICMP,
+                nw_proto=constants.PROTO_NUM_IPV6_ICMP,
                 icmp_type=icmp_type,
                 actions='normal'
             )
@@ -451,7 +439,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                 reg_port=port.ofport,
                 in_port=port.ofport,
                 dl_type=dl_type,
-                nw_proto=lib_const.PROTO_NUM_UDP,
+                nw_proto=constants.PROTO_NUM_UDP,
                 tp_src=src_port,
                 tp_dst=dst_port,
                 actions='resubmit(,{:d})'.format(
@@ -467,7 +455,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                 in_port=port.ofport,
                 reg_port=port.ofport,
                 dl_type=dl_type,
-                nw_proto=lib_const.PROTO_NUM_UDP,
+                nw_proto=constants.PROTO_NUM_UDP,
                 tp_src=src_port,
                 tp_dst=dst_port,
                 actions='drop'
@@ -562,14 +550,14 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             )
 
     def _initialize_ingress_ipv6_icmp(self, port):
-        for icmp_type in firewall.ICMPV6_ALLOWED_TYPES:
+        for icmp_type in constants.ICMPV6_ALLOWED_TYPES:
             self._add_flow(
                 table=ovs_consts.BASE_INGRESS_TABLE,
                 priority=100,
                 reg_port=port.ofport,
                 dl_dst=port.mac,
                 dl_type=constants.ETHERTYPE_IPV6,
-                nw_proto=lib_const.PROTO_NUM_IPV6_ICMP,
+                nw_proto=constants.PROTO_NUM_IPV6_ICMP,
                 icmp_type=icmp_type,
                 actions='strip_vlan,output:{:d}'.format(port.ofport),
             )
@@ -595,7 +583,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                 priority=95,
                 reg_port=port.ofport,
                 dl_type=dl_type,
-                nw_proto=lib_const.PROTO_NUM_UDP,
+                nw_proto=constants.PROTO_NUM_UDP,
                 tp_src=src_port,
                 tp_dst=dst_port,
                 actions='strip_vlan,output:{:d}'.format(port.ofport),

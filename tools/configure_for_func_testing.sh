@@ -171,10 +171,9 @@ EOF
 function _install_agent_deps {
     echo_summary "Installing agent dependencies"
 
+    source $DEVSTACK_PATH/lib/neutron-legacy
+
     ENABLED_SERVICES=q-agt,q-dhcp,q-l3
-
-    source $DEVSTACK_PATH/lib/neutron
-
     install_neutron_agent_packages
 }
 
@@ -201,7 +200,7 @@ function _install_rootwrap_sudoers {
 #
 # 1: https://bugs.launchpad.net/oslo.rootwrap/+bug/1417331
 #
-Defaults:$STACK_USER  secure_path="$PROJECT_VENV/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults:$STACK_USER  secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PROJECT_VENV/bin"
 $STACK_USER ALL=(root) NOPASSWD: $ROOTWRAP_SUDOER_CMD
 $STACK_USER ALL=(root) NOPASSWD: $ROOTWRAP_DAEMON_SUDOER_CMD
 EOF
@@ -223,12 +222,11 @@ function _install_post_devstack {
 
     if is_ubuntu; then
         install_package isc-dhcp-client
-        install_package nmap
+        install_package netcat-openbsd
     elif is_fedora; then
         install_package dhclient
-        install_package nmap-ncat
     else
-        exit_distro_not_supported "installing dhclient and ncat packages"
+        exit_distro_not_supported "installing dhclient package"
     fi
 
     # Installing python-openvswitch from packages is a stop-gap while
@@ -240,8 +238,6 @@ function _install_post_devstack {
     # NOTE: the package name 'python-openvswitch' is common across
     # supported distros.
     install_package python-openvswitch
-
-    enable_kernel_bridge_firewall
 }
 
 
@@ -282,5 +278,4 @@ fi
 
 if [[ "$VENV" =~ "dsvm-fullstack" ]]; then
     _configure_iptables_rules
-    sudo modprobe ip_conntrack_proto_sctp
 fi

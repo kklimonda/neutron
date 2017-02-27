@@ -13,11 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib import constants
+import mock
+from oslo_config import cfg
 import testtools
 
+from neutron.common import constants
 from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_const
+from neutron.plugins.ml2 import config  # noqa
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.mech_sriov.mech_driver \
     import exceptions as exc
@@ -25,6 +28,7 @@ from neutron.plugins.ml2.drivers.mech_sriov.mech_driver import mech_driver
 from neutron.tests.unit.plugins.ml2 import _test_mech_agent as base
 
 MELLANOX_CONNECTX3_PCI_INFO = '15b3:1004'
+DEFAULT_PCI_INFO = ['15b3:1004', '8086:10ca']
 
 
 class TestFakePortContext(base.FakePortContext):
@@ -52,7 +56,7 @@ class TestFakePortContext(base.FakePortContext):
 
 
 class SriovNicSwitchMechanismBaseTestCase(base.AgentMechanismBaseTestCase):
-    VIF_TYPE = portbindings.VIF_TYPE_HW_VEB
+    VIF_TYPE = mech_driver.VIF_TYPE_HW_VEB
     CAP_PORT_FILTER = False
     AGENT_TYPE = constants.AGENT_TYPE_NIC_SWITCH
     VLAN_SEGMENTS = base.AgentMechanismVlanTestCase.VLAN_SEGMENTS
@@ -73,6 +77,9 @@ class SriovNicSwitchMechanismBaseTestCase(base.AgentMechanismBaseTestCase):
                    'configurations': BAD_CONFIGS}]
 
     def setUp(self):
+        cfg.CONF.set_override('supported_pci_vendor_devs',
+                              DEFAULT_PCI_INFO,
+                              'ml2_sriov')
         super(SriovNicSwitchMechanismBaseTestCase, self).setUp()
         self.driver = mech_driver.SriovNicSwitchMechanismDriver()
         self.driver.initialize()
@@ -84,15 +91,15 @@ class SriovSwitchMechGenericTestCase(SriovNicSwitchMechanismBaseTestCase,
         """Validate the check_segment call."""
         segment = {'api.NETWORK_TYPE': ""}
         segment[api.NETWORK_TYPE] = p_const.TYPE_VLAN
-        self.assertTrue(self.driver.check_segment_for_agent(segment))
+        self.assertTrue(self.driver.check_segment(segment))
         # Validate a network type not currently supported
         segment[api.NETWORK_TYPE] = p_const.TYPE_GRE
-        self.assertFalse(self.driver.check_segment_for_agent(segment))
+        self.assertFalse(self.driver.check_segment(segment))
 
     def test_check_segment_allows_supported_network_types(self):
-        for network_type in self.driver.get_allowed_network_types(agent=None):
+        for network_type in self.driver.supported_network_types:
             segment = {api.NETWORK_TYPE: network_type}
-            self.assertTrue(self.driver.check_segment_for_agent(segment))
+            self.assertTrue(self.driver.check_segment(segment))
 
 
 class SriovMechVlanTestCase(SriovNicSwitchMechanismBaseTestCase,
@@ -135,15 +142,61 @@ class SriovSwitchMechVnicTypeTestCase(SriovNicSwitchMechanismBaseTestCase):
 
     def test_vnic_type_direct(self):
         self._check_vif_type_for_vnic_type(portbindings.VNIC_DIRECT,
-                                           portbindings.VIF_TYPE_HW_VEB)
+                                           mech_driver.VIF_TYPE_HW_VEB)
 
     def test_vnic_type_macvtap(self):
         self._check_vif_type_for_vnic_type(portbindings.VNIC_MACVTAP,
-                                           portbindings.VIF_TYPE_HW_VEB)
+                                           mech_driver.VIF_TYPE_HW_VEB)
 
     def test_vnic_type_direct_physical(self):
         self._check_vif_type_for_vnic_type(portbindings.VNIC_DIRECT_PHYSICAL,
-                                           portbindings.VIF_TYPE_HOSTDEV_PHY)
+                                           mech_driver.VIF_TYPE_HOSTDEV_PHY)
+
+
+class SriovSwitchMechProfileTestCase(SriovNicSwitchMechanismBaseTestCase):
+    def _check_vif_for_pci_info(self, pci_vendor_info, expected_vif_type):
+        context = TestFakePortContext(self.AGENT_TYPE,
+                                      self.AGENTS,
+                                      self.VLAN_SEGMENTS,
+                                      portbindings.VNIC_DIRECT,
+                                      {'pci_vendor_info': pci_vendor_info})
+        self.driver.bind_port(context)
+        self.assertEqual(expected_vif_type, context._bound_vif_type)
+
+    def test_profile_supported_pci_info(self):
+        self._check_vif_for_pci_info(MELLANOX_CONNECTX3_PCI_INFO,
+                                     mech_driver.VIF_TYPE_HW_VEB)
+
+    def test_profile_unsupported_pci_info(self):
+        with mock.patch('neutron.plugins.ml2.drivers.mech_sriov.'
+                        'mech_driver.mech_driver.LOG') as log_mock:
+            self._check_vif_for_pci_info('xxxx:yyyy', None)
+            log_mock.debug.assert_called_with('Refusing to bind due to '
+                                              'unsupported pci_vendor device')
+
+
+class SriovSwitchMechProfileFailTestCase(SriovNicSwitchMechanismBaseTestCase):
+    def _check_for_pci_vendor_info(self, pci_vendor_info):
+        context = TestFakePortContext(self.AGENT_TYPE,
+                                      self.AGENTS,
+                                      self.VLAN_SEGMENTS,
+                                      portbindings.VNIC_DIRECT,
+                                      pci_vendor_info)
+        self.driver._check_supported_pci_vendor_device(context)
+
+    def test_profile_missing_profile(self):
+        with mock.patch('neutron.plugins.ml2.drivers.mech_sriov.'
+                        'mech_driver.mech_driver.LOG') as log_mock:
+            self._check_for_pci_vendor_info({})
+            log_mock.debug.assert_called_with("Missing profile in port"
+                                              " binding")
+
+    def test_profile_missing_pci_vendor_info(self):
+        with mock.patch('neutron.plugins.ml2.drivers.mech_sriov.'
+                        'mech_driver.mech_driver.LOG') as log_mock:
+            self._check_for_pci_vendor_info({'aa': 'bb'})
+            log_mock.debug.assert_called_with("Missing pci vendor"
+                                              " info in profile")
 
 
 class SriovSwitchMechVifDetailsTestCase(SriovNicSwitchMechanismBaseTestCase):
@@ -192,3 +245,46 @@ class SriovSwitchMechVifDetailsTestCase(SriovNicSwitchMechanismBaseTestCase):
 
         self.driver.bind_port(context)
         self.assertEqual(constants.PORT_STATUS_ACTIVE, context._bound_state)
+
+
+class SriovSwitchMechConfigTestCase(SriovNicSwitchMechanismBaseTestCase):
+    def _set_config(self, pci_devs=['aa:bb']):
+        cfg.CONF.set_override('mechanism_drivers',
+                              ['logger', 'sriovnicswitch'], 'ml2')
+        cfg.CONF.set_override('supported_pci_vendor_devs', pci_devs,
+                              'ml2_sriov')
+
+    def test_pci_vendor_config_single_entry(self):
+        self._set_config()
+        self.driver.initialize()
+        self.assertEqual(['aa:bb'], self.driver.pci_vendor_info)
+
+    def test_pci_vendor_config_multiple_entry(self):
+        self._set_config(['x:y', 'a:b'])
+        self.driver.initialize()
+        self.assertEqual(['x:y', 'a:b'], self.driver.pci_vendor_info)
+
+    def test_pci_vendor_config_default_entry(self):
+        self.driver.initialize()
+        self.assertEqual(DEFAULT_PCI_INFO,
+                         self.driver.pci_vendor_info)
+
+    def test_pci_vendor_config_wrong_entry(self):
+        self._set_config(['wrong_entry'])
+        self.assertRaises(cfg.Error, self.driver.initialize)
+
+    def test_initialize_missing_product_id(self):
+        self._set_config(['vendor_id:'])
+        self.assertRaises(cfg.Error, self.driver.initialize)
+
+    def test_initialize_missing_vendor_id(self):
+        self._set_config([':product_id'])
+        self.assertRaises(cfg.Error, self.driver.initialize)
+
+    def test_initialize_multiple_colons(self):
+        self._set_config(['foo:bar:baz'])
+        self.assertRaises(cfg.Error, self.driver.initialize)
+
+    def test_initialize_empty_string(self):
+        self._set_config([''])
+        self.assertRaises(cfg.Error, self.driver.initialize)

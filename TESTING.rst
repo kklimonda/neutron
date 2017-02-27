@@ -31,7 +31,7 @@ There's two ways to approach testing:
 1) Write unit tests because they're required to get your patch merged.
    This typically involves mock heavy tests that assert that your code is as
    written.
-2) Putting as much thought into your testing strategy as you do to the rest
+2) Putting as much thought in to your testing strategy as you do to the rest
    of your code. Use different layers of testing as appropriate to provide
    high *quality* coverage. Are you touching an agent? Test it against an
    actual system! Are you adding a new API? Test it for race conditions
@@ -58,8 +58,7 @@ that broad categorization, here are a few more characteristic:
     such as an agent using no mocks.
   * Integration tests - Run against a running cloud, often target the API level,
     but also 'scenarios' or 'user stories'. You may find such tests under
-    tests/tempest/api, tests/tempest/scenario, tests/fullstack, and in the
-    Tempest and Rally projects.
+    tests/api, tests/fullstack and in the Tempest and Rally projects.
 
 Tests in the Neutron tree are typically organized by the testing infrastructure
 used, and not by the scope of the test. For example, many tests under the
@@ -120,28 +119,6 @@ its output. The test has many things going for it:
 
 This is allowed by the fact that the method was built to be testable -
 The method has clear input and output with no side effects.
-
-You can get oslo.db to generate a file-based sqlite database by setting
-OS_TEST_DBAPI_ADMIN_CONNECTION to a file based URL as described in `this
-mailing list post`__. This file will be created but (confusingly) won't be the
-actual file used for the database. To find the actual file, set a break point
-in your test method and inspect self.engine.url.
-
-__ file-based-sqlite_
-
-.. code-block:: shell
-
-    $ OS_TEST_DBAPI_ADMIN_CONNECTION=sqlite:///sqlite.db .tox/py27/bin/python -m \
-        testtools.run neutron.tests.unit...
-    ...
-    (Pdb) self.engine.url
-    sqlite:////tmp/iwbgvhbshp.db
-
-Now, you can inspect this file using sqlite3.
-
-.. code-block:: shell
-
-    $ sqlite3 /tmp/iwbgvhbshp.db
 
 Functional Tests
 ~~~~~~~~~~~~~~~~
@@ -253,7 +230,7 @@ Each OVS agent is connected to its own pair of br-int/br-ex, and those bridges
 are then interconnected.
 For LinuxBridge agent each agent is started in its own namespace, called
 "host-<some_random_value>". Such namespaces are connected with OVS "central"
-bridge to each other.
+bridge to eachother.
 
 .. image:: images/fullstack_multinode_simulation.png
 
@@ -263,16 +240,6 @@ feature called 'vhosts'. In short, just like a MySQL server serve multiple
 databases, so can a RabbitMQ server serve multiple messaging domains.
 Exchanges and queues in one 'vhost' are segmented from those in another
 'vhost'.
-
-Please note that if the change you would like to test using fullstack tests
-involves a change to python-neutronclient as well as neutron, then you should
-make sure your fullstack tests are in a separate third change that depends on
-the python-neutronclient change using the 'Depends-On' tag in the commit
-message.  You will need to wait for the next release of python-neutronclient,
-and a minimum version bump for python-neutronclient in the global requirements,
-before your fullstack tests will work in the gate.  This is because tox uses
-the version of python-neutronclient listed in the upper-constraints.txt file in
-the openstack/requirements repository.
 
 When?
 +++++
@@ -306,7 +273,7 @@ the hypervisor appropriately.
 API Tests
 ~~~~~~~~~
 
-API tests (neutron/tests/tempest/api/) are intended to ensure the function
+API tests (neutron/tests/api/) are intended to ensure the function
 and stability of the Neutron API. As much as possible, changes to
 this path should not be made at the same time as changes to the code
 to limit the potential for introducing backwards-incompatible changes,
@@ -320,10 +287,10 @@ be made about implementation. Only the contract defined by Neutron's REST API
 should be validated, and all interaction with the daemon should be via
 a REST client.
 
-The neutron/tests/tempest/api directory was copied from the Tempest project around
-the Kilo timeframe. At the time, there was an overlap of tests between the Tempest
-and Neutron repositories. This overlap was then eliminated by carving out a subset
-of resources that belong to Tempest, with the rest in Neutron.
+neutron/tests/api was copied from the Tempest project. At the time, there was
+an overlap of tests between the Tempest and Neutron repositories. This overlap
+was then eliminated by carving out a subset of resources that belong to
+Tempest, with the rest in Neutron.
 
 API tests that belong to Tempest deal with a subset of Neutron's resources:
 
@@ -334,8 +301,8 @@ API tests that belong to Tempest deal with a subset of Neutron's resources:
 * Router
 * Floating IP
 
-These resources were chosen for their ubiquity. They are found in most
-Neutron deployments regardless of plugin, and are directly involved in the
+These resources were chosen for their ubiquitously. They are found in most
+Neutron depoloyments regardless of plugin, and are directly involved in the
 networking and security of an instance. Together, they form the bare minimum
 needed by Neutron.
 
@@ -346,30 +313,6 @@ in the majority of cases.
 Tests for other resources should be contributed to the Neutron repository.
 Scenario tests should be similarly split up between Tempest and Neutron
 according to the API they're targeting.
-
-Scenario Tests
-~~~~~~~~~~~~~~
-
-Scenario tests (neutron/tests/tempest/scenario), like API tests, use the
-Tempest test infrastructure and have the same requirements. Guidelines for
-writing a good scenario test may be found at the Tempest developer guide:
-http://docs.openstack.org/developer/tempest/field_guide/scenario.html
-
-Scenario tests, like API tests, are split between the Tempest and Neutron
-repositories according to the Neutron API the test is targeting.
-
-Rally Tests
-~~~~~~~~~~~
-
-Rally tests (rally-jobs/plugins) use the `rally <http://rally.readthedocs.io/>`_
-infrastructure to exercise a neutron deployment. Guidelines for writing a
-good rally test can be found in the `rally plugin documentation <http://rally.readthedocs.io/en/latest/plugins.html>`_.
-There are also some examples in tree; the process for adding rally plugins to
-neutron requires three steps: 1) write a plugin and place it under rally-jobs/plugins/.
-This is your rally scenario; 2) (optional) add a setup file under rally-jobs/extra/.
-This is any devstack configuration required to make sure your environment can
-successfully process your scenario requests; 3) edit neutron-neutron.yaml. This
-is your scenario 'contract' or SLA.
 
 Development Process
 -------------------
@@ -413,21 +356,60 @@ Where appropriate, exceptions can be added to the above script. If
 code is not part of the Neutron namespace, for example, it's probably
 reasonable to exclude their unit tests from the check.
 
-
-.. note ::
-
-   At no time should the production code import anything from testing subtree
-   (neutron.tests). There are distributions that split out neutron.tests
-   modules in a separate package that is not installed by default, making any
-   code that relies on presence of the modules to fail. For example, RDO is one
-   of those distributions.
-
 Running Tests
 -------------
 
-Before submitting a patch for review you should always ensure all tests pass; a
-tox run is triggered by the jenkins gate executed on gerrit for each patch
-pushed for review.
+There are three mechanisms for running tests: run_tests.sh, tox,
+and nose2. Before submitting a patch for review you should always
+ensure all test pass; a tox run is triggered by the jenkins gate
+executed on gerrit for each patch pushed for review.
+
+With these mechanisms you can either run the tests in the standard
+environment or create a virtual environment to run them in.
+
+By default after running all of the tests, any pep8 errors
+found in the tree will be reported.
+
+
+With `run_tests.sh`
+~~~~~~~~~~~~~~~~~~~
+
+You can use the `run_tests.sh` script in the root source directory to execute
+tests in a virtualenv::
+
+    ./run_tests -V
+
+
+With `nose2`
+~~~~~~~~~~~~
+
+You can use `nose2`_ to run individual tests, as well as use for debugging
+portions of your code::
+
+    source .venv/bin/activate
+    pip install nose2
+    nose2
+
+There are disadvantages to running nose2 - the tests are run sequentially, so
+race condition bugs will not be triggered, and the full test suite will
+take significantly longer than tox & testr. The upside is that testr has
+some rough edges when it comes to diagnosing errors and failures, and there is
+no easy way to set a breakpoint in the Neutron code, and enter an
+interactive debugging session while using testr.
+
+Note that nose2's predecessor, `nose`_, does not understand
+`load_tests protocol`_ introduced in Python 2.7. This limitation will result in
+errors being reported for modules that depend on load_tests
+(usually due to use of `testscenarios`_). nose, therefore, is not supported,
+while nose2 is.
+
+.. _nose2: http://nose2.readthedocs.org/en/latest/index.html
+.. _nose: https://nose.readthedocs.org/en/latest/index.html
+.. _load_tests protocol: https://docs.python.org/2/library/unittest.html#load-tests-protocol
+.. _testscenarios: https://pypi.python.org/pypi/testscenarios/
+
+With `tox`
+~~~~~~~~~~
 
 Neutron, like other OpenStack projects, uses `tox`_ for managing the virtual
 environments for running test cases. It uses `Testr`_ for managing the running
@@ -450,7 +432,7 @@ see this wiki page:
 .. _virtualenvs: https://pypi.python.org/pypi/virtualenv
 
 PEP8 and Unit Tests
-~~~~~~~~~~~~~~~~~~~
++++++++++++++++++++
 
 Running pep8 and unit tests is as easy as executing this in the root
 directory of the Neutron source code::
@@ -471,7 +453,7 @@ To run only the unit tests::
     tox -e py27
 
 Functional Tests
-~~~~~~~~~~~~~~~~
+++++++++++++++++
 
 To run functional tests that do not require sudo privileges or
 specific-system dependencies::
@@ -498,7 +480,7 @@ not necessary to provide this option if DevStack has already been used
 to deploy Neutron to the target host.
 
 Fullstack Tests
-~~~~~~~~~~~~~~~
++++++++++++++++
 
 To run all the full-stack tests, you may use: ::
 
@@ -510,27 +492,27 @@ tools/configure_for_func_testing.sh is advised (As described above).
 When running full-stack tests on a clean VM for the first time, we
 advise to run ./stack.sh successfully to make sure all Neutron's
 dependencies are met. Full-stack based Neutron daemons produce logs to a
-sub-folder in /opt/stack/logs/dsvm-fullstack-logs (for example, a test named
-"test_example" will produce logs to /opt/stack/logs/dsvm-fullstack-logs/test_example/),
+sub-folder in /tmp/dsvm-fullstack-logs (for example, a test named
+"test_example" will produce logs to /tmp/dsvm-fullstack-logs/test_example/),
 so that will be a good place to look if your test is failing.
-Logging from the test infrastructure itself is placed in:
-/opt/stack/logs/dsvm-fullstack-logs/test_example.log.
 Fullstack test suite assumes 240.0.0.0/4 (Class E) range in root namespace of
 the test machine is available for its usage.
 
-API & Scenario Tests
-~~~~~~~~~~~~~~~~~~~~
+API Tests
++++++++++
 
-To run the api or scenario tests, deploy Tempest and Neutron with DevStack and
-then run the following command, from the tempest directory: ::
+To run the api tests, deploy Tempest and Neutron with DevStack and
+then run the following command: ::
 
-    tox -e all-plugin
+    tox -e api
 
-If you want to limit the amount of tests that you would like to run, you
-can do, for instance: ::
+If tempest.conf cannot be found at the default location used by
+DevStack (/opt/stack/tempest/etc) it may be necessary to set
+TEMPEST_CONFIG_DIR before invoking tox: ::
 
-    export DEVSTACK_GATE_TEMPEST_REGEX="<you-regex>" # e.g. "neutron"
-    tox -e all-plugin $DEVSTACK_GATE_TEMPEST_REGEX
+    export TEMPEST_CONFIG_DIR=[path to dir containing tempest.conf]
+    tox -e api
+
 
 Running Individual Tests
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -539,6 +521,12 @@ For running individual test modules, cases or tests, you just need to pass
 the dot-separated path you want as an argument to it.
 
 For example, the following would run only a single test or test case::
+
+      $ ./run_tests.sh neutron.tests.unit.test_manager
+      $ ./run_tests.sh neutron.tests.unit.test_manager.NeutronManagerTestCase
+      $ ./run_tests.sh neutron.tests.unit.test_manager.NeutronManagerTestCase.test_service_plugin_is_loaded
+
+or::
 
       $ tox -e py27 neutron.tests.unit.test_manager
       $ tox -e py27 neutron.tests.unit.test_manager.NeutronManagerTestCase
@@ -557,6 +545,10 @@ need better coverage.
 To get a grasp of the areas where tests are needed, you can check
 current unit tests coverage by running::
 
+    $ ./run_tests.sh -c
+
+or by running::
+
     $ tox -ecover
 
 Since the coverage command can only show unit test coverage, a coverage
@@ -574,7 +566,11 @@ Debugging
 ---------
 
 By default, calls to pdb.set_trace() will be ignored when tests
-are run. For pdb statements to work, invoke tox as follows::
+are run. For pdb statements to work, invoke run_tests as follows::
+
+    $ ./run_tests.sh -d [test module path]
+
+It's possible to debug tests in a tox environment::
 
     $ tox -e venv -- python -m testtools.run [test module path]
 
@@ -600,11 +596,22 @@ overwritten during the next tox run.
 Post-mortem Debugging
 ~~~~~~~~~~~~~~~~~~~~~
 
-TBD: how to do this with tox.
+Setting OS_POST_MORTEM_DEBUGGER in the shell environment will ensure
+that the debugger .post_mortem() method will be invoked on test failure::
+
+    $ OS_POST_MORTEM_DEBUGGER=pdb ./run_tests.sh -d [test module path]
+
+Supported debuggers are pdb, and pudb. Pudb is full-screen, console-based
+visual debugger for Python which let you inspect variables, the stack,
+and breakpoints in a very visual way, keeping a high degree of compatibility
+with pdb::
+
+    $ ./.venv/bin/pip install pudb
+
+    $ OS_POST_MORTEM_DEBUGGER=pudb ./run_tests.sh -d [test module path]
 
 References
 ~~~~~~~~~~
 
 .. [#pudb] PUDB debugger:
    https://pypi.python.org/pypi/pudb
-.. _file-based-sqlite: http://lists.openstack.org/pipermail/openstack-dev/2016-July/099861.html

@@ -13,22 +13,23 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import collections
-
-from neutron_lib import exceptions
 from oslo_log import helpers as log_helpers
+from oslo_log import log as logging
 import oslo_messaging
 
 from neutron._i18n import _
 from neutron.api.rpc.callbacks.consumer import registry as cons_registry
-from neutron.api.rpc.callbacks import exceptions as rpc_exc
 from neutron.api.rpc.callbacks.producer import registry as prod_registry
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.callbacks import version_manager
 from neutron.common import constants
+from neutron.common import exceptions
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.objects import base as obj_base
+
+
+LOG = logging.getLogger(__name__)
 
 
 class ResourcesRpcError(exceptions.NeutronException):
@@ -47,14 +48,6 @@ class ResourceNotFound(ResourcesRpcError):
 def _validate_resource_type(resource_type):
     if not resources.is_valid_resource_type(resource_type):
         raise InvalidResourceTypeClass(resource_type=resource_type)
-
-
-def _resource_to_class(resource_type):
-    _validate_resource_type(resource_type)
-
-    # we've already validated the resource type, so we are pretty sure the
-    # class is there => no need to validate it specifically
-    return resources.get_resource_cls(resource_type)
 
 
 def resource_type_versioned_topic(resource_type, version=None):
@@ -82,14 +75,19 @@ class ResourcesPullRpcApi(object):
         if not hasattr(cls, '_instance'):
             cls._instance = super(ResourcesPullRpcApi, cls).__new__(cls)
             target = oslo_messaging.Target(
-                topic=topics.PLUGIN, version='1.1',
+                topic=topics.PLUGIN, version='1.0',
                 namespace=constants.RPC_NAMESPACE_RESOURCES)
             cls._instance.client = n_rpc.get_client(target)
         return cls._instance
 
     @log_helpers.log_method_call
     def pull(self, context, resource_type, resource_id):
-        resource_type_cls = _resource_to_class(resource_type)
+        _validate_resource_type(resource_type)
+
+        # we've already validated the resource type, so we are pretty sure the
+        # class is there => no need to validate it specifically
+        resource_type_cls = resources.get_resource_cls(resource_type)
+
         cctxt = self.client.prepare()
         primitive = cctxt.call(context, 'pull',
             resource_type=resource_type,
@@ -98,17 +96,8 @@ class ResourcesPullRpcApi(object):
         if primitive is None:
             raise ResourceNotFound(resource_type=resource_type,
                                    resource_id=resource_id)
-        return resource_type_cls.clean_obj_from_primitive(primitive)
 
-    @log_helpers.log_method_call
-    def bulk_pull(self, context, resource_type, filter_kwargs=None):
-        resource_type_cls = _resource_to_class(resource_type)
-        cctxt = self.client.prepare()
-        primitives = cctxt.call(context, 'bulk_pull',
-            resource_type=resource_type,
-            version=resource_type_cls.VERSION, filter_kwargs=filter_kwargs)
-        return [resource_type_cls.clean_obj_from_primitive(primitive)
-                for primitive in primitives]
+        return resource_type_cls.clean_obj_from_primitive(primitive)
 
 
 class ResourcesPullRpcCallback(object):
@@ -121,26 +110,14 @@ class ResourcesPullRpcCallback(object):
 
     # History
     #   1.0 Initial version
-    #   1.1 Added bulk_pull
 
     target = oslo_messaging.Target(
-        version='1.1', namespace=constants.RPC_NAMESPACE_RESOURCES)
+        version='1.0', namespace=constants.RPC_NAMESPACE_RESOURCES)
 
-    @oslo_messaging.expected_exceptions(rpc_exc.CallbackNotFound)
     def pull(self, context, resource_type, version, resource_id):
         obj = prod_registry.pull(resource_type, resource_id, context=context)
         if obj:
             return obj.obj_to_primitive(target_version=version)
-
-    @oslo_messaging.expected_exceptions(rpc_exc.CallbackNotFound)
-    def bulk_pull(self, context, resource_type, version, filter_kwargs=None):
-        filter_kwargs = filter_kwargs or {}
-        resource_type_cls = _resource_to_class(resource_type)
-        # TODO(kevinbenton): add in producer registry so producers can add
-        # hooks to mangle these things like they can with 'pull'.
-        return [obj.obj_to_primitive(target_version=version)
-                for obj in resource_type_cls.get_objects(context, _pager=None,
-                                                         **filter_kwargs)]
 
 
 class ResourcesPushToServersRpcApi(object):
@@ -202,63 +179,27 @@ class ResourcesPushRpcApi(object):
 
     def __init__(self):
         target = oslo_messaging.Target(
+            version='1.0',
             namespace=constants.RPC_NAMESPACE_RESOURCES)
         self.client = n_rpc.get_client(target)
 
-    def _prepare_object_fanout_context(self, obj, resource_version,
-                                       rpc_version):
+    def _prepare_object_fanout_context(self, obj, version):
         """Prepare fanout context, one topic per object type."""
-        obj_topic = resource_type_versioned_topic(obj.obj_name(),
-                                                  resource_version)
-        return self.client.prepare(fanout=True, topic=obj_topic,
-                                   version=rpc_version)
-
-    @staticmethod
-    def _classify_resources_by_type(resource_list):
-        resources_by_type = collections.defaultdict(list)
-        for resource in resource_list:
-            resource_type = resources.get_resource_type(resource)
-            resources_by_type[resource_type].append(resource)
-        return resources_by_type
+        obj_topic = resource_type_versioned_topic(obj.obj_name(), version)
+        return self.client.prepare(fanout=True, topic=obj_topic)
 
     @log_helpers.log_method_call
-    def push(self, context, resource_list, event_type):
-        """Push an event and list of resources to agents, batched per type.
-        When a list of different resource types is passed to this method,
-        the push will be sent as separate individual list pushes, one per
-        resource type.
-        """
-
-        resources_by_type = self._classify_resources_by_type(resource_list)
-        for resource_type, type_resources in resources_by_type.items():
-            self._push(context, resource_type, type_resources, event_type)
-
-    def _push(self, context, resource_type, resource_list, event_type):
-        """Push an event and list of resources of the same type to agents."""
+    def push(self, context, resource, event_type):
+        resource_type = resources.get_resource_type(resource)
         _validate_resource_type(resource_type)
-        compat_call = len(resource_list) == 1
-
-        for version in version_manager.get_resource_versions(resource_type):
-            cctxt = self._prepare_object_fanout_context(
-                resource_list[0], version,
-                rpc_version='1.0' if compat_call else '1.1')
-
-            dehydrated_resources = [
-                resource.obj_to_primitive(target_version=version)
-                for resource in resource_list]
-
-            if compat_call:
-                #TODO(mangelajo): remove in Ocata, backwards compatibility
-                #                 for agents expecting a single element as
-                #                 a single element instead of a list, this
-                #                 is only relevant to the QoSPolicy topic queue
-                cctxt.cast(context, 'push',
-                           resource=dehydrated_resources[0],
-                           event_type=event_type)
-            else:
-                cctxt.cast(context, 'push',
-                           resource_list=dehydrated_resources,
-                           event_type=event_type)
+        versions = version_manager.get_resource_versions(resource_type)
+        for version in versions:
+            cctxt = self._prepare_object_fanout_context(resource, version)
+            dehydrated_resource = resource.obj_to_primitive(
+                target_version=version)
+            cctxt.cast(context, 'push',
+                       resource=dehydrated_resource,
+                       event_type=event_type)
 
 
 class ResourcesPushRpcCallback(object):
@@ -270,23 +211,14 @@ class ResourcesPushRpcCallback(object):
     """
     # History
     #   1.0 Initial version
-    #   1.1 push method introduces resource_list support
 
-    target = oslo_messaging.Target(version='1.1',
+    target = oslo_messaging.Target(version='1.0',
                                    namespace=constants.RPC_NAMESPACE_RESOURCES)
 
-    @oslo_messaging.expected_exceptions(rpc_exc.CallbackNotFound)
-    def push(self, context, **kwargs):
-        """Push receiver, will always receive resources of the same type."""
-        # TODO(mangelajo): accept single 'resource' parameter for backwards
-        #                  compatibility during Newton, remove in Ocata
-        resource_list = ([kwargs['resource']] if 'resource' in kwargs else
-                         kwargs['resource_list'])
-        event_type = kwargs['event_type']
-
-        resource_objs = [
-            obj_base.NeutronObject.clean_obj_from_primitive(resource)
-            for resource in resource_list]
-
-        resource_type = resources.get_resource_type(resource_objs[0])
-        cons_registry.push(context, resource_type, resource_objs, event_type)
+    def push(self, context, resource, event_type):
+        resource_obj = obj_base.NeutronObject.clean_obj_from_primitive(
+            resource)
+        LOG.debug("Resources notification (%(event_type)s): %(resource)s",
+                  {'event_type': event_type, 'resource': repr(resource_obj)})
+        resource_type = resources.get_resource_type(resource_obj)
+        cons_registry.push(resource_type, resource_obj, event_type)

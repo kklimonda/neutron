@@ -17,16 +17,15 @@ import math
 import operator
 
 import netaddr
-from neutron_lib import constants
-from neutron_lib import exceptions as lib_exc
 from oslo_db import exception as db_exc
 from oslo_utils import uuidutils
 
 from neutron._i18n import _
+from neutron.api.v2 import attributes
+from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.db import models_v2
 from neutron.ipam import driver
-from neutron.ipam import exceptions as ipam_exc
 from neutron.ipam import requests as ipam_req
 from neutron.ipam import utils as ipam_utils
 
@@ -65,7 +64,7 @@ class SubnetAllocator(driver.Pool):
             id=self._subnetpool['id'], hash=current_hash)
         count = query.update({'hash': new_hash})
         if not count:
-            raise db_exc.RetryRequest(lib_exc.SubnetPoolInUse(
+            raise db_exc.RetryRequest(n_exc.SubnetPoolInUse(
                                       subnet_pool_id=self._subnetpool['id']))
 
     def _get_allocated_cidrs(self):
@@ -185,9 +184,6 @@ class SubnetAllocator(driver.Pool):
     def remove_subnet(self, subnet_id):
         raise NotImplementedError()
 
-    def get_allocator(self, subnet_ids):
-        return IpamSubnetGroup(self, subnet_ids)
-
 
 class IpamSubnet(driver.Subnet):
 
@@ -214,27 +210,6 @@ class IpamSubnet(driver.Subnet):
         return self._req
 
 
-class IpamSubnetGroup(driver.SubnetGroup):
-    def __init__(self, driver, subnet_ids):
-        self._driver = driver
-        self._subnet_ids = subnet_ids
-
-    def allocate(self, address_request):
-        '''Originally, the Neutron pluggable IPAM backend would ask the driver
-           to try to allocate an IP from each subnet in turn, one by one.  This
-           implementation preserves that behavior so that existing drivers work
-           as they did before while giving them the opportunity to optimize it
-           by overridding the implementation.
-        '''
-        for subnet_id in self._subnet_ids:
-            try:
-                ipam_subnet = self._driver.get_subnet(subnet_id)
-                return ipam_subnet.allocate(address_request), subnet_id
-            except ipam_exc.IpAddressGenerationFailure:
-                continue
-        raise ipam_exc.IpAddressGenerationFailureAllSubnets()
-
-
 class SubnetPoolReader(object):
     '''Class to assist with reading a subnetpool, loading defaults, and
        inferring IP version from prefix list. Provides a common way of
@@ -258,7 +233,7 @@ class SubnetPoolReader(object):
         self._read_address_scope(subnetpool)
         self.subnetpool = {'id': self.id,
                            'name': self.name,
-                           'project_id': self.tenant_id,
+                           'tenant_id': self.tenant_id,
                            'prefixes': self.prefixes,
                            'min_prefix': self.min_prefix,
                            'min_prefixlen': self.min_prefixlen,
@@ -283,8 +258,8 @@ class SubnetPoolReader(object):
         return netaddr.IPNetwork(cidr).prefixlen
 
     def _read_id(self, subnetpool):
-        id = subnetpool.get('id', constants.ATTR_NOT_SPECIFIED)
-        if id is constants.ATTR_NOT_SPECIFIED:
+        id = subnetpool.get('id', attributes.ATTR_NOT_SPECIFIED)
+        if id is attributes.ATTR_NOT_SPECIFIED:
             id = uuidutils.generate_uuid()
         self.id = id
 
@@ -315,13 +290,13 @@ class SubnetPoolReader(object):
         prefixlen_attr = type + '_prefixlen'
         prefix_attr = type + '_prefix'
         prefixlen = subnetpool.get(prefixlen_attr,
-                                   constants.ATTR_NOT_SPECIFIED)
+                                   attributes.ATTR_NOT_SPECIFIED)
         wildcard = self._sp_helper.wildcard(self.ip_version)
 
-        if prefixlen is constants.ATTR_NOT_SPECIFIED and default_bound:
+        if prefixlen is attributes.ATTR_NOT_SPECIFIED and default_bound:
             prefixlen = default_bound
 
-        if prefixlen is not constants.ATTR_NOT_SPECIFIED:
+        if prefixlen is not attributes.ATTR_NOT_SPECIFIED:
             prefix_cidr = '/'.join((wildcard,
                                     str(prefixlen)))
             setattr(self, prefix_attr, prefix_cidr)
@@ -340,18 +315,15 @@ class SubnetPoolReader(object):
                 raise n_exc.PrefixVersionMismatch()
         self.default_quota = subnetpool.get('default_quota')
 
-        if self.default_quota is constants.ATTR_NOT_SPECIFIED:
+        if self.default_quota is attributes.ATTR_NOT_SPECIFIED:
             self.default_quota = None
 
         self.ip_version = ip_version
         self.prefixes = self._compact_subnetpool_prefix_list(prefix_list)
 
     def _read_address_scope(self, subnetpool):
-        address_scope_id = subnetpool.get('address_scope_id',
-                                          constants.ATTR_NOT_SPECIFIED)
-        if address_scope_id is constants.ATTR_NOT_SPECIFIED:
-            address_scope_id = None
-        self.address_scope_id = address_scope_id
+        self.address_scope_id = subnetpool.get('address_scope_id',
+                                               attributes.ATTR_NOT_SPECIFIED)
 
     def _compact_subnetpool_prefix_list(self, prefix_list):
         """Compact any overlapping prefixes in prefix_list and return the
@@ -361,7 +333,7 @@ class SubnetPoolReader(object):
         for prefix in prefix_list:
             ip_set.add(netaddr.IPNetwork(prefix))
         ip_set.compact()
-        return [x.cidr for x in ip_set.iter_cidrs()]
+        return [str(x.cidr) for x in ip_set.iter_cidrs()]
 
 
 class SubnetPoolHelper(object):

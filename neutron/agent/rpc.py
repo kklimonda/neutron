@@ -16,12 +16,12 @@
 from datetime import datetime
 import itertools
 
-from neutron_lib import constants
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import uuidutils
 
-from neutron.common import constants as n_const
+from neutron._i18n import _LW
+from neutron.common import constants
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 
@@ -68,7 +68,7 @@ class PluginReportStateAPI(object):
     """
     def __init__(self, topic):
         target = oslo_messaging.Target(topic=topic, version='1.0',
-                                       namespace=n_const.RPC_NAMESPACE_STATE)
+                                       namespace=constants.RPC_NAMESPACE_STATE)
         self.client = n_rpc.get_client(target)
 
     def report_state(self, context, agent_state, use_call=False):
@@ -110,9 +110,21 @@ class PluginApi(object):
                           agent_id=agent_id, host=host)
 
     def get_devices_details_list(self, context, devices, agent_id, host=None):
-        cctxt = self.client.prepare(version='1.3')
-        return cctxt.call(context, 'get_devices_details_list',
-                          devices=devices, agent_id=agent_id, host=host)
+        try:
+            cctxt = self.client.prepare(version='1.3')
+            res = cctxt.call(context, 'get_devices_details_list',
+                             devices=devices, agent_id=agent_id, host=host)
+        except oslo_messaging.UnsupportedVersion:
+            # If the server has not been upgraded yet, a DVR-enabled agent
+            # may not work correctly, however it can function in 'degraded'
+            # mode, in that DVR routers may not be in the system yet, and
+            # it might be not necessary to retrieve info about the host.
+            LOG.warning(_LW('DVR functionality requires a server upgrade.'))
+            res = [
+                self.get_device_details(context, device, agent_id, host)
+                for device in devices
+            ]
+        return res
 
     def get_devices_details_list_and_failed_devices(self, context, devices,
                                                     agent_id, host=None):
@@ -122,11 +134,17 @@ class PluginApi(object):
         retrieving the devices details, the device is put in a list of
         failed devices.
         """
-        cctxt = self.client.prepare(version='1.5')
-        return cctxt.call(
-            context,
-            'get_devices_details_list_and_failed_devices',
-            devices=devices, agent_id=agent_id, host=host)
+        try:
+            cctxt = self.client.prepare(version='1.5')
+            res = cctxt.call(
+                context,
+                'get_devices_details_list_and_failed_devices',
+                devices=devices, agent_id=agent_id, host=host)
+        except oslo_messaging.UnsupportedVersion:
+            #TODO(rossella_s): Remove this failback logic in M
+            res = self._device_list_rpc_call_with_failed_dev(
+                self.get_device_details, context, agent_id, host, devices)
+        return res
 
     def update_device_down(self, context, device, agent_id, host=None):
         cctxt = self.client.prepare()
@@ -138,14 +156,50 @@ class PluginApi(object):
         return cctxt.call(context, 'update_device_up', device=device,
                           agent_id=agent_id, host=host)
 
+    def _device_list_rpc_call_with_failed_dev(self, rpc_call, context,
+                                              agent_id, host, devices):
+        succeeded_devices = []
+        failed_devices = []
+        for device in devices:
+            try:
+                rpc_device = rpc_call(context, device, agent_id, host)
+            except Exception:
+                failed_devices.append(device)
+            else:
+                # update_device_up doesn't return the device
+                succeeded_dev = rpc_device or device
+                succeeded_devices.append(succeeded_dev)
+        return {'devices': succeeded_devices, 'failed_devices': failed_devices}
+
     def update_device_list(self, context, devices_up, devices_down,
                            agent_id, host):
-        cctxt = self.client.prepare(version='1.5')
-        return cctxt.call(context, 'update_device_list',
-                          devices_up=devices_up, devices_down=devices_down,
-                          agent_id=agent_id, host=host)
+        try:
+            cctxt = self.client.prepare(version='1.5')
+            res = cctxt.call(context, 'update_device_list',
+                             devices_up=devices_up, devices_down=devices_down,
+                             agent_id=agent_id, host=host)
+        except oslo_messaging.UnsupportedVersion:
+            #TODO(rossella_s): Remove this failback logic in M
+            dev_up = self._device_list_rpc_call_with_failed_dev(
+                self.update_device_up, context, agent_id, host, devices_up)
+            dev_down = self._device_list_rpc_call_with_failed_dev(
+                self.update_device_down, context, agent_id, host, devices_down)
+
+            res = {'devices_up': dev_up.get('devices'),
+                   'failed_devices_up': dev_up.get('failed_devices'),
+                   'devices_down': dev_down.get('devices'),
+                   'failed_devices_down': dev_down.get('failed_devices')}
+        return res
 
     def tunnel_sync(self, context, tunnel_ip, tunnel_type=None, host=None):
-        cctxt = self.client.prepare(version='1.4')
-        return cctxt.call(context, 'tunnel_sync', tunnel_ip=tunnel_ip,
-                          tunnel_type=tunnel_type, host=host)
+        try:
+            cctxt = self.client.prepare(version='1.4')
+            res = cctxt.call(context, 'tunnel_sync', tunnel_ip=tunnel_ip,
+                             tunnel_type=tunnel_type, host=host)
+        except oslo_messaging.UnsupportedVersion:
+            LOG.warning(_LW('Tunnel synchronization requires a '
+                            'server upgrade.'))
+            cctxt = self.client.prepare()
+            res = cctxt.call(context, 'tunnel_sync', tunnel_ip=tunnel_ip,
+                             tunnel_type=tunnel_type)
+        return res

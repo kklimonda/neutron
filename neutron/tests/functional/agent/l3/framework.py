@@ -18,24 +18,21 @@ import functools
 
 import mock
 import netaddr
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 import testtools
-import textwrap
 
 from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
 from neutron.agent.l3 import agent as neutron_l3_agent
-from neutron.agent.l3 import namespaces
-from neutron.agent.l3 import router_info as l3_router_info
 from neutron.agent import l3_agent as l3_agent_main
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import keepalived
+from neutron.agent.linux import utils
+from neutron.common import config as common_config
+from neutron.common import constants as l3_constants
 from neutron.common import utils as common_utils
-from neutron.conf import common as common_config
 from neutron.tests.common import l3_test_common
 from neutron.tests.common import net_helpers
 from neutron.tests.functional import base
@@ -50,7 +47,6 @@ def get_ovs_bridge(br_name):
 
 class L3AgentTestFramework(base.BaseSudoTestCase):
     INTERFACE_DRIVER = 'neutron.agent.linux.interface.OVSInterfaceDriver'
-    NESTED_NAMESPACE_SEPARATOR = '@'
 
     def setUp(self):
         super(L3AgentTestFramework, self).setUp()
@@ -128,17 +124,17 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         router_info = self.generate_router_info(enable_ha=ha)
         router = self.manage_router(self.agent, router_info)
 
-        port = net_helpers.get_free_namespace_port(
-            constants.PROTO_NAME_TCP, router.ns_name)
+        port = net_helpers.get_free_namespace_port(l3_constants.PROTO_NAME_TCP,
+                                                   router.ns_name)
         client_address = '19.4.4.3'
         server_address = '35.4.0.4'
 
         def clean_fips(router):
-            router.router[constants.FLOATINGIP_KEY] = []
+            router.router[l3_constants.FLOATINGIP_KEY] = []
 
         clean_fips(router)
         self._add_fip(router, client_address, fixed_address=server_address)
-        router.process()
+        router.process(self.agent)
 
         router_ns = ip_lib.IPWrapper(namespace=router.ns_name)
         netcat = net_helpers.NetcatTester(
@@ -153,7 +149,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
                 n, len([line for line in out.strip().split('\n') if line]))
 
         if ha:
-            common_utils.wait_until_true(lambda: router.ha_state == 'master')
+            utils.wait_until_true(lambda: router.ha_state == 'master')
 
         with self.assert_max_execution_time(100):
             assert_num_of_conntrack_rules(0)
@@ -162,7 +158,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
             assert_num_of_conntrack_rules(1)
 
             clean_fips(router)
-            router.process()
+            router.process(self.agent)
             assert_num_of_conntrack_rules(0)
 
             with testtools.ExpectedException(RuntimeError):
@@ -175,8 +171,8 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
 
         # Assert that every defined FIP is updated via RPC
         expected_fips = set([
-            (fip['id'], constants.FLOATINGIP_STATUS_ACTIVE) for fip in
-            router.router[constants.FLOATINGIP_KEY]])
+            (fip['id'], l3_constants.FLOATINGIP_STATUS_ACTIVE) for fip in
+            router.router[l3_constants.FLOATINGIP_KEY]])
         call = [args[0] for args in rpc.call_args_list][0]
         actual_fips = set(
             [(fip_id, status) for fip_id, status in call[2].items()])
@@ -193,7 +189,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         def ha_router_dev_name_getter(not_used):
             return router.get_ha_device_name()
         self.assertTrue(self.device_exists_with_ips_and_mac(
-            router.router[constants.HA_INTERFACE_KEY],
+            router.router[l3_constants.HA_INTERFACE_KEY],
             ha_router_dev_name_getter, router.ns_name))
 
     def _assert_gateway(self, router, v6_ext_gw_with_sub=True):
@@ -208,23 +204,11 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
             self._gateway_check(self.agent.conf.ipv6_gateway,
                                 external_device)
 
-    def _check_external_device(self, router):
+    def _assert_external_device(self, router):
         external_port = router.get_ex_gw_port()
-        return (self.device_exists_with_ips_and_mac(
+        self.assertTrue(self.device_exists_with_ips_and_mac(
             external_port, router.get_external_device_name,
             router.ns_name))
-
-    def _assert_external_device(self, router):
-        self.assertTrue(self._check_external_device(router))
-
-    def _assert_ipv6_accept_ra(self, router):
-        external_port = router.get_ex_gw_port()
-        external_device_name = router.get_external_device_name(
-            external_port['id'])
-        ip_wrapper = ip_lib.IPWrapper(namespace=router.ns_name)
-        ra_state = ip_wrapper.netns.execute(['sysctl', '-b',
-            'net.ipv6.conf.%s.accept_ra' % external_device_name])
-        self.assertEqual('2', ra_state)
 
     def _router_lifecycle(self, enable_ha, ip_version=4,
                           dual_stack=False, v6_ext_gw_with_sub=True,
@@ -236,36 +220,36 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         router = self.manage_router(self.agent, router_info)
 
         # Add multiple-IPv6-prefix internal router port
-        slaac = constants.IPV6_SLAAC
+        slaac = l3_constants.IPV6_SLAAC
         slaac_mode = {'ra_mode': slaac, 'address_mode': slaac}
         subnet_modes = [slaac_mode] * 2
         self._add_internal_interface_by_subnet(router.router,
                                                count=2,
                                                ip_version=6,
                                                ipv6_subnet_modes=subnet_modes)
-        router.process()
+        router.process(self.agent)
 
         if enable_ha:
             port = router.get_ex_gw_port()
             interface_name = router.get_external_device_name(port['id'])
             self._assert_no_ip_addresses_on_interface(router.ns_name,
                                                       interface_name)
-            common_utils.wait_until_true(lambda: router.ha_state == 'master')
+            utils.wait_until_true(lambda: router.ha_state == 'master')
 
             # Keepalived notifies of a state transition when it starts,
             # not when it ends. Thus, we have to wait until keepalived finishes
             # configuring everything. We verify this by waiting until the last
             # device has an IP address.
-            device = router.router[constants.INTERFACE_KEY][-1]
+            device = router.router[l3_constants.INTERFACE_KEY][-1]
             device_exists = functools.partial(
                 self.device_exists_with_ips_and_mac,
                 device,
                 router.get_internal_device_name,
                 router.ns_name)
-            common_utils.wait_until_true(device_exists)
+            utils.wait_until_true(device_exists)
 
         self.assertTrue(self._namespace_exists(router.ns_name))
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: self._metadata_proxy_exists(self.agent.conf, router))
         self._assert_internal_devices(router)
         self._assert_external_device(router)
@@ -288,22 +272,24 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         # when IPv6 is enabled and no IPv6 gateway is configured.
         if router.use_ipv6 and not v6_ext_gw_with_sub:
             if not self.agent.conf.ipv6_gateway:
-                self._assert_ipv6_accept_ra(router)
+                external_port = router.get_ex_gw_port()
+                external_device_name = router.get_external_device_name(
+                    external_port['id'])
+                ip_wrapper = ip_lib.IPWrapper(namespace=router.ns_name)
+                ra_state = ip_wrapper.netns.execute(['sysctl', '-b',
+                    'net.ipv6.conf.%s.accept_ra' % external_device_name])
+                self.assertEqual('2', ra_state)
 
         if enable_ha:
             self._assert_ha_device(router)
-            common_utils.wait_until_true(
-                lambda: router.keepalived_manager.get_process().active,
-                timeout=15)
+            self.assertTrue(router.keepalived_manager.get_process().active)
 
         self._delete_router(self.agent, router.router_id)
 
         self._assert_interfaces_deleted_from_ovs()
         self._assert_router_does_not_exist(router)
         if enable_ha:
-            common_utils.wait_until_true(
-                lambda: not router.keepalived_manager.get_process().active,
-                timeout=15)
+            self.assertFalse(router.keepalived_manager.get_process().active)
         return return_copy
 
     def manage_router(self, agent, router):
@@ -322,7 +308,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
                'fixed_ip_address': fixed_address,
                'host': host,
                'fixed_ip_address_scope': fixed_ip_address_scope}
-        router.router[constants.FLOATINGIP_KEY].append(fip)
+        router.router[l3_constants.FLOATINGIP_KEY].append(fip)
 
     def _add_internal_interface_by_subnet(self, router, count=1,
                                           ip_version=4,
@@ -363,10 +349,10 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         ha_device_name = router.get_ha_device_name()
         external_port = router.get_ex_gw_port()
         ex_port_ipv6 = ip_lib.get_ipv6_lladdr(external_port['mac_address'])
-        ex_device_name = router.get_external_device_name(
+        external_device_name = router.get_external_device_name(
             external_port['id'])
         external_device_cidr = self._port_first_ip_cidr(external_port)
-        internal_port = router.router[constants.INTERFACE_KEY][0]
+        internal_port = router.router[l3_constants.INTERFACE_KEY][0]
         int_port_ipv6 = ip_lib.get_ipv6_lladdr(internal_port['mac_address'])
         internal_device_name = router.get_internal_device_name(
             internal_port['id'])
@@ -375,42 +361,35 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
             router.get_floating_ips()[0]['floating_ip_address'])
         default_gateway_ip = external_port['subnets'][0].get('gateway_ip')
         extra_subnet_cidr = external_port['extra_subnets'][0].get('cidr')
-        return textwrap.dedent("""\
-            global_defs {
-                notification_email_from %(email_from)s
-                router_id %(router_id)s
-            }
-            vrrp_instance VR_1 {
-                state BACKUP
-                interface %(ha_device_name)s
-                virtual_router_id 1
-                priority 50
-                garp_master_delay 60
-                nopreempt
-                advert_int 2
-                track_interface {
-                    %(ha_device_name)s
-                }
-                virtual_ipaddress {
-                    169.254.0.1/24 dev %(ha_device_name)s
-                }
-                virtual_ipaddress_excluded {
-                    %(floating_ip_cidr)s dev %(ex_device_name)s
-                    %(external_device_cidr)s dev %(ex_device_name)s
-                    %(internal_device_cidr)s dev %(internal_device_name)s
-                    %(ex_port_ipv6)s dev %(ex_device_name)s scope link
-                    %(int_port_ipv6)s dev %(internal_device_name)s scope link
-                }
-                virtual_routes {
-                    0.0.0.0/0 via %(default_gateway_ip)s dev %(ex_device_name)s
-                    8.8.8.0/24 via 19.4.4.4
-                    %(extra_subnet_cidr)s dev %(ex_device_name)s scope link
-                }
-            }""") % {
-            'email_from': keepalived.KEEPALIVED_EMAIL_FROM,
-            'router_id': keepalived.KEEPALIVED_ROUTER_ID,
+        return """vrrp_instance VR_1 {
+    state BACKUP
+    interface %(ha_device_name)s
+    virtual_router_id 1
+    priority 50
+    garp_master_delay 60
+    nopreempt
+    advert_int 2
+    track_interface {
+        %(ha_device_name)s
+    }
+    virtual_ipaddress {
+        169.254.0.1/24 dev %(ha_device_name)s
+    }
+    virtual_ipaddress_excluded {
+        %(floating_ip_cidr)s dev %(external_device_name)s
+        %(external_device_cidr)s dev %(external_device_name)s
+        %(internal_device_cidr)s dev %(internal_device_name)s
+        %(ex_port_ipv6)s dev %(external_device_name)s scope link
+        %(int_port_ipv6)s dev %(internal_device_name)s scope link
+    }
+    virtual_routes {
+        0.0.0.0/0 via %(default_gateway_ip)s dev %(external_device_name)s
+        8.8.8.0/24 via 19.4.4.4
+        %(extra_subnet_cidr)s dev %(external_device_name)s scope link
+    }
+}""" % {
             'ha_device_name': ha_device_name,
-            'ex_device_name': ex_device_name,
+            'external_device_name': external_device_name,
             'external_device_cidr': external_device_cidr,
             'internal_device_name': internal_device_name,
             'internal_device_cidr': internal_device_cidr,
@@ -431,7 +410,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         # then the devices and iptable rules have also been deleted,
         # so there's no need to check that explicitly.
         self.assertFalse(self._namespace_exists(router.ns_name))
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: not self._metadata_proxy_exists(self.agent.conf, router))
 
     def _assert_snat_chains(self, router):
@@ -463,7 +442,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
                                        metadata_port_filter))
 
     def _assert_internal_devices(self, router):
-        internal_devices = router.router[constants.INTERFACE_KEY]
+        internal_devices = router.router[l3_constants.INTERFACE_KEY]
         self.assertTrue(len(internal_devices))
         for device in internal_devices:
             self.assertTrue(self.device_exists_with_ips_and_mac(
@@ -502,7 +481,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         assert_ovs_bridge_empty(self.agent.conf.external_network_bridge)
 
     def floating_ips_configured(self, router):
-        floating_ips = router.router[constants.FLOATINGIP_KEY]
+        floating_ips = router.router[l3_constants.FLOATINGIP_KEY]
         external_port = router.get_ex_gw_port()
         return len(floating_ips) and all(
             ip_lib.device_exists_with_ips_and_mac(
@@ -511,95 +490,10 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
                 external_port['mac_address'],
                 namespace=router.ns_name) for fip in floating_ips)
 
-    def _create_router(self, router_info, agent):
-
-        ns_name = "%s%s%s" % (
-            'qrouter-' + router_info['id'],
-            self.NESTED_NAMESPACE_SEPARATOR, agent.host)
-        ext_name = "qg-%s-%s" % (agent.host, _uuid()[-4:])
-        int_name = "qr-%s-%s" % (agent.host, _uuid()[-4:])
-
-        get_ns_name = mock.patch.object(
-            namespaces.RouterNamespace, '_get_ns_name').start()
-        get_ns_name.return_value = ns_name
-        get_ext_name = mock.patch.object(l3_router_info.RouterInfo,
-            'get_external_device_name').start()
-        get_ext_name.return_value = ext_name
-        get_int_name = mock.patch.object(l3_router_info.RouterInfo,
-            'get_internal_device_name').start()
-        get_int_name.return_value = int_name
-
-        router = self.manage_router(agent, router_info)
-
-        router_ext_name = mock.patch.object(router,
-            'get_external_device_name').start()
-        router_ext_name.return_value = get_ext_name.return_value
-        router_int_name = mock.patch.object(router,
-            'get_internal_device_name').start()
-        router_int_name.return_value = get_int_name.return_value
-
-        return router
-
-    def create_ha_routers(self):
-        router_info = self.generate_router_info(enable_ha=True)
-        router1 = self._create_router(router_info, self.agent)
-        self._add_fip(router1, '192.168.111.12')
-
-        r1_br = ip_lib.IPDevice(router1.driver.conf.external_network_bridge)
-        r1_br.addr.add('19.4.4.1/24')
-        r1_br.link.set_up()
-
-        router_info_2 = copy.deepcopy(router_info)
-        router_info_2[constants.HA_INTERFACE_KEY] = (
-            l3_test_common.get_ha_interface(ip='169.254.192.2',
-                                            mac='22:22:22:22:22:22'))
-        router2 = self._create_router(router_info_2, self.failover_agent)
-
-        r2_br = ip_lib.IPDevice(router2.driver.conf.external_network_bridge)
-        r2_br.addr.add('19.4.4.1/24')
-        r2_br.link.set_up()
-
-        return (router1, router2)
-
-    def _get_master_and_slave_routers(self, router1, router2):
-
-        try:
-            common_utils.wait_until_true(
-                lambda: router1.ha_state == 'master')
-            common_utils.wait_until_true(
-                lambda: self._check_external_device(router1))
-            master_router = router1
-            slave_router = router2
-        except common_utils.WaitTimeout:
-            common_utils.wait_until_true(
-                lambda: router2.ha_state == 'master')
-            common_utils.wait_until_true(
-                lambda: self._check_external_device(router2))
-            master_router = router2
-            slave_router = router1
-
-        common_utils.wait_until_true(
-                lambda: master_router.ha_state == 'master')
-        common_utils.wait_until_true(
-                lambda: self._check_external_device(master_router))
-        common_utils.wait_until_true(
-            lambda: slave_router.ha_state == 'backup')
-        return master_router, slave_router
-
     def fail_ha_router(self, router):
         device_name = router.get_ha_device_name()
         ha_device = ip_lib.IPDevice(device_name, router.ha_namespace)
         ha_device.link.set_down()
-
-    @staticmethod
-    def fail_gw_router_port(router):
-        r_br = ip_lib.IPDevice(router.driver.conf.external_network_bridge)
-        r_br.link.set_down()
-
-    @staticmethod
-    def restore_gw_router_port(router):
-        r_br = ip_lib.IPDevice(router.driver.conf.external_network_bridge)
-        r_br.link.set_up()
 
     @classmethod
     def _get_addresses_on_device(cls, namespace, interface):

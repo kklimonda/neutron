@@ -15,17 +15,50 @@
 
 import collections
 import mock
-from neutron_lib import constants
 
+from neutron.common import constants
 from neutron.common import ipv6_utils
 from neutron.tests import base
 from neutron.tests import tools
 
 
-class TestIsEnabledAndBindByDefault(base.BaseTestCase):
+class IPv6byEUI64TestCase(base.BaseTestCase):
+    """Unit tests for generate IPv6 by EUI-64 operations."""
+
+    def test_generate_IPv6_by_EUI64(self):
+        addr = ipv6_utils.get_ipv6_addr_by_EUI64('2001:db8::',
+                                                 '00:16:3e:33:44:55')
+        self.assertEqual('2001:db8::216:3eff:fe33:4455', addr.format())
+
+    def test_generate_IPv6_with_IPv4_prefix(self):
+        ipv4_prefix = '10.0.8'
+        mac = '00:16:3e:33:44:55'
+        self.assertRaises(TypeError, lambda:
+                          ipv6_utils.get_ipv6_addr_by_EUI64(ipv4_prefix, mac))
+
+    def test_generate_IPv6_with_bad_mac(self):
+        bad_mac = '00:16:3e:33:44:5Z'
+        prefix = '2001:db8::'
+        self.assertRaises(TypeError, lambda:
+                          ipv6_utils.get_ipv6_addr_by_EUI64(prefix, bad_mac))
+
+    def test_generate_IPv6_with_bad_prefix(self):
+        mac = '00:16:3e:33:44:55'
+        bad_prefix = 'bb'
+        self.assertRaises(TypeError, lambda:
+                          ipv6_utils.get_ipv6_addr_by_EUI64(bad_prefix, mac))
+
+    def test_generate_IPv6_with_error_prefix_type(self):
+        mac = '00:16:3e:33:44:55'
+        prefix = 123
+        self.assertRaises(TypeError, lambda:
+                          ipv6_utils.get_ipv6_addr_by_EUI64(prefix, mac))
+
+
+class TestIsEnabled(base.BaseTestCase):
 
     def setUp(self):
-        super(TestIsEnabledAndBindByDefault, self).setUp()
+        super(TestIsEnabled, self).setUp()
 
         def reset_detection_flag():
             ipv6_utils._IS_IPV6_ENABLED = None
@@ -37,25 +70,25 @@ class TestIsEnabledAndBindByDefault(base.BaseTestCase):
 
     def test_enabled(self):
         self.useFixture(tools.OpenFixture(self.proc_path, '0'))
-        enabled = ipv6_utils.is_enabled_and_bind_by_default()
+        enabled = ipv6_utils.is_enabled()
         self.assertTrue(enabled)
 
     def test_disabled(self):
         self.useFixture(tools.OpenFixture(self.proc_path, '1'))
-        enabled = ipv6_utils.is_enabled_and_bind_by_default()
+        enabled = ipv6_utils.is_enabled()
         self.assertFalse(enabled)
 
     def test_disabled_non_exists(self):
         mo = self.useFixture(tools.OpenFixture(self.proc_path, '1')).mock_open
         self.mock_exists.return_value = False
-        enabled = ipv6_utils.is_enabled_and_bind_by_default()
+        enabled = ipv6_utils.is_enabled()
         self.assertFalse(enabled)
         self.assertFalse(mo.called)
 
     def test_memoize(self):
         mo = self.useFixture(tools.OpenFixture(self.proc_path, '0')).mock_open
-        ipv6_utils.is_enabled_and_bind_by_default()
-        enabled = ipv6_utils.is_enabled_and_bind_by_default()
+        ipv6_utils.is_enabled()
+        enabled = ipv6_utils.is_enabled()
         self.assertTrue(enabled)
         mo.assert_called_once_with(self.proc_path, 'r')
 
@@ -100,6 +133,12 @@ class TestIsEui64Address(base.BaseTestCase):
         for ip in ips:
             self.assertEqual(expected, ipv6_utils.is_eui64_address(ip),
                              "Error on %s" % ip)
+
+    def test_valid_eui64_addresses(self):
+        ips = ('fffe::0cad:12ff:fe44:5566',
+               ipv6_utils.get_ipv6_addr_by_EUI64('2001:db8::',
+                                                 '00:16:3e:33:44:55'))
+        self._test_eui_64(ips, True)
 
     def test_invalid_eui64_addresses(self):
         ips = ('192.168.1.1',

@@ -13,15 +13,13 @@
 #    under the License.
 
 import mock
-from neutron_lib import constants
 import testtools
 
 from neutron.agent.common import ovs_lib
 from neutron.agent import firewall
 from neutron.agent.linux.openvswitch_firewall import constants as ovsfw_consts
-from neutron.agent.linux.openvswitch_firewall import exceptions
 from neutron.agent.linux.openvswitch_firewall import firewall as ovsfw
-from neutron.common import constants as n_const
+from neutron.common import constants
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants \
         as ovs_consts
 from neutron.tests import base
@@ -30,8 +28,7 @@ TESTING_VLAN_TAG = 1
 
 
 def create_ofport(port_dict):
-    ovs_port = mock.Mock(vif_mac='00:00:00:00:00:00', ofport=1,
-                         port_name="port-name")
+    ovs_port = mock.Mock(vif_mac='00:00:00:00:00:00', port_name="port-name")
     return ovsfw.OFPort(port_dict, ovs_port, vlan_tag=TESTING_VLAN_TAG)
 
 
@@ -328,33 +325,21 @@ class TestOVSFirewallDriver(base.BaseTestCase):
         self.assertIn(port, sg1.ports)
         self.assertIn(port, sg2.ports)
 
-    def test_get_or_create_ofport_changed(self):
-        port_dict = {
-            'device': 'port-id',
-            'security_groups': [123, 456]}
-        of_port = create_ofport(port_dict)
-        self.firewall.sg_port_map.ports[of_port.id] = of_port
-        fake_ovs_port = FakeOVSPort('port', 2, '00:00:00:00:00:00')
-        self.mock_bridge.br.get_vif_port_by_id.return_value = \
-            fake_ovs_port
-        port = self.firewall.get_or_create_ofport(port_dict)
-        self.assertEqual(port.ofport, 2)
-
     def test_get_or_create_ofport_missing(self):
         port_dict = {
             'device': 'port-id',
             'security_groups': [123, 456]}
         self.mock_bridge.br.get_vif_port_by_id.return_value = None
-        with testtools.ExpectedException(exceptions.OVSFWPortNotFound):
+        with testtools.ExpectedException(ovsfw.OVSFWPortNotFound):
             self.firewall.get_or_create_ofport(port_dict)
 
-    def test_get_or_create_ofport_missing_nocreate(self):
+    def test_get_or_create_ofport_not_tagged(self):
         port_dict = {
             'device': 'port-id',
             'security_groups': [123, 456]}
-        self.mock_bridge.br.get_vif_port_by_id.return_value = None
-        self.assertIsNone(self.firewall.get_ofport(port_dict))
-        self.assertFalse(self.mock_bridge.br.get_vif_port_by_id.called)
+        self.mock_bridge.br.db_get_val.return_value = None
+        port = self.firewall.get_or_create_ofport(port_dict)
+        self.assertEqual(ovs_consts.DEAD_VLAN_TAG, port.vlan_tag)
 
     def test_is_port_managed_managed_port(self):
         port_dict = {'device': 'port-id'}
@@ -372,7 +357,7 @@ class TestOVSFirewallDriver(base.BaseTestCase):
                      'security_groups': [1]}
         self._prepare_security_group()
         self.firewall.prepare_port_filter(port_dict)
-        exp_egress_classifier = mock.call(
+        exp_ingress_classifier = mock.call(
             actions='set_field:{:d}->reg5,set_field:{:d}->reg6,'
                     'resubmit(,{:d})'.format(
                         self.port_ofport, TESTING_VLAN_TAG,
@@ -380,7 +365,7 @@ class TestOVSFirewallDriver(base.BaseTestCase):
             in_port=self.port_ofport,
             priority=100,
             table=ovs_consts.LOCAL_SWITCHING)
-        exp_ingress_classifier = mock.call(
+        exp_egress_classifier = mock.call(
             actions='set_field:{:d}->reg5,set_field:{:d}->reg6,'
                     'resubmit(,{:d})'.format(
                         self.port_ofport, TESTING_VLAN_TAG,
@@ -392,7 +377,7 @@ class TestOVSFirewallDriver(base.BaseTestCase):
             actions='ct(commit,zone=NXM_NX_REG6[0..15]),'
             'strip_vlan,output:{:d}'.format(self.port_ofport),
             dl_dst=self.port_mac,
-            dl_type="0x{:04x}".format(n_const.ETHERTYPE_IP),
+            dl_type="0x{:04x}".format(constants.ETHERTYPE_IP),
             nw_proto=constants.PROTO_NUM_TCP,
             priority=70,
             reg5=self.port_ofport,
@@ -435,7 +420,7 @@ class TestOVSFirewallDriver(base.BaseTestCase):
             actions='resubmit(,{:d})'.format(
                 ovs_consts.ACCEPT_OR_INGRESS_TABLE),
             dl_src=self.port_mac,
-            dl_type="0x{:04x}".format(n_const.ETHERTYPE_IP),
+            dl_type="0x{:04x}".format(constants.ETHERTYPE_IP),
             nw_proto=constants.PROTO_NUM_UDP,
             priority=70,
             ct_state=ovsfw_consts.OF_STATE_NEW_NOT_ESTABLISHED,

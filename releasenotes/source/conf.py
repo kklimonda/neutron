@@ -167,7 +167,7 @@ html_static_path = ['_static']
 # html_domain_indices = True
 
 # If false, no index is generated.
-html_use_index = False
+# html_use_index = True
 
 # If true, the index is split into individual pages for each letter.
 # html_split_index = False
@@ -272,6 +272,3 @@ texinfo_documents = [
 
 # If true, do not generate a @detailmenu in the "Top" node's menu.
 # texinfo_no_detailmenu = False
-
-# -- Options for Internationalization output ------------------------------
-locale_dirs = ['locale/']

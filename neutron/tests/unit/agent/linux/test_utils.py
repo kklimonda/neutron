@@ -12,7 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import signal
 import socket
 
 import mock
@@ -37,13 +36,6 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
         self.process = mock.patch('eventlet.green.subprocess.Popen').start()
         self.process.return_value.returncode = 0
         self.mock_popen = self.process.return_value.communicate
-
-    def test_xenapi_root_helper(self):
-        token = utils.xenapi_root_helper.ROOT_HELPER_DAEMON_TOKEN
-        self.config(group='AGENT', root_helper_daemon=token)
-        cmd_client = utils.RootwrapDaemonHelper.get_client()
-        self.assertIsInstance(cmd_client,
-                              utils.xenapi_root_helper.XenAPIClient)
 
     def test_without_helper(self):
         expected = "%s\n" % self.test_file
@@ -143,11 +135,12 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
             self.mock_popen.return_value = [bytes_odata, b'']
             result = utils.execute(['cat'], process_input=str_idata)
             self.mock_popen.assert_called_once_with(bytes_idata)
+            self.assertEqual(str_odata, result)
         else:
             self.mock_popen.return_value = [str_odata, '']
             result = utils.execute(['cat'], process_input=str_idata)
             self.mock_popen.assert_called_once_with(str_idata)
-        self.assertEqual(str_odata, result)
+            self.assertEqual(str_odata, result)
 
     def test_return_str_data(self):
         str_data = "%s\n" % self.test_file
@@ -182,105 +175,40 @@ class AgentUtilsGetInterfaceMAC(base.BaseTestCase):
     def test_get_interface_mac(self):
         expect_val = '01:02:03:04:05:06'
         with mock.patch('fcntl.ioctl') as ioctl:
-            ioctl.return_value = b''.join([b'\x00' * 18,
-                                           b'\x01\x02\x03\x04\x05\x06',
-                                           b'\x00' * 232])
+            ioctl.return_value = ''.join(['\x00' * 18,
+                                          '\x01\x02\x03\x04\x05\x06',
+                                          '\x00' * 232])
             actual_val = utils.get_interface_mac('eth0')
         self.assertEqual(actual_val, expect_val)
 
 
-class TestFindParentPid(base.BaseTestCase):
-    def setUp(self):
-        super(TestFindParentPid, self).setUp()
-        self.m_execute = mock.patch.object(utils, 'execute').start()
+class AgentUtilsReplaceFile(base.BaseTestCase):
+    def _test_replace_file_helper(self, explicit_perms=None):
+        # make file to replace
+        with mock.patch('tempfile.NamedTemporaryFile') as ntf:
+            ntf.return_value.name = '/baz'
+            with mock.patch('os.chmod') as chmod:
+                with mock.patch('os.rename') as rename:
+                    if explicit_perms is None:
+                        expected_perms = 0o644
+                        utils.replace_file('/foo', 'bar')
+                    else:
+                        expected_perms = explicit_perms
+                        utils.replace_file('/foo', 'bar', explicit_perms)
 
-    def test_returns_none_for_no_valid_pid(self):
-        self.m_execute.side_effect = utils.ProcessExecutionError('',
-                                                                 returncode=1)
-        self.assertIsNone(utils.find_parent_pid(-1))
+                    expected = [mock.call('w+', dir='/', delete=False),
+                                mock.call().write('bar'),
+                                mock.call().close()]
 
-    def test_returns_parent_id_for_good_ouput(self):
-        self.m_execute.return_value = '123 \n'
-        self.assertEqual(utils.find_parent_pid(-1), '123')
+                    ntf.assert_has_calls(expected)
+                    chmod.assert_called_once_with('/baz', expected_perms)
+                    rename.assert_called_once_with('/baz', '/foo')
 
-    def test_raises_exception_returncode_0(self):
-        with testtools.ExpectedException(utils.ProcessExecutionError):
-            self.m_execute.side_effect = \
-                utils.ProcessExecutionError('', returncode=0)
-            utils.find_parent_pid(-1)
+    def test_replace_file_with_default_perms(self):
+        self._test_replace_file_helper()
 
-    def test_raises_unknown_exception(self):
-        with testtools.ExpectedException(RuntimeError):
-            self.m_execute.side_effect = RuntimeError()
-            utils.find_parent_pid(-1)
-
-
-class TestFindForkTopParent(base.BaseTestCase):
-    def _test_find_fork_top_parent(self, expected=_marker,
-                                   find_parent_pid_retvals=None,
-                                   pid_invoked_with_cmdline_retvals=None):
-        def _find_parent_pid(x):
-            if find_parent_pid_retvals:
-                return find_parent_pid_retvals.pop(0)
-
-        pid_invoked_with_cmdline = {}
-        if pid_invoked_with_cmdline_retvals:
-            pid_invoked_with_cmdline['side_effect'] = (
-                pid_invoked_with_cmdline_retvals)
-        else:
-            pid_invoked_with_cmdline['return_value'] = False
-        with mock.patch.object(utils, 'find_parent_pid',
-                               side_effect=_find_parent_pid), \
-                mock.patch.object(utils, 'pid_invoked_with_cmdline',
-                                  **pid_invoked_with_cmdline):
-                    actual = utils.find_fork_top_parent(_marker)
-        self.assertEqual(expected, actual)
-
-    def test_returns_own_pid_no_parent(self):
-        self._test_find_fork_top_parent()
-
-    def test_returns_own_pid_nofork(self):
-        self._test_find_fork_top_parent(find_parent_pid_retvals=['2', '3'])
-
-    def test_returns_first_parent_pid_fork(self):
-        self._test_find_fork_top_parent(
-            expected='2',
-            find_parent_pid_retvals=['2', '3', '4'],
-            pid_invoked_with_cmdline_retvals=[True, False, False])
-
-    def test_returns_top_parent_pid_fork(self):
-        self._test_find_fork_top_parent(
-            expected='4',
-            find_parent_pid_retvals=['2', '3', '4'],
-            pid_invoked_with_cmdline_retvals=[True, True, True])
-
-
-class TestKillProcess(base.BaseTestCase):
-    def _test_kill_process(self, pid, exception_message=None,
-                           kill_signal=signal.SIGKILL):
-        if exception_message:
-            exc = utils.ProcessExecutionError(exception_message, returncode=0)
-        else:
-            exc = None
-        with mock.patch.object(utils, 'execute',
-                               side_effect=exc) as mock_execute:
-            utils.kill_process(pid, kill_signal, run_as_root=True)
-
-        mock_execute.assert_called_with(['kill', '-%d' % kill_signal, pid],
-                                        run_as_root=True)
-
-    def test_kill_process_returns_none_for_valid_pid(self):
-        self._test_kill_process('1')
-
-    def test_kill_process_returns_none_for_stale_pid(self):
-        self._test_kill_process('1', 'No such process')
-
-    def test_kill_process_raises_exception_for_execute_exception(self):
-        with testtools.ExpectedException(utils.ProcessExecutionError):
-            self._test_kill_process('1', 'Invalid')
-
-    def test_kill_process_with_different_signal(self):
-        self._test_kill_process('1', kill_signal=signal.SIGTERM)
+    def test_replace_file_with_0o600_perms(self):
+        self._test_replace_file_helper(0o600)
 
 
 class TestFindChildPids(base.BaseTestCase):
@@ -298,14 +226,6 @@ class TestFindChildPids(base.BaseTestCase):
     def test_returns_list_of_child_process_ids_for_good_ouput(self):
         with mock.patch.object(utils, 'execute', return_value=' 123 \n 185\n'):
             self.assertEqual(utils.find_child_pids(-1), ['123', '185'])
-
-    def test_returns_list_of_child_process_ids_recursively(self):
-        with mock.patch.object(utils, 'execute',
-                               side_effect=[' 123 \n 185\n',
-                                            ' 40 \n', '\n',
-                                            '41\n', '\n']):
-            actual = utils.find_child_pids(-1, True)
-            self.assertEqual(actual, ['123', '185', '40', '41'])
 
     def test_raises_unknown_exception(self):
         with testtools.ExpectedException(RuntimeError):
@@ -475,9 +395,8 @@ class TestUnixDomainHttpConnection(base.BaseTestCase):
 
 class TestUnixDomainHttpProtocol(base.BaseTestCase):
     def test_init_empty_client(self):
-        for addr in ('', b''):
-            u = utils.UnixDomainHttpProtocol(mock.Mock(), addr, mock.Mock())
-            self.assertEqual(u.client_address, ('<local>', 0))
+        u = utils.UnixDomainHttpProtocol(mock.Mock(), '', mock.Mock())
+        self.assertEqual(u.client_address, ('<local>', 0))
 
     def test_init_with_client(self):
         u = utils.UnixDomainHttpProtocol(mock.Mock(), 'foo', mock.Mock())

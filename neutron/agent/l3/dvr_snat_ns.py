@@ -10,14 +10,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
 from oslo_log import log as logging
 
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
+from neutron.common import constants
 
 LOG = logging.getLogger(__name__)
 SNAT_NS_PREFIX = 'snat-'
+SNAT_INT_DEV_PREFIX = constants.SNAT_INT_DEV_PREFIX
 
 
 class SnatNamespace(namespaces.Namespace):
@@ -42,10 +43,10 @@ class SnatNamespace(namespaces.Namespace):
     def delete(self):
         ns_ip = ip_lib.IPWrapper(namespace=self.name)
         for d in ns_ip.get_devices(exclude_loopback=True):
-            if d.name.startswith(constants.SNAT_INT_DEV_PREFIX):
+            if d.name.startswith(SNAT_INT_DEV_PREFIX):
                 LOG.debug('Unplugging DVR device %s', d.name)
                 self.driver.unplug(d.name, namespace=self.name,
-                                   prefix=constants.SNAT_INT_DEV_PREFIX)
+                                   prefix=SNAT_INT_DEV_PREFIX)
             elif d.name.startswith(namespaces.EXTERNAL_DEV_PREFIX):
                 self.driver.unplug(
                     d.name,

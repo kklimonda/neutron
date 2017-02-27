@@ -16,14 +16,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import validators
-from neutron_lib import constants
-from neutron_lib.db import model_base
 import oslo_db.sqlalchemy.session
 import sqlalchemy as sa
 from sqlalchemy import orm
 
 from neutron.api import extensions
+from neutron.api.v2 import attributes
+from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.plugins.ml2 import driver_api
 from neutron.tests.unit.plugins.ml2 import extensions as test_extensions
@@ -43,8 +42,9 @@ class TestExtensionDriverBase(driver_api.ExtensionDriver):
 class TestExtensionDriver(TestExtensionDriverBase):
     def initialize(self):
         super(TestExtensionDriver, self).initialize()
-        # keep track of values
-        self.val_by_id = {}
+        self.network_extension = 'Test_Network_Extension'
+        self.subnet_extension = 'Test_Subnet_Extension'
+        self.port_extension = 'Test_Port_Extension'
 
     def _check_create(self, session, data, result):
         assert(isinstance(session, oslo_db.sqlalchemy.session.Session))
@@ -67,59 +67,50 @@ class TestExtensionDriver(TestExtensionDriverBase):
         assert(isinstance(db_entry, expected_db_entry_class))
         assert(db_entry.id == result['id'])
 
-    def _store_change(self, result, data, field):
-        if field in data and data[field] != constants.ATTR_NOT_SPECIFIED:
-            self.val_by_id[result['id']] = data[field]
-        elif result['id'] not in self.val_by_id:
-            self.val_by_id[result['id']] = 'default_%s' % field
-
     def process_create_network(self, plugin_context, data, result):
         session = plugin_context.session
         self._check_create(session, data, result)
-        self._store_change(result, data, 'network_extension')
-        result['network_extension'] = self.val_by_id[result['id']]
+        result['network_extension'] = self.network_extension + '_create'
 
     def process_update_network(self, plugin_context, data, result):
         session = plugin_context.session
         self._check_update(session, data, result)
-        self._store_change(result, data, 'network_extension')
-        result['network_extension'] = self.val_by_id[result['id']]
+        self.network_extension = data['network_extension']
+        result['network_extension'] = self.network_extension + '_update'
 
     def extend_network_dict(self, session, net_db, result):
         self._check_extend(session, result, net_db, models_v2.Network)
-        result['network_extension'] = self.val_by_id.get(result['id'])
+        result['network_extension'] = self.network_extension + '_extend'
 
     def process_create_subnet(self, plugin_context, data, result):
         session = plugin_context.session
         self._check_create(session, data, result)
-        self._store_change(result, data, 'subnet_extension')
-        result['subnet_extension'] = self.val_by_id[result['id']]
+        result['subnet_extension'] = self.subnet_extension + '_create'
 
     def process_update_subnet(self, plugin_context, data, result):
         session = plugin_context.session
         self._check_update(session, data, result)
-        self._store_change(result, data, 'subnet_extension')
-        result['subnet_extension'] = self.val_by_id[result['id']]
+        self.subnet_extension = data['subnet_extension']
+        result['subnet_extension'] = self.subnet_extension + '_update'
 
     def extend_subnet_dict(self, session, subnet_db, result):
         self._check_extend(session, result, subnet_db, models_v2.Subnet)
-        result['subnet_extension'] = self.val_by_id.get(result['id'])
+        result['subnet_extension'] = self.subnet_extension + '_extend'
 
     def process_create_port(self, plugin_context, data, result):
         session = plugin_context.session
         self._check_create(session, data, result)
-        self._store_change(result, data, 'port_extension')
-        result['port_extension'] = self.val_by_id[result['id']]
+        result['port_extension'] = self.port_extension + '_create'
 
     def process_update_port(self, plugin_context, data, result):
         session = plugin_context.session
         self._check_update(session, data, result)
-        self._store_change(result, data, 'port_extension')
-        result['port_extension'] = self.val_by_id[result['id']]
+        self.port_extension = data['port_extension']
+        result['port_extension'] = self.port_extension + '_update'
 
     def extend_port_dict(self, session, port_db, result):
         self._check_extend(session, result, port_db, models_v2.Port)
-        result['port_extension'] = self.val_by_id.get(result['id'])
+        result['port_extension'] = self.port_extension + '_extend'
 
 
 class TestNetworkExtension(model_base.BASEV2):
@@ -155,7 +146,7 @@ class TestPortExtension(model_base.BASEV2):
 class TestDBExtensionDriver(TestExtensionDriverBase):
     def _get_value(self, data, key):
         value = data[key]
-        if not validators.is_attr_set(value):
+        if not attributes.is_attr_set(value):
             value = ''
         return value
 

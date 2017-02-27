@@ -34,6 +34,14 @@ that is explicitly marked to be consumed by other projects.
 
 That said, there are modules that other projects should definitely avoid relying on.
 
+Specifically, no external repository should use anything located under
+neutron.openstack.common.* import path. This code belongs to oslo-incubator
+modules and is not meant to work for consumers other than neutron main tree
+itself. (The only exception is made for advanced service repositories that are
+tightly controlled by neutron community.) Long story short, if your repository
+uses those modules, please switch to corresponding oslo libraries or use your
+own copy of oslo-incubator files.
+
 
 Breakages
 ---------
@@ -43,13 +51,6 @@ neutron tree is expected to trigger breakage for one or more external
 repositories under the neutron tent. Below you can find a list of known
 incompatible changes that could or are known to trigger those breakages.
 The changes are listed in reverse chronological order (newer at the top).
-
-* change: QoS plugin refactor
-
-  - commit: I863f063a0cfbb464cedd00bddc15dd853cbb6389
-  - solution: implement the new abstract methods in
-              neutron.extensions.qos.QoSPluginBase.
-  - severity: Low (some out-of-tree plugins might be affected).
 
 * change: Consume ConfigurableMiddleware from oslo_middleware.
 

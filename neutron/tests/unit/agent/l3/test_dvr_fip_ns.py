@@ -14,7 +14,6 @@
 
 import copy
 import mock
-from oslo_config import cfg
 from oslo_utils import uuidutils
 
 from neutron.agent.common import utils
@@ -32,7 +31,7 @@ class TestDvrFipNs(base.BaseTestCase):
     def setUp(self):
         super(TestDvrFipNs, self).setUp()
         self.conf = mock.Mock()
-        self.conf.state_path = cfg.CONF.state_path
+        self.conf.state_path = '/tmp'
         self.driver = mock.Mock()
         self.driver.DEV_NAME_LEN = 14
         self.net_id = _uuid()
@@ -97,63 +96,86 @@ class TestDvrFipNs(base.BaseTestCase):
     @mock.patch.object(dvr_fip_ns.FipNamespace, 'create')
     def test_create_gateway_port(self, fip_create, device_exists, ip_wrapper):
         agent_gw_port = self._get_agent_gw_port()
+        interface_name = self.fip_ns.get_ext_device_name(agent_gw_port['id'])
 
         device_exists.return_value = False
+        self.fip_ns._update_gateway_port = mock.Mock()
         self.fip_ns.create_or_update_gateway_port(agent_gw_port)
         self.assertTrue(fip_create.called)
         self.assertEqual(1, self.driver.plug.call_count)
         self.assertEqual(1, self.driver.init_l3.call_count)
+        self.fip_ns._update_gateway_port.assert_called_once_with(
+            agent_gw_port, interface_name)
+
+    @mock.patch.object(ip_lib, 'IPWrapper')
+    @mock.patch.object(ip_lib, 'device_exists')
+    @mock.patch.object(dvr_fip_ns.FipNamespace, 'create')
+    @mock.patch.object(dvr_fip_ns.FipNamespace, 'delete')
+    @mock.patch.object(dvr_fip_ns.FipNamespace, 'unsubscribe')
+    def test_create_gateway_port_raises_exception(
+        self, fip_desub, fip_delete, fip_create, device_exists, ip_wrapper):
+        agent_gw_port = self._get_agent_gw_port()
+        interface_name = self.fip_ns.get_ext_device_name(agent_gw_port['id'])
+
+        device_exists.return_value = False
+        msg = 'L3 agent failed to setup fip gateway in the namespace'
+        self.fip_ns._update_gateway_port = mock.Mock(
+            side_effect=n_exc.FloatingIpSetupException(msg))
+        self.assertRaises(n_exc.FloatingIpSetupException,
+                          self.fip_ns.create_or_update_gateway_port,
+                          agent_gw_port)
+        self.assertTrue(fip_create.called)
+        self.assertEqual(1, self.driver.plug.call_count)
+        self.assertEqual(1, self.driver.init_l3.call_count)
+        self.fip_ns._update_gateway_port.assert_called_once_with(
+            agent_gw_port, interface_name)
+        self.assertTrue(fip_desub.called)
+        self.assertTrue(fip_delete.called)
+        self.assertIsNone(self.fip_ns.agent_gateway_port)
 
     @mock.patch.object(ip_lib, 'IPDevice')
     @mock.patch.object(ip_lib, 'send_ip_addr_adv_notif')
     @mock.patch.object(dvr_fip_ns.FipNamespace, 'subscribe')
-    @mock.patch.object(dvr_fip_ns.FipNamespace, '_add_default_gateway_for_fip')
-    def test_update_gateway_port(
-        self, def_gw, fip_sub, send_adv_notif, IPDevice):
+    def test_update_gateway_port(self, fip_sub, send_adv_notif, IPDevice):
         fip_sub.return_value = False
-        self.fip_ns._check_for_gateway_ip_change = mock.Mock(return_value=True)
-        agent_gw_port = self._get_agent_gw_port()
-        interface_name = self.fip_ns.get_ext_device_name(agent_gw_port['id'])
-        self.fip_ns.create_or_update_gateway_port(agent_gw_port)
-        expected = [
-            mock.call(self.fip_ns.get_name(),
-                      interface_name,
-                      agent_gw_port['fixed_ips'][0]['ip_address'],
-                      mock.ANY),
-            mock.call(self.fip_ns.get_name(),
-                      interface_name,
-                      agent_gw_port['fixed_ips'][1]['ip_address'],
-                      mock.ANY)]
-        send_adv_notif.assert_has_calls(expected)
-        self.assertTrue(def_gw.called)
-
-    @mock.patch.object(ip_lib.IPDevice, 'exists')
-    @mock.patch.object(dvr_fip_ns.FipNamespace, 'subscribe')
-    @mock.patch.object(dvr_fip_ns.FipNamespace, 'delete')
-    @mock.patch.object(dvr_fip_ns.FipNamespace, 'unsubscribe')
-    def test_update_gateway_port_raises_exception(
-        self, fip_unsub, fip_delete, fip_sub, exists):
         self.fip_ns._check_for_gateway_ip_change = mock.Mock(return_value=True)
         self.fip_ns.agent_gateway_port = None
         agent_gw_port = self._get_agent_gw_port()
-        self.fip_ns._create_gateway_port = mock.Mock()
+
         self.fip_ns.create_or_update_gateway_port(agent_gw_port)
-        exists.return_value = False
+        expected = [
+            mock.call(self.fip_ns.get_name(),
+                      self.fip_ns.get_ext_device_name(agent_gw_port['id']),
+                      agent_gw_port['fixed_ips'][0]['ip_address'],
+                      mock.ANY),
+            mock.call(self.fip_ns.get_name(),
+                      self.fip_ns.get_ext_device_name(agent_gw_port['id']),
+                      agent_gw_port['fixed_ips'][1]['ip_address'],
+                      mock.ANY)]
+        send_adv_notif.assert_has_calls(expected)
+        gw_ipv4 = agent_gw_port['subnets'][0]['gateway_ip']
+        gw_ipv6 = agent_gw_port['subnets'][1]['gateway_ip']
+        expected = [mock.call(gw_ipv4), mock.call(gw_ipv6)]
+        IPDevice().route.add_gateway.assert_has_calls(expected)
+
+    @mock.patch.object(ip_lib.IPDevice, 'exists')
+    @mock.patch.object(dvr_fip_ns.FipNamespace, 'subscribe')
+    def test_update_gateway_port_raises_exception(self, fip_sub, exists):
         fip_sub.return_value = False
+        exists.return_value = False
         self.fip_ns._check_for_gateway_ip_change = mock.Mock(return_value=True)
+        self.fip_ns.agent_gateway_port = None
+        agent_gw_port = self._get_agent_gw_port()
 
         self.assertRaises(n_exc.FloatingIpSetupException,
                           self.fip_ns.create_or_update_gateway_port,
                           agent_gw_port)
-        self.assertTrue(fip_unsub.called)
-        self.assertTrue(fip_delete.called)
 
     @mock.patch.object(ip_lib, 'IPDevice')
     @mock.patch.object(ip_lib, 'send_ip_addr_adv_notif')
     @mock.patch.object(dvr_fip_ns.FipNamespace, 'subscribe')
-    @mock.patch.object(dvr_fip_ns.FipNamespace, '_add_default_gateway_for_fip')
     def test_update_gateway_port_gateway_outside_subnet_added(
-            self, def_gw, fip_sub, send_adv_notif, IPDevice):
+            self, fip_sub, send_adv_notif, IPDevice):
         fip_sub.return_value = False
         self.fip_ns.agent_gateway_port = None
         agent_gw_port = self._get_agent_gw_port()
@@ -163,7 +185,6 @@ class TestDvrFipNs(base.BaseTestCase):
 
         IPDevice().route.add_route.assert_called_once_with('20.0.1.1',
                                                            scope='link')
-        self.assertTrue(def_gw.called)
 
     def test_check_gateway_ip_changed_no_change(self):
         agent_gw_port = self._get_agent_gw_port()
@@ -191,10 +212,10 @@ class TestDvrFipNs(base.BaseTestCase):
     @mock.patch.object(ip_lib.IpNetnsCommand, 'exists')
     def _test_create(self, old_kernel, exists, execute, IPTables):
         exists.return_value = True
-        # There are up to four sysctl calls - two to enable forwarding,
-        # and two for ip_nonlocal_bind
-        execute.side_effect = [None, None,
-                               RuntimeError if old_kernel else None, None]
+        # There are up to four sysctl calls - two for ip_nonlocal_bind,
+        # and two to enable forwarding
+        execute.side_effect = [RuntimeError if old_kernel else None,
+                               None, None, None]
 
         self.fip_ns._iptables_manager = IPTables()
         self.fip_ns.create()
@@ -263,7 +284,6 @@ class TestDvrFipNs(base.BaseTestCase):
         ri.router_id = _uuid()
         ri.rtr_fip_subnet = None
         ri.ns_name = mock.sentinel.router_ns
-        ri.get_ex_gw_port.return_value = {'mtu': 2000}
 
         rtr_2_fip_name = self.fip_ns.get_rtr_ext_device_name(ri.router_id)
         fip_2_rtr_name = self.fip_ns.get_int_device_name(ri.router_id)
@@ -274,12 +294,12 @@ class TestDvrFipNs(base.BaseTestCase):
         allocator.allocate.return_value = pair
         addr_pair = pair.get_pair()
         ip_wrapper = IPWrapper()
+        self.conf.network_device_mtu = 2000
         ip_wrapper.add_veth.return_value = (IPDevice(), IPDevice())
         device = IPDevice()
         device.exists.return_value = dev_exists
         device.addr.list.return_value = addr_exists
-        ri._get_snat_idx = mock.Mock()
-        self.fip_ns._add_rtr_ext_route_rule_to_route_table = mock.Mock()
+
         self.fip_ns.create_rtr_2_fip_link(ri)
 
         if not dev_exists:
@@ -299,8 +319,6 @@ class TestDvrFipNs(base.BaseTestCase):
 
         device.route.add_gateway.assert_called_once_with(
             '169.254.31.29', table=16)
-        self.assertTrue(
-            self.fip_ns._add_rtr_ext_route_rule_to_route_table.called)
 
     def test_create_rtr_2_fip_link(self):
         self._test_create_rtr_2_fip_link(False, False)

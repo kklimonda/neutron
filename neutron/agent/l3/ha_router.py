@@ -14,10 +14,8 @@
 
 import os
 import shutil
-import signal
 
 import netaddr
-from neutron_lib import constants as n_consts
 from oslo_log import log as logging
 
 from neutron._i18n import _LE
@@ -26,13 +24,13 @@ from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
+from neutron.common import constants as n_consts
 from neutron.common import utils as common_utils
 from neutron.extensions import portbindings
 
 LOG = logging.getLogger(__name__)
 HA_DEV_PREFIX = 'ha-'
 IP_MONITOR_PROCESS_SERVICE = 'ip_monitor'
-SIGTERM_TIMEOUT = 10
 
 
 class HaRouterNamespace(namespaces.RouterNamespace):
@@ -129,10 +127,7 @@ class HaRouter(router.RouterInfo):
             ha_port_cidrs,
             nopreempt=True,
             advert_int=self.agent_conf.ha_vrrp_advert_int,
-            priority=self.ha_priority,
-            vrrp_health_check_interval=(
-                self.agent_conf.ha_vrrp_health_check_interval),
-            ha_conf_dir=self.keepalived_manager.get_conf_dir())
+            priority=self.ha_priority)
         instance.track_interfaces.append(interface_name)
 
         if self.agent_conf.ha_vrrp_auth_password:
@@ -217,11 +212,11 @@ class HaRouter(router.RouterInfo):
         default_gw_rts = []
         instance = self._get_keepalived_instance()
         for gw_ip in gateway_ips:
-            # TODO(Carl) This is repeated everywhere.  A method would
-            # be nice.
-            default_gw = n_consts.IP_ANY[netaddr.IPAddress(gw_ip).version]
-            default_gw_rts.append(keepalived.KeepalivedVirtualRoute(
-                default_gw, gw_ip, interface_name))
+                # TODO(Carl) This is repeated everywhere.  A method would
+                # be nice.
+                default_gw = n_consts.IP_ANY[netaddr.IPAddress(gw_ip).version]
+                default_gw_rts.append(keepalived.KeepalivedVirtualRoute(
+                    default_gw, gw_ip, interface_name))
         instance.virtual_routes.gateway_routes = default_gw_rts
 
     def _add_extra_subnet_onlink_routes(self, ex_gw_port, interface_name):
@@ -277,7 +272,9 @@ class HaRouter(router.RouterInfo):
 
     def remove_floating_ip(self, device, ip_cidr):
         self._remove_vip(ip_cidr)
-        if device.addr.list(to=ip_cidr):
+        if self.ha_state == 'master' and device.addr.list(to=ip_cidr):
+            # Delete the floatingip address from external port only after
+            # the ip address has been configured to the device
             super(HaRouter, self).remove_floating_ip(device, ip_cidr)
 
     def internal_network_updated(self, interface_name, ip_cidrs):
@@ -347,12 +344,7 @@ class HaRouter(router.RouterInfo):
         pm = self._get_state_change_monitor_process_manager()
         process_monitor.unregister(
             self.router_id, IP_MONITOR_PROCESS_SERVICE)
-        pm.disable(sig=str(int(signal.SIGTERM)))
-        try:
-            common_utils.wait_until_true(lambda: not pm.active,
-                                         timeout=SIGTERM_TIMEOUT)
-        except common_utils.WaitTimeout:
-            pm.disable(sig=str(int(signal.SIGKILL)))
+        pm.disable()
 
     def update_initial_state(self, callback):
         ha_device = ip_lib.IPDevice(
@@ -379,8 +371,6 @@ class HaRouter(router.RouterInfo):
         self._plug_external_gateway(ex_gw_port, interface_name, self.ns_name)
         self._add_gateway_vip(ex_gw_port, interface_name)
         self._disable_ipv6_addressing_on_interface(interface_name)
-        if self.ha_state == 'master':
-            self._enable_ra_on_gw(ex_gw_port, self.ns_name, interface_name)
 
     def external_gateway_updated(self, ex_gw_port, interface_name):
         self._plug_external_gateway(
@@ -403,14 +393,14 @@ class HaRouter(router.RouterInfo):
                                namespace=self.ns_name,
                                prefix=router.EXTERNAL_DEV_PREFIX)
 
-    def delete(self):
+    def delete(self, agent):
         self.destroy_state_change_monitor(self.process_monitor)
         self.disable_keepalived()
         self.ha_network_removed()
-        super(HaRouter, self).delete()
+        super(HaRouter, self).delete(agent)
 
-    def process(self):
-        super(HaRouter, self).process()
+    def process(self, agent):
+        super(HaRouter, self).process(agent)
 
         self.ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
         if (self.ha_port and

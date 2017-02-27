@@ -12,86 +12,27 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os.path
-import random
-import sys
+import errno
+import inspect
+import re
 
 import eventlet
 import mock
 import netaddr
-from neutron_lib import constants
-from neutron_lib import exceptions as exc
 from oslo_log import log as logging
 import six
 import testscenarios
 import testtools
 
+from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
 from neutron.tests import base
 from neutron.tests.common import helpers
-from neutron.tests.unit import tests
 
 load_tests = testscenarios.load_tests_apply_scenarios
-
-
-class _PortRange(object):
-    """A linked list of port ranges."""
-    def __init__(self, base, prev_ref=None):
-        self.base = base
-        self.mask = 0xffff
-        self.prev_ref = prev_ref
-
-    @property
-    def possible_mask_base(self):
-        return self.base & (self.mask << 1)
-
-    @property
-    def can_merge(self):
-        return (self.prev_ref
-                and self.possible_mask_base == self.prev_ref.possible_mask_base
-                and self.mask == self.prev_ref.mask)
-
-    def shake(self):
-        """Try to merge ranges created earlier.
-
-        If previous number in a list can be merged with current item under
-        common mask, it's merged. Then it continues to do the same with the
-        rest of the list.
-        """
-        while self.can_merge:
-            self.mask <<= 1
-            self.base = self.prev_ref.base
-            if self.prev_ref:
-                self.prev_ref = self.prev_ref.prev_ref
-
-    def __str__(self):
-        return _hex_format(self.base, self.mask)
-
-    def get_list(self):
-        if self.prev_ref:
-            return self.prev_ref.get_list() + [str(self)]
-        return [str(self)]
-
-
-_hex_str = lambda num: format(num, '#06x')
-
-
-def _hex_format(port, mask):
-    if mask != 0xffff:
-        return "%s/%s" % (_hex_str(port), _hex_str(0xffff & mask))
-    return _hex_str(port)
-
-
-def _port_rule_masking(port_min, port_max):
-    current = None
-    for num in range(port_min, port_max + 1):
-        port_range = _PortRange(num, prev_ref=current)
-        port_range.shake()
-        current = port_range
-    return current.get_list()
 
 
 class TestParseMappings(base.BaseTestCase):
@@ -166,12 +107,12 @@ class TestParseTunnelRangesMixin(object):
 
     def _check_range_invalid_ranges(self, bad_range, which):
         expected_msg = self._build_invalid_tunnel_range_msg(bad_range, which)
-        err = self.assertRaises(exc.NetworkTunnelRangeError,
+        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         self.assertEqual(expected_msg, str(err))
 
     def _check_range_reversed(self, bad_range):
-        err = self.assertRaises(exc.NetworkTunnelRangeError,
+        err = self.assertRaises(n_exc.NetworkTunnelRangeError,
                                 self._verify_range, bad_range)
         expected_msg = self._build_range_reversed_msg(bad_range)
         self.assertEqual(expected_msg, str(err))
@@ -206,16 +147,20 @@ class TestVxlanTunnelRangeVerifyValid(TestParseTunnelRangesMixin,
 
 class UtilTestParseVlanRanges(base.BaseTestCase):
     _err_prefix = "Invalid network VLAN range: '"
-    _err_bad_count = "' - 'Need exactly two values for VLAN range'."
+    _err_too_few = "' - 'need more than 2 values to unpack'."
+    _err_too_many_prefix = "' - 'too many values to unpack"
+    _err_not_int = "' - 'invalid literal for int() with base 10: '%s''."
     _err_bad_vlan = "' - '%s is not a valid VLAN tag'."
     _err_range = "' - 'End of VLAN range is less than start of VLAN range'."
 
-    def _range_err_bad_count(self, nv_range):
-        return self._err_prefix + nv_range + self._err_bad_count
+    def _range_too_few_err(self, nv_range):
+        return self._err_prefix + nv_range + self._err_too_few
 
-    def _range_invalid_vlan(self, nv_range, n):
-        vlan = nv_range.split(':')[n]
-        return self._err_prefix + nv_range + (self._err_bad_vlan % vlan)
+    def _range_too_many_err_prefix(self, nv_range):
+        return self._err_prefix + nv_range + self._err_too_many_prefix
+
+    def _vlan_not_int_err(self, nv_range, vlan):
+        return self._err_prefix + nv_range + (self._err_not_int % vlan)
 
     def _nrange_invalid_vlan(self, nv_range, n):
         vlan = nv_range.split(':')[n]
@@ -326,31 +271,34 @@ class TestParseOneVlanRange(UtilTestParseVlanRanges):
 
     def test_parse_one_net_incomplete_range(self):
         config_str = "net1:100"
-        expected_msg = self._range_err_bad_count(config_str)
+        expected_msg = self._range_too_few_err(config_str)
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_one_net_range_too_many(self):
         config_str = "net1:100:150:200"
-        expected_msg = self._range_err_bad_count(config_str)
+        expected_msg_prefix = self._range_too_many_err_prefix(config_str)
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        # The error message is not same in Python 2 and Python 3. In Python 3,
+        # it depends on the amount of values used when unpacking, so it cannot
+        # be predicted as a fixed string.
+        self.assertTrue(str(err).startswith(expected_msg_prefix))
 
     def test_parse_one_net_vlan1_not_int(self):
         config_str = "net1:foo:199"
-        expected_msg = self._range_invalid_vlan(config_str, 1)
+        expected_msg = self._vlan_not_int_err(config_str, 'foo')
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_one_net_vlan2_not_int(self):
         config_str = "net1:100:bar"
-        expected_msg = self._range_invalid_vlan(config_str, 2)
+        expected_msg = self._vlan_not_int_err(config_str, 'bar')
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_one_net_and_max_range(self):
         config_str = "net1:1:4094"
@@ -362,14 +310,14 @@ class TestParseOneVlanRange(UtilTestParseVlanRanges):
         expected_msg = self._nrange_invalid_vlan(config_str, 1)
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_one_net_range_bad_vlan2(self):
         config_str = "net1:4000:4999"
         expected_msg = self._nrange_invalid_vlan(config_str, 2)
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_one, config_str)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
 
 class TestParseVlanRangeList(UtilTestParseVlanRanges):
@@ -410,18 +358,18 @@ class TestParseVlanRangeList(UtilTestParseVlanRanges):
     def test_parse_two_nets_bad_vlan_range1(self):
         config_list = ["net1:100",
                        "net2:200:299"]
-        expected_msg = self._range_err_bad_count(config_list[0])
+        expected_msg = self._range_too_few_err(config_list[0])
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_list, config_list)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_two_nets_vlan_not_int2(self):
         config_list = ["net1:100:199",
                        "net2:200:0x200"]
-        expected_msg = self._range_invalid_vlan(config_list[1], 2)
+        expected_msg = self._vlan_not_int_err(config_list[1], '0x200')
         err = self.assertRaises(n_exc.NetworkVlanRangeError,
                                 self.parse_list, config_list)
-        self.assertEqual(expected_msg, str(err))
+        self.assertEqual(str(err), expected_msg)
 
     def test_parse_two_nets_and_append_1_2(self):
         config_list = ["net1:100:199",
@@ -465,8 +413,66 @@ class TestDictUtils(base.BaseTestCase):
                     {"key2": "value2"},
                     {"key4": "value4"}]
         added, removed = utils.diff_list_of_dict(old_list, new_list)
-        self.assertEqual([dict(key4="value4")], added)
-        self.assertEqual([dict(key3="value3")], removed)
+        self.assertEqual(added, [dict(key4="value4")])
+        self.assertEqual(removed, [dict(key3="value3")])
+
+
+class _CachingDecorator(object):
+    def __init__(self):
+        self.func_retval = 'bar'
+        self._cache = mock.Mock()
+
+    @utils.cache_method_results
+    def func(self, *args, **kwargs):
+        return self.func_retval
+
+
+class TestCachingDecorator(base.BaseTestCase):
+    def setUp(self):
+        super(TestCachingDecorator, self).setUp()
+        self.decor = _CachingDecorator()
+        self.func_name = '%(module)s._CachingDecorator.func' % {
+            'module': self.__module__
+        }
+        self.not_cached = self.decor.func.func.__self__._not_cached
+
+    def test_cache_miss(self):
+        expected_key = (self.func_name, 1, 2, ('foo', 'bar'))
+        args = (1, 2)
+        kwargs = {'foo': 'bar'}
+        self.decor._cache.get.return_value = self.not_cached
+        retval = self.decor.func(*args, **kwargs)
+        self.decor._cache.set.assert_called_once_with(
+            expected_key, self.decor.func_retval, None)
+        self.assertEqual(self.decor.func_retval, retval)
+
+    def test_cache_hit(self):
+        expected_key = (self.func_name, 1, 2, ('foo', 'bar'))
+        args = (1, 2)
+        kwargs = {'foo': 'bar'}
+        retval = self.decor.func(*args, **kwargs)
+        self.assertFalse(self.decor._cache.set.called)
+        self.assertEqual(self.decor._cache.get.return_value, retval)
+        self.decor._cache.get.assert_called_once_with(expected_key,
+                                                      self.not_cached)
+
+    def test_get_unhashable(self):
+        expected_key = (self.func_name, [1], 2)
+        self.decor._cache.get.side_effect = TypeError
+        retval = self.decor.func([1], 2)
+        self.assertFalse(self.decor._cache.set.called)
+        self.assertEqual(self.decor.func_retval, retval)
+        self.decor._cache.get.assert_called_once_with(expected_key,
+                                                      self.not_cached)
+
+    def test_missing_cache(self):
+        delattr(self.decor, '_cache')
+        self.assertRaises(NotImplementedError, self.decor.func, (1, 2))
+
+    def test_no_cache(self):
+        self.decor._cache = False
+        retval = self.decor.func((1, 2))
+        self.assertEqual(self.decor.func_retval, retval)
 
 
 class TestDict2Tuples(base.BaseTestCase):
@@ -678,6 +684,31 @@ class TestDelayedStringRenderer(base.BaseTestCase):
         self.assertTrue(my_func.called)
 
 
+class TestEnsureDir(base.BaseTestCase):
+    @mock.patch('os.makedirs')
+    def test_ensure_dir_no_fail_if_exists(self, makedirs):
+        error = OSError()
+        error.errno = errno.EEXIST
+        makedirs.side_effect = error
+        utils.ensure_dir("/etc/create/concurrently")
+
+    @mock.patch('os.makedirs')
+    def test_ensure_dir_calls_makedirs(self, makedirs):
+        utils.ensure_dir("/etc/create/directory")
+        makedirs.assert_called_once_with("/etc/create/directory", 0o755)
+
+
+class TestCamelize(base.BaseTestCase):
+    def test_camelize(self):
+        data = {'bandwidth_limit': 'BandwidthLimit',
+                'test': 'Test',
+                'some__more__dashes': 'SomeMoreDashes',
+                'a_penguin_walks_into_a_bar': 'APenguinWalksIntoABar'}
+
+        for s, expected in data.items():
+            self.assertEqual(expected, utils.camelize(s))
+
+
 class TestRoundVal(base.BaseTestCase):
     def test_round_val_ok(self):
         for expected, value in ((0, 0),
@@ -686,6 +717,15 @@ class TestRoundVal(base.BaseTestCase):
                                 (1, 1.49),
                                 (2, 1.5)):
             self.assertEqual(expected, utils.round_val(value))
+
+
+class TestGetRandomString(base.BaseTestCase):
+    def test_get_random_string(self):
+        length = 127
+        random_string = utils.get_random_string(length)
+        self.assertEqual(length, len(random_string))
+        regex = re.compile('^[0-9a-fA-F]+$')
+        self.assertIsNotNone(regex.match(random_string))
 
 
 class TestSafeDecodeUtf8(base.BaseTestCase):
@@ -710,111 +750,62 @@ class TestSafeDecodeUtf8(base.BaseTestCase):
 
 
 class TestPortRuleMasking(base.BaseTestCase):
-    def test_port_rule_wrong_input(self):
-        with testtools.ExpectedException(ValueError):
-            utils.port_rule_masking(12, 5)
+    scenarios = [
+        ('Test 1 (networking-ovs-dpdk)',
+         {'port_min': 5,
+          'port_max': 12,
+          'expected': ['0x0005', '0x0006/0xfffe', '0x0008/0xfffc', '0x000c']}
+         ),
+        ('Test 2 (networking-ovs-dpdk)',
+         {'port_min': 20,
+          'port_max': 130,
+          'expected': ['0x0014/0xfffc', '0x0018/0xfff8',
+                       '0x0020/0xffe0', '0x0040/0xffc0', '0x0080/0xfffe',
+                       '0x0082']}),
+        ('Test 3 (networking-ovs-dpdk)',
+         {'port_min': 4501,
+          'port_max': 33057,
+          'expected': ['0x1195', '0x1196/0xfffe', '0x1198/0xfff8',
+                       '0x11a0/0xffe0', '0x11c0/0xffc0', '0x1200/0xfe00',
+                       '0x1400/0xfc00', '0x1800/0xf800', '0x2000/0xe000',
+                       '0x4000/0xc000', '0x8000/0xff00', '0x8100/0xffe0',
+                       '0x8120/0xfffe']}),
+        ('Test port_max == 2^k-1',
+         {'port_min': 101,
+          'port_max': 127,
+          'expected': ['0x0065', '0x0066/0xfffe', '0x0068/0xfff8',
+                       '0x0070/0xfff0']}),
+        ('Test single even port',
+         {'port_min': 22,
+          'port_max': 22,
+          'expected': ['0x0016']}),
+        ('Test single odd port',
+         {'port_min': 5001,
+          'port_max': 5001,
+          'expected': ['0x1389']}),
+        ('Test full interval',
+         {'port_min': 0,
+          'port_max': 7,
+          'expected': ['0x0000/0xfff8']}),
+        ('Test 2^k interval',
+         {'port_min': 8,
+          'port_max': 15,
+          'expected': ['0x0008/0xfff8']}),
+        ('Test full port range',
+         {'port_min': 0,
+          'port_max': 65535,
+          'expected': ['0x0000/0x0000']}),
+        ('Test bad values',
+         {'port_min': 12,
+          'port_max': 5,
+          'expected': ValueError}),
+    ]
 
-    def compare_port_ranges_results(self, port_min, port_max):
-        observed = utils.port_rule_masking(port_min, port_max)
-        expected = _port_rule_masking(port_min, port_max)
-        self.assertItemsEqual(expected, observed)
-
-    def test_port_rule_masking_random_ranges(self):
-        # calling randint a bunch of times is really slow
-        randports = sorted(random.sample(six.moves.range(1, 65536), 2000))
-        port_max = 0
-        for i in randports:
-            port_min = port_max
-            port_max = i
-            self.compare_port_ranges_results(port_min, port_max)
-
-    def test_port_rule_masking_edge_cases(self):
-        # (port_min, port_max) tuples
-        TESTING_DATA = [
-            (5, 12),
-            (20, 130),
-            (4501, 33057),
-            (0, 65535),
-            (22, 22),
-            (5001, 5001),
-            (0, 7),
-            (8, 15),
-            (1, 127),
-        ]
-        for port_min, port_max in TESTING_DATA:
-            self.compare_port_ranges_results(port_min, port_max)
-
-
-class TestAuthenticEUI(base.BaseTestCase):
-
-    def test_retains_original_format(self):
-        for mac_str in ('FA-16-3E-73-A2-E9', 'fa:16:3e:73:a2:e9'):
-            self.assertEqual(mac_str, str(utils.AuthenticEUI(mac_str)))
-
-    def test_invalid_values(self):
-        for mac in ('XXXX', 'ypp', 'g3:vvv'):
-            with testtools.ExpectedException(netaddr.core.AddrFormatError):
-                utils.AuthenticEUI(mac)
-
-
-class TestAuthenticIPNetwork(base.BaseTestCase):
-
-    def test_retains_original_format(self):
-        for addr_str in ('10.0.0.0/24', '10.0.0.10/32', '100.0.0.1'):
-            self.assertEqual(addr_str, str(utils.AuthenticIPNetwork(addr_str)))
-
-    def test_invalid_values(self):
-        for addr in ('XXXX', 'ypp', 'g3:vvv'):
-            with testtools.ExpectedException(netaddr.core.AddrFormatError):
-                utils.AuthenticIPNetwork(addr)
-
-
-class TestExcDetails(base.BaseTestCase):
-
-    def test_attach_exc_details(self):
-        e = Exception()
-        utils.attach_exc_details(e, 'details')
-        self.assertEqual('details', utils.extract_exc_details(e))
-
-    def test_attach_exc_details_with_interpolation(self):
-        e = Exception()
-        utils.attach_exc_details(e, 'details: %s', 'foo')
-        self.assertEqual('details: foo', utils.extract_exc_details(e))
-
-    def test_attach_exc_details_with_None_interpolation(self):
-        e = Exception()
-        utils.attach_exc_details(e, 'details: %s', None)
-        self.assertEqual(
-            'details: %s' % str(None), utils.extract_exc_details(e))
-
-    def test_attach_exc_details_with_multiple_interpolation(self):
-        e = Exception()
-        utils.attach_exc_details(
-            e, 'details: %s, %s', ('foo', 'bar'))
-        self.assertEqual('details: foo, bar', utils.extract_exc_details(e))
-
-    def test_attach_exc_details_with_dict_interpolation(self):
-        e = Exception()
-        utils.attach_exc_details(
-            e, 'details: %(foo)s, %(bar)s', {'foo': 'foo', 'bar': 'bar'})
-        self.assertEqual('details: foo, bar', utils.extract_exc_details(e))
-
-    def test_extract_exc_details_no_details_attached(self):
-        self.assertIsInstance(
-            utils.extract_exc_details(Exception()), six.text_type)
-
-
-class ImportModulesRecursivelyTestCase(base.BaseTestCase):
-
-    def test_recursion(self):
-        expected_modules = (
-            'neutron.tests.unit.tests.example.dir.example_module',
-            'neutron.tests.unit.tests.example.dir.subdir.example_module',
-        )
-        for module in expected_modules:
-            sys.modules.pop(module, None)
-        modules = utils.import_modules_recursively(
-            os.path.dirname(tests.__file__))
-        for module in expected_modules:
-            self.assertIn(module, modules)
-            self.assertIn(module, sys.modules)
+    def test_port_rule_masking(self):
+        if (inspect.isclass(self.expected)
+                and issubclass(self.expected, Exception)):
+            with testtools.ExpectedException(self.expected):
+                utils.port_rule_masking(self.port_min, self.port_max)
+        else:
+            rules = utils.port_rule_masking(self.port_min, self.port_max)
+            self.assertItemsEqual(self.expected, rules)

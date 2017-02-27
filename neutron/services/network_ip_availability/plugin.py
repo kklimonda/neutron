@@ -13,8 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-from neutron_lib import exceptions
-
+import neutron.common.exceptions as exceptions
 import neutron.db.db_base_plugin_v2 as db_base_plugin_v2
 import neutron.db.network_ip_availability_db as ip_availability_db
 
@@ -35,8 +34,7 @@ class NetworkIPAvailabilityPlugin(ip_availability_db.IpAvailabilityMixin,
     def get_plugin_description(self):
         return "Provides IP availability data for each network and subnet."
 
-    @classmethod
-    def get_plugin_type(cls):
+    def get_plugin_type(self):
         return "network-ip-availability"
 
     def get_network_ip_availabilities(self, context, filters=None,

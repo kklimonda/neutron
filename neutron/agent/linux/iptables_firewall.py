@@ -14,23 +14,22 @@
 #    under the License.
 
 import collections
+import re
 
 import netaddr
-from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_log import versionutils
-from oslo_utils import netutils
 import six
 
-from neutron._i18n import _, _LI, _LW
+from neutron._i18n import _LI
 from neutron.agent import firewall
 from neutron.agent.linux import ip_conntrack
 from neutron.agent.linux import ipset_manager
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_manager
 from neutron.agent.linux import utils
-from neutron.common import constants as n_const
+from neutron.common import constants
+from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as c_utils
 
@@ -41,13 +40,14 @@ SPOOF_FILTER = 'spoof-filter'
 CHAIN_NAME_PREFIX = {firewall.INGRESS_DIRECTION: 'i',
                      firewall.EGRESS_DIRECTION: 'o',
                      SPOOF_FILTER: 's'}
+ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES = [131, 135, 143]
 IPSET_DIRECTION = {firewall.INGRESS_DIRECTION: 'src',
                    firewall.EGRESS_DIRECTION: 'dst'}
+# length of all device prefixes (e.g. qvo, tap, qvb)
+LINUX_DEV_PREFIX_LEN = 3
+LINUX_DEV_LEN = 14
+MAX_CONNTRACK_ZONES = 65535
 comment_rule = iptables_manager.comment_rule
-
-
-def get_hybrid_port_name(port_name):
-    return (constants.TAP_DEVICE_PREFIX + port_name)[:n_const.LINUX_DEV_LEN]
 
 
 class mac_iptables(netaddr.mac_eui48):
@@ -61,18 +61,18 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                           firewall.EGRESS_DIRECTION: 'physdev-in'}
 
     def __init__(self, namespace=None):
-        self.iptables = iptables_manager.IptablesManager(state_less=True,
-            use_ipv6=ipv6_utils.is_enabled_and_bind_by_default(),
+        self.iptables = iptables_manager.IptablesManager(
+            use_ipv6=ipv6_utils.is_enabled(),
             namespace=namespace)
         # TODO(majopela, shihanzhang): refactor out ipset to a separate
         # driver composed over this one
         self.ipset = ipset_manager.IpsetManager(namespace=namespace)
+        self.ipconntrack = ip_conntrack.IpConntrackManager(
+            self.get_device_zone, namespace=namespace)
+        self._populate_initial_zone_map()
         # list of port which has security group
         self.filtered_ports = {}
         self.unfiltered_ports = {}
-        self.ipconntrack = ip_conntrack.get_conntrack(
-            self.iptables.get_rules_for_table, self.filtered_ports,
-            self.unfiltered_ports, namespace=namespace)
         self._add_fallback_chain_v4v6()
         self._defer_apply = False
         self._pre_defer_filtered_ports = None
@@ -105,31 +105,15 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         # enabled by default or not (Ubuntu - yes, Redhat - no, for
         # example).
         LOG.debug("Enabling netfilter for bridges")
-        try:
-            entries = utils.execute(
-                ['sysctl', '-N', 'net.bridge'], run_as_root=True,
-                log_fail_as_error=False).splitlines()
-        except utils.ProcessExecutionError:
-            LOG.info(_LI("Process is probably running in namespace or "
-                         "kernel module br_netfilter is not loaded. "
-                         "Please ensure that netfilter options for bridge "
-                         "are enabled to provide working security groups."))
-            return
-
-        for proto in ('ip', 'ip6'):
-            knob = 'net.bridge.bridge-nf-call-%stables' % proto
-            if knob not in entries:
-                raise SystemExit(
-                    _("sysctl value %s not present on this system.") % knob)
-            enabled = utils.execute(['sysctl', '-b', knob])
-            if enabled != '1':
-                versionutils.report_deprecated_feature(
-                    LOG,
-                    _LW('Bridge firewalling is disabled; enabling to make '
-                        'iptables firewall work. This may not work in future '
-                        'releases.'))
-                utils.execute(
-                    ['sysctl', '-w', '%s=1' % knob], run_as_root=True)
+        utils.execute(['sysctl', '-w',
+                       'net.bridge.bridge-nf-call-arptables=1'],
+                      run_as_root=True)
+        utils.execute(['sysctl', '-w',
+                       'net.bridge.bridge-nf-call-ip6tables=1'],
+                      run_as_root=True)
+        utils.execute(['sysctl', '-w',
+                       'net.bridge.bridge-nf-call-iptables=1'],
+                      run_as_root=True)
 
     @property
     def ports(self):
@@ -185,16 +169,9 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         self.unfiltered_ports.pop(port['device'], None)
         self.filtered_ports.pop(port['device'], None)
 
-    def _remove_conntrack_entries_from_port_deleted(self, port):
-        device_info = self.filtered_ports.get(port['device'])
-        if not device_info:
-            return
-        for ethertype in [constants.IPv4, constants.IPv6]:
-            self.ipconntrack.delete_conntrack_state_by_remote_ips(
-                [device_info], ethertype, set())
-
     def prepare_port_filter(self, port):
         LOG.debug("Preparing device (%s) filter", port['device'])
+        self._remove_chains()
         self._set_ports(port)
         self._enable_netfilter_for_bridges()
         # each security group has it own chains
@@ -219,7 +196,6 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                          'filtered %r'), port)
             return
         self._remove_chains()
-        self._remove_conntrack_entries_from_port_deleted(port)
         self._unset_ports(port)
         self._setup_chains()
         return self.iptables.apply()
@@ -333,6 +309,9 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
             self._remove_rule_from_chain_v4v6('FORWARD', jump_rule, jump_rule)
 
         if direction == firewall.EGRESS_DIRECTION:
+            jump_rule = ['-m physdev --%s %s --physdev-is-bridged '
+                         '-j ACCEPT' % (self.IPTABLES_DIRECTION[direction],
+                                        device)]
             if add:
                 self._add_rules_to_chain_v4v6('INPUT', jump_rule, jump_rule,
                                               comment=ic.PORT_SEC_ACCEPT)
@@ -414,11 +393,9 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
             mac_ipv4_pairs.append((mac, ip_address))
         else:
             mac_ipv6_pairs.append((mac, ip_address))
-            lla = str(netutils.get_ipv6_addr_by_EUI64(
-                    constants.IPv6_LLA_PREFIX, mac))
-            if (mac, lla) not in mac_ipv6_pairs:
-                # only add once so we don't generate duplicate rules
-                mac_ipv6_pairs.append((mac, lla))
+            lla = str(ipv6_utils.get_ipv6_addr_by_EUI64(
+                    constants.IPV6_LLA_PREFIX, mac))
+            mac_ipv6_pairs.append((mac, lla))
 
     def _spoofing_rule(self, port, ipv4_rules, ipv6_rules):
         # Fixed rules for traffic sourced from unspecified addresses: 0.0.0.0
@@ -429,7 +406,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                                     '-j RETURN', comment=ic.DHCP_CLIENT)]
         # Allow neighbor solicitation and multicast listener discovery
         # from the unspecified address for duplicate address detection
-        for icmp6_type in constants.ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES:
+        for icmp6_type in ICMPV6_ALLOWED_UNSPEC_ADDR_TYPES:
             ipv6_rules += [comment_rule('-s ::/128 -d ff02::/16 '
                                         '-p ipv6-icmp -m icmp6 '
                                         '--icmpv6-type %s -j RETURN' %
@@ -467,23 +444,23 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         ipv6_rules += [comment_rule('-p ipv6-icmp -j RETURN',
                                     comment=ic.IPV6_ICMP_ALLOW)]
         ipv6_rules += [comment_rule('-p udp -m udp --sport 546 '
-                                    '--dport 547 '
+                                    '-m udp --dport 547 '
                                     '-j RETURN', comment=ic.DHCP_CLIENT)]
 
     def _drop_dhcp_rule(self, ipv4_rules, ipv6_rules):
         #Note(nati) Drop dhcp packet from VM
         ipv4_rules += [comment_rule('-p udp -m udp --sport 67 '
-                                    '--dport 68 '
+                                    '-m udp --dport 68 '
                                     '-j DROP', comment=ic.DHCP_SPOOF)]
         ipv6_rules += [comment_rule('-p udp -m udp --sport 547 '
-                                    '--dport 546 '
+                                    '-m udp --dport 546 '
                                     '-j DROP', comment=ic.DHCP_SPOOF)]
 
     def _accept_inbound_icmpv6(self):
         # Allow multicast listener, neighbor solicitation and
         # neighbor advertisement into the instance
         icmpv6_rules = []
-        for icmp6_type in firewall.ICMPV6_ALLOWED_TYPES:
+        for icmp6_type in constants.ICMPV6_ALLOWED_TYPES:
             icmpv6_rules += ['-p ipv6-icmp -m icmp6 --icmpv6-type %s '
                              '-j RETURN' % icmp6_type]
         return icmpv6_rules
@@ -583,9 +560,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         return args
 
     def _generate_protocol_and_port_args(self, sg_rule):
-        is_port = (sg_rule.get('source_port_range_min') is not None or
-                   sg_rule.get('port_range_min') is not None)
-        args = self._protocol_arg(sg_rule.get('protocol'), is_port)
+        args = self._protocol_arg(sg_rule.get('protocol'))
         args += self._port_arg('sport',
                                sg_rule.get('protocol'),
                                sg_rule.get('source_port_range_min'),
@@ -647,24 +622,23 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
             comment=ic.ALLOW_ASSOC)]
         return iptables_rules
 
-    def _protocol_arg(self, protocol, is_port):
+    def _protocol_arg(self, protocol):
         if not protocol:
             return []
         if protocol == 'icmpv6':
             protocol = 'ipv6-icmp'
         iptables_rule = ['-p', protocol]
-
-        if (is_port and protocol in ['udp', 'tcp', 'icmp', 'ipv6-icmp']):
-            protocol_modules = {'udp': 'udp', 'tcp': 'tcp',
-                                'icmp': 'icmp', 'ipv6-icmp': 'icmp6'}
-            # iptables adds '-m protocol' when the port number is specified
-            iptables_rule += ['-m', protocol_modules[protocol]]
         return iptables_rule
 
     def _port_arg(self, direction, protocol, port_range_min, port_range_max):
-        args = []
-        if port_range_min is None:
-            return args
+        if (protocol not in ['udp', 'tcp', 'icmp', 'ipv6-icmp']
+            or port_range_min is None):
+            return []
+
+        protocol_modules = {'udp': 'udp', 'tcp': 'tcp',
+                            'icmp': 'icmp', 'ipv6-icmp': 'icmp6'}
+        # iptables adds '-m protocol' when the port number is specified
+        args = ['-m', protocol_modules[protocol]]
 
         if protocol in ['icmp', 'ipv6-icmp']:
             protocol_type = 'icmpv6' if protocol == 'ipv6-icmp' else 'icmp'
@@ -872,19 +846,86 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
             self._pre_defer_filtered_ports = None
             self._pre_defer_unfiltered_ports = None
 
+    def _populate_initial_zone_map(self):
+        """Setup the map between devices and zones based on current rules."""
+        self._device_zone_map = {}
+        rules = self.iptables.get_rules_for_table('raw')
+        for rule in rules:
+            match = re.match(r'.* --physdev-in (?P<dev>[a-zA-Z0-9\-]+)'
+                             r'.* -j CT --zone (?P<zone>\d+).*', rule)
+            if match:
+                # strip off any prefix that the interface is using
+                short_port_id = match.group('dev')[LINUX_DEV_PREFIX_LEN:]
+                self._device_zone_map[short_port_id] = int(match.group('zone'))
+        LOG.debug("Populated conntrack zone map: %s", self._device_zone_map)
+
+    def get_device_zone(self, port_id):
+        # we have to key the device_zone_map based on the fragment of the port
+        # UUID that shows up in the interface name. This is because the initial
+        # map is populated strictly based on interface names that we don't know
+        # the full UUID of.
+        short_port_id = port_id[:(LINUX_DEV_LEN - LINUX_DEV_PREFIX_LEN)]
+        try:
+            return self._device_zone_map[short_port_id]
+        except KeyError:
+            return self._generate_device_zone(short_port_id)
+
+    def _free_zones_from_removed_ports(self):
+        """Clears any entries from the zone map of removed ports."""
+        existing_ports = [
+            port['device'][:(LINUX_DEV_LEN - LINUX_DEV_PREFIX_LEN)]
+            for port in (list(self.filtered_ports.values()) +
+                         list(self.unfiltered_ports.values()))
+        ]
+        removed = set(self._device_zone_map) - set(existing_ports)
+        for dev in removed:
+            self._device_zone_map.pop(dev, None)
+
+    def _generate_device_zone(self, short_port_id):
+        """Generates a unique conntrack zone for the passed in ID."""
+        try:
+            zone = self._find_open_zone()
+        except n_exc.CTZoneExhaustedError:
+            # Free some zones and try again, repeat failure will not be caught
+            self._free_zones_from_removed_ports()
+            zone = self._find_open_zone()
+
+        self._device_zone_map[short_port_id] = zone
+        LOG.debug("Assigned CT zone %(z)s to port %(dev)s.",
+                  {'z': zone, 'dev': short_port_id})
+        return self._device_zone_map[short_port_id]
+
+    def _find_open_zone(self):
+        # call set to dedup because old ports may be mapped to the same zone.
+        zones_in_use = sorted(set(self._device_zone_map.values()))
+        if not zones_in_use:
+            return 1
+        # attempt to increment onto the highest used zone first. if we hit the
+        # end, go back and look for any gaps left by removed devices.
+        last = zones_in_use[-1]
+        if last < MAX_CONNTRACK_ZONES:
+            return last + 1
+        for index, used in enumerate(zones_in_use):
+            if used - index != 1:
+                # gap found, let's use it!
+                return index + 1
+        # conntrack zones exhausted :( :(
+        raise n_exc.CTZoneExhaustedError()
+
 
 class OVSHybridIptablesFirewallDriver(IptablesFirewallDriver):
+    OVS_HYBRID_TAP_PREFIX = constants.TAP_DEVICE_PREFIX
     OVS_HYBRID_PLUG_REQUIRED = True
 
     def _port_chain_name(self, port, direction):
         return iptables_manager.get_chain_name(
             '%s%s' % (CHAIN_NAME_PREFIX[direction], port['device']))
 
-    def _get_br_device_name(self, port):
-        return ('qvb' + port['device'])[:n_const.LINUX_DEV_LEN]
-
     def _get_device_name(self, port):
-        return get_hybrid_port_name(port['device'])
+        return (self.OVS_HYBRID_TAP_PREFIX + port['device'])[:LINUX_DEV_LEN]
+
+    def _get_br_device_name(self, port):
+        return ('qvb' + port['device'])[:LINUX_DEV_LEN]
 
     def _get_jump_rule(self, port, direction):
         if direction == firewall.INGRESS_DIRECTION:
@@ -892,8 +933,7 @@ class OVSHybridIptablesFirewallDriver(IptablesFirewallDriver):
         else:
             device = self._get_device_name(port)
         jump_rule = '-m physdev --physdev-in %s -j CT --zone %s' % (
-            device, self.ipconntrack.get_device_zone(
-                port['device']))
+            device, self.get_device_zone(port['device']))
         return jump_rule
 
     def _add_raw_chain_rules(self, port, direction):

@@ -13,7 +13,6 @@
 #    under the License.
 
 import os
-import signal
 import sys
 
 import httplib2
@@ -29,10 +28,13 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ip_monitor
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import config
-from neutron.conf.agent.l3 import keepalived
 
 
 LOG = logging.getLogger(__name__)
+
+
+class L3HAConfig(object):
+    send_arp_for_ha = 3
 
 
 class KeepalivedUnixDomainConnection(agent_utils.UnixDomainHTTPConnection):
@@ -116,35 +118,47 @@ class MonitorDaemon(daemon.Daemon):
             self.namespace,
             event.interface,
             str(netaddr.IPNetwork(event.cidr).ip),
+            L3HAConfig,
             log_exception=False
         )
 
-    def _kill_monitor(self):
-        if self.monitor:
-            # Kill PID instead of calling self.monitor.stop() because the ip
-            # monitor is running as root while keepalived-state-change is not
-            # (dropped privileges after launching the ip monitor) and will fail
-            # with "Permission denied". Also, we can safely do this because the
-            # monitor was launched with respawn_interval=None so it won't be
-            # automatically respawned
-            agent_utils.kill_process(self.monitor.pid, signal.SIGKILL,
-                                     run_as_root=True)
 
-    def handle_sigterm(self, signum, frame):
-        self._kill_monitor()
-        super(MonitorDaemon, self).handle_sigterm(signum, frame)
+def register_opts(conf):
+    conf.register_cli_opt(
+        cfg.StrOpt('router_id', help=_('ID of the router')))
+    conf.register_cli_opt(
+        cfg.StrOpt('namespace', help=_('Namespace of the router')))
+    conf.register_cli_opt(
+        cfg.StrOpt('conf_dir', help=_('Path to the router directory')))
+    conf.register_cli_opt(
+        cfg.StrOpt('monitor_interface', help=_('Interface to monitor')))
+    conf.register_cli_opt(
+        cfg.StrOpt('monitor_cidr', help=_('CIDR to monitor')))
+    conf.register_cli_opt(
+        cfg.StrOpt('pid_file', help=_('Path to PID file for this process')))
+    conf.register_cli_opt(
+        cfg.StrOpt('user', help=_('User (uid or name) running this process '
+                                  'after its initialization')))
+    conf.register_cli_opt(
+        cfg.StrOpt('group', help=_('Group (gid or name) running this process '
+                                   'after its initialization')))
+    conf.register_opt(
+        cfg.StrOpt('metadata_proxy_socket',
+                   default='$state_path/metadata_proxy',
+                   help=_('Location of Metadata Proxy UNIX domain '
+                          'socket')))
 
 
 def configure(conf):
     config.init(sys.argv[1:])
     conf.set_override('log_dir', cfg.CONF.conf_dir)
     conf.set_override('debug', True)
+    conf.set_override('verbose', True)
     config.setup_logging()
 
 
 def main():
-    keepalived.register_cli_l3_agent_keepalived_opts()
-    keepalived.register_l3_agent_keepalived_opts()
+    register_opts(cfg.CONF)
     configure(cfg.CONF)
     MonitorDaemon(cfg.CONF.pid_file,
                   cfg.CONF.router_id,

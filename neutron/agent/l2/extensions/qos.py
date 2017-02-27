@@ -16,17 +16,18 @@
 import abc
 import collections
 
-from neutron_lib import exceptions
 from oslo_concurrency import lockutils
 from oslo_log import log as logging
 import six
 
 from neutron._i18n import _LW, _LI
-from neutron.agent.l2 import l2_agent_extension
+from neutron.agent.l2 import agent_extension
+from neutron.agent.linux import tc_lib
 from neutron.api.rpc.callbacks.consumer import registry
 from neutron.api.rpc.callbacks import events
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import resources_rpc
+from neutron.common import exceptions
 from neutron import manager
 
 LOG = logging.getLogger(__name__)
@@ -62,15 +63,6 @@ class QosAgentDriver(object):
         :param qos_policy: the QoS policy to be applied on port.
         """
         self._handle_update_create_rules('create', port, qos_policy)
-
-    def consume_api(self, agent_api):
-        """Consume the AgentAPI instance from the QoSAgentExtension class
-
-        This allows QosAgentDrivers to gain access to resources limited to the
-        NeutronAgent when this method is overridden.
-
-        :param agent_api: An instance of an agent specific API
-        """
 
     def update(self, port, qos_policy):
         """Apply QoS rules on port.
@@ -120,6 +112,15 @@ class QosAgentDriver(object):
             else:
                 LOG.debug("Port %(port)s excluded from QoS rule %(rule)s",
                           {'port': port, 'rule': rule.id})
+
+    def _get_egress_burst_value(self, rule):
+        """Return burst value used for egress bandwidth limitation.
+
+        Because Egress bw_limit is done on ingress qdisc by LB and ovs drivers
+        so it will return burst_value used by tc on as ingress_qdisc.
+        """
+        return tc_lib.TcCommand.get_ingress_qdisc_burst_value(
+                rule.max_kbps, rule.max_burst_kbps)
 
 
 class PortPolicyMap(object):
@@ -175,50 +176,39 @@ class PortPolicyMap(object):
         del self.known_policies[qos_policy_id]
 
 
-class QosAgentExtension(l2_agent_extension.L2AgentExtension):
-    SUPPORTED_RESOURCE_TYPES = [resources.QOS_POLICY]
+class QosAgentExtension(agent_extension.AgentCoreResourceExtension):
+    SUPPORTED_RESOURCES = [resources.QOS_POLICY]
 
     def initialize(self, connection, driver_type):
-        """Initialize agent extension."""
+        """Perform Agent Extension initialization.
 
+        """
         self.resource_rpc = resources_rpc.ResourcesPullRpcApi()
         self.qos_driver = manager.NeutronManager.load_class_for_provider(
             'neutron.qos.agent_drivers', driver_type)()
-        self.qos_driver.consume_api(self.agent_api)
         self.qos_driver.initialize()
 
         self.policy_map = PortPolicyMap()
 
+        registry.subscribe(self._handle_notification, resources.QOS_POLICY)
         self._register_rpc_consumers(connection)
 
-    def consume_api(self, agent_api):
-        """Allows an extension to gain access to resources internal to the
-           neutron agent and otherwise unavailable to the extension.
-        """
-        self.agent_api = agent_api
-
     def _register_rpc_consumers(self, connection):
-        """Allows an extension to receive notifications of updates made to
-           items of interest.
-        """
         endpoints = [resources_rpc.ResourcesPushRpcCallback()]
-        for resource_type in self.SUPPORTED_RESOURCE_TYPES:
-            # We assume that the neutron server always broadcasts the latest
+        for resource_type in self.SUPPORTED_RESOURCES:
+            # we assume that neutron-server always broadcasts the latest
             # version known to the agent
-            registry.register(self._handle_notification, resource_type)
             topic = resources_rpc.resource_type_versioned_topic(resource_type)
             connection.create_consumer(topic, endpoints, fanout=True)
 
     @lockutils.synchronized('qos-port')
-    def _handle_notification(self, context, resource_type,
-                             qos_policies, event_type):
+    def _handle_notification(self, qos_policy, event_type):
         # server does not allow to remove a policy that is attached to any
         # port, so we ignore DELETED events. Also, if we receive a CREATED
         # event for a policy, it means that there are no ports so far that are
         # attached to it. That's why we are interested in UPDATED events only
         if event_type == events.UPDATED:
-            for qos_policy in qos_policies:
-                self._process_update_policy(qos_policy)
+            self._process_update_policy(qos_policy)
 
     @lockutils.synchronized('qos-port')
     def handle_port(self, context, port):

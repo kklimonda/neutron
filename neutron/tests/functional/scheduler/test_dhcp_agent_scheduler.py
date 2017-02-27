@@ -16,7 +16,6 @@
 import collections
 from operator import attrgetter
 
-from neutron_lib import constants
 import six
 import testscenarios
 
@@ -24,11 +23,7 @@ from neutron import context
 from neutron.db import agents_db
 from neutron.db import agentschedulers_db
 from neutron.db import common_db_mixin
-from neutron.db.network_dhcp_agent_binding import models as ndab_model
-from neutron.extensions import providernet
 from neutron.scheduler import dhcp_agent_scheduler
-from neutron.tests.common import helpers
-from neutron.tests.unit.plugins.ml2 import test_plugin
 from neutron.tests.unit.scheduler import (test_dhcp_agent_scheduler as
                                           test_dhcp_sch)
 
@@ -364,8 +359,7 @@ class TestAutoSchedule(test_dhcp_sch.TestDhcpSchedulerBaseTestCase,
             enable_dhcp = (not self._strip_host_index(net_id) in
                            self.networks_with_dhcp_disabled)
             subnets.append({'network_id': net_id,
-                            'enable_dhcp': enable_dhcp,
-                            'segment_id': None})
+                            'enable_dhcp': enable_dhcp})
         return subnets
 
     def get_network(self, context, net_id):
@@ -376,9 +370,9 @@ class TestAutoSchedule(test_dhcp_sch.TestDhcpSchedulerBaseTestCase,
 
     def _get_hosted_networks_on_dhcp_agent(self, agent_id):
         query = self.ctx.session.query(
-            ndab_model.NetworkDhcpAgentBinding.network_id)
+            agentschedulers_db.NetworkDhcpAgentBinding.network_id)
         query = query.filter(
-            ndab_model.NetworkDhcpAgentBinding.dhcp_agent_id ==
+            agentschedulers_db.NetworkDhcpAgentBinding.dhcp_agent_id ==
             agent_id)
 
         return [item[0] for item in query]
@@ -566,51 +560,3 @@ class TestAZAwareWeightScheduler(test_dhcp_sch.TestDhcpSchedulerBaseTestCase,
             self.assertEqual(self.scheduled_agent_count[i] +
                              scheduled_azs.get('az%s' % i, 0),
                              hosted_azs.get('az%s' % i, 0))
-
-
-class TestDHCPSchedulerWithNetworkAccessibility(
-    test_plugin.Ml2PluginV2TestCase):
-
-    _mechanism_drivers = ['openvswitch']
-
-    def test_dhcp_scheduler_filters_hosts_without_network_access(self):
-        dhcp_agent1 = helpers.register_dhcp_agent(host='host1')
-        dhcp_agent2 = helpers.register_dhcp_agent(host='host2')
-        dhcp_agent3 = helpers.register_dhcp_agent(host='host3')
-        dhcp_agents = [dhcp_agent1, dhcp_agent2, dhcp_agent3]
-        helpers.register_ovs_agent(
-            host='host1', bridge_mappings={'physnet1': 'br-eth-1'})
-        helpers.register_ovs_agent(
-            host='host2', bridge_mappings={'physnet2': 'br-eth-1'})
-        helpers.register_ovs_agent(
-            host='host3', bridge_mappings={'physnet2': 'br-eth-1'})
-        admin_context = context.get_admin_context()
-        net = self.driver.create_network(
-            admin_context,
-            {'network': {'name': 'net1',
-                         providernet.NETWORK_TYPE: 'vlan',
-                         providernet.PHYSICAL_NETWORK: 'physnet1',
-                         providernet.SEGMENTATION_ID: 1,
-                         'tenant_id': 'tenant_one',
-                         'admin_state_up': True,
-                         'shared': True}})
-
-        self.driver.create_subnet(
-            admin_context,
-            {'subnet':
-                {'name': 'name',
-                 'ip_version': 4,
-                 'network_id': net['id'],
-                 'cidr': '10.0.0.0/24',
-                 'gateway_ip': constants.ATTR_NOT_SPECIFIED,
-                 'allocation_pools': constants.ATTR_NOT_SPECIFIED,
-                 'dns_nameservers': constants.ATTR_NOT_SPECIFIED,
-                 'host_routes': constants.ATTR_NOT_SPECIFIED,
-                 'tenant_id': 'tenant_one',
-                 'enable_dhcp': True}})
-
-        self.plugin.schedule_network(admin_context, net)
-        dhcp_agents = self.driver.get_dhcp_agents_hosting_networks(
-            admin_context, [net['id']])
-        self.assertEqual(1, len(dhcp_agents))
-        self.assertEqual('host1', dhcp_agents[0]['host'])

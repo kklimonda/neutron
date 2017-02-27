@@ -15,14 +15,13 @@
 
 import random
 
-from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log
 
 from neutron._i18n import _LE
 from neutron.common import exceptions as exc
-from neutron import context as neutron_ctx
+from neutron.common import utils
 from neutron.plugins.common import utils as p_utils
 from neutron.plugins.ml2 import driver_api as api
 
@@ -32,12 +31,12 @@ LOG = log.getLogger(__name__)
 IDPOOL_SELECT_SIZE = 100
 
 
-class BaseTypeDriver(api.ML2TypeDriver):
+class BaseTypeDriver(api.TypeDriver):
     """BaseTypeDriver for functions common to Segment and flat."""
 
     def __init__(self):
         try:
-            self.physnet_mtus = helpers.parse_mappings(
+            self.physnet_mtus = utils.parse_mappings(
                 cfg.CONF.ml2.physical_network_mtus, unique_values=False
             )
         except Exception as e:
@@ -61,13 +60,7 @@ class SegmentTypeDriver(BaseTypeDriver):
         self.primary_keys = set(dict(model.__table__.columns))
         self.primary_keys.remove("allocated")
 
-    # TODO(ataraday): get rid of this method when old TypeDriver won't be used
-    def _get_session(self, arg):
-        if isinstance(arg, neutron_ctx.Context):
-            return arg.session
-        return arg
-
-    def allocate_fully_specified_segment(self, context, **raw_segment):
+    def allocate_fully_specified_segment(self, session, **raw_segment):
         """Allocate segment fully specified by raw_segment.
 
         If segment exists, then try to allocate it and return db object
@@ -76,12 +69,10 @@ class SegmentTypeDriver(BaseTypeDriver):
         """
 
         network_type = self.get_type()
-        session = self._get_session(context)
         try:
             with session.begin(subtransactions=True):
-                alloc = (
-                    session.query(self.model).filter_by(**raw_segment).
-                    first())
+                alloc = (session.query(self.model).filter_by(**raw_segment).
+                         first())
                 if alloc:
                     if alloc.allocated:
                         # Segment already allocated
@@ -125,14 +116,13 @@ class SegmentTypeDriver(BaseTypeDriver):
 
         return alloc
 
-    def allocate_partially_specified_segment(self, context, **filters):
+    def allocate_partially_specified_segment(self, session, **filters):
         """Allocate model segment from pool partially specified by filters.
 
         Return allocated db object or None.
         """
 
         network_type = self.get_type()
-        session = self._get_session(context)
         with session.begin(subtransactions=True):
             select = (session.query(self.model).
                       filter_by(allocated=False, **filters))

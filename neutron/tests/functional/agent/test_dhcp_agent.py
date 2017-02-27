@@ -20,7 +20,6 @@ import eventlet
 import fixtures
 import mock
 import netaddr
-from neutron_lib import constants as lib_const
 from oslo_config import fixture as fixture_config
 from oslo_utils import uuidutils
 
@@ -33,6 +32,7 @@ from neutron.agent.linux import external_process
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
+from neutron.common import constants
 from neutron.common import utils as common_utils
 from neutron.tests.common import net_helpers
 from neutron.tests.functional.agent.linux import helpers
@@ -117,7 +117,7 @@ class DHCPAgentOVSTestFramework(base.BaseSudoTestCase):
             "ipv6_ra_mode": None,
             "ipv6_address_mode": None})
         if ip_version == 6:
-            sn_dict['ipv6_address_mode'] = lib_const.DHCPV6_STATEFUL
+            sn_dict['ipv6_address_mode'] = constants.DHCPV6_STATEFUL
         return sn_dict
 
     def create_port_dict(self, network_id, subnet_id, mac_address,
@@ -166,17 +166,11 @@ class DHCPAgentOVSTestFramework(base.BaseSudoTestCase):
         iface_name = self.get_interface_name(network, port)
         self.assertEqual(dhcp_enabled, ovs.port_exists(iface_name))
         self.assert_dhcp_namespace(network.namespace, dhcp_enabled)
-        self.assert_accept_ra_disabled(network.namespace)
         self.assert_dhcp_device(network.namespace, iface_name, dhcp_enabled)
 
     def assert_dhcp_namespace(self, namespace, dhcp_enabled):
         ip = ip_lib.IPWrapper()
         self.assertEqual(dhcp_enabled, ip.netns.exists(namespace))
-
-    def assert_accept_ra_disabled(self, namespace):
-        actual = ip_lib.IPWrapper(namespace=namespace).netns.execute(
-            ['sysctl', '-b', 'net.ipv6.conf.default.accept_ra'])
-        self.assertEqual('0', actual)
 
     def assert_dhcp_device(self, namespace, dhcp_iface_name, dhcp_enabled):
         dev = ip_lib.IPDevice(dhcp_iface_name, namespace)
@@ -212,7 +206,7 @@ class DHCPAgentOVSTestFramework(base.BaseSudoTestCase):
 
         predicate = lambda: len(
             self._ip_list_for_vif(vif_name, network.namespace))
-        common_utils.wait_until_true(predicate, 10)
+        utils.wait_until_true(predicate, 10)
 
         ip_list = self._ip_list_for_vif(vif_name, network.namespace)
         cidr = ip_list[0].get('cidr')
@@ -309,7 +303,7 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
         self.addCleanup(self.agent.disable_isolated_metadata_proxy, network)
         self.configure_dhcp_for_network(network=network)
         pm = self._get_metadata_proxy_process(network)
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: pm.active,
             timeout=5,
             sleep=0.01,
@@ -321,7 +315,7 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
         old_pid = pm.pid
 
         utils.execute(['kill', '-9', old_pid], run_as_root=True)
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: pm.active and pm.pid != old_pid,
             timeout=5,
             sleep=0.1,
@@ -332,7 +326,7 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
 
         self.conf.set_override('enable_isolated_metadata', False)
         self.configure_dhcp_for_network(network=network)
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: not pm.active,
             timeout=5,
             sleep=0.1,
@@ -352,7 +346,7 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
         self.mock_plugin_api.get_network_info.return_value = new_network
         self.agent.refresh_dhcp_helper(network.id)
         # Metadata proxy should be spawned for the newly added subnet
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: pm.active,
             timeout=5,
             sleep=0.1,
@@ -361,7 +355,7 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
         self.mock_plugin_api.get_network_info.return_value = network
         self.agent.refresh_dhcp_helper(network.id)
         # Metadata proxy should be killed because network doesn't need it.
-        common_utils.wait_until_true(
+        utils.wait_until_true(
             lambda: not pm.active,
             timeout=5,
             sleep=0.1,
@@ -376,21 +370,3 @@ class DHCPAgentOVSTestCase(DHCPAgentOVSTestFramework):
         self.conf.set_override('force_metadata', True)
         self.conf.set_override('enable_isolated_metadata', False)
         self._test_metadata_proxy_spawn_kill_with_subnet_create_delete()
-
-    def test_notify_port_ready_after_enable_dhcp(self):
-        network = self.network_dict_for_dhcp()
-        dhcp_port = self.create_port_dict(
-            network.id, network.subnets[0].id,
-            '24:77:03:7d:00:4d', ip_address='192.168.10.11')
-        dhcp_port.device_owner = lib_const.DEVICE_OWNER_DHCP
-        network.ports.append(dhcp_port)
-        self.agent.start_ready_ports_loop()
-        self.configure_dhcp_for_network(network)
-        ports_to_send = {p.id for p in network.ports}
-        common_utils.wait_until_true(
-            lambda: self.mock_plugin_api.dhcp_ready_on_ports.called,
-            timeout=1,
-            sleep=0.1,
-            exception=RuntimeError("'dhcp_ready_on_ports' not be called"))
-        self.mock_plugin_api.dhcp_ready_on_ports.assert_called_with(
-            ports_to_send)

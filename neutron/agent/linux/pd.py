@@ -17,18 +17,18 @@ import functools
 import signal
 
 import eventlet
-from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_utils import netutils
 import six
 from stevedore import driver
 
-from neutron._i18n import _, _LE
+from neutron._i18n import _
+from neutron.agent.linux import utils as linux_utils
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.common import constants as l3_constants
+from neutron.common import ipv6_utils
 from neutron.common import utils
 
 LOG = logging.getLogger(__name__)
@@ -57,9 +57,6 @@ class PrefixDelegation(object):
         registry.subscribe(add_router,
                            resources.ROUTER,
                            events.BEFORE_CREATE)
-        registry.subscribe(update_router,
-                           resources.ROUTER,
-                           events.AFTER_UPDATE)
         registry.subscribe(remove_router,
                            resources.ROUTER,
                            events.AFTER_DELETE)
@@ -162,15 +159,6 @@ class PrefixDelegation(object):
             self.delete_router_pd(router)
 
     @utils.synchronized("l3-agent-pd")
-    def get_preserve_ips(self, router_id):
-        preserve_ips = []
-        router = self.routers.get(router_id)
-        if router is not None:
-            for subnet_id, pd_info in router['subnets'].items():
-                preserve_ips.append(pd_info.get_bind_lla_with_mask())
-        return preserve_ips
-
-    @utils.synchronized("l3-agent-pd")
     def sync_router(self, router_id):
         router = self.routers.get(router_id)
         if router is not None and router['gw_interface'] is None:
@@ -187,8 +175,8 @@ class PrefixDelegation(object):
 
     @staticmethod
     def _get_lla(mac):
-        lla = netutils.get_ipv6_addr_by_EUI64(n_const.IPv6_LLA_PREFIX,
-                                              mac)
+        lla = ipv6_utils.get_ipv6_addr_by_EUI64(l3_constants.IPV6_LLA_PREFIX,
+                                                mac)
         return lla
 
     def _get_llas(self, gw_ifname, ns_name):
@@ -214,10 +202,10 @@ class PrefixDelegation(object):
                                    lla_with_mask)
 
     def _spawn_lla_thread(self, gw_ifname, ns_name, lla_with_mask):
-        eventlet.spawn_n(self._ensure_lla_task,
-                         gw_ifname,
-                         ns_name,
-                         lla_with_mask)
+            eventlet.spawn_n(self._ensure_lla_task,
+                             gw_ifname,
+                             ns_name,
+                             lla_with_mask)
 
     def _delete_lla(self, router, lla_with_mask):
         if lla_with_mask and router['gw_interface']:
@@ -232,17 +220,17 @@ class PrefixDelegation(object):
     def _ensure_lla_task(self, gw_ifname, ns_name, lla_with_mask):
         # It would be insane for taking so long unless DAD test failed
         # In that case, the subnet would never be assigned a prefix.
-        utils.wait_until_true(functools.partial(self._lla_available,
-                                                gw_ifname,
-                                                ns_name,
-                                                lla_with_mask),
-                              timeout=l3_constants.LLA_TASK_TIMEOUT,
-                              sleep=2)
+        linux_utils.wait_until_true(functools.partial(self._lla_available,
+                                                      gw_ifname,
+                                                      ns_name,
+                                                      lla_with_mask),
+                                    timeout=l3_constants.LLA_TASK_TIMEOUT,
+                                    sleep=2)
 
     def _lla_available(self, gw_ifname, ns_name, lla_with_mask):
         llas = self._get_llas(gw_ifname, ns_name)
         if self._is_lla_active(lla_with_mask, llas):
-            LOG.debug("LLA %s is active now", lla_with_mask)
+            LOG.debug("LLA %s is active now" % lla_with_mask)
             self.pd_update_cb()
             return True
 
@@ -332,24 +320,12 @@ def get_router_entry(ns_name):
 def add_router(resource, event, l3_agent, **kwargs):
     added_router = kwargs['router']
     router = l3_agent.pd.routers.get(added_router.router_id)
-    gw_ns_name = added_router.get_gw_ns_name()
     if not router:
         l3_agent.pd.routers[added_router.router_id] = (
-            get_router_entry(gw_ns_name))
+            get_router_entry(added_router.ns_name))
     else:
         # This will happen during l3 agent restart
-        router['ns_name'] = gw_ns_name
-
-
-@utils.synchronized("l3-agent-pd")
-def update_router(resource, event, l3_agent, **kwargs):
-    updated_router = kwargs['router']
-    router = l3_agent.pd.routers.get(updated_router.router_id)
-    if not router:
-        LOG.exception(_LE("Router to be updated is not in internal routers "
-                          "list: %s"), updated_router.router_id)
-    else:
-        router['ns_name'] = updated_router.get_gw_ns_name()
+        router['ns_name'] = added_router.ns_name
 
 
 class PDInfo(object):

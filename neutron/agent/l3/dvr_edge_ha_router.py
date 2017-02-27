@@ -13,21 +13,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
+from neutron.agent.l3.dvr_edge_router import DvrEdgeRouter
+from neutron.agent.l3 import dvr_snat_ns
+from neutron.agent.l3.ha_router import HaRouter
+from neutron.agent.l3.router_info import RouterInfo
+from neutron.common import constants as l3_constants
 
-from neutron.agent.l3 import dvr_edge_router
-from neutron.agent.l3 import ha_router
-from neutron.agent.l3 import router_info
 
-
-class DvrEdgeHaRouter(dvr_edge_router.DvrEdgeRouter,
-                      ha_router.HaRouter):
+class DvrEdgeHaRouter(DvrEdgeRouter, HaRouter):
     """Router class which represents a centralized SNAT
        DVR router with HA capabilities.
     """
 
-    def __init__(self, host, *args, **kwargs):
-        super(DvrEdgeHaRouter, self).__init__(host,
+    def __init__(self, agent, host, *args, **kwargs):
+        super(DvrEdgeHaRouter, self).__init__(agent, host,
                                               *args, **kwargs)
         self.enable_snat = None
 
@@ -39,7 +38,7 @@ class DvrEdgeHaRouter(dvr_edge_router.DvrEdgeRouter,
 
     def internal_network_added(self, port):
         # Call RouterInfo's internal_network_added (Plugs the port, adds IP)
-        router_info.RouterInfo.internal_network_added(self, port)
+        RouterInfo.internal_network_added(self, port)
 
         for subnet in port['subnets']:
             self._set_subnet_arp_info(subnet['id'])
@@ -55,7 +54,7 @@ class DvrEdgeHaRouter(dvr_edge_router.DvrEdgeRouter,
         self._plug_ha_router_port(
             sn_port,
             self._get_snat_int_device_name,
-            constants.SNAT_INT_DEV_PREFIX)
+            dvr_snat_ns.SNAT_INT_DEV_PREFIX)
 
     def external_gateway_added(self, ex_gw_port, interface_name):
         super(DvrEdgeHaRouter, self).external_gateway_added(
@@ -75,19 +74,21 @@ class DvrEdgeHaRouter(dvr_edge_router.DvrEdgeRouter,
             snat_interface = self._get_snat_int_device_name(port['id'])
             self.driver.unplug(snat_interface,
                                namespace=self.ha_namespace,
-                               prefix=constants.SNAT_INT_DEV_PREFIX)
+                               prefix=l3_constants.SNAT_INT_DEV_PREFIX)
             self._clear_vips(snat_interface)
         super(DvrEdgeHaRouter, self)._external_gateway_removed(
             ex_gw_port, interface_name)
         self._clear_vips(interface_name)
 
     def external_gateway_updated(self, ex_gw_port, interface_name):
-        ha_router.HaRouter.external_gateway_updated(self, ex_gw_port,
-                                                    interface_name)
+        HaRouter.external_gateway_updated(self, ex_gw_port, interface_name)
 
     def initialize(self, process_monitor):
         self._create_snat_namespace()
         super(DvrEdgeHaRouter, self).initialize(process_monitor)
+
+    def get_router_cidrs(self, device):
+        return RouterInfo.get_router_cidrs(self, device)
 
     def _external_gateway_added(self, ex_gw_port, interface_name,
                                 ns_name, preserve_ips):
@@ -95,7 +96,7 @@ class DvrEdgeHaRouter(dvr_edge_router.DvrEdgeRouter,
 
     def _is_this_snat_host(self):
         return (self.agent_conf.agent_mode
-                == constants.L3_AGENT_MODE_DVR_SNAT)
+                == l3_constants.L3_AGENT_MODE_DVR_SNAT)
 
     def _dvr_internal_network_removed(self, port):
         super(DvrEdgeHaRouter, self)._dvr_internal_network_removed(port)
@@ -110,5 +111,5 @@ class DvrEdgeHaRouter(dvr_edge_router.DvrEdgeRouter,
         self.driver.plug(port['network_id'], port['id'],
                          interface_name, port['mac_address'],
                          namespace=self.snat_namespace.name,
-                         prefix=constants.SNAT_INT_DEV_PREFIX,
+                         prefix=dvr_snat_ns.SNAT_INT_DEV_PREFIX,
                          mtu=port.get('mtu'))

@@ -12,10 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import uuid
+
 import mock
 from oslo_config import cfg
-from oslo_utils import uuidutils
-import testtools
 
 from neutron import context
 from neutron.db import api as db_api
@@ -60,18 +60,16 @@ class TestResource(base.DietTestCase):
 class TestTrackedResource(testlib_api.SqlTestCaseLight):
 
     def _add_data(self, tenant_id=None):
-        session = db_api.get_writer_session()
+        session = db_api.get_session()
         with session.begin():
             tenant_id = tenant_id or self.tenant_id
-            session.add(test_quota.MehModel(
-                meh='meh_%s' % uuidutils.generate_uuid(),
-                tenant_id=tenant_id))
-            session.add(test_quota.MehModel(
-                meh='meh_%s' % uuidutils.generate_uuid(),
-                tenant_id=tenant_id))
+            session.add(test_quota.MehModel(meh='meh_%s' % uuid.uuid4(),
+                                            tenant_id=tenant_id))
+            session.add(test_quota.MehModel(meh='meh_%s' % uuid.uuid4(),
+                                            tenant_id=tenant_id))
 
     def _delete_data(self):
-        session = db_api.get_writer_session()
+        session = db_api.get_session()
         with session.begin():
             query = session.query(test_quota.MehModel).filter_by(
                 tenant_id=self.tenant_id)
@@ -79,7 +77,7 @@ class TestTrackedResource(testlib_api.SqlTestCaseLight):
                 session.delete(item)
 
     def _update_data(self):
-        session = db_api.get_writer_session()
+        session = db_api.get_session()
         with session.begin():
             query = session.query(test_quota.MehModel).filter_by(
                 tenant_id=self.tenant_id)
@@ -113,12 +111,6 @@ class TestTrackedResource(testlib_api.SqlTestCaseLight):
             self.other_resource, test_quota.OtherMehModel, meh_quota_flag)
         self._register_events(res)
         return res
-
-    def test_bulk_delete_protection(self):
-        self._create_resource()
-        with testtools.ExpectedException(RuntimeError):
-            ctx = context.get_admin_context()
-            ctx.session.query(test_quota.MehModel).delete()
 
     def test_count_first_call_with_dirty_false(self):
         quota_api.set_quota_usage(

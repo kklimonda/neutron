@@ -12,13 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import signal
-
 import mock
 from oslo_utils import uuidutils
 
 from neutron.agent.l3 import ha_router
-from neutron.agent.l3 import router_info
 from neutron.tests import base
 
 _uuid = uuidutils.generate_uuid
@@ -34,7 +31,6 @@ class TestBasicRouterOperations(base.BaseTestCase):
         self.agent_conf = mock.Mock()
         self.router_id = _uuid()
         return ha_router.HaRouter(mock.sentinel.enqueue_state,
-                                  mock.sentinel.agent,
                                   self.router_id,
                                   router,
                                   self.agent_conf,
@@ -76,40 +72,3 @@ class TestBasicRouterOperations(base.BaseTestCase):
         subnets[1]['gateway_ip'] = None
         ri._add_default_gw_virtual_route(ex_gw_port, 'qg-abc')
         self.assertEqual(0, len(mock_instance.virtual_routes.gateway_routes))
-
-    @mock.patch.object(router_info.RouterInfo, 'remove_floating_ip')
-    def test_remove_floating_ip(self, super_remove_floating_ip):
-        ri = self._create_router(mock.MagicMock())
-        mock_instance = mock.Mock()
-        ri._get_keepalived_instance = mock.Mock(return_value=mock_instance)
-        device = mock.Mock()
-        fip_cidr = '15.1.2.3/32'
-
-        ri.remove_floating_ip(device, fip_cidr)
-        self.assertTrue(super_remove_floating_ip.called)
-
-    def test_destroy_state_change_monitor_ok(self):
-        ri = self._create_router(mock.MagicMock())
-        with mock.patch.object(ri,
-                               '_get_state_change_monitor_process_manager')\
-                as m_get_state:
-            mock_pm = m_get_state.return_value
-            mock_pm.active = False
-            ri.destroy_state_change_monitor(mock_pm)
-
-        mock_pm.disable.assert_called_once_with(
-            sig=str(int(signal.SIGTERM)))
-
-    def test_destroy_state_change_monitor_force(self):
-        ri = self._create_router(mock.MagicMock())
-        with mock.patch.object(ri,
-                               '_get_state_change_monitor_process_manager')\
-                as m_get_state:
-            mock_pm = m_get_state.return_value
-            mock_pm.active = False
-            with mock.patch.object(ha_router, 'SIGTERM_TIMEOUT', 0):
-                ri.destroy_state_change_monitor(mock_pm)
-
-        calls = ["sig='str(%d)'" % signal.SIGTERM,
-                 "sig='str(%d)'" % signal.SIGKILL]
-        mock_pm.disable.has_calls(calls)

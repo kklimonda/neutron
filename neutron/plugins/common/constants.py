@@ -13,16 +13,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-
-
 # Neutron well-known service type constants:
+CORE = "CORE"
 DUMMY = "DUMMY"
 LOADBALANCER = "LOADBALANCER"
 LOADBALANCERV2 = "LOADBALANCERV2"
 FIREWALL = "FIREWALL"
 VPN = "VPN"
 METERING = "METERING"
+L3_ROUTER_NAT = "L3_ROUTER_NAT"
 FLAVORS = "FLAVORS"
 QOS = "QOS"
 
@@ -35,7 +34,7 @@ EXT_TO_SERVICE_MAPPING = {
     'fwaas': FIREWALL,
     'vpnaas': VPN,
     'metering': METERING,
-    'router': constants.L3,
+    'router': L3_ROUTER_NAT,
     'qos': QOS,
 }
 
@@ -43,10 +42,8 @@ EXT_TO_SERVICE_MAPPING = {
 DEFAULT_SERVICE_PLUGINS = {
     'auto_allocate': 'auto-allocated-topology',
     'tag': 'tag',
-    'timestamp': 'timestamp',
-    'network_ip_availability': 'network-ip-availability',
-    'flavors': 'flavors',
-    'revisions': 'revisions',
+    'timestamp_core': 'timestamp_core',
+    'network_ip_availability': 'network-ip-availability'
 }
 
 # Service operation status constants
@@ -93,13 +90,7 @@ MIN_VXLAN_VNI = 1
 MAX_VXLAN_VNI = 2 ** 24 - 1
 VXLAN_UDP_PORT = 4789
 
-# Overlay (tunnel) protocol overhead
-GENEVE_ENCAP_MIN_OVERHEAD = 30
-GRE_ENCAP_OVERHEAD = 22
-VXLAN_ENCAP_OVERHEAD = 30
-
-# IP header length
-IP_HEADER_LENGTH = {
-    4: 20,
-    6: 40,
-}
+# Network Type MTU overhead
+GENEVE_ENCAP_MIN_OVERHEAD = 50
+GRE_ENCAP_OVERHEAD = 42
+VXLAN_ENCAP_OVERHEAD = 50

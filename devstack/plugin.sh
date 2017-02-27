@@ -1,19 +1,11 @@
 LIBDIR=$DEST/neutron/devstack/lib
 
-source $LIBDIR/dns
+source $LIBDIR/bgp
 source $LIBDIR/flavors
 source $LIBDIR/l2_agent
 source $LIBDIR/l2_agent_sriovnicswitch
 source $LIBDIR/ml2
 source $LIBDIR/qos
-source $LIBDIR/ovs
-source $LIBDIR/trunk
-
-Q_BUILD_OVS_FROM_GIT=$(trueorfalse False Q_BUILD_OVS_FROM_GIT)
-
-if [ -f $LIBDIR/${Q_AGENT}_agent ]; then
-    source $LIBDIR/${Q_AGENT}_agent
-fi
 
 if [[ "$1" == "stack" ]]; then
     case "$2" in
@@ -24,25 +16,16 @@ if [[ "$1" == "stack" ]]; then
             if is_service_enabled q-qos; then
                 configure_qos
             fi
-            if is_service_enabled q-trunk; then
-                configure_trunk_extension
-            fi
-            if is_service_enabled q-dns; then
-                configure_dns_extension
-            fi
-            if [[ "$Q_AGENT" == "openvswitch" ]] && \
-               [[ "$Q_BUILD_OVS_FROM_GIT" == "True" ]]; then
-                remove_ovs_packages
-                compile_ovs True /usr /var
-                start_new_ovs
+            if is_service_enabled q-bgp; then
+                configure_bgp
             fi
             ;;
         post-config)
-            if is_service_enabled q-dns; then
-                post_config_dns_extension
-            fi
             if is_service_enabled q-agt; then
                 configure_l2_agent
+            fi
+            if is_service_enabled q-bgp && is_service_enabled q-bgp-agt; then
+                configure_bgp_dragent
             fi
             #Note: sriov agent should run with OVS or linux bridge agent
             #because they are the mechanisms that bind the DHCP and router ports.
@@ -59,10 +42,16 @@ if [[ "$1" == "stack" ]]; then
             if is_service_enabled q-sriov-agt; then
                 start_l2_agent_sriov
             fi
+            if is_service_enabled q-bgp && is_service_enabled q-bgp-agt; then
+                start_bgp_dragent
+            fi
             ;;
     esac
 elif [[ "$1" == "unstack" ]]; then
     if is_service_enabled q-sriov-agt; then
         stop_l2_agent_sriov
+    fi
+    if is_service_enabled q-bgp && is_service_enabled q-bgp-agt; then
+        stop_bgp_dragent
     fi
 fi

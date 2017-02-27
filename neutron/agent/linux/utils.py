@@ -21,26 +21,23 @@ import pwd
 import shlex
 import socket
 import struct
+import tempfile
 import threading
 
 import debtcollector
 import eventlet
 from eventlet.green import subprocess
 from eventlet import greenthread
-from neutron_lib import constants
-from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_rootwrap import client
-from oslo_utils import encodeutils
 from oslo_utils import excutils
-from oslo_utils import fileutils
-from six import iterbytes
+import six
 from six.moves import http_client as httplib
 
 from neutron._i18n import _, _LE
 from neutron.agent.common import config
-from neutron.agent.linux import xenapi_root_helper
+from neutron.common import constants
 from neutron.common import utils
 from neutron import wsgi
 
@@ -66,17 +63,13 @@ class RootwrapDaemonHelper(object):
     def get_client(cls):
         with cls.__lock:
             if cls.__client is None:
-                if xenapi_root_helper.ROOT_HELPER_DAEMON_TOKEN == \
-                    cfg.CONF.AGENT.root_helper_daemon:
-                    cls.__client = xenapi_root_helper.XenAPIClient()
-                else:
-                    cls.__client = client.Client(
-                        shlex.split(cfg.CONF.AGENT.root_helper_daemon))
+                cls.__client = client.Client(
+                    shlex.split(cfg.CONF.AGENT.root_helper_daemon))
             return cls.__client
 
 
 def addl_env_args(addl_env):
-    """Build arguments for adding additional environment vars with env"""
+    """Build arugments for adding additional environment vars with env"""
 
     # NOTE (twilson) If using rootwrap, an EnvFilter should be set up for the
     # command instead of a CommandFilter.
@@ -119,10 +112,11 @@ def execute(cmd, process_input=None, addl_env=None,
             check_exit_code=True, return_stderr=False, log_fail_as_error=True,
             extra_ok_codes=None, run_as_root=False):
     try:
-        if process_input is not None:
-            _process_input = encodeutils.to_utf8(process_input)
+        if (process_input is None or
+            isinstance(process_input, six.binary_type)):
+            _process_input = process_input
         else:
-            _process_input = None
+            _process_input = process_input.encode('utf-8')
         if run_as_root and cfg.CONF.AGENT.root_helper_daemon:
             returncode, _stdout, _stderr = (
                 execute_rootwrap_daemon(cmd, process_input, addl_env))
@@ -132,8 +126,8 @@ def execute(cmd, process_input=None, addl_env=None,
             _stdout, _stderr = obj.communicate(_process_input)
             returncode = obj.returncode
             obj.stdin.close()
-        _stdout = helpers.safe_decode_utf8(_stdout)
-        _stderr = helpers.safe_decode_utf8(_stderr)
+        _stdout = utils.safe_decode_utf8(_stdout)
+        _stderr = utils.safe_decode_utf8(_stderr)
 
         extra_ok_codes = extra_ok_codes or []
         if returncode and returncode not in extra_ok_codes:
@@ -162,25 +156,39 @@ def execute(cmd, process_input=None, addl_env=None,
     return (_stdout, _stderr) if return_stderr else _stdout
 
 
-@debtcollector.removals.remove(
-    version='Ocata', removal_version='Pike',
-    message="Use 'neutron.agent.linux.ip_lib.get_device_mac' instead."
-)
 def get_interface_mac(interface):
     MAC_START = 18
     MAC_END = 24
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     dev = interface[:constants.DEVICE_NAME_MAX_LEN]
-    dev = encodeutils.to_utf8(dev)
+    if isinstance(dev, six.text_type):
+        dev = dev.encode('utf-8')
     info = fcntl.ioctl(s.fileno(), 0x8927, struct.pack('256s', dev))
-    return ':'.join(["%02x" % b for b in iterbytes(info[MAC_START:MAC_END])])
+    return ''.join(['%02x:' % ord(char)
+                    for char in info[MAC_START:MAC_END]])[:-1]
 
 
-def find_child_pids(pid, recursive=False):
-    """Retrieve a list of the pids of child processes of the given pid.
+@debtcollector.removals.remove(message="Redundant in Mitaka release.")
+def replace_file(file_name, data, file_mode=0o644):
+    """Replaces the contents of file_name with data in a safe manner.
 
-    It can also find all children through the hierarchy if recursive=True
+    First write to a temp file and then rename. Since POSIX renames are
+    atomic, the file is unlikely to be corrupted by competing writes.
+
+    We create the tempfile on the same device to ensure that it can be renamed.
     """
+
+    base_dir = os.path.dirname(os.path.abspath(file_name))
+    tmp_file = tempfile.NamedTemporaryFile('w+', dir=base_dir, delete=False)
+    tmp_file.write(data)
+    tmp_file.close()
+    os.chmod(tmp_file.name, file_mode)
+    os.rename(tmp_file.name, file_name)
+
+
+def find_child_pids(pid):
+    """Retrieve a list of the pids of child processes of the given pid."""
+
     try:
         raw_pids = execute(['ps', '--ppid', pid, '-o', 'pid='],
                            log_fail_as_error=False)
@@ -192,58 +200,7 @@ def find_child_pids(pid, recursive=False):
             if no_children_found:
                 ctxt.reraise = False
                 return []
-    child_pids = [x.strip() for x in raw_pids.split('\n') if x.strip()]
-    if recursive:
-        for child in child_pids:
-            child_pids = child_pids + find_child_pids(child, True)
-    return child_pids
-
-
-def find_parent_pid(pid):
-    """Retrieve the pid of the parent process of the given pid.
-
-    If the pid doesn't exist in the system, this function will return
-    None
-    """
-    try:
-        ppid = execute(['ps', '-o', 'ppid=', pid],
-                       log_fail_as_error=False)
-    except ProcessExecutionError as e:
-        # Unexpected errors are the responsibility of the caller
-        with excutils.save_and_reraise_exception() as ctxt:
-            # Exception has already been logged by execute
-            no_such_pid = e.returncode == 1
-            if no_such_pid:
-                ctxt.reraise = False
-                return
-    return ppid.strip()
-
-
-def find_fork_top_parent(pid):
-    """Retrieve the pid of the top parent of the given pid through a fork.
-
-    This function will search the top parent with its same cmdline. If the
-    given pid has no parent, its own pid will be returned
-    """
-    while True:
-        ppid = find_parent_pid(pid)
-        if (ppid and ppid != pid and
-                pid_invoked_with_cmdline(ppid, get_cmdline_from_pid(pid))):
-            pid = ppid
-        else:
-            return pid
-
-
-def kill_process(pid, signal, run_as_root=False):
-    """Kill the process with the given pid using the given signal."""
-    try:
-        execute(['kill', '-%d' % signal, pid], run_as_root=run_as_root)
-    except ProcessExecutionError as ex:
-        # TODO(dalvarez): this check has i18n issues. Maybe we can use
-        # use gettext module setting a global locale or just pay attention
-        # to returncode instead of checking the ex message.
-        if 'No such process' not in str(ex):
-            raise
+    return [x.strip() for x in raw_pids.split('\n') if x.strip()]
 
 
 def _get_conf_base(cfg_root, uuid, ensure_conf_dir):
@@ -252,7 +209,7 @@ def _get_conf_base(cfg_root, uuid, ensure_conf_dir):
     conf_dir = os.path.abspath(os.path.normpath(cfg_root))
     conf_base = os.path.join(conf_dir, uuid)
     if ensure_conf_dir:
-        fileutils.ensure_tree(conf_dir, mode=0o755)
+        utils.ensure_dir(conf_dir)
     return conf_base
 
 
@@ -272,6 +229,12 @@ def get_value_from_file(filename, converter=None):
                 LOG.error(_LE('Unable to convert value in %s'), filename)
     except IOError:
         LOG.debug('Unable to access %s', filename)
+
+
+def get_value_from_conf_file(cfg_root, uuid, cfg_file, converter=None):
+    """A helper function to read a value from one of a config file."""
+    file_name = get_conf_file_name(cfg_root, uuid, cfg_file)
+    return get_value_from_file(file_name, converter)
 
 
 def remove_conf_files(cfg_root, uuid):
@@ -353,6 +316,22 @@ def pid_invoked_with_cmdline(pid, expected_cmd):
     return cmd_matches_expected(cmd, expected_cmd)
 
 
+def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
+    """
+    Wait until callable predicate is evaluated as True
+
+    :param predicate: Callable deciding whether waiting should continue.
+    Best practice is to instantiate predicate with functools.partial()
+    :param timeout: Timeout in seconds how long should function wait.
+    :param sleep: Polling interval for results in seconds.
+    :param exception: Exception class for eventlet.Timeout.
+    (see doc for eventlet.Timeout for more information)
+    """
+    with eventlet.timeout.Timeout(timeout, exception):
+        while not predicate():
+            eventlet.sleep(sleep)
+
+
 def ensure_directory_exists_without_file(path):
     dirname = os.path.dirname(path)
     if os.path.isdir(dirname):
@@ -363,7 +342,7 @@ def ensure_directory_exists_without_file(path):
                 if not os.path.exists(path):
                     ctxt.reraise = False
     else:
-        fileutils.ensure_tree(dirname, mode=0o755)
+        utils.ensure_dir(dirname)
 
 
 def is_effective_user(user_id_or_name):
@@ -407,7 +386,7 @@ class UnixDomainHttpProtocol(eventlet.wsgi.HttpProtocol):
     disable_nagle_algorithm = False
 
     def __init__(self, request, client_address, server):
-        if not client_address:
+        if client_address == '':
             client_address = ('<local>', 0)
         # base class is old-style, so super does not work properly
         eventlet.wsgi.HttpProtocol.__init__(self, request, client_address,

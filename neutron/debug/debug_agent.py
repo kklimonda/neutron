@@ -17,17 +17,17 @@ import shlex
 import socket
 
 import netaddr
-from neutron_lib import constants
 from oslo_log import log as logging
 
 from neutron._i18n import _LW
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import ip_lib
+from neutron.common import constants
 from neutron.extensions import portbindings
 
 LOG = logging.getLogger(__name__)
 
-DEVICE_OWNER_NETWORK_PROBE = constants.DEVICE_OWNER_NETWORK_PREFIX + 'probe'
+DEVICE_OWNER_NETWORK_PROBE = 'network:probe'
 
 DEVICE_OWNER_COMPUTE_PROBE = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'probe'
 

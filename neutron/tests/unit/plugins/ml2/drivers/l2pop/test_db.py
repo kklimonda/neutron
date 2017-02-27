@@ -12,15 +12,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
+from neutron.common import constants
 from oslo_utils import uuidutils
 
 from neutron.common import constants as n_const
 from neutron.common import utils
 from neutron import context
-from neutron.db.models import l3 as l3_models
-from neutron.db.models import l3_attrs
-from neutron.db.models import l3ha as l3ha_model
+from neutron.db import l3_attrs_db
+from neutron.db import l3_db
+from neutron.db import l3_hamode_db
 from neutron.db import models_v2
 from neutron.extensions import portbindings
 from neutron.plugins.ml2.drivers.l2pop import db as l2pop_db
@@ -51,8 +51,8 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
 
     def _create_router(self, distributed=True, ha=False):
         with self.ctx.session.begin(subtransactions=True):
-            self.ctx.session.add(l3_models.Router(id=TEST_ROUTER_ID))
-            self.ctx.session.add(l3_attrs.RouterExtraAttributes(
+            self.ctx.session.add(l3_db.Router(id=TEST_ROUTER_ID))
+            self.ctx.session.add(l3_attrs_db.RouterExtraAttributes(
                 router_id=TEST_ROUTER_ID, distributed=distributed, ha=ha))
 
     def _create_ha_router(self, distributed=False):
@@ -115,7 +115,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
                              'vnic_type': portbindings.VNIC_NORMAL}
 
             if device_owner == constants.DEVICE_OWNER_DVR_INTERFACE:
-                port_binding_cls = models.DistributedPortBinding
+                port_binding_cls = models.DVRPortBinding
                 binding_kwarg['router_id'] = TEST_ROUTER_ID
                 binding_kwarg['status'] = constants.PORT_STATUS_DOWN
 
@@ -123,7 +123,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
 
             if network_id == TEST_HA_NETWORK_ID:
                 agent = self.get_l3_agent_by_host(host)
-                haport_bindings_cls = l3ha_model.L3HARouterAgentPortBinding
+                haport_bindings_cls = l3_hamode_db.L3HARouterAgentPortBinding
                 habinding_kwarg = {'port_id': port_id,
                                    'router_id': device_id,
                                    'l3_agent_id': agent['id'],
@@ -131,7 +131,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
                                        n_const.HA_ROUTER_STATE_ACTIVE)}
                 self.ctx.session.add(haport_bindings_cls(**habinding_kwarg))
 
-    def test_get_distributed_active_network_ports(self):
+    def test_get_dvr_active_network_ports(self):
         self._setup_port_binding(
             device_owner=constants.DEVICE_OWNER_DVR_INTERFACE)
         # Register a L2 agent + A bunch of other agents on the same host
@@ -144,7 +144,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
         _, agent = tunnel_network_ports[0]
         self.assertEqual(constants.AGENT_TYPE_OVS, agent.agent_type)
 
-    def test_get_distributed_active_network_ports_no_candidate(self):
+    def test_get_dvr_active_network_ports_no_candidate(self):
         self._setup_port_binding(
             device_owner=constants.DEVICE_OWNER_DVR_INTERFACE)
         # Register a bunch of non-L2 agents on the same host
@@ -154,7 +154,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
             self.ctx.session, TEST_NETWORK_ID)
         self.assertEqual(0, len(tunnel_network_ports))
 
-    def test_get_nondistributed_active_network_ports(self):
+    def test_get_nondvr_active_network_ports(self):
         self._setup_port_binding(dvr=False)
         # Register a L2 agent + A bunch of other agents on the same host
         helpers.register_l3_agent()
@@ -166,7 +166,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
         _, agent = fdb_network_ports[0]
         self.assertEqual(constants.AGENT_TYPE_OVS, agent.agent_type)
 
-    def test_get_nondistributed_active_network_ports_no_candidate(self):
+    def test_get_nondvr_active_network_ports_no_candidate(self):
         self._setup_port_binding(dvr=False)
         # Register a bunch of non-L2 agents on the same host
         helpers.register_l3_agent()
@@ -193,7 +193,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
         helpers.register_ovs_agent()
         self._create_ha_router()
         self._setup_port_binding(
-            device_owner=constants.DEVICE_OWNER_HA_REPLICATED_INT,
+            device_owner=constants.DEVICE_OWNER_ROUTER_INTF,
             device_id=TEST_ROUTER_ID)
         ha_iface_ids = l2pop_db._get_ha_router_interface_ids(
             self.ctx.session, TEST_NETWORK_ID)

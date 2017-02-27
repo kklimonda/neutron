@@ -13,9 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
-
-from neutron.common import constants as n_const
+from neutron.common import constants
 
 OF_STATE_NOT_TRACKED = "-trk"
 OF_STATE_TRACKED = "+trk"
@@ -35,9 +33,15 @@ CT_MARK_INVALID = '0x1'
 REG_PORT = 5
 REG_NET = 6
 
+protocol_to_nw_proto = {
+        constants.PROTO_NAME_ICMP: constants.PROTO_NUM_ICMP,
+        constants.PROTO_NAME_TCP: constants.PROTO_NUM_TCP,
+        constants.PROTO_NAME_UDP: constants.PROTO_NUM_UDP,
+}
+
 PROTOCOLS_WITH_PORTS = (constants.PROTO_NAME_TCP, constants.PROTO_NAME_UDP)
 
 ethertype_to_dl_type_map = {
-    constants.IPv4: n_const.ETHERTYPE_IP,
-    constants.IPv6: n_const.ETHERTYPE_IPV6,
+    constants.IPv4: constants.ETHERTYPE_IP,
+    constants.IPv6: constants.ETHERTYPE_IPV6,
 }

@@ -19,24 +19,25 @@ import operator
 import time
 import uuid
 
-from debtcollector import removals
-from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
+import retrying
 import six
-import tenacity
 
 from neutron._i18n import _, _LE, _LI, _LW
-from neutron.agent.common import ip_lib
 from neutron.agent.common import utils
+from neutron.agent.linux import ip_lib
 from neutron.agent.ovsdb import api as ovsdb
-from neutron.conf.agent import ovs_conf
+from neutron.common import exceptions
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants
 
 UINT64_BITMASK = (1 << 64) - 1
+
+# Default timeout for ovs-vsctl command
+DEFAULT_OVS_VSCTL_TIMEOUT = 10
 
 # Special return value for an invalid OVS ofport
 INVALID_OFPORT = -1
@@ -46,7 +47,14 @@ UNASSIGNED_OFPORT = []
 FAILMODE_SECURE = 'secure'
 FAILMODE_STANDALONE = 'standalone'
 
-ovs_conf.register_ovs_agent_opts()
+OPTS = [
+    cfg.IntOpt('ovs_vsctl_timeout',
+               default=DEFAULT_OVS_VSCTL_TIMEOUT,
+               help=_('Timeout in seconds for ovs-vsctl commands. '
+                      'If the timeout expires, ovs commands will fail with '
+                      'ALARMCLOCK error.')),
+]
+cfg.CONF.register_opts(OPTS)
 
 LOG = logging.getLogger(__name__)
 
@@ -75,12 +83,12 @@ def _ofport_retry(fn):
     @six.wraps(fn)
     def wrapped(*args, **kwargs):
         self = args[0]
-        new_fn = tenacity.retry(
-            reraise=True,
-            retry=tenacity.retry_if_result(_ofport_result_pending),
-            wait=tenacity.wait_exponential(multiplier=0.01, max=1),
-            stop=tenacity.stop_after_delay(
-                self.vsctl_timeout))(fn)
+        new_fn = retrying.retry(
+            retry_on_result=_ofport_result_pending,
+            stop_max_delay=self.vsctl_timeout * 1000,
+            wait_exponential_multiplier=10,
+            wait_exponential_max=1000,
+            retry_on_exception=lambda _: False)(fn)
         return new_fn(*args, **kwargs)
     return wrapped
 
@@ -107,20 +115,12 @@ class BaseOVS(object):
         self.vsctl_timeout = cfg.CONF.ovs_vsctl_timeout
         self.ovsdb = ovsdb.API.get(self)
 
-    def add_manager(self, connection_uri):
-        self.ovsdb.add_manager(connection_uri).execute()
-
-    def get_manager(self):
-        return self.ovsdb.get_manager().execute()
-
-    def remove_manager(self, connection_uri):
-        self.ovsdb.remove_manager(connection_uri).execute()
-
     def add_bridge(self, bridge_name,
                    datapath_type=constants.OVS_DATAPATH_SYSTEM):
-        br = OVSBridge(bridge_name, datapath_type=datapath_type)
-        br.create()
-        return br
+
+        self.ovsdb.add_br(bridge_name,
+                          datapath_type).execute()
+        return OVSBridge(bridge_name)
 
     def delete_bridge(self, bridge_name):
         self.ovsdb.del_br(bridge_name).execute()
@@ -206,32 +206,15 @@ class OVSBridge(BaseOVS):
     def set_standalone_mode(self):
         self._set_bridge_fail_mode(FAILMODE_STANDALONE)
 
-    @removals.remove(
-        message=("Consider using add_protocols instead, or if replacing "
-                 "the whole set of supported protocols is the desired "
-                 "behavior, using set_db_attribute"),
-        version="Ocata",
-        removal_version="Queens")
     def set_protocols(self, protocols):
         self.set_db_attribute('Bridge', self.br_name, 'protocols', protocols,
                               check_error=True)
-
-    def add_protocols(self, *protocols):
-        self.ovsdb.db_add('Bridge', self.br_name,
-                          'protocols', *protocols).execute(check_error=True)
 
     def create(self, secure_mode=False):
         with self.ovsdb.transaction() as txn:
             txn.add(
                 self.ovsdb.add_br(self.br_name,
-                                  datapath_type=self.datapath_type))
-            # the ovs-ofctl commands below in run_ofctl use OF10, so we
-            # need to ensure that this version is enabled ; we could reuse
-            # add_protocols, but doing ovsdb.db_add avoids doing two
-            # transactions
-            txn.add(
-                self.ovsdb.db_add('Bridge', self.br_name,
-                                  'protocols', constants.OPENFLOW10))
+                datapath_type=self.datapath_type))
             if secure_mode:
                 txn.add(self.ovsdb.set_fail_mode(self.br_name,
                                                  FAILMODE_SECURE))
@@ -301,7 +284,7 @@ class OVSBridge(BaseOVS):
         ofport = INVALID_OFPORT
         try:
             ofport = self._get_port_ofport(port_name)
-        except tenacity.RetryError:
+        except retrying.RetryError:
             LOG.exception(_LE("Timed out retrieving ofport on port %s."),
                           port_name)
         return ofport

@@ -18,19 +18,21 @@ import random
 
 import eventlet
 import mock
-from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_utils import uuidutils
 
 from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
-from neutron.agent.l2 import l2_agent_extensions_manager as ext_manager
+from neutron.agent.l2.extensions import manager as ext_manager
 from neutron.agent.linux import interface
 from neutron.agent.linux import polling
+from neutron.agent.linux import utils as agent_utils
+from neutron.common import config as common_config
+from neutron.common import constants as n_const
 from neutron.common import utils
-from neutron.conf import common as common_config
-from neutron.conf.plugins.ml2.drivers import ovs_conf
 from neutron.plugins.common import constants as p_const
+from neutron.plugins.ml2.drivers.openvswitch.agent.common import config \
+    as ovs_config
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
 from neutron.plugins.ml2.drivers.openvswitch.agent.openflow.ovs_ofctl \
     import br_int
@@ -52,12 +54,12 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
                      'ovs_neutron_agent.OVSPluginApi')
         mock.patch(agent_rpc).start()
         mock.patch('neutron.agent.rpc.PluginReportStateAPI').start()
-        self.br_int = utils.get_rand_name(n_const.DEVICE_NAME_MAX_LEN,
-                                          prefix='br-int')
-        self.br_tun = utils.get_rand_name(n_const.DEVICE_NAME_MAX_LEN,
-                                          prefix='br-tun')
-        self.br_phys = utils.get_rand_name(n_const.DEVICE_NAME_MAX_LEN,
-                                           prefix='br-phys')
+        self.br_int = base.get_rand_name(n_const.DEVICE_NAME_MAX_LEN,
+                                         prefix='br-int')
+        self.br_tun = base.get_rand_name(n_const.DEVICE_NAME_MAX_LEN,
+                                         prefix='br-tun')
+        self.br_phys = base.get_rand_name(n_const.DEVICE_NAME_MAX_LEN,
+                                          prefix='br-phys')
         patch_name_len = n_const.DEVICE_NAME_MAX_LEN - len("-patch-tun")
         self.patch_tun = "%s-patch-tun" % self.br_int[patch_name_len:]
         self.patch_int = "%s-patch-int" % self.br_tun[patch_name_len:]
@@ -70,7 +72,8 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
         config = cfg.ConfigOpts()
         config.register_opts(common_config.core_opts)
         config.register_opts(interface.OPTS)
-        ovs_conf.register_ovs_agent_opts(config)
+        config.register_opts(ovs_config.ovs_opts, "OVS")
+        config.register_opts(ovs_config.agent_opts, "AGENT")
         agent_config.register_interface_driver_opts_helper(config)
         agent_config.register_agent_state_opts_helper(config)
         ext_manager.register_opts(config)
@@ -143,10 +146,6 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
             return {'added': filtered_ports, 'removed': events['removed']}
         polling_manager.get_events = mock.Mock(side_effect=filter_events)
 
-    def stop_agent(self, agent, rpc_loop_thread):
-        agent.run_daemon_loop = False
-        rpc_loop_thread.wait()
-
     def start_agent(self, agent, ports=None, unplug_ports=None):
         if unplug_ports is None:
             unplug_ports = []
@@ -157,14 +156,17 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
         self._mock_get_events(agent, polling_manager, ports)
         self.addCleanup(polling_manager.stop)
         polling_manager.start()
-        utils.wait_until_true(
+        agent_utils.wait_until_true(
             polling_manager._monitor.is_active)
         agent.check_ovs_status = mock.Mock(
             return_value=constants.OVS_NORMAL)
-        self.agent_thread = eventlet.spawn(agent.rpc_loop,
-                                           polling_manager)
+        t = eventlet.spawn(agent.rpc_loop, polling_manager)
 
-        self.addCleanup(self.stop_agent, agent, self.agent_thread)
+        def stop_agent(agent, rpc_loop_thread):
+            agent.run_daemon_loop = False
+            rpc_loop_thread.wait()
+
+        self.addCleanup(stop_agent, agent, t)
         return polling_manager
 
     def _create_test_port_dict(self):
@@ -176,7 +178,7 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
                          random.randint(3, 254),
                          random.randint(3, 254),
                          random.randint(3, 254))}],
-                'vif_name': utils.get_rand_name(
+                'vif_name': base.get_rand_name(
                     self.driver.DEV_NAME_LEN, self.driver.DEV_NAME_PREFIX)}
 
     def _create_test_network_dict(self):
@@ -211,7 +213,9 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
                'physical_network': network.get('physical_network', 'physnet'),
                'segmentation_id': network.get('segmentation_id', 1),
                'fixed_ips': port['fixed_ips'],
-               'device_owner': n_const.DEVICE_OWNER_COMPUTE_PREFIX,
+               'device_owner': 'compute',
+               'port_security_enabled': True,
+               'security_groups': ['default'],
                'admin_state_up': True}
         return dev
 
@@ -224,9 +228,9 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
             return agent.int_br.db_get_val(
                 'Interface', port, 'options', check_error=True)
 
-        utils.wait_until_true(
+        agent_utils.wait_until_true(
             lambda: get_peer(self.patch_int) == {'peer': self.patch_tun})
-        utils.wait_until_true(
+        agent_utils.wait_until_true(
             lambda: get_peer(self.patch_tun) == {'peer': self.patch_int})
 
     def assert_bridge_ports(self):
@@ -357,7 +361,7 @@ class OVSAgentTestFramework(base.BaseOVSLinuxTestCase):
 
     def wait_until_ports_state(self, ports, up, timeout=60):
         port_ids = [p['id'] for p in ports]
-        utils.wait_until_true(
+        agent_utils.wait_until_true(
             lambda: self._expected_plugin_rpc_call(
                 self.agent.plugin_rpc.update_device_list, port_ids, up),
             timeout=timeout)

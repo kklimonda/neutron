@@ -14,24 +14,22 @@
 
 import mock
 import netaddr
-from neutron_lib import constants as lib_constants
-from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import uuidutils
 
 from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import agent as l3_agent
+from neutron.agent.l3 import config as l3_config
 from neutron.agent.l3 import dvr_local_router as dvr_router
+from neutron.agent.l3 import ha
 from neutron.agent.l3 import link_local_allocator as lla
 from neutron.agent.l3 import router_info
 from neutron.agent.linux import external_process
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
-from neutron.common import constants as n_const
+from neutron.common import config as base_config
+from neutron.common import constants as l3_constants
 from neutron.common import utils as common_utils
-from neutron.conf.agent.l3 import config as l3_config
-from neutron.conf.agent.l3 import ha as ha_conf
-from neutron.conf import common as base_config
 from neutron.extensions import portbindings
 from neutron.tests import base
 from neutron.tests.common import l3_test_common
@@ -50,23 +48,23 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.conf.register_opts(base_config.core_opts)
         log.register_options(self.conf)
         self.conf.register_opts(agent_config.AGENT_STATE_OPTS, 'AGENT')
-        l3_config.register_l3_agent_config_opts(l3_config.OPTS, self.conf)
-        ha_conf.register_l3_agent_ha_opts(self.conf)
+        self.conf.register_opts(l3_config.OPTS)
+        self.conf.register_opts(ha.OPTS)
         agent_config.register_interface_driver_opts_helper(self.conf)
         agent_config.register_process_monitor_opts(self.conf)
         self.conf.register_opts(interface.OPTS)
         self.conf.register_opts(external_process.OPTS)
+        self.conf.set_override('router_id', 'fake_id')
         self.conf.set_override('interface_driver',
                                'neutron.agent.linux.interface.NullDriver')
         self.conf.set_override('send_arp_for_ha', 1)
-        self.conf.set_override('state_path', cfg.CONF.state_path)
+        self.conf.set_override('state_path', '')
 
         self.device_exists_p = mock.patch(
             'neutron.agent.linux.ip_lib.device_exists')
         self.device_exists = self.device_exists_p.start()
 
-        self.ensure_dir = mock.patch(
-            'oslo_utils.fileutils.ensure_tree').start()
+        self.ensure_dir = mock.patch('neutron.common.utils.ensure_dir').start()
 
         mock.patch('neutron.agent.linux.keepalived.KeepalivedManager'
                    '.get_full_config_file_path').start()
@@ -76,7 +74,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.utils_exec = self.utils_exec_p.start()
 
         self.utils_replace_file_p = mock.patch(
-            'neutron_lib.utils.file.replace_file')
+            'neutron.common.utils.replace_file')
         self.utils_replace_file = self.utils_replace_file_p.start()
 
         self.external_process_p = mock.patch(
@@ -126,7 +124,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
                                          'id': subnet_id_1}],
                            'network_id': _uuid(),
                            'device_owner':
-                           lib_constants.DEVICE_OWNER_ROUTER_SNAT,
+                           l3_constants.DEVICE_OWNER_ROUTER_SNAT,
                            'mac_address': 'fa:16:3e:80:8d:80',
                            'fixed_ips': [{'subnet_id': subnet_id_1,
                                           'ip_address': '152.2.0.13',
@@ -137,7 +135,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
                                         'id': subnet_id_2}],
                            'network_id': _uuid(),
                            'device_owner':
-                           lib_constants.DEVICE_OWNER_ROUTER_SNAT,
+                           l3_constants.DEVICE_OWNER_ROUTER_SNAT,
                            'mac_address': 'fa:16:3e:80:8d:80',
                            'fixed_ips': [{'subnet_id': subnet_id_2,
                                          'ip_address': '152.10.0.13',
@@ -152,21 +150,13 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.router_id = _uuid()
         if not router:
             router = mock.MagicMock()
-        kwargs['agent'] = agent
-        kwargs['router_id'] = self.router_id
-        kwargs['router'] = router
-        kwargs['agent_conf'] = self.conf
-        kwargs['interface_driver'] = mock.Mock()
-        return dvr_router.DvrLocalRouter(HOSTNAME, **kwargs)
-
-    def _set_ri_kwargs(self, agent, router_id, router):
-        self.ri_kwargs['agent'] = agent
-        self.ri_kwargs['router_id'] = router_id
-        self.ri_kwargs['router'] = router
-
-    def test_gw_ns_name(self):
-        ri = self._create_router()
-        self.assertEqual(ri.ns_name, ri.get_gw_ns_name())
+        return dvr_router.DvrLocalRouter(agent,
+                                    HOSTNAME,
+                                    self.router_id,
+                                    router,
+                                    self.conf,
+                                    mock.Mock(),
+                                    **kwargs)
 
     def test_create_dvr_fip_interfaces_update(self):
         ri = self._create_router()
@@ -286,7 +276,8 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.assertTrue(fip_ns.destroyed)
         mIPWrapper().del_veth.assert_called_once_with(
             fip_ns.get_int_device_name(router['id']))
-        self.assertEqual(1, mIPDevice().route.delete_gateway.call_count)
+        mIPDevice().route.delete_gateway.assert_called_once_with(
+            str(fip_to_rtr.ip), table=16)
         self.assertFalse(ri.fip_ns.unsubscribe.called)
         ri.fip_ns.local_subnets.allocate.assert_called_once_with(ri.router_id)
 
@@ -328,7 +319,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         fip = {'floating_ip_address': ip}
         result = self._test_add_floating_ip(ri, fip, True)
         ri.floating_ip_added_dist.assert_called_once_with(fip, ip + '/32')
-        self.assertEqual(lib_constants.FLOATINGIP_STATUS_ACTIVE, result)
+        self.assertEqual(l3_constants.FLOATINGIP_STATUS_ACTIVE, result)
 
     @mock.patch.object(router_info.RouterInfo, 'remove_floating_ip')
     def test_remove_floating_ip(self, super_remove_floating_ip):
@@ -381,12 +372,12 @@ class TestDvrRouterOperations(base.BaseTestCase):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         router = l3_test_common.prepare_router_data(num_internal_ports=2)
         router['distributed'] = True
-        self._set_ri_kwargs(agent, router['id'], router)
-        ri = dvr_router.DvrLocalRouter(HOSTNAME, **self.ri_kwargs)
-        ports = ri.router.get(lib_constants.INTERFACE_KEY, [])
+        ri = dvr_router.DvrLocalRouter(
+            agent, HOSTNAME, router['id'], router, **self.ri_kwargs)
+        ports = ri.router.get(l3_constants.INTERFACE_KEY, [])
         subnet_id = l3_test_common.get_subnet_id(ports[0])
         test_ports = [{'mac_address': '00:11:22:33:44:55',
-                      'device_owner': lib_constants.DEVICE_OWNER_DHCP,
+                      'device_owner': l3_constants.DEVICE_OWNER_DHCP,
                       'fixed_ips': [{'ip_address': '1.2.3.4',
                                      'prefixlen': 24,
                                      'subnet_id': subnet_id}]}]
@@ -413,7 +404,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         router = l3_test_common.prepare_router_data(num_internal_ports=2)
         router['distributed'] = True
         subnet_id = l3_test_common.get_subnet_id(
-            router[lib_constants.INTERFACE_KEY][0])
+            router[l3_constants.INTERFACE_KEY][0])
         arp_table = {'ip_address': '1.7.23.11',
                      'mac_address': '00:11:22:33:44:55',
                      'subnet_id': subnet_id}
@@ -429,7 +420,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         router = l3_test_common.prepare_router_data(num_internal_ports=2)
         subnet_id = l3_test_common.get_subnet_id(
-            router[lib_constants.INTERFACE_KEY][0])
+            router[l3_constants.INTERFACE_KEY][0])
         arp_table = {'ip_address': '1.7.23.11',
                      'mac_address': '00:11:22:33:44:55',
                      'subnet_id': subnet_id}
@@ -438,10 +429,12 @@ class TestDvrRouterOperations(base.BaseTestCase):
         agent.add_arp_entry(None, payload)
 
     def test__update_arp_entry_with_no_subnet(self):
-        self._set_ri_kwargs(mock.sentinel.agent,
-                            'foo_router_id',
-                            {'distributed': True, 'gw_port_host': HOSTNAME})
-        ri = dvr_router.DvrLocalRouter(HOSTNAME, **self.ri_kwargs)
+        ri = dvr_router.DvrLocalRouter(
+            mock.sentinel.agent,
+            HOSTNAME,
+            'foo_router_id',
+            {'distributed': True, 'gw_port_host': HOSTNAME},
+            **self.ri_kwargs)
         with mock.patch.object(l3_agent.ip_lib, 'IPDevice') as f:
             ri._update_arp_entry(mock.ANY, mock.ANY, 'foo_subnet_id', 'add')
         self.assertFalse(f.call_count)
@@ -450,10 +443,10 @@ class TestDvrRouterOperations(base.BaseTestCase):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         router = l3_test_common.prepare_router_data(num_internal_ports=2)
         router['distributed'] = True
-        self._set_ri_kwargs(agent, router['id'], router)
-        ri = dvr_router.DvrLocalRouter(HOSTNAME, **self.ri_kwargs)
+        ri = dvr_router.DvrLocalRouter(
+            agent, HOSTNAME, router['id'], router, **self.ri_kwargs)
         subnet_id = l3_test_common.get_subnet_id(
-            ri.router[lib_constants.INTERFACE_KEY][0])
+            ri.router[l3_constants.INTERFACE_KEY][0])
         return ri, subnet_id
 
     def test__update_arp_entry_calls_arp_cache_with_no_device(self):
@@ -493,7 +486,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         router = l3_test_common.prepare_router_data(num_internal_ports=2)
         router['distributed'] = True
         subnet_id = l3_test_common.get_subnet_id(
-            router[lib_constants.INTERFACE_KEY][0])
+            router[l3_constants.INTERFACE_KEY][0])
         arp_table = {'ip_address': '1.5.25.15',
                      'mac_address': '00:44:33:22:11:55',
                      'subnet_id': subnet_id}
@@ -520,17 +513,17 @@ class TestDvrRouterOperations(base.BaseTestCase):
                            'gateway_ip': '20.0.0.1'}],
               'id': _uuid(),
               portbindings.HOST_ID: 'myhost',
-              'device_owner': lib_constants.DEVICE_OWNER_AGENT_GW,
+              'device_owner': l3_constants.DEVICE_OWNER_AGENT_GW,
               'network_id': fake_network_id,
               'mac_address': 'ca:fe:de:ad:be:ef'}]
         )
 
         router = l3_test_common.prepare_router_data(enable_snat=True)
-        router[n_const.FLOATINGIP_AGENT_INTF_KEY] = agent_gateway_port
+        router[l3_constants.FLOATINGIP_AGENT_INTF_KEY] = agent_gateway_port
         router['distributed'] = True
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
-        self._set_ri_kwargs(agent, router['id'], router)
-        ri = dvr_router.DvrLocalRouter(HOSTNAME, **self.ri_kwargs)
+        ri = dvr_router.DvrLocalRouter(
+            agent, HOSTNAME, router['id'], router, **self.ri_kwargs)
         self.assertEqual(
             agent_gateway_port[0],
             ri.get_floating_agent_gw_interface(fake_network_id))
@@ -551,11 +544,14 @@ class TestDvrRouterOperations(base.BaseTestCase):
              'port_id': _uuid()}]}
 
         router = l3_test_common.prepare_router_data(enable_snat=True)
-        router[lib_constants.FLOATINGIP_KEY] = fake_floatingips['floatingips']
+        router[l3_constants.FLOATINGIP_KEY] = fake_floatingips['floatingips']
         router['distributed'] = True
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
-        self._set_ri_kwargs(agent, router['id'], router)
-        ri = dvr_router.DvrLocalRouter(HOSTNAME, **self.ri_kwargs)
+        ri = dvr_router.DvrLocalRouter(agent,
+                                  HOSTNAME,
+                                  router['id'],
+                                  router,
+                                  **self.ri_kwargs)
         ri.iptables_manager.ipv4['nat'] = mock.MagicMock()
         ri.dist_fip_count = 0
         fip_ns = agent.get_fip_ns(mock.sentinel.ext_net_id)
@@ -575,8 +571,11 @@ class TestDvrRouterOperations(base.BaseTestCase):
                                             agent_mode, expected_call_count):
         router = l3_test_common.prepare_router_data(num_internal_ports=2)
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
-        self._set_ri_kwargs(agent, router['id'], router)
-        ri = dvr_router.DvrLocalRouter(HOSTNAME, **self.ri_kwargs)
+        ri = dvr_router.DvrLocalRouter(agent,
+                                       HOSTNAME,
+                                       router['id'],
+                                       router,
+                                       **self.ri_kwargs)
 
         interface_name, ex_gw_port = l3_test_common.prepare_ext_gw_test(self,
                                                                         ri)
@@ -601,6 +600,8 @@ class TestDvrRouterOperations(base.BaseTestCase):
                                                  'dvr', 0)
 
     def test_external_gateway_removed_ext_gw_port_and_fip(self):
+        self.conf.set_override('state_path', '/tmp')
+
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         agent.conf.agent_mode = 'dvr'
         router = l3_test_common.prepare_router_data(num_internal_ports=2)
@@ -608,8 +609,8 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.mock_driver.unplug.reset_mock()
 
         external_net_id = router['gw_port']['network_id']
-        self._set_ri_kwargs(agent, router['id'], router)
-        ri = dvr_router.DvrLocalRouter(HOSTNAME, **self.ri_kwargs)
+        ri = dvr_router.DvrLocalRouter(
+            agent, HOSTNAME, router['id'], router, **self.ri_kwargs)
         ri.remove_floating_ip = mock.Mock()
         agent._fetch_external_net_id = mock.Mock(return_value=external_net_id)
         ri.ex_gw_port = ri.router['gw_port']

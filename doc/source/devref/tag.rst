@@ -41,7 +41,7 @@ can be applicable to any other Neutron resource:
 3) Leverage tags by deployment tools
 
 4) allow operators to tag information about provider networks
-   (e.g. high-bandwidth, low-latency, etc)
+   (e.g. high-bandwith, low-latency, etc)
 
 5) new features like get-me-a-network or a similar port scheduler
    could choose a network for a port based on tags
@@ -49,10 +49,10 @@ can be applicable to any other Neutron resource:
 Which Resources
 ---------------
 
-Tag system uses standardattr mechanism so it's targeting to resources that have
-the mechanism. The system is provided by 'tag' extension and 'tag-ext'
-extension. The 'tag' extension supports networks only. The 'tag-ext' extension
-supports subnets, ports, routers, and subnet pools.
+Tag system uses standardattr mechanism so it's targeting to resources have the
+mechanism. In Mitaka, they are networks, ports, routers, floating IPs, security
+group, security group rules and subnet pools but now tag system supports
+networks only.
 
 Model
 -----
