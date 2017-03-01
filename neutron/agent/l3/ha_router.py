@@ -14,12 +14,15 @@
 
 import os
 import shutil
+import signal
 
+import eventlet
 import netaddr
 from neutron_lib import constants as n_consts
 from oslo_log import log as logging
 
 from neutron._i18n import _LE
+from neutron.agent.l3 import namespaces
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
@@ -30,6 +33,20 @@ from neutron.extensions import portbindings
 LOG = logging.getLogger(__name__)
 HA_DEV_PREFIX = 'ha-'
 IP_MONITOR_PROCESS_SERVICE = 'ip_monitor'
+SIGTERM_TIMEOUT = 10
+
+
+class HaRouterNamespace(namespaces.RouterNamespace):
+    """Namespace for HA router.
+
+    This namespace sets the ip_nonlocal_bind to 0 for HA router namespaces.
+    It does so to prevent sending gratuitous ARPs for interfaces that got VIP
+    removed in the middle of processing.
+    """
+    def create(self):
+        super(HaRouterNamespace, self).create()
+        # HA router namespaces should not have ip_nonlocal_bind enabled
+        ip_lib.set_ip_nonlocal_bind_for_namespace(self.name)
 
 
 class HaRouter(router.RouterInfo):
@@ -39,6 +56,11 @@ class HaRouter(router.RouterInfo):
         self.ha_port = None
         self.keepalived_manager = None
         self.state_change_callback = state_change_callback
+
+    def create_router_namespace_object(
+            self, router_id, agent_conf, iface_driver, use_ipv6):
+        return HaRouterNamespace(
+            router_id, agent_conf, iface_driver, use_ipv6)
 
     @property
     def ha_priority(self):
@@ -325,7 +347,12 @@ class HaRouter(router.RouterInfo):
         pm = self._get_state_change_monitor_process_manager()
         process_monitor.unregister(
             self.router_id, IP_MONITOR_PROCESS_SERVICE)
-        pm.disable()
+        pm.disable(sig=str(int(signal.SIGTERM)))
+        try:
+            common_utils.wait_until_true(lambda: not pm.active,
+                                         timeout=SIGTERM_TIMEOUT)
+        except eventlet.timeout.Timeout:
+            pm.disable(sig=str(int(signal.SIGKILL)))
 
     def update_initial_state(self, callback):
         ha_device = ip_lib.IPDevice(

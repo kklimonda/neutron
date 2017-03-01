@@ -28,6 +28,7 @@ from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
 from neutron.common import constants as n_const
+from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.extensions import portbindings
 from neutron.tests.common import l3_test_common
@@ -110,6 +111,89 @@ class TestDvrRouter(framework.L3AgentTestFramework):
         self.assertEqual(3, default_rules_list_count)
         self.assertEqual(2, interface_rules_list_count)
 
+    def test_dvr_update_gateway_port_with_no_gw_port_in_namespace(self):
+        self.agent.conf.agent_mode = 'dvr'
+
+        # Create the router with external net
+        router_info = self.generate_dvr_router_info()
+        external_gw_port = router_info['gw_port']
+        ext_net_id = router_info['_floatingips'][0]['floating_network_id']
+        self.mock_plugin_api.get_external_network_id.return_value = ext_net_id
+        router = self.manage_router(self.agent, router_info)
+        fg_port = router.fip_ns.agent_gateway_port
+        fg_port_name = router.fip_ns.get_ext_device_name(fg_port['id'])
+        fg_device = ip_lib.IPDevice(fg_port_name,
+                                    namespace=router.fip_ns.name)
+        # Now validate if the gateway is properly configured.
+        self.assertIn('gateway', fg_device.route.get_gateway())
+        self._validate_fips_for_external_network(
+            router, router.fip_ns.get_name())
+        # Now delete the fg- port that was created
+        ext_net_bridge = self.agent.conf.external_network_bridge
+        router.fip_ns.driver.unplug(fg_port_name,
+                                    bridge=ext_net_bridge,
+                                    namespace=router.fip_ns.name,
+                                    prefix=dvr_fip_ns.FIP_EXT_DEV_PREFIX)
+        # Now check if the fg- port is missing.
+        self.assertFalse(fg_device.exists())
+        # Now change the gateway ip for the router and do an update.
+        router.ex_gw_port = copy.deepcopy(router.ex_gw_port)
+        new_fg_port = copy.deepcopy(fg_port)
+        for subnet in new_fg_port['subnets']:
+            subnet['gateway_ip'] = '19.4.4.2'
+        router.router[n_const.FLOATINGIP_AGENT_INTF_KEY] = [new_fg_port]
+        self.assertRaises(n_exc.FloatingIpSetupException,
+                          self.manage_router,
+                          self.agent,
+                          router.router)
+        router = self.manage_router(self.agent, router.router)
+        self.assertTrue(fg_device.exists())
+        self.assertEqual({'gateway': u'19.4.4.2'},
+                         fg_device.route.get_gateway())
+        self._validate_fips_for_external_network(
+            router, router.fip_ns.get_name())
+        self._delete_router(self.agent, router.router_id)
+        self._assert_fip_namespace_deleted(external_gw_port)
+
+    @mock.patch.object(dvr_fip_ns.FipNamespace, 'subscribe')
+    def test_dvr_process_fips_with_no_gw_port_in_namespace(
+        self, fip_subscribe):
+        self.agent.conf.agent_mode = 'dvr'
+
+        # Create the router with external net
+        router_info = self.generate_dvr_router_info()
+        external_gw_port = router_info['gw_port']
+        ext_net_id = router_info['_floatingips'][0]['floating_network_id']
+        self.mock_plugin_api.get_external_network_id.return_value = ext_net_id
+
+        # Create the fip namespace up front
+        dvr_fip_ns.FipNamespace(ext_net_id,
+                                self.agent.conf,
+                                self.agent.driver,
+                                self.agent.use_ipv6).create()
+        # Create the router with the fip, this shouldn't allow the
+        # update_gateway_port to be called without the fg- port
+        fip_subscribe.return_value = False
+        # This will raise the exception and will also clear
+        # subscription for the ext_net_id
+        self.assertRaises(n_exc.FloatingIpSetupException,
+                          self.manage_router,
+                          self.agent,
+                          router_info)
+        fip_subscribe.return_value = True
+        # Now update the router again
+        router = self.manage_router(self.agent, router_info)
+        fg_port = router.fip_ns.agent_gateway_port
+        fg_port_name = router.fip_ns.get_ext_device_name(fg_port['id'])
+        fg_device = ip_lib.IPDevice(fg_port_name,
+                                    namespace=router.fip_ns.name)
+        # Now validate if the gateway is properly configured.
+        self.assertIn('gateway', fg_device.route.get_gateway())
+        self._validate_fips_for_external_network(
+            router, router.fip_ns.get_name())
+        self._delete_router(self.agent, router.router_id)
+        self._assert_fip_namespace_deleted(external_gw_port)
+
     def test_dvr_router_fips_stale_gw_port(self):
         self.agent.conf.agent_mode = 'dvr'
 
@@ -148,7 +232,7 @@ class TestDvrRouter(framework.L3AgentTestFramework):
                            'prefixlen': prefixlen}],
             'id': framework._uuid(),
             'device_id': framework._uuid()}
-        stale_fip_ns.create_gateway_port(stale_agent_gw_port)
+        stale_fip_ns.create_or_update_gateway_port(stale_agent_gw_port)
 
         stale_dev_exists = self.device_exists_with_ips_and_mac(
                 stale_agent_gw_port,
@@ -550,6 +634,68 @@ class TestDvrRouter(framework.L3AgentTestFramework):
                                                            fixedip)
             self._assert_iptables_rules_exist(
                 router.iptables_manager, 'nat', expected_rules)
+
+    def test_dvr_router_with_ha_for_fip_disassociation(self):
+        """Test to validate the fip rules are deleted in dvr_snat_ha router.
+
+        This test validates the fip rules are getting deleted in
+        a router namespace when the router has ha and snat enabled after
+        the floatingip is disassociated.
+        """
+        self.agent.conf.agent_mode = 'dvr_snat'
+        router_info = self.generate_dvr_router_info(
+            enable_snat=True, enable_ha=True, enable_gw=True)
+        fip_agent_gw_port = router_info[n_const.FLOATINGIP_AGENT_INTF_KEY]
+        self.mock_plugin_api.get_agent_gateway_port.return_value = (
+            fip_agent_gw_port[0])
+        router1 = self.manage_router(self.agent, router_info)
+        fip_ns_name = router1.fip_ns.get_name()
+        self.assertTrue(self._namespace_exists(router1.ns_name))
+        self.assertTrue(self._namespace_exists(fip_ns_name))
+        self._assert_snat_namespace_exists(router1)
+        ns_ipr = ip_lib.IPRule(namespace=router1.ns_name)
+        ip4_rules_list_with_fip = ns_ipr.rule.list_rules(
+            lib_constants.IP_VERSION_4)
+        # The rules_list should have 6 entries:
+        # 3 default rules (local, main and default)
+        # 1 Fip forward rule
+        # 2 interface rules to redirect to snat
+        self.assertEqual(6, len(ip4_rules_list_with_fip))
+        rfp_device_name = router1.fip_ns.get_rtr_ext_device_name(
+            router1.router_id)
+        rfp_device = ip_lib.IPDevice(rfp_device_name,
+                                     namespace=router1.ns_name)
+        rtr_2_fip, fip_2_rtr = router1.rtr_fip_subnet.get_pair()
+        self._assert_default_gateway(
+            fip_2_rtr, rfp_device, rfp_device_name)
+
+        router1.router[lib_constants.FLOATINGIP_KEY] = []
+        self.agent._process_updated_router(router1.router)
+        router_updated = self.agent.router_info[router1.router['id']]
+        self.assertTrue(self._namespace_exists(router_updated.ns_name))
+        self._assert_snat_namespace_exists(router1)
+        ip4_rules_list = ns_ipr.rule.list_rules(lib_constants.IP_VERSION_4)
+        self.assertEqual(5, len(ip4_rules_list))
+        interface_rules_list_count = 0
+        fip_rule_count = 0
+        for ip_rule in ip4_rules_list:
+            tbl_index = ip_rule['table']
+            if tbl_index not in ['local', 'default', 'main']:
+                interface_rules_list_count += 1
+                if tbl_index == dvr_fip_ns.FIP_RT_TBL:
+                    fip_rule_count += 1
+        self.assertEqual(2, interface_rules_list_count)
+        self.assertEqual(0, fip_rule_count)
+
+    def _assert_default_gateway(self, fip_2_rtr, rfp_device, device_name):
+        expected_gateway = [{'dev': device_name,
+                             'cidr': '0.0.0.0/0',
+                             'via': str(fip_2_rtr.ip),
+                             'table': dvr_fip_ns.FIP_RT_TBL}]
+        self.assertEqual(expected_gateway, rfp_device.route.list_routes(
+            ip_version=lib_constants.IP_VERSION_4,
+            table=dvr_fip_ns.FIP_RT_TBL,
+            via=str(fip_2_rtr.ip)))
 
     def test_dvr_router_rem_fips_on_restarted_agent(self):
         self.agent.conf.agent_mode = 'dvr_snat'
@@ -1078,3 +1224,20 @@ class TestDvrRouter(framework.L3AgentTestFramework):
         # external networks. SNAT will be used. Direct route will not work
         # here.
         src_machine.assert_no_ping(machine_diff_scope.ip)
+
+    def test_dvr_snat_namespace_has_ip_nonlocal_bind_disabled(self):
+        self.agent.conf.agent_mode = 'dvr_snat'
+        router_info = self.generate_dvr_router_info(
+            enable_ha=True, enable_snat=True)
+        router = self.manage_router(self.agent, router_info)
+        try:
+            ip_nonlocal_bind_value = ip_lib.get_ip_nonlocal_bind(
+                router.snat_namespace.name)
+        except RuntimeError as rte:
+            stat_message = 'cannot stat /proc/sys/net/ipv4/ip_nonlocal_bind'
+            if stat_message in str(rte):
+                raise self.skipException(
+                    "This kernel doesn't support %s in network namespaces." % (
+                        ip_lib.IP_NONLOCAL_BIND))
+            raise
+        self.assertEqual(0, ip_nonlocal_bind_value)

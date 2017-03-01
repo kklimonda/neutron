@@ -9,6 +9,7 @@ NEUTRON_PATH=$GATE_DEST/neutron
 GATE_HOOKS=$NEUTRON_PATH/neutron/tests/contrib/hooks
 DEVSTACK_PATH=$GATE_DEST/devstack
 LOCAL_CONF=$DEVSTACK_PATH/local.conf
+RALLY_EXTRA_DIR=$NEUTRON_PATH/rally-jobs/extra
 
 
 # Inject config from hook into localrc
@@ -29,6 +30,18 @@ function load_conf_hook {
 }
 
 
+# Tweak gate configuration for our rally scenarios
+function load_rc_for_rally {
+    for file in $(ls $RALLY_EXTRA_DIR/*.setup); do
+        local config=$(cat $file)
+        export DEVSTACK_LOCAL_CONFIG+="
+# generated from hook '$file'
+${config}
+"
+    done
+}
+
+
 case $VENV in
 "dsvm-functional"|"dsvm-fullstack")
     # The following need to be set before sourcing
@@ -44,7 +57,14 @@ case $VENV in
 
     configure_host_for_func_testing
 
-    upgrade_ovs_if_necessary
+    # Kernel modules are not needed for functional job. They are needed only
+    # for fullstack because of bug present in Ubuntu Xenial kernel version
+    # that makes VXLAN local tunneling fail.
+    if [[ "$VENV" =~ "dsvm-functional" ]]; then
+        compile_modules=False
+        NEUTRON_OVERRIDE_OVS_BRANCH=v2.5.1
+    fi
+    upgrade_ovs_if_necessary $compile_modules
 
     load_conf_hook iptables_verify
     # Make the workspace owned by the stack user
@@ -67,6 +87,11 @@ case $VENV in
         load_conf_hook pecan
     fi
 
+    $BASE/new/devstack-gate/devstack-vm-gate.sh
+    ;;
+
+"rally")
+    load_rc_for_rally
     $BASE/new/devstack-gate/devstack-vm-gate.sh
     ;;
 

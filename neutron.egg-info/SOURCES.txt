@@ -109,6 +109,7 @@ etc/neutron/rootwrap.d/ipset-firewall.filters
 etc/neutron/rootwrap.d/iptables-firewall.filters
 etc/neutron/rootwrap.d/l3.filters
 etc/neutron/rootwrap.d/linuxbridge-plugin.filters
+etc/neutron/rootwrap.d/netns-cleanup.filters
 etc/neutron/rootwrap.d/openvswitch-plugin.filters
 etc/oslo-config-generator/dhcp_agent.ini
 etc/oslo-config-generator/l3_agent.ini
@@ -984,6 +985,7 @@ neutron/tests/functional/agent/windows/test_ip_lib.py
 neutron/tests/functional/api/__init__.py
 neutron/tests/functional/api/test_policies.py
 neutron/tests/functional/cmd/__init__.py
+neutron/tests/functional/cmd/process_spawn.py
 neutron/tests/functional/cmd/test_ipset_cleanup.py
 neutron/tests/functional/cmd/test_linuxbridge_cleanup.py
 neutron/tests/functional/cmd/test_netns_cleanup.py
@@ -1494,8 +1496,10 @@ neutron/tests/var/privatekey.key
 rally-jobs/README.rst
 rally-jobs/neutron-neutron.yaml
 rally-jobs/extra/README.rst
+rally-jobs/extra/trunk_scenario.setup
 rally-jobs/plugins/README.rst
 rally-jobs/plugins/__init__.py
+rally-jobs/plugins/trunk_scenario.py
 releasenotes/notes/.placeholder
 releasenotes/notes/1500-default-mtu-b0d6e4ab193b62a4.yaml
 releasenotes/notes/1500-default-segment-mtu-54e2cf6aea9602d5.yaml
@@ -1541,6 +1545,7 @@ releasenotes/notes/deprecate_max_fixed_ips_per_port-5e80518cbf25cfd6.yaml
 releasenotes/notes/deprecate_neutron_debug-a578e0adfc9cff4c.yaml
 releasenotes/notes/deprecate_prevent_arp_spoofing_option-a09e673fc8f9fee4.yaml
 releasenotes/notes/deprecated-driver-e368e0befc9bee4c.yaml
+releasenotes/notes/dhcp-for-service-subnets-06f03d902f2fb738.yaml
 releasenotes/notes/dhcp-lease-time-5c504c3730a4f9ea.yaml
 releasenotes/notes/direct-physical-vnic-878d15bdb758b70e.yaml
 releasenotes/notes/dnsmasq_dns_servers-d729c04887ce67b4.yaml
@@ -1555,6 +1560,7 @@ releasenotes/notes/fdb_population-70d751c8c2e4395f.yaml
 releasenotes/notes/firewall_driver_not_needed_on_server-4159669ad834dea6.yaml
 releasenotes/notes/fix-mtu-for-existing-networks-5a476cde9bc46a53.yaml
 releasenotes/notes/hyperv-neutron-agent-decomposition-ae6a052aeb48c6ac.yaml
+releasenotes/notes/iptables-fail-on-missing-sysctl-bridge-firewalling-912f157b5671363f.yaml
 releasenotes/notes/keepalived-state-change-server-threads-9ed775e7533dd1a0.yaml
 releasenotes/notes/l2_adjacency-e6e54e5ff9aad9b7.yaml
 releasenotes/notes/l3-agent-extensions-b348ff26aec0fe88.yaml
@@ -1563,6 +1569,7 @@ releasenotes/notes/linuxbridge_vxlan_arp_responder-e9ea91552e1b62a7.yaml
 releasenotes/notes/macvtap-l2-agent-2b551d8ec341196d.yaml
 releasenotes/notes/macvtap_assigned_vf_check-f4d07660ffd82a24.yaml
 releasenotes/notes/mtu-selection-and-advertisement-ab29f9ec43140224.yaml
+releasenotes/notes/netns_cleanup_kill_procs-af88d8c47c07dd9c.yaml
 releasenotes/notes/network_ip_availability-d64bd7032b3c15ee.yaml
 releasenotes/notes/new-vif-type-for-pf-passthrough-33ec560b9b5d246f.yaml
 releasenotes/notes/of_interface-native-by-default-0c07bdbd7365230a.yaml
@@ -1587,6 +1594,7 @@ releasenotes/notes/remove-subnetpool-config-b15dbe59237aee7e.yaml
 releasenotes/notes/rename-tenant-to-project-b19a4068f8625969.yaml
 releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml
 releasenotes/notes/segment_mtu_to_global_physnet_mtu-9cee5ff09557edeb.yaml
+releasenotes/notes/sending-garp-for-l3-ha-c118871833ad8743.yaml
 releasenotes/notes/set-of-default-qos-burst-value-0790773703fa08fc.yaml
 releasenotes/notes/sorting-pagination-extensions-e66e99e2a8f5e563.yaml
 releasenotes/notes/sriov-agent-num-vf-0-0c06424247e7efe0.yaml

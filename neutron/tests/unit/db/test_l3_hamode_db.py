@@ -187,29 +187,51 @@ class L3HATestCase(L3HATestFramework):
             self.admin_ctx, router['id'])
         self.assertEqual([], bindings)
 
-    def _assert_ha_state_for_agent_is_standby(self, router, agent):
+    def _assert_ha_state_for_agent(self, router, agent,
+                                   state=n_const.HA_ROUTER_STATE_STANDBY):
         bindings = (
             self.plugin.get_l3_bindings_hosting_router_with_ha_states(
                 self.admin_ctx, router['id']))
         agent_ids = [(a[0]['id'], a[1]) for a in bindings]
-        self.assertIn((agent['id'], 'standby'), agent_ids)
+        self.assertIn((agent['id'], state), agent_ids)
 
     def test_get_l3_bindings_hosting_router_with_ha_states_active_and_dead(
             self):
         router = self._create_router()
         self.plugin.update_routers_states(
-            self.admin_ctx, {router['id']: 'active'}, self.agent1['host'])
+            self.admin_ctx, {router['id']: n_const.HA_ROUTER_STATE_ACTIVE},
+            self.agent1['host'])
+        self.plugin.update_routers_states(
+            self.admin_ctx, {router['id']: n_const.HA_ROUTER_STATE_ACTIVE},
+            self.agent2['host'])
         with mock.patch.object(agents_db.AgentDbMixin, 'is_agent_down',
                                return_value=True):
-            self._assert_ha_state_for_agent_is_standby(router, self.agent1)
+            self._assert_ha_state_for_agent(router, self.agent1)
 
     def test_get_l3_bindings_hosting_router_agents_admin_state_up_is_false(
             self):
         router = self._create_router()
         self.plugin.update_routers_states(
-            self.admin_ctx, {router['id']: 'active'}, self.agent1['host'])
+            self.admin_ctx, {router['id']: n_const.HA_ROUTER_STATE_ACTIVE},
+            self.agent1['host'])
+        self.plugin.update_routers_states(
+            self.admin_ctx, {router['id']: n_const.HA_ROUTER_STATE_ACTIVE},
+            self.agent2['host'])
         helpers.set_agent_admin_state(self.agent1['id'])
-        self._assert_ha_state_for_agent_is_standby(router, self.agent1)
+        self._assert_ha_state_for_agent(router, self.agent1)
+
+    def test_get_l3_bindings_hosting_router_with_ha_states_one_dead(self):
+        router = self._create_router()
+        self.plugin.update_routers_states(
+            self.admin_ctx, {router['id']: n_const.HA_ROUTER_STATE_ACTIVE},
+            self.agent1['host'])
+        self.plugin.update_routers_states(
+            self.admin_ctx, {router['id']: n_const.HA_ROUTER_STATE_STANDBY},
+            self.agent2['host'])
+        with mock.patch.object(agents_db.AgentDbMixin, 'is_agent_down',
+                               return_value=True):
+            self._assert_ha_state_for_agent(
+                router, self.agent1, state=n_const.HA_ROUTER_STATE_ACTIVE)
 
     def test_router_created_in_active_state(self):
         router = self._create_router()
@@ -1197,6 +1219,27 @@ class L3HAModeDbTestCase(L3HATestFramework):
 
         self.assertFalse(l3_hamode_db.is_ha_router_port(
             port['device_owner'], port['device_id']))
+
+    def test_migration_from_ha(self):
+        router = self._create_router()
+        self.assertTrue(router['ha'])
+
+        network_id = self._create_network(self.core_plugin, self.admin_ctx)
+        subnet = self._create_subnet(self.core_plugin, self.admin_ctx,
+                                     network_id)
+        interface_info = {'subnet_id': subnet['id']}
+        self.plugin.add_router_interface(self.admin_ctx,
+                                         router['id'],
+                                         interface_info)
+
+        router = self._migrate_router(router['id'], False)
+
+        self.assertFalse(router.extra_attributes['ha'])
+        for routerport in router.attached_ports.all():
+            self.assertEqual(constants.DEVICE_OWNER_ROUTER_INTF,
+                             routerport.port_type)
+            self.assertEqual(constants.DEVICE_OWNER_ROUTER_INTF,
+                             routerport.port.device_owner)
 
 
 class L3HAUserTestCase(L3HATestFramework):

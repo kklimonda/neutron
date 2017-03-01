@@ -342,6 +342,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
 
         return num_agents
 
+    @db_api.retry_if_session_inactive()
     def _create_ha_port_binding(self, context, router_id, port_id):
         try:
             with context.session.begin():
@@ -582,6 +583,10 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             # deleted. the core plugin will stop us if its in use
             self.safe_delete_ha_network(context, ha_network,
                                         router_db.tenant_id)
+            self._migrate_router_ports(
+                context, router_db,
+                old_owner=constants.DEVICE_OWNER_HA_REPLICATED_INT,
+                new_owner=constants.DEVICE_OWNER_ROUTER_INTF)
 
         self.schedule_router(context, router_id)
         router_db = super(L3_HA_NAT_db_mixin, self)._update_router_db(
@@ -669,16 +674,19 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
         """
         with context.session.begin(subtransactions=True):
             bindings = self.get_ha_router_port_bindings(context, [router_id])
-            dead_agents = [
-                binding.agent for binding in bindings
-                if binding.state == n_const.HA_ROUTER_STATE_ACTIVE and
-                not (binding.agent.is_active and binding.agent.admin_state_up)]
-
-            for dead_agent in dead_agents:
-                self.update_routers_states(
-                    context, {router_id: n_const.HA_ROUTER_STATE_STANDBY},
-                    dead_agent.host)
-
+            dead_agents = []
+            active = [binding for binding in bindings
+                      if binding.state == n_const.HA_ROUTER_STATE_ACTIVE]
+            # Check dead agents only if we have more then one active agent
+            if len(active) > 1:
+                dead_agents = [binding.agent for binding in active
+                               if not (binding.agent.is_active and
+                                       binding.agent.admin_state_up)]
+                for dead_agent in dead_agents:
+                    self.update_routers_states(
+                        context,
+                        {router_id: n_const.HA_ROUTER_STATE_STANDBY},
+                        dead_agent.host)
         if dead_agents:
             return self.get_ha_router_port_bindings(context, [router_id])
         return bindings

@@ -17,6 +17,7 @@ import functools
 
 from debtcollector import removals
 import netaddr
+from neutron_lib.db import model_base
 from neutron_lib import exceptions
 from oslo_config import cfg
 import oslo_i18n
@@ -51,7 +52,7 @@ def get_filters_from_dict(data, attr_info, skips=None):
     skips = skips or []
     res = {}
     for key, values in data.items():
-        if key in skips:
+        if key in skips or hasattr(model_base.BASEV2, key):
             continue
         values = [v for v in values if v]
         key_attr_info = attr_info.get(key, {})
@@ -121,13 +122,14 @@ def _get_pagination_max_limit():
 
 def _get_limit_param(request):
     """Extract integer limit from request or fail."""
+    limit = request.GET.get('limit', 0)
     try:
-        limit = int(request.GET.get('limit', 0))
+        limit = int(limit)
         if limit >= 0:
             return limit
     except ValueError:
         pass
-    msg = _("Limit must be an integer 0 or greater and not '%d'")
+    msg = _("Limit must be an integer 0 or greater and not '%s'") % limit
     raise exceptions.BadRequest(resource='limit', msg=msg)
 
 

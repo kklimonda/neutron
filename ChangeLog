@@ -1,6 +1,63 @@
 CHANGES
 =======
 
+9.2.0
+-----
+
+* ovsfw: Support protocol numbers instead of just tcp and udp
+* Remove get_router_cidrs method of dvr_edge_ha router
+* Add check for ha state
+* Fix netns_cleanup interrupted on rwd I/O
+* DHCP: enhance DHCPAgent startup procedure
+* Add filter check for quering
+* Fix a bug in process_spawn binding on ports
+* Check for unbound ports in L3 RPC handler
+* XenAPI: add support for conntrack with XenServer
+* Add retry to _create_ha_port_binding
+* Support alembic 0.8.9 in test_autogen_process_directives
+* Solve unexpected NoneType returned by _get_routers_can_schedule
+* Get rid of double-join to rbac_entries without filter
+* Make ovs functional tests mutually isolated
+* Add fullstack test with OVS arp_responder
+* Add missing revises_on_change attribute
+* Unplug external device when delete snat namespace
+* Kill neutron-keepalived-state-change gracefully
+* Kill processes when cleaning up namespaces
+* Remove iptables nat and mangle rules for security group
+* Handle label_id's DBReferenceError when creating label-rule
+* Have qos object increment port/network revision
+* Compare port_rule_masking() results with different approach
+* Use gate_hook to enable q-trunk for rally
+* Reduce IP link show calls for SR-IOV scan loop
+* Account for unwire failures during OVS trunk rewiring operations
+* gate_hook: Add a no-op rally case
+* Delete related conntrack when delete vm
+* Optimize trunk details extension hook
+* rally trunk port list
+* Use subqueries for rbac_entries and subnets<->network
+* DVR: Fix race condition in creation of fip gateway
+* Fix DHCP Port Creation on Service Subnets
+* Update MTU on existing devices
+* Correctly print --limit value passed via API
+* Add rally hook to neutron devstack plugin
+* Add a trunk rally test
+* Imported Translations from Zanata
+* Skip larger than /64 subnets in DHCP agent
+* Delete conntrack when remote ipset member removed
+* Only send string values to OVSDB other_config column
+* SRIOV: don't block report_state with device count
+* Speed-up iptables_manager remove_chain() code
+* Don't compile OVS kernel modules for functional job
+* Migrate device_owner for router's interface
+* ovs-agent: Close ryu app on all exceptions
+* ovsdb: don't erase existing ovsdb managers
+* Changing arping command execute to accept 1 as extra OK code
+* ovs-agent: Catch exceptions in agent_main_wrapper
+* DVR: remove misleading error log
+* iptables: fail to start ovs/linuxbridge agents on missing sysctl knobs
+* callbacks: Make the value of FLOATING_IP match with api resource
+* Fixed functional iptables firewall tests for newer kernels
+
 9.1.1
 -----
 
@@ -14,6 +71,8 @@ CHANGES
 * Only mark ports ready on synced networks
 * DHCP: Add missing path for marking ports as ready
 * Add unit tests for ip_lib.get_routing_table
+* Allow to override Idl class in OVSDB Connection
+* l3-ha: Send gratuitous ARP when new floating IP is added
 * Update metadata proxy when subnet add/delete
 * Check if namespace exists before getting devices
 

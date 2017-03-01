@@ -238,6 +238,8 @@ function _install_post_devstack {
     # NOTE: the package name 'python-openvswitch' is common across
     # supported distros.
     install_package python-openvswitch
+
+    enable_kernel_bridge_firewall
 }
 
 
@@ -278,4 +280,5 @@ fi
 
 if [[ "$VENV" =~ "dsvm-fullstack" ]]; then
     _configure_iptables_rules
+    sudo modprobe ip_conntrack_proto_sctp
 fi

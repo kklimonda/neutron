@@ -23,7 +23,7 @@ from oslo_log import log as logging
 from oslo_utils import netutils
 import six
 
-from neutron._i18n import _LI
+from neutron._i18n import _, _LI
 from neutron.agent import firewall
 from neutron.agent.linux import ip_conntrack
 from neutron.agent.linux import ipset_manager
@@ -66,6 +66,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
 
     def __init__(self, namespace=None):
         self.iptables = iptables_manager.IptablesManager(
+            state_less=True,
             use_ipv6=ipv6_utils.is_enabled(),
             namespace=namespace)
         # TODO(majopela, shihanzhang): refactor out ipset to a separate
@@ -109,15 +110,17 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         # enabled by default or not (Ubuntu - yes, Redhat - no, for
         # example).
         LOG.debug("Enabling netfilter for bridges")
-        utils.execute(['sysctl', '-w',
-                       'net.bridge.bridge-nf-call-arptables=1'],
-                      run_as_root=True)
-        utils.execute(['sysctl', '-w',
-                       'net.bridge.bridge-nf-call-ip6tables=1'],
-                      run_as_root=True)
-        utils.execute(['sysctl', '-w',
-                       'net.bridge.bridge-nf-call-iptables=1'],
-                      run_as_root=True)
+        entries = utils.execute(['sysctl', '-N', 'net.bridge'],
+                                run_as_root=True).splitlines()
+        for proto in ('arp', 'ip', 'ip6'):
+            knob = 'net.bridge.bridge-nf-call-%stables' % proto
+            if 'net.bridge.bridge-nf-call-%stables' % proto not in entries:
+                raise SystemExit(
+                    _("sysctl value %s not present on this system.") % knob)
+            enabled = utils.execute(['sysctl', '-b', knob])
+            if enabled != '1':
+                utils.execute(
+                    ['sysctl', '-w', '%s=1' % knob], run_as_root=True)
 
     @property
     def ports(self):
@@ -148,8 +151,18 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         LOG.debug("Update members of security group (%s)", sg_id)
         self.sg_members[sg_id] = collections.defaultdict(list, sg_members)
         if self.enable_ipset:
-            for ip_version, current_ips in sg_members.items():
-                self.ipset.set_members(sg_id, ip_version, current_ips)
+            self._update_ipset_members(sg_id, sg_members)
+
+    def _update_ipset_members(self, sg_id, sg_members):
+        devices = self.devices_with_updated_sg_members.pop(sg_id, None)
+        for ip_version, current_ips in sg_members.items():
+            add_ips, del_ips = self.ipset.set_members(
+                sg_id, ip_version, current_ips)
+            if devices and del_ips:
+                # remove prefix from del_ips
+                ips = [str(netaddr.IPNetwork(del_ip).ip) for del_ip in del_ips]
+                self.ipconntrack.delete_conntrack_state_by_remote_ips(
+                    devices, ip_version, ips)
 
     def _set_ports(self, port):
         if not firewall.port_sec_enabled(port):
@@ -162,6 +175,14 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
     def _unset_ports(self, port):
         self.unfiltered_ports.pop(port['device'], None)
         self.filtered_ports.pop(port['device'], None)
+
+    def _remove_conntrack_entries_from_port_deleted(self, port):
+        device_info = self.filtered_ports.get(port['device'])
+        if not device_info:
+            return
+        for ethertype in [constants.IPv4, constants.IPv6]:
+            self.ipconntrack.delete_conntrack_state_by_remote_ips(
+                [device_info], ethertype, set())
 
     def prepare_port_filter(self, port):
         LOG.debug("Preparing device (%s) filter", port['device'])
@@ -190,6 +211,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                          'filtered %r'), port)
             return
         self._remove_chains()
+        self._remove_conntrack_entries_from_port_deleted(port)
         self._unset_ports(port)
         self._setup_chains()
         return self.iptables.apply()
@@ -823,7 +845,8 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
     def _remove_conntrack_entries_from_sg_updates(self):
         self._clean_deleted_sg_rule_conntrack_entries()
         self._clean_updated_sg_member_conntrack_entries()
-        self._clean_deleted_remote_sg_members_conntrack_entries()
+        if not self.enable_ipset:
+            self._clean_deleted_remote_sg_members_conntrack_entries()
 
     def _get_sg_members(self, sg_info, sg_id, ethertype):
         return set(sg_info.get(sg_id, {}).get(ethertype, []))
