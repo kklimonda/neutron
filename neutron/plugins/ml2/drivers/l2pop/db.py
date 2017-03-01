@@ -13,17 +13,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants as const
 from oslo_serialization import jsonutils
 from oslo_utils import timeutils
 
-from neutron.common import constants as const
 from neutron.db import agents_db
 from neutron.db import l3_hamode_db
 from neutron.db import models_v2
 from neutron.plugins.ml2 import models as ml2_models
 
 
-HA_ROUTER_PORTS = (const.DEVICE_OWNER_ROUTER_INTF,
+HA_ROUTER_PORTS = (const.DEVICE_OWNER_HA_REPLICATED_INT,
                    const.DEVICE_OWNER_ROUTER_SNAT)
 
 
@@ -103,10 +103,11 @@ def get_nondistributed_active_network_ports(session, network_id):
 
 def get_dvr_active_network_ports(session, network_id):
     with session.begin(subtransactions=True):
-        query = session.query(ml2_models.DVRPortBinding, agents_db.Agent)
+        query = session.query(ml2_models.DistributedPortBinding,
+                              agents_db.Agent)
         query = query.join(agents_db.Agent,
                            agents_db.Agent.host ==
-                           ml2_models.DVRPortBinding.host)
+                           ml2_models.DistributedPortBinding.host)
         query = query.join(models_v2.Port)
         query = query.filter(models_v2.Port.network_id == network_id,
                              models_v2.Port.status == const.PORT_STATUS_ACTIVE,
@@ -171,13 +172,13 @@ def get_agent_network_active_port_count(session, agent_host,
         ha_port_count = get_ha_router_active_port_count(
             session, agent_host, network_id)
 
-        query2 = query.join(ml2_models.DVRPortBinding)
+        query2 = query.join(ml2_models.DistributedPortBinding)
         query2 = query2.filter(models_v2.Port.network_id == network_id,
-                               ml2_models.DVRPortBinding.status ==
+                               ml2_models.DistributedPortBinding.status ==
                                const.PORT_STATUS_ACTIVE,
                                models_v2.Port.device_owner ==
                                const.DEVICE_OWNER_DVR_INTERFACE,
-                               ml2_models.DVRPortBinding.host ==
+                               ml2_models.DistributedPortBinding.host ==
                                agent_host)
         return (query1.count() + query2.count() + ha_port_count)
 

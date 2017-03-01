@@ -28,6 +28,7 @@ import time
 
 import fixtures
 import netaddr
+from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
@@ -37,12 +38,12 @@ from neutron.agent.common import ovs_lib
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
+from neutron.agent.linux import iptables_firewall
 from neutron.agent.linux import utils
-from neutron.common import constants as n_const
+from neutron.common import utils as common_utils
 from neutron.db import db_base_plugin_common
 from neutron.plugins.ml2.drivers.linuxbridge.agent import \
     linuxbridge_neutron_agent as linuxbridge_agent
-from neutron.tests import base as tests_base
 from neutron.tests.common import base as common_base
 from neutron.tests import tools
 
@@ -71,7 +72,11 @@ READ_TIMEOUT = os.environ.get('OS_TEST_READ_TIMEOUT', 5)
 CHILD_PROCESS_TIMEOUT = os.environ.get('OS_TEST_CHILD_PROCESS_TIMEOUT', 20)
 CHILD_PROCESS_SLEEP = os.environ.get('OS_TEST_CHILD_PROCESS_SLEEP', 0.5)
 
-TRANSPORT_PROTOCOLS = (n_const.PROTO_NAME_TCP, n_const.PROTO_NAME_UDP)
+TRANSPORT_PROTOCOLS = (n_const.PROTO_NAME_TCP, n_const.PROTO_NAME_UDP,
+                       n_const.PROTO_NAME_SCTP)
+
+OVS_MANAGER_TEST_PORT_FIRST = 6610
+OVS_MANAGER_TEST_PORT_LAST = 6639
 
 
 def increment_ip_cidr(ip_cidr, offset=1):
@@ -96,7 +101,7 @@ def set_namespace_gateway(port_dev, gateway_ip):
     port_dev.route.add_gateway(gateway_ip)
 
 
-def assert_ping(src_namespace, dst_ip, timeout=1, count=1):
+def assert_ping(src_namespace, dst_ip, timeout=1, count=3):
     ipversion = netaddr.IPAddress(dst_ip).version
     ping_command = 'ping' if ipversion == 4 else 'ping6'
     ns_ip_wrapper = ip_lib.IPWrapper(src_namespace)
@@ -178,12 +183,17 @@ def _get_source_ports_from_ss_output(output):
     return ports
 
 
-def get_unused_port(used, start=1024, end=65535):
+def get_unused_port(used, start=1024, end=None):
+    if end is None:
+        port_range = utils.execute(
+            ['sysctl', '-n', 'net.ipv4.ip_local_port_range'])
+        end = int(port_range.split()[0]) - 1
+
     candidates = set(range(start, end + 1))
     return random.choice(list(candidates - used))
 
 
-def get_free_namespace_port(protocol, namespace=None):
+def get_free_namespace_port(protocol, namespace=None, start=1024, end=None):
     """Return an unused port from given namespace
 
     WARNING: This function returns a port that is free at the execution time of
@@ -193,19 +203,23 @@ def get_free_namespace_port(protocol, namespace=None):
 
     :param protocol: Return free port for given protocol. Supported protocols
                      are 'tcp' and 'udp'.
+    :param namespace: Namespace in which free port has to be returned.
+    :param start: The starting port number.
+    :param end: The ending port number (free port that is returned would be
+                between (start, end) values.
     """
     if protocol == n_const.PROTO_NAME_TCP:
         param = '-tna'
     elif protocol == n_const.PROTO_NAME_UDP:
         param = '-una'
     else:
-        raise ValueError("Unsupported procotol %s" % protocol)
+        raise ValueError("Unsupported protocol %s" % protocol)
 
     ip_wrapper = ip_lib.IPWrapper(namespace=namespace)
     output = ip_wrapper.netns.execute(['ss', param])
     used_ports = _get_source_ports_from_ss_output(output)
 
-    return get_unused_port(used_ports)
+    return get_unused_port(used_ports, start, end)
 
 
 def create_patch_ports(source, destination):
@@ -219,11 +233,11 @@ def create_patch_ports(source, destination):
     :param source: Instance of OVSBridge
     :param destination: Instance of OVSBridge
     """
-    common = tests_base.get_rand_name(max_length=4, prefix='')
+    common = common_utils.get_rand_name(max_length=4, prefix='')
     prefix = '%s-%s-' % (PATCH_PREFIX, common)
 
-    source_name = tests_base.get_rand_device_name(prefix=prefix)
-    destination_name = tests_base.get_rand_device_name(prefix=prefix)
+    source_name = common_utils.get_rand_device_name(prefix=prefix)
+    destination_name = common_utils.get_rand_device_name(prefix=prefix)
 
     source.add_patch_port(source_name, destination_name)
     destination.add_patch_port(destination_name, source_name)
@@ -256,7 +270,7 @@ class RootHelperProcess(subprocess.Popen):
             poller = select.poll()
             poller.register(stream.fileno())
             poll_predicate = functools.partial(poller.poll, 1)
-            utils.wait_until_true(poll_predicate, timeout, 0.1,
+            common_utils.wait_until_true(poll_predicate, timeout, 0.1,
                                   RuntimeError(
                                       'No output in %.2f seconds' % timeout))
         return stream.readline()
@@ -273,7 +287,7 @@ class RootHelperProcess(subprocess.Popen):
             if utils.pid_invoked_with_cmdline(child_pid, self.cmd):
                 return True
 
-        utils.wait_until_true(
+        common_utils.wait_until_true(
             child_is_running,
             timeout,
             exception=RuntimeError("Process %s hasn't been spawned "
@@ -323,7 +337,7 @@ class Pinger(object):
 
     def _wait_for_death(self):
         is_dead = lambda: self.proc.poll() is not None
-        utils.wait_until_true(
+        common_utils.wait_until_true(
             is_dead, timeout=self.TIMEOUT, exception=RuntimeError(
                 "Ping command hasn't ended after %d seconds." % self.TIMEOUT))
 
@@ -362,13 +376,14 @@ class Pinger(object):
             self._wait_for_death()
             self._parse_stats()
         else:
-            raise RuntimeError("Pinger is running infinitelly, use stop() "
+            raise RuntimeError("Pinger is running infinitely, use stop() "
                                "first")
 
 
 class NetcatTester(object):
     TCP = n_const.PROTO_NAME_TCP
     UDP = n_const.PROTO_NAME_UDP
+    SCTP = n_const.PROTO_NAME_SCTP
     VERSION_TO_ALL_ADDRESS = {
         4: '0.0.0.0',
         6: '::',
@@ -389,7 +404,7 @@ class NetcatTester(object):
                                  will be spawned
         :param address: Server address from client point of view
         :param dst_port: Port on which netcat listens
-        :param protocol: Transport protocol, either 'tcp' or 'udp'
+        :param protocol: Transport protocol, either 'tcp', 'udp' or 'sctp'
         :param server_address: Address in server namespace on which netcat
                                should listen
         :param src_port: Source port of netcat process spawned in client
@@ -475,9 +490,12 @@ class NetcatTester(object):
         cmd = ['nc', address, self.dst_port]
         if self.protocol == self.UDP:
             cmd.append('-u')
+        elif self.protocol == self.SCTP:
+            cmd.append('--sctp')
+
         if listen:
             cmd.append('-l')
-            if self.protocol == self.TCP:
+            if self.protocol in (self.TCP, self.SCTP):
                 cmd.append('-k')
         else:
             cmd.extend(['-w', '20'])
@@ -512,8 +530,8 @@ class NamespaceFixture(fixtures.Fixture):
     def _setUp(self):
         ip = ip_lib.IPWrapper()
         self.name = self.prefix + uuidutils.generate_uuid()
-        self.addCleanup(self.destroy)
         self.ip_wrapper = ip.ensure_namespace(self.name)
+        self.addCleanup(self.destroy)
 
     def destroy(self):
         if self.ip_wrapper.netns.exists(self.name):
@@ -579,9 +597,9 @@ class NamedVethFixture(VethFixture):
     @staticmethod
     def get_veth_name(name):
         if name.startswith(VETH0_PREFIX):
-            return tests_base.get_rand_device_name(VETH0_PREFIX)
+            return common_utils.get_rand_device_name(VETH0_PREFIX)
         if name.startswith(VETH1_PREFIX):
-            return tests_base.get_rand_device_name(VETH1_PREFIX)
+            return common_utils.get_rand_device_name(VETH1_PREFIX)
         return name
 
 
@@ -647,10 +665,11 @@ class PortFixture(fixtures.Fixture):
             self.bridge = self.useFixture(self._create_bridge_fixture()).bridge
 
     @classmethod
-    def get(cls, bridge, namespace=None, mac=None, port_id=None):
+    def get(cls, bridge, namespace=None, mac=None, port_id=None,
+            hybrid_plug=False):
         """Deduce PortFixture class from bridge type and instantiate it."""
         if isinstance(bridge, ovs_lib.OVSBridge):
-            return OVSPortFixture(bridge, namespace, mac, port_id)
+            return OVSPortFixture(bridge, namespace, mac, port_id, hybrid_plug)
         if isinstance(bridge, bridge_lib.BridgeDevice):
             return LinuxBridgePortFixture(bridge, namespace, mac, port_id)
         if isinstance(bridge, VethBridge):
@@ -677,7 +696,21 @@ class OVSBridgeFixture(fixtures.Fixture):
         self.addCleanup(self.bridge.destroy)
 
 
+class OVSTrunkBridgeFixture(OVSBridgeFixture):
+    """This bridge doesn't generate the name."""
+    def _setUp(self):
+        ovs = ovs_lib.BaseOVS()
+        self.bridge = ovs.add_bridge(self.prefix)
+        self.addCleanup(self.bridge.destroy)
+
+
 class OVSPortFixture(PortFixture):
+    NIC_NAME_LEN = 14
+
+    def __init__(self, bridge=None, namespace=None, mac=None, port_id=None,
+                 hybrid_plug=False):
+        super(OVSPortFixture, self).__init__(bridge, namespace, mac, port_id)
+        self.hybrid_plug = hybrid_plug
 
     def _create_bridge_fixture(self):
         return OVSBridgeFixture()
@@ -685,17 +718,26 @@ class OVSPortFixture(PortFixture):
     def _setUp(self):
         super(OVSPortFixture, self)._setUp()
 
-        interface_config = cfg.ConfigOpts()
-        interface_config.register_opts(interface.OPTS)
-        ovs_interface = interface.OVSInterfaceDriver(interface_config)
-
         # because in some tests this port can be used to providing connection
         # between linuxbridge agents and vlan_id can be also added to this
         # device name it has to be max LB_DEVICE_NAME_MAX_LEN long
-        port_name = tests_base.get_rand_name(
+        port_name = common_utils.get_rand_name(
             LB_DEVICE_NAME_MAX_LEN,
             PORT_PREFIX
         )
+
+        if self.hybrid_plug:
+            self.hybrid_plug_port(port_name)
+        else:
+            self.plug_port(port_name)
+
+    def plug_port(self, port_name):
+        # TODO(jlibosva): Don't use interface driver for fullstack fake
+        # machines as the port should be treated by OVS agent and not by
+        # external party
+        interface_config = cfg.ConfigOpts()
+        interface_config.register_opts(interface.OPTS)
+        ovs_interface = interface.OVSInterfaceDriver(interface_config)
         ovs_interface.plug_new(
             None,
             self.port_id,
@@ -705,6 +747,52 @@ class OVSPortFixture(PortFixture):
             namespace=self.namespace)
         self.addCleanup(self.bridge.delete_port, port_name)
         self.port = ip_lib.IPDevice(port_name, self.namespace)
+
+    def hybrid_plug_port(self, port_name):
+        """Plug port with linux bridge in the middle.
+
+        """
+        ip_wrapper = ip_lib.IPWrapper(self.namespace)
+        qvb_name, qvo_name = self._get_veth_pair_names(self.port_id)
+        qvb, qvo = self.useFixture(NamedVethFixture(qvb_name, qvo_name)).ports
+        qvb.link.set_up()
+        qvo.link.set_up()
+        qbr_name = self._get_br_name(self.port_id)
+        self.qbr = self.useFixture(
+            LinuxBridgeFixture(qbr_name,
+                               namespace=None,
+                               prefix_is_full_name=True)).bridge
+        self.qbr.link.set_up()
+        self.qbr.setfd(0)
+        self.qbr.disable_stp()
+        self.qbr.addif(qvb_name)
+        qvo_attrs = ('external_ids', {'iface-id': self.port_id,
+                                      'iface-status': 'active',
+                                      'attached-mac': self.mac})
+        self.bridge.add_port(qvo_name, qvo_attrs)
+
+        # NOTE(jlibosva): Create fake vm port, instead of tap device, we use
+        # veth pair here in order to be able to attach it to linux bridge in
+        # root namespace. Name with tap is in root namespace and its peer is in
+        # the namespace
+        hybrid_port_name = iptables_firewall.get_hybrid_port_name(self.port_id)
+        bridge_port, self.port = self.useFixture(
+            NamedVethFixture(hybrid_port_name)).ports
+        self.addCleanup(self.port.link.delete)
+        ip_wrapper.add_device_to_namespace(self.port)
+        bridge_port.link.set_up()
+        self.qbr.addif(bridge_port)
+
+        self.port.link.set_address(self.mac)
+        self.port.link.set_up()
+
+    # NOTE(jlibosva): Methods below are taken from nova.virt.libvirt.vif
+    def _get_br_name(self, iface_id):
+        return ("qbr" + iface_id)[:self.NIC_NAME_LEN]
+
+    def _get_veth_pair_names(self, iface_id):
+        return (("qvb%s" % iface_id)[:self.NIC_NAME_LEN],
+                ("qvo%s" % iface_id)[:self.NIC_NAME_LEN])
 
 
 class LinuxBridgeFixture(fixtures.Fixture):
@@ -780,10 +868,11 @@ class LinuxBridgePortFixture(PortFixture):
         super(LinuxBridgePortFixture, self)._setUp()
         br_port_name = self._get_port_name()
         if br_port_name:
-            self.br_port, self.port = self.useFixture(
-                NamedVethFixture(veth0_prefix=br_port_name)).ports
+            self.veth_fixture = self.useFixture(
+                NamedVethFixture(veth0_prefix=br_port_name))
         else:
-            self.br_port, self.port = self.useFixture(VethFixture()).ports
+            self.veth_fixture = self.useFixture(VethFixture())
+        self.br_port, self.port = self.veth_fixture.ports
 
         if self.mac:
             self.port.link.set_address(self.mac)

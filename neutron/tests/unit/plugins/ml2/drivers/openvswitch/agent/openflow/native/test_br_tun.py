@@ -31,7 +31,20 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
     dvr_process_next_table_id = ovs_const.PATCH_LV_TO_TUN
 
     def setUp(self):
+        conn_patcher = mock.patch(
+            'neutron.agent.ovsdb.native.connection.Connection.start')
+        conn_patcher.start()
         super(OVSTunnelBridgeTest, self).setUp()
+        # NOTE(ivasilevskaya) The behaviour of oslotest.base.addCleanup()
+        # according to https://review.openstack.org/#/c/119201/4 guarantees
+        # that all started mocks will be stopped even without direct call to
+        # patcher.stop().
+        # If any individual mocks should be stopped by other than default
+        # mechanism, their cleanup has to be added after
+        # oslotest.BaseTestCase.setUp() not to be included in the stopall set
+        # that will be cleaned up by mock.patch.stopall. This way the mock
+        # won't be attempted to be stopped twice.
+        self.addCleanup(conn_patcher.stop)
         self.setup_bridge_mock('br-tun', self.br_tun_cls)
         self.stamp = self.br.default_cookie
 
@@ -91,16 +104,16 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
                             priority=1,
                             specs=[
                                 ofpp.NXFlowSpecMatch(
-                                    dst=('vlan_vid', 0),
+                                    dst=('vlan_tci', 0),
                                     n_bits=12,
-                                    src=('vlan_vid', 0)),
+                                    src=('vlan_tci', 0)),
                                 ofpp.NXFlowSpecMatch(
                                     dst=('eth_dst', 0),
                                     n_bits=48,
                                     src=('eth_src', 0)),
                                 ofpp.NXFlowSpecLoad(
-                                    dst=('vlan_vid', 0),
-                                    n_bits=12,
+                                    dst=('vlan_tci', 0),
+                                    n_bits=16,
                                     src=0),
                                 ofpp.NXFlowSpecLoad(
                                     dst=('tunnel_id', 0),
@@ -197,16 +210,16 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
                             priority=1,
                             specs=[
                                 ofpp.NXFlowSpecMatch(
-                                    dst=('vlan_vid', 0),
+                                    dst=('vlan_tci', 0),
                                     n_bits=12,
-                                    src=('vlan_vid', 0)),
+                                    src=('vlan_tci', 0)),
                                 ofpp.NXFlowSpecMatch(
                                     dst=('eth_dst', 0),
                                     n_bits=48,
                                     src=('eth_src', 0)),
                                 ofpp.NXFlowSpecLoad(
-                                    dst=('vlan_vid', 0),
-                                    n_bits=12,
+                                    dst=('vlan_tci', 0),
+                                    n_bits=16,
                                     src=0),
                                 ofpp.NXFlowSpecLoad(
                                     dst=('tunnel_id', 0),
@@ -392,7 +405,7 @@ class OVSTunnelBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
                         ofpp.NXActionRegMove(src_field='eth_src',
                                              dst_field='eth_dst',
                                              n_bits=48),
-                        ofpp.OFPActionSetField(eth_src_nxm=mac),
+                        ofpp.OFPActionSetField(eth_src=mac),
                         ofpp.OFPActionOutput(ofp.OFPP_IN_PORT, 0),
                     ]),
                 ],

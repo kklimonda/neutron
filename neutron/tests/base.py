@@ -20,9 +20,10 @@ import contextlib
 import gc
 import os
 import os.path
-import random
+import sys
 import weakref
 
+from debtcollector import moves
 import eventlet.timeout
 import fixtures
 import mock
@@ -41,18 +42,19 @@ from neutron.api.rpc.callbacks.consumer import registry as rpc_consumer_reg
 from neutron.callbacks import manager as registry_manager
 from neutron.callbacks import registry
 from neutron.common import config
-from neutron.common import constants
 from neutron.common import rpc as n_rpc
+from neutron.common import utils
 from neutron.db import agentschedulers_db
 from neutron import manager
 from neutron import policy
+from neutron.quota import resource_registry
 from neutron.tests import fake_notifier
 from neutron.tests import post_mortem_debug
 from neutron.tests import tools
 
 
 CONF = cfg.CONF
-CONF.import_opt('state_path', 'neutron.common.config')
+CONF.import_opt('state_path', 'neutron.conf.common')
 
 ROOTDIR = os.path.dirname(__file__)
 ETCDIR = os.path.join(ROOTDIR, 'etc')
@@ -66,29 +68,14 @@ def fake_use_fatal_exceptions(*args):
     return True
 
 
-def get_rand_name(max_length=None, prefix='test'):
-    """Return a random string.
-
-    The string will start with 'prefix' and will be exactly 'max_length'.
-    If 'max_length' is None, then exactly 8 random characters, each
-    hexadecimal, will be added. In case len(prefix) <= len(max_length),
-    ValueError will be raised to indicate the problem.
-    """
-
-    if max_length:
-        length = max_length - len(prefix)
-        if length <= 0:
-            raise ValueError("'max_length' must be bigger than 'len(prefix)'.")
-
-        suffix = ''.join(str(random.randint(0, 9)) for i in range(length))
-    else:
-        suffix = hex(random.randint(0x10000000, 0x7fffffff))[2:]
-    return prefix + suffix
-
-
-def get_rand_device_name(prefix='test'):
-    return get_rand_name(
-        max_length=constants.DEVICE_NAME_MAX_LEN, prefix=prefix)
+for _name in ('get_related_rand_names',
+              'get_rand_name',
+              'get_rand_device_name',
+              'get_related_rand_device_names'):
+    setattr(sys.modules[__name__], _name, moves.moved_function(
+        getattr(utils, _name), _name, __name__,
+        message='use "neutron.common.utils.%s" instead' % _name,
+        version='Newton', removal_version='Ocata'))
 
 
 def bool_from_env(key, strict=False, default=False):
@@ -96,9 +83,23 @@ def bool_from_env(key, strict=False, default=False):
     return strutils.bool_from_string(value, strict=strict, default=default)
 
 
+def setup_test_logging(config_opts, log_dir, log_file_path_template):
+    # Have each test log into its own log file
+    config_opts.set_override('debug', True)
+    utils.ensure_dir(log_dir)
+    log_file = sanitize_log_path(
+        os.path.join(log_dir, log_file_path_template))
+    config_opts.set_override('log_file', log_file)
+    config_opts.set_override('use_stderr', False)
+    config.setup_logging()
+
+
 def sanitize_log_path(path):
     # Sanitize the string so that its log path is shell friendly
-    return path.replace(' ', '-').replace('(', '_').replace(')', '_')
+    replace_map = {' ': '-', '(': '_', ')': '_'}
+    for s, r in six.iteritems(replace_map):
+        path = path.replace(s, r)
+    return path
 
 
 class AttributeDict(dict):
@@ -261,7 +262,7 @@ class BaseTestCase(DietTestCase):
         self.useFixture(ProcessMonitorFixture())
 
         self.useFixture(fixtures.MonkeyPatch(
-            'neutron.common.exceptions.NeutronException.use_fatal_exceptions',
+            'neutron_lib.exceptions.NeutronException.use_fatal_exceptions',
             fake_use_fatal_exceptions))
 
         self.useFixture(fixtures.MonkeyPatch(
@@ -274,6 +275,7 @@ class BaseTestCase(DietTestCase):
 
         policy.init()
         self.addCleanup(policy.reset)
+        self.addCleanup(resource_registry.unregister_all_resources)
         self.addCleanup(rpc_consumer_reg.clear)
 
     def get_new_temp_dir(self):
@@ -386,11 +388,11 @@ class PluginFixture(fixtures.Fixture):
         self.patched_default_svc_plugins = self.default_svc_plugins_p.start()
         self.dhcp_periodic_p = mock.patch(
             'neutron.db.agentschedulers_db.DhcpAgentSchedulerDbMixin.'
-            'start_periodic_dhcp_agent_status_check')
+            'add_periodic_dhcp_agent_status_check')
         self.patched_dhcp_periodic = self.dhcp_periodic_p.start()
         self.agent_health_check_p = mock.patch(
             'neutron.db.agentschedulers_db.DhcpAgentSchedulerDbMixin.'
-            'add_agent_status_check')
+            'add_agent_status_check_worker')
         self.agent_health_check = self.agent_health_check_p.start()
         # Plugin cleanup should be triggered last so that
         # test-specific cleanup has a chance to release references.

@@ -14,11 +14,12 @@
 
 import contextlib
 
+from neutron_lib import constants as n_consts
+from oslo_utils import uuidutils
 import webob.exc
 
 from neutron.api import extensions
 from neutron.common import config
-from neutron.common import constants as n_consts
 from neutron import context
 import neutron.extensions
 from neutron.extensions import metering
@@ -32,6 +33,7 @@ DB_METERING_PLUGIN_KLASS = (
 )
 
 extensions_path = ':'.join(neutron.extensions.__path__)
+_fake_uuid = uuidutils.generate_uuid
 
 
 class MeteringPluginDbTestCaseMixin(object):
@@ -155,6 +157,15 @@ class TestMetering(MeteringPluginDbTestCase):
             for k, v, in keys:
                 self.assertEqual(metering_label['metering_label'][k], v)
 
+    def test_update_metering_label(self):
+        name = 'my label'
+        description = 'my metering label'
+        data = {'metering_label': {}}
+        with self.metering_label(name, description) as metering_label:
+            metering_label_id = metering_label['metering_label']['id']
+            self._update('metering-labels', metering_label_id, data,
+                         webob.exc.HTTPNotImplemented.code)
+
     def test_delete_metering_label(self):
         name = 'my label'
         description = 'my metering label'
@@ -194,6 +205,32 @@ class TestMetering(MeteringPluginDbTestCase):
                                           excluded) as label_rule:
                 for k, v, in keys:
                     self.assertEqual(label_rule['metering_label_rule'][k], v)
+
+    def test_create_metering_label_rule_with_non_existent_label(self):
+        direction = 'egress'
+        remote_ip_prefix = '192.168.0.0/24'
+        excluded = True
+
+        res = self._create_metering_label_rule(self.fmt,
+                                               _fake_uuid(),
+                                               direction,
+                                               remote_ip_prefix,
+                                               excluded)
+        self.assertEqual(webob.exc.HTTPNotFound.code, res.status_int)
+
+    def test_update_metering_label_rule(self):
+        name = 'my label'
+        description = 'my metering label'
+        direction = 'egress'
+        remote_ip_prefix = '192.168.0.0/24'
+        data = {'metering_label_rule': {}}
+        with self.metering_label(name, description) as metering_label, \
+                self.metering_label_rule(
+                        metering_label['metering_label']['id'],
+                        direction, remote_ip_prefix) as label_rule:
+            rule_id = label_rule['metering_label_rule']['id']
+            self._update('metering-label-rules', rule_id, data,
+                         webob.exc.HTTPNotImplemented.code)
 
     def test_delete_metering_label_rule(self):
         name = 'my label'

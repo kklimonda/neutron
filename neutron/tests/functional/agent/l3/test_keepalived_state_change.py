@@ -19,14 +19,14 @@ import re
 import eventlet
 import mock
 import netaddr
-from oslo_config import cfg
 from oslo_config import fixture as fixture_config
 from oslo_utils import uuidutils
 
-from neutron._i18n import _
 from neutron.agent.l3 import keepalived_state_change
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import utils
+from neutron.common import utils
+from neutron.conf.agent.l3 import config
+from neutron.conf.agent.l3 import keepalived as kd
 from neutron.tests.common import machine_fixtures as mf
 from neutron.tests.common import net_helpers
 from neutron.tests.functional import base
@@ -57,12 +57,7 @@ class TestKeepalivedStateChange(base.BaseSudoTestCase):
     def setUp(self):
         super(TestKeepalivedStateChange, self).setUp()
         self.conf_fixture = self.useFixture(fixture_config.Config())
-        self.conf_fixture.register_opt(
-            cfg.StrOpt('metadata_proxy_socket',
-                       default='$state_path/metadata_proxy',
-                       help=_('Location of Metadata Proxy UNIX domain '
-                              'socket')))
-
+        kd.register_l3_agent_keepalived_opts(self.conf_fixture)
         self.router_id = uuidutils.generate_uuid()
         self.conf_dir = self.get_default_temp_dir().path
         self.cidr = '169.254.128.1/24'
@@ -111,6 +106,7 @@ class TestMonitorDaemon(base.BaseSudoTestCase):
         bridge = self.useFixture(net_helpers.OVSBridgeFixture()).bridge
         self.machines = self.useFixture(mf.PeerMachines(bridge))
         self.router, self.peer = self.machines.machines[:2]
+        config.register_l3_agent_config_opts(config.OPTS)
 
         conf_dir = self.get_default_temp_dir().path
         monitor = keepalived_state_change.MonitorDaemon(

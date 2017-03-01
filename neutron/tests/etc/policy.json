@@ -8,16 +8,18 @@
     "admin_only": "rule:context_is_admin",
     "regular_user": "",
     "shared": "field:networks:shared=True",
-    "shared_firewalls": "field:firewalls:shared=True",
-    "shared_firewall_policies": "field:firewall_policies:shared=True",
     "shared_subnetpools": "field:subnetpools:shared=True",
     "shared_address_scopes": "field:address_scopes:shared=True",
     "external": "field:networks:router:external=True",
     "default": "rule:admin_or_owner",
 
     "create_subnet": "rule:admin_or_network_owner",
+    "create_subnet:segment_id": "rule:admin_only",
+    "create_subnet:service_types": "rule:admin_only",
     "get_subnet": "rule:admin_or_owner or rule:shared",
+    "get_subnet:segment_id": "rule:admin_only",
     "update_subnet": "rule:admin_or_network_owner",
+    "update_subnet:service_types": "rule:admin_only",
     "delete_subnet": "rule:admin_or_network_owner",
 
     "create_subnetpool": "",
@@ -60,6 +62,11 @@
     "update_network:provider:segmentation_id": "rule:admin_only",
     "update_network:router:external": "rule:admin_only",
     "delete_network": "rule:admin_or_owner",
+
+    "create_segment": "rule:admin_only",
+    "get_segment": "rule:admin_only",
+    "update_segment": "rule:admin_only",
+    "delete_segment": "rule:admin_only",
 
     "network_device": "field:port:device_owner=~^network:",
     "create_port": "",
@@ -106,27 +113,8 @@
     "create_router:external_gateway_info:external_fixed_ips": "rule:admin_only",
     "update_router:external_gateway_info:external_fixed_ips": "rule:admin_only",
 
-    "create_firewall": "",
-    "get_firewall": "rule:admin_or_owner",
-    "create_firewall:shared": "rule:admin_only",
-    "get_firewall:shared": "rule:admin_only",
-    "update_firewall": "rule:admin_or_owner",
-    "update_firewall:shared": "rule:admin_only",
-    "delete_firewall": "rule:admin_or_owner",
-
-    "create_firewall_policy": "",
-    "get_firewall_policy": "rule:admin_or_owner or rule:shared_firewall_policies",
-    "create_firewall_policy:shared": "rule:admin_or_owner",
-    "update_firewall_policy": "rule:admin_or_owner",
-    "delete_firewall_policy": "rule:admin_or_owner",
-
     "insert_rule": "rule:admin_or_owner",
     "remove_rule": "rule:admin_or_owner",
-
-    "create_firewall_rule": "",
-    "get_firewall_rule": "rule:admin_or_owner or rule:shared_firewalls",
-    "update_firewall_rule": "rule:admin_or_owner",
-    "delete_firewall_rule": "rule:admin_or_owner",
 
     "create_qos_queue": "rule:admin_only",
     "get_qos_queue": "rule:admin_only",
@@ -194,7 +182,15 @@
     "create_policy_bandwidth_limit_rule": "rule:admin_only",
     "delete_policy_bandwidth_limit_rule": "rule:admin_only",
     "update_policy_bandwidth_limit_rule": "rule:admin_only",
+    "get_policy_dscp_marking_rule": "rule:regular_user",
+    "create_policy_dscp_marking_rule": "rule:admin_only",
+    "delete_policy_dscp_marking_rule": "rule:admin_only",
+    "update_policy_dscp_marking_rule": "rule:admin_only",
     "get_rule_type": "rule:regular_user",
+    "get_policy_minimum_bandwidth_rule": "rule:regular_user",
+    "create_policy_minimum_bandwidth_rule": "rule:admin_only",
+    "delete_policy_minimum_bandwidth_rule": "rule:admin_only",
+    "update_policy_minimum_bandwidth_rule": "rule:admin_only",
 
     "restrict_wildcard": "(not field:rbac_policy:target_tenant=*) or rule:admin_only",
     "create_rbac_policy": "",
@@ -209,26 +205,10 @@
     "get_flavor_service_profile": "rule:regular_user",
     "get_auto_allocated_topology": "rule:admin_or_owner",
 
-    "get_bgp_speaker": "rule:admin_only",
-    "create_bgp_speaker": "rule:admin_only",
-    "update_bgp_speaker": "rule:admin_only",
-    "delete_bgp_speaker": "rule:admin_only",
-
-    "get_bgp_peer": "rule:admin_only",
-    "create_bgp_peer": "rule:admin_only",
-    "update_bgp_peer": "rule:admin_only",
-    "delete_bgp_peer": "rule:admin_only",
-
-    "add_bgp_peer": "rule:admin_only",
-    "remove_bgp_peer": "rule:admin_only",
-
-    "add_gateway_network": "rule:admin_only",
-    "remove_gateway_network": "rule:admin_only",
-
-    "get_advertised_routes":"rule:admin_only",
-
-    "add_bgp_speaker_to_dragent": "rule:admin_only",
-    "remove_bgp_speaker_from_dragent": "rule:admin_only",
-    "list_bgp_speaker_on_dragent": "rule:admin_only",
-    "list_dragent_hosting_bgp_speaker": "rule:admin_only"
+    "create_trunk": "rule:regular_user",
+    "get_trunk": "rule:admin_or_owner",
+    "delete_trunk": "rule:admin_or_owner",
+    "get_subports": "",
+    "add_subports": "rule:admin_or_owner",
+    "remove_subports": "rule:admin_or_owner"
 }

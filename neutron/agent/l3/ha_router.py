@@ -14,8 +14,11 @@
 
 import os
 import shutil
+import signal
 
+import eventlet
 import netaddr
+from neutron_lib import constants as n_consts
 from oslo_log import log as logging
 
 from neutron._i18n import _LE
@@ -24,13 +27,13 @@ from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
-from neutron.common import constants as n_consts
 from neutron.common import utils as common_utils
 from neutron.extensions import portbindings
 
 LOG = logging.getLogger(__name__)
 HA_DEV_PREFIX = 'ha-'
 IP_MONITOR_PROCESS_SERVICE = 'ip_monitor'
+SIGTERM_TIMEOUT = 10
 
 
 class HaRouterNamespace(namespaces.RouterNamespace):
@@ -212,11 +215,11 @@ class HaRouter(router.RouterInfo):
         default_gw_rts = []
         instance = self._get_keepalived_instance()
         for gw_ip in gateway_ips:
-                # TODO(Carl) This is repeated everywhere.  A method would
-                # be nice.
-                default_gw = n_consts.IP_ANY[netaddr.IPAddress(gw_ip).version]
-                default_gw_rts.append(keepalived.KeepalivedVirtualRoute(
-                    default_gw, gw_ip, interface_name))
+            # TODO(Carl) This is repeated everywhere.  A method would
+            # be nice.
+            default_gw = n_consts.IP_ANY[netaddr.IPAddress(gw_ip).version]
+            default_gw_rts.append(keepalived.KeepalivedVirtualRoute(
+                default_gw, gw_ip, interface_name))
         instance.virtual_routes.gateway_routes = default_gw_rts
 
     def _add_extra_subnet_onlink_routes(self, ex_gw_port, interface_name):
@@ -344,7 +347,12 @@ class HaRouter(router.RouterInfo):
         pm = self._get_state_change_monitor_process_manager()
         process_monitor.unregister(
             self.router_id, IP_MONITOR_PROCESS_SERVICE)
-        pm.disable()
+        pm.disable(sig=str(int(signal.SIGTERM)))
+        try:
+            common_utils.wait_until_true(lambda: not pm.active,
+                                         timeout=SIGTERM_TIMEOUT)
+        except eventlet.timeout.Timeout:
+            pm.disable(sig=str(int(signal.SIGKILL)))
 
     def update_initial_state(self, callback):
         ha_device = ip_lib.IPDevice(
@@ -371,6 +379,8 @@ class HaRouter(router.RouterInfo):
         self._plug_external_gateway(ex_gw_port, interface_name, self.ns_name)
         self._add_gateway_vip(ex_gw_port, interface_name)
         self._disable_ipv6_addressing_on_interface(interface_name)
+        if self.ha_state == 'master':
+            self._enable_ra_on_gw(ex_gw_port, self.ns_name, interface_name)
 
     def external_gateway_updated(self, ex_gw_port, interface_name):
         self._plug_external_gateway(

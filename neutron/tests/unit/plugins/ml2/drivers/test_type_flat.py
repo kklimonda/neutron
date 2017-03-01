@@ -13,8 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.common import exceptions as exc
+from neutron_lib import exceptions as exc
+
+from neutron.common import exceptions as n_exc
 import neutron.db.api as db
+from neutron.db.models.plugins.ml2 import flatallocation as type_flat_model
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import config
 from neutron.plugins.ml2 import driver_api as api
@@ -37,7 +40,7 @@ class FlatTypeTest(testlib_api.SqlTestCase):
         self.driver.physnet_mtus = []
 
     def _get_allocation(self, session, segment):
-        return session.query(type_flat.FlatAllocation).filter_by(
+        return session.query(type_flat_model.FlatAllocation).filter_by(
             physical_network=segment[api.PHYSICAL_NETWORK]).first()
 
     def test_is_partial_segment(self):
@@ -113,7 +116,7 @@ class FlatTypeTest(testlib_api.SqlTestCase):
         segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
                    api.PHYSICAL_NETWORK: 'flat_net1'}
         self.driver.reserve_provider_segment(self.session, segment)
-        self.assertRaises(exc.FlatNetworkInUse,
+        self.assertRaises(n_exc.FlatNetworkInUse,
                           self.driver.reserve_provider_segment,
                           self.session, segment)
 

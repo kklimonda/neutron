@@ -13,18 +13,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api import validators
+from neutron_lib.db import model_base
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 import sqlalchemy as sa
 from sqlalchemy import orm
 
 from neutron._i18n import _, _LE
-from neutron.api.v2 import attributes
-from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
-from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.extensions import dns
 from neutron.extensions import l3
@@ -48,6 +48,7 @@ class NetworkDNSDomain(model_base.BASEV2):
                                                    lazy='joined',
                                                    uselist=False,
                                                    cascade='delete'))
+    revises_on_change = ('network', )
 
 
 class FloatingIPDNS(model_base.BASEV2):
@@ -75,6 +76,7 @@ class FloatingIPDNS(model_base.BASEV2):
                                                       lazy='joined',
                                                       uselist=False,
                                                       cascade='delete'))
+    revises_on_change = ('floatingip', )
 
 
 class PortDNS(model_base.BASEV2):
@@ -94,7 +96,7 @@ class PortDNS(model_base.BASEV2):
                                   nullable=False)
     previous_dns_domain = sa.Column(sa.String(255),
                                     nullable=False)
-
+    dns_name = sa.Column(sa.String(255), nullable=False)
     # Add a relationship to the Port model in order to instruct
     # SQLAlchemy to eagerly load this association
     port = orm.relationship(models_v2.Port,
@@ -102,6 +104,7 @@ class PortDNS(model_base.BASEV2):
                                                 lazy='joined',
                                                 uselist=False,
                                                 cascade='delete'))
+    revises_on_change = ('port', )
 
 
 class DNSActionsData(object):
@@ -152,7 +155,7 @@ class DNSDbMixin(object):
                                                  floatingip_data, req_data):
         # expects to be called within a plugin's session
         dns_domain = req_data.get(dns.DNSDOMAIN)
-        if not attributes.is_attr_set(dns_domain):
+        if not validators.is_attr_set(dns_domain):
             return
         if not self.dns_driver:
             return
@@ -268,15 +271,17 @@ class DNSDbMixin(object):
             raise n_exc.BadRequest(resource='floatingip', msg=msg)
 
     def _get_internal_port_dns_data(self, context, floatingip_data):
-        internal_port = context.session.query(models_v2.Port).filter_by(
-            id=floatingip_data['port_id']).one()
-        dns_domain = None
-        if internal_port['dns_name']:
-            net_dns = context.session.query(NetworkDNSDomain).filter_by(
-                network_id=internal_port['network_id']).one_or_none()
-            if net_dns:
-                dns_domain = net_dns['dns_domain']
-        return internal_port['dns_name'], dns_domain
+        port_dns = context.session.query(PortDNS).filter_by(
+            port_id=floatingip_data['port_id']).one_or_none()
+        if not (port_dns and port_dns['dns_name']):
+            return None, None
+        net_dns = context.session.query(NetworkDNSDomain).join(
+            models_v2.Port, NetworkDNSDomain.network_id ==
+            models_v2.Port.network_id).filter_by(
+            id=floatingip_data['port_id']).one_or_none()
+        if not net_dns:
+            return port_dns['dns_name'], None
+        return port_dns['dns_name'], net_dns['dns_domain']
 
     def _delete_floatingip_from_external_dns_service(self, context, dns_domain,
                                                      dns_name, records):
@@ -287,11 +292,11 @@ class DNSDbMixin(object):
             LOG.exception(_LE("Error deleting Floating IP data from external "
                               "DNS service. Name: '%(name)s'. Domain: "
                               "'%(domain)s'. IP addresses '%(ips)s'. DNS "
-                              "service driver message '%(message)s'")
-                          % {"name": dns_name,
-                             "domain": dns_domain,
-                             "message": e.msg,
-                             "ips": ', '.join(records)})
+                              "service driver message '%(message)s'"),
+                          {"name": dns_name,
+                           "domain": dns_domain,
+                           "message": e.msg,
+                           "ips": ', '.join(records)})
 
     def _get_requested_state_for_external_dns_service_create(self, context,
                                                              floatingip_data,
@@ -318,7 +323,7 @@ class DNSDbMixin(object):
             LOG.exception(_LE("Error publishing floating IP data in external "
                               "DNS service. Name: '%(name)s'. Domain: "
                               "'%(domain)s'. DNS service driver message "
-                              "'%(message)s'")
-                          % {"name": dns_name,
-                             "domain": dns_domain,
-                             "message": e.msg})
+                              "'%(message)s'"),
+                          {"name": dns_name,
+                           "domain": dns_domain,
+                           "message": e.msg})

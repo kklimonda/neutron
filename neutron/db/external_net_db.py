@@ -13,22 +13,24 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api import validators
+from neutron_lib import constants as lib_constants
+from neutron_lib.db import model_base
+from neutron_lib import exceptions as n_exc
 import sqlalchemy as sa
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
 from sqlalchemy import sql
 from sqlalchemy.sql import expression as expr
 
+from neutron._i18n import _
 from neutron.api.v2 import attributes
 from neutron.callbacks import events
 from neutron.callbacks import exceptions as c_exc
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import constants as l3_constants
-from neutron.common import exceptions as n_exc
 from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
-from neutron.db import model_base
 from neutron.db import models_v2
 from neutron.db import rbac_db_models as rbac_db
 from neutron.extensions import external_net
@@ -37,7 +39,7 @@ from neutron import manager
 from neutron.plugins.common import constants as service_constants
 
 
-DEVICE_OWNER_ROUTER_GW = l3_constants.DEVICE_OWNER_ROUTER_GW
+DEVICE_OWNER_ROUTER_GW = lib_constants.DEVICE_OWNER_ROUTER_GW
 
 
 class ExternalNetwork(model_base.BASEV2):
@@ -53,6 +55,7 @@ class ExternalNetwork(model_base.BASEV2):
         models_v2.Network,
         backref=orm.backref("external", lazy='joined',
                             uselist=False, cascade='delete'))
+    revises_on_change = ('network', )
 
 
 class External_net_db_mixin(object):
@@ -117,7 +120,7 @@ class External_net_db_mixin(object):
 
     def _process_l3_create(self, context, net_data, req_data):
         external = req_data.get(external_net.EXTERNAL)
-        external_set = attributes.is_attr_set(external)
+        external_set = validators.is_attr_set(external)
 
         if not external_set:
             return
@@ -156,7 +159,7 @@ class External_net_db_mixin(object):
 
         new_value = req_data.get(external_net.EXTERNAL)
         net_id = net_data['id']
-        if not attributes.is_attr_set(new_value):
+        if not validators.is_attr_set(new_value):
             return
 
         if net_data.get(external_net.EXTERNAL) == new_value:

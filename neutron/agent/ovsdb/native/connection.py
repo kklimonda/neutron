@@ -29,8 +29,10 @@ class TransactionQueue(Queue.Queue, object):
     def __init__(self, *args, **kwargs):
         super(TransactionQueue, self).__init__(*args, **kwargs)
         alertpipe = os.pipe()
-        self.alertin = os.fdopen(alertpipe[0], 'r', 0)
-        self.alertout = os.fdopen(alertpipe[1], 'w', 0)
+        # NOTE(ivasilevskaya) python 3 doesn't allow unbuffered I/O. Will get
+        # around this constraint by using binary mode.
+        self.alertin = os.fdopen(alertpipe[0], 'rb', 0)
+        self.alertout = os.fdopen(alertpipe[1], 'wb', 0)
 
     def get_nowait(self, *args, **kwargs):
         try:
@@ -51,15 +53,23 @@ class TransactionQueue(Queue.Queue, object):
 
 
 class Connection(object):
-    def __init__(self, connection, timeout, schema_name):
+    def __init__(self, connection, timeout, schema_name, idl_class=None):
         self.idl = None
         self.connection = connection
         self.timeout = timeout
         self.txns = TransactionQueue(1)
         self.lock = threading.Lock()
         self.schema_name = schema_name
+        self.idl_class = idl_class or idl.Idl
 
-    def start(self):
+    def start(self, table_name_list=None):
+        """
+        :param table_name_list: A list of table names for schema_helper to
+                register. When this parameter is given, schema_helper will only
+                register tables which name are in list. Otherwise,
+                schema_helper will register all tables for given schema_name as
+                default.
+        """
         with self.lock:
             if self.idl is not None:
                 return
@@ -79,8 +89,12 @@ class Connection(object):
                                                       self.schema_name)
                 helper = do_get_schema_helper()
 
-            helper.register_all()
-            self.idl = idl.Idl(self.connection, helper)
+            if table_name_list is None:
+                helper.register_all()
+            else:
+                for table_name in table_name_list:
+                    helper.register_table(table_name)
+            self.idl = self.idl_class(self.connection, helper)
             idlutils.wait_for_change(self.idl, self.timeout)
             self.poller = poller.Poller()
             self.thread = threading.Thread(target=self.run)

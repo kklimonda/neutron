@@ -16,14 +16,14 @@
 """
 Utility methods for working with WSGI servers
 """
-from __future__ import print_function
-
 import errno
 import socket
 import sys
 import time
 
 import eventlet.wsgi
+from neutron.conf import wsgi as wsgi_config
+from neutron_lib import exceptions as exception
 from oslo_config import cfg
 import oslo_i18n
 from oslo_log import log as logging
@@ -32,6 +32,7 @@ from oslo_service import service as common_service
 from oslo_service import sslutils
 from oslo_service import systemd
 from oslo_service import wsgi
+from oslo_utils import encodeutils
 from oslo_utils import excutils
 import six
 import webob.dec
@@ -39,27 +40,13 @@ import webob.exc
 
 from neutron._i18n import _, _LE, _LI
 from neutron.common import config
-from neutron.common import exceptions as exception
+from neutron.common import exceptions as n_exc
 from neutron import context
 from neutron.db import api
-from neutron import worker
-
-socket_opts = [
-    cfg.IntOpt('backlog',
-               default=4096,
-               help=_("Number of backlog requests to configure "
-                      "the socket with")),
-    cfg.IntOpt('retry_until_window',
-               default=30,
-               help=_("Number of seconds to keep retrying to listen")),
-    cfg.BoolOpt('use_ssl',
-                default=False,
-                help=_('Enable SSL on the API server')),
-]
+from neutron import worker as neutron_worker
 
 CONF = cfg.CONF
-CONF.register_opts(socket_opts)
-wsgi.register_opts(CONF)
+wsgi_config.register_socket_opts()
 
 LOG = logging.getLogger(__name__)
 
@@ -69,14 +56,15 @@ def encode_body(body):
 
     WebOb requires to encode unicode body used to update response body.
     """
-    if isinstance(body, six.text_type):
-        return body.encode('utf-8')
-    return body
+    return encodeutils.to_utf8(body)
 
 
-class WorkerService(worker.NeutronWorker):
+class WorkerService(neutron_worker.NeutronWorker):
     """Wraps a worker to be handled by ProcessLauncher"""
-    def __init__(self, service, application, disable_ssl=False):
+    def __init__(self, service, application, disable_ssl=False,
+                 worker_process_count=0):
+        super(WorkerService, self).__init__(worker_process_count)
+
         self._service = service
         self._application = application
         self._disable_ssl = disable_ssl
@@ -188,7 +176,7 @@ class Server(object):
         self._launch(application, workers)
 
     def _launch(self, application, workers=0):
-        service = WorkerService(self, application, self.disable_ssl)
+        service = WorkerService(self, application, self.disable_ssl, workers)
         if workers < 1:
             # The API service should run in the current process.
             self._server = service
@@ -200,13 +188,14 @@ class Server(object):
             # dispose the whole pool before os.fork, otherwise there will
             # be shared DB connections in child processes which may cause
             # DB errors.
-            api.dispose()
+            api.context_manager.dispose_pool()
             # The API service runs in a number of child processes.
             # Minimize the cost of checking for child exit by extending the
             # wait interval past the default of 0.01s.
             self._server = common_service.ProcessLauncher(cfg.CONF,
                                                           wait_interval=1.0)
-            self._server.launch_service(service, workers=workers)
+            self._server.launch_service(service,
+                                        workers=service.worker_process_count)
 
     @property
     def host(self):
@@ -263,7 +252,7 @@ class Request(wsgi.Request):
         return bm or 'application/json'
 
     def get_content_type(self):
-        allowed_types = ("application/json")
+        allowed_types = ("application/json",)
         if "Content-Type" not in self.headers:
             LOG.debug("Missing Content-Type")
             return None
@@ -389,7 +378,7 @@ class JSONDeserializer(TextDeserializer):
             return jsonutils.loads(datastring)
         except ValueError:
             msg = _("Cannot understand JSON")
-            raise exception.MalformedRequestBody(reason=msg)
+            raise n_exc.MalformedRequestBody(reason=msg)
 
     def default(self, datastring):
         return {'body': self._from_json(datastring)}
@@ -602,7 +591,7 @@ class Resource(Application):
             msg = _("Unsupported Content-Type")
             LOG.exception(_LE("InvalidContentType: %s"), msg)
             return Fault(webob.exc.HTTPBadRequest(explanation=msg))
-        except exception.MalformedRequestBody:
+        except n_exc.MalformedRequestBody:
             msg = _("Malformed request body")
             LOG.exception(_LE("MalformedRequestBody: %s"), msg)
             return Fault(webob.exc.HTTPBadRequest(explanation=msg))
@@ -635,15 +624,15 @@ class Resource(Application):
         return response
 
     def dispatch(self, request, action, action_args):
-        """Find action-spefic method on controller and call it."""
+        """Find action-specific method on controller and call it."""
 
         controller_method = getattr(self.controller, action)
         try:
             #NOTE(salvatore-orlando): the controller method must have
             # an argument whose name is 'request'
             return controller_method(request=request, **action_args)
-        except TypeError as exc:
-            LOG.exception(exc)
+        except TypeError:
+            LOG.exception(_LE('Invalid request'))
             return Fault(webob.exc.HTTPBadRequest())
 
 

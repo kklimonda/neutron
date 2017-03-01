@@ -30,7 +30,7 @@ interface_map = {
 OPTS = [
     cfg.StrOpt('ovsdb_interface',
                choices=interface_map.keys(),
-               default='vsctl',
+               default='native',
                help=_('The interface for interacting with the OVSDB')),
     cfg.StrOpt('ovsdb_connection',
                default='tcp:127.0.0.1:6640',
@@ -98,6 +98,36 @@ class API(object):
         :type log_errors:   bool
         :returns: A new transaction
         :rtype: :class:`Transaction`
+        """
+
+    @abc.abstractmethod
+    def add_manager(self, connection_uri):
+        """Create a command to add a Manager to the OVS switch
+
+        This API will add a new manager without overriding the existing ones.
+
+        :param connection_uri: target to which manager needs to be set
+        :type connection_uri: string, see ovs-vsctl manpage for format
+        :returns:           :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
+    def get_manager(self):
+        """Create a command to get Manager list from the OVS switch
+
+        :returns: :class:`Command` with list of Manager names result
+        """
+
+    @abc.abstractmethod
+    def remove_manager(self, connection_uri):
+        """Create a command to remove a Manager from the OVS switch
+
+        This API will remove the manager configured on the OVS switch.
+
+        :param connection_uri: target identifying the manager uri that
+                               needs to be removed.
+        :type connection_uri: string, see ovs-vsctl manpage for format
+        :returns:           :class:`Command` with no result
         """
 
     @abc.abstractmethod
@@ -258,6 +288,8 @@ class API(object):
         :type table:      string
         :param conditions:The conditions to satisfy the query
         :type conditions: 3-tuples containing (column, operation, match)
+                          Type of 'match' parameter MUST be identical to column
+                          type
                           Examples:
                               atomic: ('tag', '=', 7)
                               map: ('external_ids' '=', {'iface-id': 'xxx'})

@@ -14,11 +14,13 @@
 #    under the License.
 
 import mock
+from neutron_lib import constants
+from neutron_lib import exceptions
 from oslo_serialization import jsonutils
 import testtools
 
 from neutron.api.v2 import attributes
-from neutron.common import constants
+from neutron.common import constants as n_const
 from neutron.common import topics
 from neutron import context
 from neutron.db import agents_db
@@ -29,7 +31,6 @@ from neutron.extensions import portbindings
 from neutron.extensions import providernet as pnet
 from neutron import manager
 from neutron.plugins.common import constants as service_constants
-from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers.l2pop import db as l2pop_db
 from neutron.plugins.ml2.drivers.l2pop import mech_driver as l2pop_mech_driver
@@ -239,7 +240,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         plugin = manager.NeutronManager.get_plugin()
         device_filter = {'device_id': [router_id],
                          'device_owner':
-                         [constants.DEVICE_OWNER_ROUTER_INTF]}
+                         [constants.DEVICE_OWNER_HA_REPLICATED_INT]}
         return plugin.get_ports(self.adminContext, filters=device_filter)[0]
 
     def _add_router_interface(self, subnet, router, host):
@@ -248,7 +249,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                                          router['id'], interface_info)
         self.plugin.update_routers_states(
             self.adminContext,
-            {router['id']: constants.HA_ROUTER_STATE_ACTIVE}, host)
+            {router['id']: n_const.HA_ROUTER_STATE_ACTIVE}, host)
 
         port = self._get_first_interface(subnet['network_id'], router['id'])
 
@@ -872,7 +873,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                            arg_list=(portbindings.HOST_ID,),
                            **host_arg) as port1:
                 p1 = port1['port']
-
+                p1_ip = p1['fixed_ips'][0]['ip_address']
                 self.mock_fanout.reset_mock()
                 device = 'tap' + p1['id']
 
@@ -903,7 +904,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                             '20.0.0.1': [
                                 l2pop_rpc.PortInfo('00:00:00:00:00:00',
                                                    '0.0.0.0'),
-                                l2pop_rpc.PortInfo(new_mac, '10.0.0.2')
+                                l2pop_rpc.PortInfo(new_mac, p1_ip)
                             ]
                         }
                     }
@@ -916,9 +917,12 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
 
         with self.subnet(network=self._network) as subnet:
             host_arg = {portbindings.HOST_ID: HOST}
+            fixed_ips = [{'subnet_id': subnet['subnet']['id'],
+                          'ip_address': '10.0.0.2'}]
             with self.port(subnet=subnet, cidr='10.0.0.0/24',
                            device_owner=DEVICE_OWNER_COMPUTE,
                            arg_list=(portbindings.HOST_ID,),
+                           fixed_ips=fixed_ips,
                            **host_arg) as port1:
                 p1 = port1['port']
 
@@ -1262,7 +1266,8 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
         original_port = port.copy()
         original_port['mac_address'] = u'12:34:56:78:4b:0f'
 
-        with mock.patch.object(driver_context.db, 'get_network_segments'):
+        with mock.patch.object(driver_context.segments_db,
+                               'get_network_segments'):
             ctx = driver_context.PortContext(mock.Mock(),
                                              mock.Mock(),
                                              port,
@@ -1272,5 +1277,5 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
                                              original_port=original_port)
 
         mech_driver = l2pop_mech_driver.L2populationMechanismDriver()
-        with testtools.ExpectedException(ml2_exc.MechanismDriverError):
+        with testtools.ExpectedException(exceptions.InvalidInput):
             mech_driver.update_port_precommit(ctx)

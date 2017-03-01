@@ -35,21 +35,10 @@ are:
 * Consumed from the subnet's allocation pools (derives total IPs)
 
 This API tracks consumable IPs so network administrators know when their
-subnet's IP pools (and and ultimately a network's) IPs are about to run out.
+subnet's IP pools (and ultimately a network's) IPs are about to run out.
 This API does not account reserved IPs such as a subnet's gateway IP or other
 reserved or unused IPs of a subnet's cidr that are consumed as a result of
 the subnet creation itself.
-
-Enabling in Neutron
--------------------
-
-To enable this plugin within neutron, append this pluging class to the
-comma-delimited plugin list to the end of the **service_plugins** configuration
-property within your neutron.conf file.
-
-Example::
-
-    service_plugins=router, network_ip_availability
 
 
 API Specification
@@ -86,7 +75,7 @@ Example response ::
                         "used_ips": 3
                     }
                 ],
-                "tenant_id": "test-tenant",
+                "tenant_id": "test-project",
                 "total_ips": 253,
                 "used_ips": 3
             },
@@ -94,7 +83,7 @@ Example response ::
                 "network_id": "47035bae-4f29-4fef-be2e-2941b72528a8",
                 "network_name": "net2",
                 "subnet_ip_availability": [],
-                "tenant_id": "test-tenant",
+                "tenant_id": "test-project",
                 "total_ips": 0,
                 "used_ips": 0
             },
@@ -111,7 +100,7 @@ Example response ::
                         "used_ips": 2
                     }
                 ],
-                "tenant_id": "test-tenant",
+                "tenant_id": "test-project",
                 "total_ips": 253,
                 "used_ips": 2
             }
@@ -148,7 +137,7 @@ Example response ::
                     "used_ips": 3
                 }
             ],
-            "tenant_id": "test-tenant",
+            "tenant_id": "test-project",
             "total_ips": 253,
             "used_ips": 3
         }
@@ -165,7 +154,7 @@ This API currently supports the following query parameters:
 * **network_name**: Returns availability for network matching
   the provided name
 * **tenant_id**: Returns availability for all networks owned by the provided
-  tenant ID.
+  project ID.
 * **ip_version**: Filters network subnets by those supporting the supplied
   ip version. Values can be either 4 or 6.
 
@@ -173,8 +162,8 @@ Query filters can be combined to further narrow results and what is returned
 will match all criteria. When a parameter is specified more
 than once, it will return results that match both. Examples: ::
 
-    # Fetch IPv4 availability for a specific tenant uuid
-    GET /v2.0/network-ip-availabilities?ip_version=4&tenant_id=example-tenant-uuid
+    # Fetch IPv4 availability for a specific project uuid
+    GET /v2.0/network-ip-availabilities?ip_version=4&tenant_id=example-project-uuid
 
     # Fetch multiple networks by their ids
     GET /v2.0/network-ip-availabilities?network_id=uuid_sample_1&network_id=uuid_sample_2

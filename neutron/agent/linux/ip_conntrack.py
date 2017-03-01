@@ -58,7 +58,11 @@ class IpConntrackManager(object):
                 ip_cmd = [str(net.ip), '-w', zone_id]
                 if remote_ip and str(
                         netaddr.IPNetwork(remote_ip).version) in ethertype:
-                    ip_cmd.extend(['-s', str(remote_ip)])
+                    if rule.get('direction') == 'ingress':
+                        direction = '-s'
+                    else:
+                        direction = '-d'
+                    ip_cmd.extend([direction, str(remote_ip)])
                 conntrack_cmds.add(tuple(cmd + ip_cmd))
         return conntrack_cmds
 
@@ -72,17 +76,19 @@ class IpConntrackManager(object):
                              extra_ok_codes=[1])
             except RuntimeError:
                 LOG.exception(
-                    _LE("Failed execute conntrack command %s"), str(cmd))
+                    _LE("Failed execute conntrack command %s"), cmd)
 
     def delete_conntrack_state_by_rule(self, device_info_list, rule):
         self._delete_conntrack_state(device_info_list, rule)
 
     def delete_conntrack_state_by_remote_ips(self, device_info_list,
                                              ethertype, remote_ips):
-        rule = {'ethertype': str(ethertype).lower(), 'direction': 'ingress'}
-        if remote_ips:
-            for remote_ip in remote_ips:
-                self._delete_conntrack_state(
-                    device_info_list, rule, remote_ip)
-        else:
-            self._delete_conntrack_state(device_info_list, rule)
+        for direction in ['ingress', 'egress']:
+            rule = {'ethertype': str(ethertype).lower(),
+                    'direction': direction}
+            if remote_ips:
+                for remote_ip in remote_ips:
+                    self._delete_conntrack_state(
+                        device_info_list, rule, remote_ip)
+            else:
+                self._delete_conntrack_state(device_info_list, rule)

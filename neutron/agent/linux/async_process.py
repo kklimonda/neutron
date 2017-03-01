@@ -113,7 +113,7 @@ class AsyncProcess(object):
             self._spawn()
 
         if block:
-            utils.wait_until_true(self.is_active)
+            common_utils.wait_until_true(self.is_active)
 
     def stop(self, block=False, kill_signal=signal.SIGKILL):
         """Halt the process and watcher threads.
@@ -131,7 +131,7 @@ class AsyncProcess(object):
             raise AsyncProcessException(_('Process is not running.'))
 
         if block:
-            utils.wait_until_true(lambda: not self.is_active())
+            common_utils.wait_until_true(lambda: not self.is_active())
 
     def _spawn(self):
         """Spawn a process and its watchers."""
@@ -174,15 +174,11 @@ class AsyncProcess(object):
         try:
             # A process started by a root helper will be running as
             # root and need to be killed via the same helper.
-            utils.execute(['kill', '-%d' % kill_signal, pid],
-                          run_as_root=self.run_as_root)
-        except Exception as ex:
-            stale_pid = (isinstance(ex, RuntimeError) and
-                         'No such process' in str(ex))
-            if not stale_pid:
-                LOG.exception(_LE('An error occurred while killing [%s].'),
-                              self.cmd)
-                return False
+            utils.kill_process(pid, kill_signal, self.run_as_root)
+        except Exception:
+            LOG.exception(_LE('An error occurred while killing [%s].'),
+                          self.cmd)
+            return False
 
         if self._process:
             self._process.wait()

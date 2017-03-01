@@ -15,11 +15,12 @@
 
 import mock
 import netaddr
+from neutron_lib import exceptions
 import testtools
 
 from neutron.agent.common import utils  # noqa
 from neutron.agent.linux import ip_lib
-from neutron.common import exceptions
+from neutron.common import exceptions as n_exc
 from neutron.tests import base
 
 NETNS_SAMPLE = [
@@ -282,16 +283,6 @@ class TestIpWrapper(base.BaseTestCase):
         self.assertEqual(retval, [ip_lib.IPDevice('lo', namespace='foo')])
 
     @mock.patch('neutron.agent.common.utils.execute')
-    def test_get_devices_exclude_loopback_and_gre(self, mocked_execute):
-        device_name = 'somedevice'
-        mocked_execute.return_value = 'lo gre0 gretap0 ' + device_name
-        devices = ip_lib.IPWrapper(namespace='foo').get_devices(
-            exclude_loopback=True, exclude_gre_devices=True)
-        somedevice = devices.pop()
-        self.assertEqual(device_name, somedevice.name)
-        self.assertFalse(devices)
-
-    @mock.patch('neutron.agent.common.utils.execute')
     def test_get_devices_namespaces_ns_not_exists(self, mocked_execute):
         mocked_execute.side_effect = RuntimeError(
             "Cannot open network namespace")
@@ -309,7 +300,18 @@ class TestIpWrapper(base.BaseTestCase):
             self.assertRaises(RuntimeError,
                               ip_lib.IPWrapper(namespace='foo').get_devices)
 
-    def test_get_namespaces(self):
+    @mock.patch('neutron.agent.common.utils.execute')
+    def test_get_devices_exclude_loopback_and_gre(self, mocked_execute):
+        device_name = 'somedevice'
+        mocked_execute.return_value = 'lo gre0 gretap0 ' + device_name
+        devices = ip_lib.IPWrapper(namespace='foo').get_devices(
+            exclude_loopback=True, exclude_gre_devices=True)
+        somedevice = devices.pop()
+        self.assertEqual(device_name, somedevice.name)
+        self.assertFalse(devices)
+
+    def test_get_namespaces_non_root(self):
+        self.config(group='AGENT', use_helper_for_ns_read=False)
         self.execute.return_value = '\n'.join(NETNS_SAMPLE)
         retval = ip_lib.IPWrapper.get_namespaces()
         self.assertEqual(retval,
@@ -317,9 +319,11 @@ class TestIpWrapper(base.BaseTestCase):
                           'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
                           'cccccccc-cccc-cccc-cccc-cccccccccccc'])
 
-        self.execute.assert_called_once_with([], 'netns', ('list',))
+        self.execute.assert_called_once_with([], 'netns', ('list',),
+                                             run_as_root=False)
 
-    def test_get_namespaces_iproute2_4(self):
+    def test_get_namespaces_iproute2_4_root(self):
+        self.config(group='AGENT', use_helper_for_ns_read=True)
         self.execute.return_value = '\n'.join(NETNS_SAMPLE_IPROUTE2_4)
         retval = ip_lib.IPWrapper.get_namespaces()
         self.assertEqual(retval,
@@ -327,7 +331,8 @@ class TestIpWrapper(base.BaseTestCase):
                           'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
                           'cccccccc-cccc-cccc-cccc-cccccccccccc'])
 
-        self.execute.assert_called_once_with([], 'netns', ('list',))
+        self.execute.assert_called_once_with([], 'netns', ('list',),
+                                             run_as_root=True)
 
     def test_add_tuntap(self):
         ip_lib.IPWrapper().add_tuntap('tap0')
@@ -504,7 +509,7 @@ class TestIpWrapper(base.BaseTestCase):
 
     def test_add_vxlan_invalid_port_length(self):
         wrapper = ip_lib.IPWrapper()
-        self.assertRaises(exceptions.NetworkVxlanPortRangeError,
+        self.assertRaises(n_exc.NetworkVxlanPortRangeError,
                           wrapper.add_vxlan, 'vxlan0', 'vni0', group='group0',
                           dev='dev0', ttl='ttl0', tos='tos0',
                           local='local0', proxy=True,
@@ -994,42 +999,6 @@ class TestIpRouteCommand(TestIPCmdBase):
             self.assertEqual(self.route_cmd.get_gateway(),
                              test_case['expected'])
 
-    def test_pullup_route(self):
-        # NOTE(brian-haley) Currently we do not have any IPv6-specific usecase
-        # for pullup_route, hence skipping. Revisit, if required, in future.
-        if self.ip_version == 6:
-            return
-        # interface is not the first in the list - requires
-        # deleting and creating existing entries
-        output = [DEVICE_ROUTE_SAMPLE, SUBNET_SAMPLE1]
-
-        def pullup_side_effect(self, *args):
-            result = output.pop(0)
-            return result
-
-        self.parent._run = mock.Mock(side_effect=pullup_side_effect)
-        self.route_cmd.pullup_route('tap1d7888a7-10', ip_version=4)
-        self._assert_sudo([4], ('del', '10.0.0.0/24', 'dev', 'qr-23380d11-d2'))
-        self._assert_sudo([4], ('append', '10.0.0.0/24', 'proto', 'kernel',
-                                'src', '10.0.0.1', 'dev', 'qr-23380d11-d2'))
-
-    def test_pullup_route_first(self):
-        # NOTE(brian-haley) Currently we do not have any IPv6-specific usecase
-        # for pullup_route, hence skipping. Revisit, if required, in future.
-        if self.ip_version == 6:
-            return
-        # interface is first in the list - no changes
-        output = [DEVICE_ROUTE_SAMPLE, SUBNET_SAMPLE2]
-
-        def pullup_side_effect(self, *args):
-            result = output.pop(0)
-            return result
-
-        self.parent._run = mock.Mock(side_effect=pullup_side_effect)
-        self.route_cmd.pullup_route('tap1d7888a7-10', ip_version=4)
-        # Check two calls - device get and subnet get
-        self.assertEqual(len(self.parent._run.mock_calls), 2)
-
     def test_flush_route_table(self):
         self.route_cmd.flush(self.ip_version, self.table)
         self._assert_sudo([self.ip_version], ('flush', 'table', self.table))
@@ -1216,12 +1185,6 @@ class TestIPRoute(TestIpRouteCommand):
         if not self.check_dev_args:
             args = self._remove_dev_args(args)
         super(TestIPRoute, self)._assert_sudo(options, args)
-
-    def test_pullup_route(self):
-        # This method gets the interface name passed to it as an argument.  So,
-        # don't remove it from the expected arguments.
-        self.check_dev_args = True
-        super(TestIPRoute, self).test_pullup_route()
 
     def test_del_gateway_cannot_find_device(self):
         # This test doesn't make sense for this case since dev won't be passed

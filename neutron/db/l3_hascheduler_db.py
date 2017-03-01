@@ -91,21 +91,16 @@ class L3_HA_scheduler_db_mixin(l3_sch_db.AZL3AgentSchedulerDbMixin):
 
 
 def _notify_l3_agent_ha_port_update(resource, event, trigger, **kwargs):
-    # HA router on a agent has to spawn keepalived only when HA network port
-    # is active. So notify agent when HA network port becomes active.
-    # 'update_device_up' will be set only when port status changed to active.
-    if not kwargs.get('update_device_up'):
-        return
-    port_db = kwargs.get('port')
+    new_port = kwargs.get('port')
+    original_port = kwargs.get('original_port')
     context = kwargs.get('context')
-    core_plugin = manager.NeutronManager.get_plugin()
-    new_port = core_plugin._make_port_dict(port_db)
-    host = new_port.get(portbindings.HOST_ID)
+    host = new_port[portbindings.HOST_ID]
 
-    if new_port and host:
+    if new_port and original_port and host:
         new_device_owner = new_port.get('device_owner', '')
         if (new_device_owner == constants.DEVICE_OWNER_ROUTER_HA_INTF and
-            new_port['status'] == constants.PORT_STATUS_ACTIVE):
+            new_port['status'] == constants.PORT_STATUS_ACTIVE and
+            original_port['status'] != new_port['status']):
             l3plugin = manager.NeutronManager.get_service_plugins().get(
                 service_constants.L3_ROUTER_NAT)
             l3plugin.l3_rpc_notifier.routers_updated_on_host(

@@ -76,10 +76,16 @@ many-to-one because each object then needs its own table for the attributes
 
 To address this issue, the 'standardattribute' table is available. Any model
 can add support for this table by inheriting the 'HasStandardAttributes' mixin
-in neutron.db.model_base. This mixin will add a standard_attr_id BigInteger
+in neutron.db.standard_attr. This mixin will add a standard_attr_id BigInteger
 column to the model with a foreign key relationship to the 'standardattribute'
 table. The model will then be able to access any columns of the
 'standardattribute' table and any tables related to it.
+
+A model that inherits HasStandardAttributes must implement the property
+'api_collections', which is a list of API resources that the new object
+may appear under. In most cases, this will only be one (e.g. 'ports' for
+the Port model). This is used by all of the service plugins that add standard
+attribute fields to determine which API responses need to be populated.
 
 The introduction of a new standard attribute only requires one column addition
 to the 'standardattribute' table for one-to-one relationships or a new table

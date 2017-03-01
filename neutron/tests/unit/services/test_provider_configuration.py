@@ -16,9 +16,9 @@ import os
 import shutil
 
 import mock
+from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 
-from neutron.common import exceptions as n_exc
 from neutron import manager
 from neutron.plugins.common import constants
 from neutron.services import provider_configuration as provconf
@@ -269,3 +269,13 @@ class NeutronModuleMultiConfigFileTestCase(base.BaseTestCase):
         mod = provconf.NeutronModule('neutron_test')
         mod.ini()
         self.assertEqual(['zzz', 'foo', 'bar'], mod.service_providers())
+
+
+class NeutronModuleConfigNotParsedTestCase(base.DietTestCase):
+
+    def setup_config(self):
+        pass
+
+    def test_ini_no_crash_if_config_files_not_parsed(self):
+        mod = provconf.NeutronModule('neutron_test')
+        mod.ini()
