@@ -1,4 +1,4 @@
-neutron (2:8.4.0-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:8.4.0-0ubuntu1) xenial; urgency=medium
 
   [ Corey Bryant ]
   * d/p/check-namespace-before-getting-devices.patch: Dropped. Fixed upstream.
