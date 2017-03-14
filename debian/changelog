@@ -1,3 +1,9 @@
+neutron (2:10.0.0-0ubuntu2) UNRELEASED; urgency=medium
+
+  * d/rules: Switch to direct use of ostestr.
+
+ -- James Page <james.page@ubuntu.com>  Tue, 14 Mar 2017 12:13:42 +0000
+
 neutron (2:10.0.0-0ubuntu1) zesty; urgency=medium
 
   * New upstream release for OpenStack Ocata.
