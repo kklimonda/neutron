@@ -1,3 +1,9 @@
+neutron (2:10.0.0-0ubuntu2) zesty; urgency=medium
+
+  * d/control: Bump minimum pecan version to 1.1.2 (LP: #1668578).
+
+ -- James Page <james.page@ubuntu.com>  Wed, 15 Mar 2017 10:39:34 +0000
+
 neutron (2:10.0.0-0ubuntu1) zesty; urgency=medium
 
   * New upstream release for OpenStack Ocata.
