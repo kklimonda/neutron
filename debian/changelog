@@ -1,6 +1,8 @@
 neutron (2:10.0.0-0ubuntu3) UNRELEASED; urgency=medium
 
   * d/rules: Switch to direct use of ostestr.
+  * d/p/fix-db-path.patch: Drop patch, we do want to run unit tests with
+    an in-memory sqlite db otherwise they stomp all over each other.
 
  -- James Page <james.page@ubuntu.com>  Tue, 14 Mar 2017 12:13:42 +0000
 
