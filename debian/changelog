@@ -1,8 +1,9 @@
-neutron (2:10.0.0-0ubuntu4) UNRELEASED; urgency=medium
+neutron (2:10.0.0-0ubuntu4) zesty; urgency=medium
 
   * d/neutron-common.install, d/neutron-dhcp-agent.install:
     Remove cron jobs since they will cause a race when
-    using an L3 agent. (LP: #1623664)
+    using an L3 agent. The L3 agent cleans up after itself now. 
+    (LP: #1623664)
 
  -- Chuck Short <zulcss@ubuntu.com>  Mon, 27 Mar 2017 12:42:06 -0400
 
