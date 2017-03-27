@@ -1,4 +1,3 @@
-debian/cron.d/neutron-l3-agent-netns-cleanup etc/cron.d
 debian/neutron_sudoers etc/sudoers.d
 etc/api-paste.ini etc/neutron
 etc/l3_agent.ini etc/neutron
