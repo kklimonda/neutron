@@ -1,3 +1,13 @@
+neutron (2:10.0.0-0ubuntu5) UNRELEASED; urgency=medium
+
+  * d/pydist-overrides: Dropped no longer needed. 
+  * d/rules:
+    - Removed missing patch
+    - Configure sqlite database using pkgos-fix-config-default.
+    - Removed missing binaries to exclude.
+
+ -- Chuck Short <zulcss@ubuntu.com>  Tue, 28 Mar 2017 10:01:44 -0400
+
 neutron (2:10.0.0-0ubuntu4) zesty; urgency=medium
 
   * d/neutron-common.install, d/neutron-dhcp-agent.install:
