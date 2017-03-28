@@ -170,6 +170,7 @@ Description: Neutron is a virtual network service for Openstack - DHCP agent
 Package: neutron-metadata-agent
 Architecture: all
 Depends: neutron-common (= ${source:Version}),
+         haproxy,
          ${misc:Depends},
          ${python:Depends},
          ${shlibs:Depends}
