@@ -41,12 +41,5 @@ get-orig-source:
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
-	rm -rf .testrepository
-	testr init
-	set -e ; \
-		TEMPREZ=`mktemp -t` ; \
-		PYTHONPATH=$(CURDIR) testr run --subunit 'neutron.tests.unit' | tee $$TEMP_REZ | subunit2pyunit ; \
-		cat $$TEMP_REZ | subunit-filter -s --no-passthrough | subunit-stats ; \
-		rm -f $$TEMP_REZ ;
-	testr slowlest
+	PYTHONPATH=$(CURDIR) OS_TEST_PATH=./neutron/tests/unit ostestr
 endif
