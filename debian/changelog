@@ -1,4 +1,4 @@
-neutron (2:10.0.0-0ubuntu5) UNRELEASED; urgency=medium
+neutron (2:10.0.0-0ubuntu5) zesty; urgency=medium
 
   * d/pydist-overrides: Dropped no longer needed. 
   * d/rules:
