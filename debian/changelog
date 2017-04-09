@@ -1,3 +1,9 @@
+neutron (2:10.0.0-0ubuntu5) zesty; urgency=medium
+
+  * d/rules: Fix failing unit tests. 
+
+ -- Chuck Short <zulcss@ubuntu.com>  Sun, 09 Apr 2017 11:41:39 -0400
+
 neutron (2:10.0.0-0ubuntu4) zesty; urgency=medium
 
   * d/neutron-common.install, d/neutron-dhcp-agent.install:
