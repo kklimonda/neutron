@@ -2,3 +2,4 @@ skip-test-secure-client.patch
 skip-ryu-tests.patch
 skip-iptest.patch
 drop-ryu-dep.patch
+add-check-for-ha-state.patch

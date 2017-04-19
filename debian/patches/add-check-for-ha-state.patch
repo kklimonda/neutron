@@ -1,0 +1,267 @@
+From c8a4fa46948e5026923ae22eb75aeeb4a93161c4 Mon Sep 17 00:00:00 2001
+From: AKamyshnikova <akamyshnikova@mirantis.com>
+Date: Fri, 16 Dec 2016 16:00:59 +0400
+Subject: [PATCH] Add check for ha state
+
+If all agents are shown as a standby it is possible changing state
+were lost due to problems with RabbitMQ. Current change adds check
+for ha state in fetch_and_sync_all_routers. If state is different -
+ notify server that state should be changed.
+
+Also change _get_bindings_and_update_router_state_for_dead_agents
+to set standby for dead agent only in case we have more than one
+active.
+
+(cherry picked from commit 1927da1bc7c4e56162dd3704d58d3b922d4ebce9)
+Change-Id: If5596eb24041ea9fae1d5d2563dcaf655c5face7
+Closes-bug:#1648242
+---
+ neutron/agent/l3/agent.py                  |  4 +++
+ neutron/agent/l3/ha.py                     | 32 ++++++++++++------
+ neutron/db/l3_hamode_db.py                 | 22 +++++++------
+ neutron/tests/unit/agent/l3/test_agent.py  | 43 ++++++++++++++++++++++++
+ neutron/tests/unit/db/test_l3_hamode_db.py | 52 ++++++++++++++++++++++++------
+ 5 files changed, 125 insertions(+), 28 deletions(-)
+
+diff --git a/neutron/agent/l3/agent.py b/neutron/agent/l3/agent.py
+index 05a7096..b67b577 100644
+--- a/neutron/agent/l3/agent.py
++++ b/neutron/agent/l3/agent.py
+@@ -573,6 +573,10 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
+                             ns_manager.keep_ext_net(ext_net_id)
+                         elif is_snat_agent:
+                             ns_manager.ensure_snat_cleanup(r['id'])
++                    # For HA routers check that DB state matches actual state
++                    if r.get('ha'):
++                        self.check_ha_state_for_router(
++                            r['id'], r.get(l3_constants.HA_ROUTER_STATE_KEY))
+                     update = queue.RouterUpdate(
+                         r['id'],
+                         queue.PRIORITY_SYNC_ROUTERS_TASK,
+diff --git a/neutron/agent/l3/ha.py b/neutron/agent/l3/ha.py
+index 562028d..5c50dbf 100644
+--- a/neutron/agent/l3/ha.py
++++ b/neutron/agent/l3/ha.py
+@@ -23,6 +23,7 @@ import webob
+ from neutron._i18n import _, _LI
+ from neutron.agent.linux import keepalived
+ from neutron.agent.linux import utils as agent_utils
++from neutron.common import constants
+ from neutron.common import utils as common_utils
+ from neutron.notifiers import batch_notifier
+ 
+@@ -54,6 +55,10 @@ OPTS = [
+                       'on the agent node.')),
+ ]
+ 
++TRANSLATION_MAP = {'master': constants.HA_ROUTER_STATE_ACTIVE,
++                   'backup': constants.HA_ROUTER_STATE_STANDBY,
++                   'fault': constants.HA_ROUTER_STATE_STANDBY}
++
+ 
+ class KeepalivedStateChangeHandler(object):
+     def __init__(self, agent):
+@@ -103,6 +108,21 @@ class AgentMixin(object):
+             self._calculate_batch_duration(), self.notify_server)
+         eventlet.spawn(self._start_keepalived_notifications_server)
+ 
++    def _get_router_info(self, router_id):
++        try:
++            return self.router_info[router_id]
++        except KeyError:
++            LOG.info(_LI('Router %s is not managed by this agent. It was '
++                         'possibly deleted concurrently.'), router_id)
++
++    def check_ha_state_for_router(self, router_id, current_state):
++        ri = self._get_router_info(router_id)
++        if ri and current_state != TRANSLATION_MAP[ri.ha_state]:
++            LOG.debug("Updating server with state %(state)s for router "
++                      "%(router_id)s", {'router_id': router_id,
++                                        'state': ri.ha_state})
++            self.state_change_notifier.queue_event((router_id, ri.ha_state))
++
+     def _start_keepalived_notifications_server(self):
+         state_change_server = (
+             L3AgentKeepalivedStateChangeServer(self, self.conf))
+@@ -123,11 +143,8 @@ class AgentMixin(object):
+                  {'router_id': router_id,
+                   'state': state})
+ 
+-        try:
+-            ri = self.router_info[router_id]
+-        except KeyError:
+-            LOG.info(_LI('Router %s is not managed by this agent. It was '
+-                         'possibly deleted concurrently.'), router_id)
++        ri = self._get_router_info(router_id)
++        if ri is None:
+             return
+ 
+         self._configure_ipv6_ra_on_ext_gw_port_if_necessary(ri, state)
+@@ -172,10 +189,7 @@ class AgentMixin(object):
+             ri.disable_radvd()
+ 
+     def notify_server(self, batched_events):
+-        translation_map = {'master': 'active',
+-                           'backup': 'standby',
+-                           'fault': 'standby'}
+-        translated_states = dict((router_id, translation_map[state]) for
++        translated_states = dict((router_id, TRANSLATION_MAP[state]) for
+                                  router_id, state in batched_events)
+         LOG.debug('Updating server with HA routers states %s',
+                   translated_states)
+diff --git a/neutron/db/l3_hamode_db.py b/neutron/db/l3_hamode_db.py
+index ca19d9f..e3bd57c 100644
+--- a/neutron/db/l3_hamode_db.py
++++ b/neutron/db/l3_hamode_db.py
+@@ -647,15 +647,19 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
+         """
+         with context.session.begin(subtransactions=True):
+             bindings = self.get_ha_router_port_bindings(context, [router_id])
+-            dead_agents = [
+-                binding.agent for binding in bindings
+-                if binding.state == constants.HA_ROUTER_STATE_ACTIVE and
+-                not binding.agent.is_active]
+-            for dead_agent in dead_agents:
+-                self.update_routers_states(
+-                    context, {router_id: constants.HA_ROUTER_STATE_STANDBY},
+-                    dead_agent.host)
+-
++            dead_agents = []
++            active = [binding for binding in bindings
++                      if binding.state == constants.HA_ROUTER_STATE_ACTIVE]
++            # Check dead agents only if we have more then one active agent
++            if len(active) > 1:
++                dead_agents = [binding.agent for binding in active
++                               if not (binding.agent.is_active and
++                                       binding.agent.admin_state_up)]
++                for dead_agent in dead_agents:
++                    self.update_routers_states(
++                        context,
++                        {router_id: constants.HA_ROUTER_STATE_STANDBY},
++                        dead_agent.host)
+         if dead_agents:
+             return self.get_ha_router_port_bindings(context, [router_id])
+         return bindings
+diff --git a/neutron/tests/unit/agent/l3/test_agent.py b/neutron/tests/unit/agent/l3/test_agent.py
+index 65c206c..27264a8 100644
+--- a/neutron/tests/unit/agent/l3/test_agent.py
++++ b/neutron/tests/unit/agent/l3/test_agent.py
+@@ -204,6 +204,49 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
+         agent.enqueue_state_change(router.id, 'master')
+         self.assertFalse(agent._update_metadata_proxy.call_count)
+ 
++    def test_check_ha_state_for_router_master_standby(self):
++        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
++        router = mock.Mock()
++        router.id = '1234'
++        router_info = mock.MagicMock()
++        agent.router_info[router.id] = router_info
++        router_info.ha_state = 'master'
++        with mock.patch.object(agent.state_change_notifier,
++                               'queue_event') as queue_event:
++            agent.check_ha_state_for_router(
++                router.id, l3_constants.HA_ROUTER_STATE_STANDBY)
++            queue_event.assert_called_once_with((router.id, 'master'))
++
++    def test_check_ha_state_for_router_standby_standby(self):
++        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
++        router = mock.Mock()
++        router.id = '1234'
++        router_info = mock.MagicMock()
++        agent.router_info[router.id] = router_info
++        router_info.ha_state = 'backup'
++        with mock.patch.object(agent.state_change_notifier,
++                               'queue_event') as queue_event:
++            agent.check_ha_state_for_router(
++                router.id, l3_constants.HA_ROUTER_STATE_STANDBY)
++            queue_event.assert_not_called()
++
++    def test_periodic_sync_routers_task_call_check_ha_state_for_router(self):
++        agent = l3_agent.L3NATAgentWithStateReport(HOSTNAME, self.conf)
++        ha_id = _uuid()
++        active_routers = [
++            {'id': ha_id,
++             l3_constants.HA_ROUTER_STATE_KEY:
++                 l3_constants.HA_ROUTER_STATE_STANDBY,
++             'ha': True},
++            {'id': _uuid()}]
++        self.plugin_api.get_router_ids.return_value = [r['id'] for r
++                                                       in active_routers]
++        self.plugin_api.get_routers.return_value = active_routers
++        with mock.patch.object(agent, 'check_ha_state_for_router') as check:
++            agent.periodic_sync_routers_task(agent.context)
++            check.assert_called_once_with(ha_id,
++                                          l3_constants.HA_ROUTER_STATE_STANDBY)
++
+     def test_periodic_sync_routers_task_raise_exception(self):
+         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+         self.plugin_api.get_router_ids.return_value = ['fake_id']
+diff --git a/neutron/tests/unit/db/test_l3_hamode_db.py b/neutron/tests/unit/db/test_l3_hamode_db.py
+index fc94819..d087f52 100644
+--- a/neutron/tests/unit/db/test_l3_hamode_db.py
++++ b/neutron/tests/unit/db/test_l3_hamode_db.py
+@@ -187,19 +187,51 @@ class L3HATestCase(L3HATestFramework):
+             self.admin_ctx, router['id'])
+         self.assertEqual([], bindings)
+ 
++    def _assert_ha_state_for_agent(self, router, agent,
++                                   state=constants.HA_ROUTER_STATE_STANDBY):
++        bindings = (
++            self.plugin.get_l3_bindings_hosting_router_with_ha_states(
++                self.admin_ctx, router['id']))
++        agent_ids = [(a[0]['id'], a[1]) for a in bindings]
++        self.assertIn((agent['id'], state), agent_ids)
++
+     def test_get_l3_bindings_hosting_router_with_ha_states_active_and_dead(
+             self):
+         router = self._create_router()
+-        with mock.patch.object(agents_db.Agent, 'is_active',
+-                               new_callable=mock.PropertyMock,
+-                               return_value=False):
+-            self.plugin.update_routers_states(
+-                self.admin_ctx, {router['id']: 'active'}, self.agent1['host'])
+-            bindings = (
+-                self.plugin.get_l3_bindings_hosting_router_with_ha_states(
+-                    self.admin_ctx, router['id']))
+-            agent_ids = [(agent[0]['id'], agent[1]) for agent in bindings]
+-            self.assertIn((self.agent1['id'], 'standby'), agent_ids)
++        self.plugin.update_routers_states(
++            self.admin_ctx, {router['id']: constants.HA_ROUTER_STATE_ACTIVE},
++            self.agent1['host'])
++        self.plugin.update_routers_states(
++            self.admin_ctx, {router['id']: constants.HA_ROUTER_STATE_ACTIVE},
++            self.agent2['host'])
++        with mock.patch.object(agents_db.AgentDbMixin, 'is_agent_down',
++                               return_value=True):
++            self._assert_ha_state_for_agent(router, self.agent1)
++
++    def test_get_l3_bindings_hosting_router_agents_admin_state_up_is_false(
++            self):
++        router = self._create_router()
++        self.plugin.update_routers_states(
++            self.admin_ctx, {router['id']: constants.HA_ROUTER_STATE_ACTIVE},
++            self.agent1['host'])
++        self.plugin.update_routers_states(
++            self.admin_ctx, {router['id']: constants.HA_ROUTER_STATE_ACTIVE},
++            self.agent2['host'])
++        helpers.set_agent_admin_state(self.agent1['id'])
++        self._assert_ha_state_for_agent(router, self.agent1)
++
++    def test_get_l3_bindings_hosting_router_with_ha_states_one_dead(self):
++        router = self._create_router()
++        self.plugin.update_routers_states(
++            self.admin_ctx, {router['id']: constants.HA_ROUTER_STATE_ACTIVE},
++            self.agent1['host'])
++        self.plugin.update_routers_states(
++            self.admin_ctx, {router['id']: constants.HA_ROUTER_STATE_STANDBY},
++            self.agent2['host'])
++        with mock.patch.object(agents_db.AgentDbMixin, 'is_agent_down',
++                               return_value=True):
++            self._assert_ha_state_for_agent(
++                router, self.agent1, state=constants.HA_ROUTER_STATE_ACTIVE)
+ 
+     def test_router_created_in_active_state(self):
+         router = self._create_router()
+-- 
+2.7.4
+

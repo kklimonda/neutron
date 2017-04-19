@@ -1,11 +1,16 @@
-neutron (2:8.4.0-0ubuntu2) zesty; urgency=medium
+neutron (2:8.4.0-0ubuntu2) xenial; urgency=medium
 
+  [ Edward Hope-Morley ]
+  * Backport fix for Failure to retry update_ha_routers_states (LP: #1648242)
+    - d/p/add-check-for-ha-state.patch
+
+  [ Chuck Short ]
   * d/neutron-common.install, d/neutron-dhcp-agent.install:
     Remove cron jobs since they will cause a race when
     using an L3 agent. The L3 agent cleans up after itself now.
     (LP: #1623664)
 
- -- Chuck Short <zulcss@ubuntu.com>  Mon, 27 Mar 2017 13:55:19 -0400
+ -- Chuck Short <zulcss@ubuntu.com>  Wed, 19 Apr 2017 11:39:09 +0100
 
 neutron (2:8.4.0-0ubuntu1) xenial; urgency=medium
 
