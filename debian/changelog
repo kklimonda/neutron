@@ -1,3 +1,11 @@
+neutron (2:10.0.0-0ubuntu5.1) UNRELEASED; urgency=medium
+
+  * d/rules: Revert the majority of changes made under 2:10.0.0-0ubuntu5
+    as these break default configuration and are the root cause of
+    the autopkgtest failures.
+
+ -- James Page <james.page@ubuntu.com>  Wed, 19 Apr 2017 10:59:25 +0100
+
 neutron (2:10.0.0-0ubuntu5) zesty; urgency=medium
 
   * d/rules: Fix failing unit tests. 

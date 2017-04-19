@@ -15,8 +15,10 @@ include /usr/share/openstack-pkg-tools/pkgos.make
 override_dh_install:
 	PYTHONPATH=$(CURDIR) $(CURDIR)/tools/generate_config_file_samples.sh
 	find $(CURDIR)/etc -type f | xargs rename 's/\.sample$$//'
+	patch -p1 < debian/patches/fix-neutron-configuration.patch
 	dh_install --fail-missing -X/usr/etc -X/usr/bin/neutron-vpn-agent \
 		-X/usr/bin/neutron-lbaas-agent -X/usr/bin/neutron-hyperv-agent
+	patch -p1 -R < debian/patches/fix-neutron-configuration.patch
 
 override_dh_systemd_enable:
 	dh_systemd_enable -pneutron-openvswitch-agent --name=neutron-ovs-cleanup \
@@ -41,5 +43,5 @@ get-orig-source:
 
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
 override_dh_auto_test:
-	PYTHONPATH=$(CURDIR) OS_TEST_PATH=./neutron/tests/unit ostestr
+	PYTHONPATH=$(CURDIR) ostestr
 endif
