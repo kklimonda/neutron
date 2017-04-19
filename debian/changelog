@@ -1,6 +1,6 @@
-neutron (2:10.0.0-0ubuntu5) zesty; urgency=medium
+neutron (2:10.0.0-0ubuntu6) UNRELEASED; urgency=medium
 
-  * d/pydist-overrides: Dropped no longer needed. 
+  * d/pydist-overrides: Dropped no longer needed.
   * d/rules:
     - Removed missing patch
     - Configure sqlite database using pkgos-fix-config-default.
@@ -8,7 +8,7 @@ neutron (2:10.0.0-0ubuntu5) zesty; urgency=medium
   * d/neutron-metadata-agent.install: Remove neutron-metadata-proxy
     has been replaced by haproxy.
   * d/control: Add python-os-xenapi as a depdendency.
-  * d/rules: Fix running unit tests. 
+  * d/rules: Fix running unit tests.
 
  -- Chuck Short <zulcss@ubuntu.com>  Tue, 28 Mar 2017 10:01:44 -0400
 
