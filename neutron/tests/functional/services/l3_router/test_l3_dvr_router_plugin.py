@@ -13,16 +13,17 @@
 #    under the License.
 
 import mock
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
+from neutron_lib import context
 
 from neutron.api.rpc.handlers import l3_rpc
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.common import topics
-from neutron import context
 from neutron.extensions import external_net
-from neutron.extensions import portbindings
+from neutron.extensions import l3
 from neutron.tests.common import helpers
 from neutron.tests.unit.plugins.ml2 import base as ml2_test_base
 
@@ -30,16 +31,23 @@ from neutron.tests.unit.plugins.ml2 import base as ml2_test_base
 DEVICE_OWNER_COMPUTE = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
 
 
-class L3DvrTestCase(ml2_test_base.ML2TestFramework):
+class L3DvrTestCaseBase(ml2_test_base.ML2TestFramework):
     def setUp(self):
-        super(L3DvrTestCase, self).setUp()
+        super(L3DvrTestCaseBase, self).setUp()
         self.l3_agent = helpers.register_l3_agent(
             agent_mode=constants.L3_AGENT_MODE_DVR_SNAT)
+        # register OVS agents to avoid time wasted on committing
+        # port binding failures on every port update
+        helpers.register_ovs_agent(host='host1')
+        helpers.register_ovs_agent(host='host2')
 
-    def _create_router(self, distributed=True, ha=False):
-        return (super(L3DvrTestCase, self).
-                _create_router(distributed=distributed, ha=ha))
+    def _create_router(self, distributed=True, ha=False, admin_state_up=True):
+        return (super(L3DvrTestCaseBase, self).
+                _create_router(distributed=distributed, ha=ha,
+                               admin_state_up=admin_state_up))
 
+
+class L3DvrTestCase(L3DvrTestCaseBase):
     def test_update_router_db_centralized_to_distributed(self):
         router = self._create_router(distributed=False)
         # router needs to be in admin state down in order to be upgraded to DVR
@@ -89,9 +97,10 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                 self.l3_plugin.add_router_interface(
                     self.context, router['id'],
                     {'subnet_id': subnet2['subnet']['id']})
-                self.l3_plugin._update_router_gw_info(
+                gw_info = {'network_id': ext_net['network']['id']}
+                self.l3_plugin.update_router(
                     self.context, router['id'],
-                    {'network_id': ext_net['network']['id']})
+                    {'router': {l3.EXTERNAL_GW_INFO: gw_info}})
 
                 snat_router_intfs = self.l3_plugin._get_snat_sync_interfaces(
                     self.context, [router['id']])
@@ -1132,7 +1141,9 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                     self.context, vm_port['port']['id'],
                     {'port': {
                         portbindings.PROFILE: live_migration_port_profile}})
-                l3_notifier.routers_updated_on_host.assert_called_once_with(
+                # this will be called twice, once for port update, and once
+                # for new binding
+                l3_notifier.routers_updated_on_host.assert_any_call(
                     self.context, {router['id']}, HOST2)
                 # Check the port-binding is still with the old HOST1, but
                 # the router update notification has been sent to the new
@@ -1144,7 +1155,7 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                     # Since we have already created the floatingip for the
                     # port, it should be creating the floatingip agent gw
                     # port for the new host if it does not exist.
-                    fip_agent.assert_called_once_with(
+                    fip_agent.assert_any_call(
                         mock.ANY, floating_ip['floating_network_id'], HOST2)
 
     def test_router_notifications(self):
@@ -1519,7 +1530,7 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                 {'subnet_id': subnet['subnet']['id']})
 
             l3_notifier.router_removed_from_agent.assert_called_once_with(
-                self.context, router['id'], HOST1)
+                mock.ANY, router['id'], HOST1)
 
     def test_router_auto_scheduling(self):
         router = self._create_router()
@@ -1548,11 +1559,14 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
         router = self._create_router()
         with self.network() as net, \
                 self.subnet(network=net) as subnet:
+            interface_info = {'subnet_id': subnet['subnet']['id']}
             self.l3_plugin.add_router_interface(
-                    self.context, router['id'],
-                    {'subnet_id': subnet['subnet']['id']})
+                    self.context, router['id'], interface_info)
             kwargs = {'context': self.context, 'router_id': router['id'],
-                      'network_id': net['network']['id']}
+                      'network_id': net['network']['id'],
+                      'router_db': mock.ANY,
+                      'port': mock.ANY,
+                      'interface_info': interface_info}
             notif_handler_before.callback.assert_called_once_with(
                 resources.ROUTER_INTERFACE, events.BEFORE_CREATE,
                 mock.ANY, **kwargs)
@@ -1562,6 +1576,8 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                             'interface_info': mock.ANY,
                             'network_id': None,
                             'port': mock.ANY,
+                            'new_interface': True,
+                            'subnets': mock.ANY,
                             'port_id': mock.ANY,
                             'router_id': router['id']}
             notif_handler_after.callback.assert_called_once_with(
@@ -1581,11 +1597,14 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
         with self.network() as net, \
                 self.subnet(network=net) as subnet, \
                 self.port(subnet=subnet) as port:
+            interface_info = {'port_id': port['port']['id']}
             self.l3_plugin.add_router_interface(
-                    self.context, router['id'],
-                    {'port_id': port['port']['id']})
+                    self.context, router['id'], interface_info)
             kwargs = {'context': self.context, 'router_id': router['id'],
-                      'network_id': net['network']['id']}
+                      'network_id': net['network']['id'],
+                      'router_db': mock.ANY,
+                      'port': mock.ANY,
+                      'interface_info': interface_info}
             notif_handler_before.callback.assert_called_once_with(
                 resources.ROUTER_INTERFACE, events.BEFORE_CREATE,
                 mock.ANY, **kwargs)
@@ -1595,6 +1614,8 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                             'interface_info': mock.ANY,
                             'network_id': None,
                             'port': mock.ANY,
+                            'new_interface': True,
+                            'subnets': mock.ANY,
                             'port_id': port['port']['id'],
                             'router_id': router['id']}
             notif_handler_after.callback.assert_called_once_with(
@@ -1602,7 +1623,7 @@ class L3DvrTestCase(ml2_test_base.ML2TestFramework):
                 mock.ANY, **kwargs_after)
 
 
-class L3DvrTestCaseMigration(L3DvrTestCase):
+class L3DvrTestCaseMigration(L3DvrTestCaseBase):
     def test_update_router_db_centralized_to_distributed_with_ports(self):
         with self.subnet() as subnet1:
             kwargs = {'arg_list': (external_net.EXTERNAL,),

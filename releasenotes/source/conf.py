@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -167,7 +166,7 @@ html_static_path = ['_static']
 # html_domain_indices = True
 
 # If false, no index is generated.
-# html_use_index = True
+html_use_index = False
 
 # If true, the index is split into individual pages for each letter.
 # html_split_index = False
@@ -272,3 +271,6 @@ texinfo_documents = [
 
 # If true, do not generate a @detailmenu in the "Top" node's menu.
 # texinfo_no_detailmenu = False
+
+# -- Options for Internationalization output ------------------------------
+locale_dirs = ['locale/']

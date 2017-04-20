@@ -14,14 +14,13 @@
 # limitations under the License.
 
 import mock
-
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.plugins import directory
 import testtools
 
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.extensions import portbindings
-from neutron import manager
 from neutron.objects import trunk as trunk_objects
 from neutron.services.trunk import callbacks
 from neutron.services.trunk import constants
@@ -76,7 +75,7 @@ class TrunkPluginTestCase(test_plugin.Ml2PluginV2TestCase):
                                        exception):
         subport = create_subport_dict(child_port['port']['id'])
         self._create_test_trunk(parent_port, [subport])
-        core_plugin = manager.NeutronManager.get_plugin()
+        core_plugin = directory.get_plugin()
         self.assertRaises(exception, core_plugin.delete_port,
                           self.context, port_id)
 
@@ -95,7 +94,7 @@ class TrunkPluginTestCase(test_plugin.Ml2PluginV2TestCase):
     def test_delete_trunk_raise_in_use(self):
         with self.port() as port:
             trunk = self._create_test_trunk(port)
-            core_plugin = manager.NeutronManager.get_plugin()
+            core_plugin = directory.get_plugin()
             port['port']['binding:host_id'] = 'host'
             core_plugin.update_port(self.context, port['port']['id'], port)
             self.assertRaises(trunk_exc.TrunkInUse,
@@ -270,13 +269,20 @@ class TrunkPluginTestCase(test_plugin.Ml2PluginV2TestCase):
             self.assertEqual(constants.DOWN_STATUS, trunk['status'])
 
     def test__trigger_trunk_status_change_vif_type_changed_unbound(self):
+        callback = register_mock_callback(constants.TRUNK, events.AFTER_UPDATE)
         with self.port() as parent:
             parent[portbindings.VIF_TYPE] = portbindings.VIF_TYPE_UNBOUND
             original_port = {portbindings.VIF_TYPE: 'fakeviftype'}
-            self._test__trigger_trunk_status_change(parent,
-                                                    original_port,
-                                                    constants.ACTIVE_STATUS,
-                                                    constants.DOWN_STATUS)
+            original_trunk, current_trunk = (
+                self._test__trigger_trunk_status_change(
+                    parent, original_port,
+                    constants.ACTIVE_STATUS, constants.DOWN_STATUS))
+        payload = callbacks.TrunkPayload(self.context, original_trunk['id'],
+                                         original_trunk=original_trunk,
+                                         current_trunk=current_trunk)
+        callback.assert_called_once_with(
+            constants.TRUNK, events.AFTER_UPDATE,
+            self.trunk_plugin, payload=payload)
 
     def test__trigger_trunk_status_change_vif_type_unchanged(self):
         with self.port() as parent:
@@ -309,10 +315,11 @@ class TrunkPluginTestCase(test_plugin.Ml2PluginV2TestCase):
         kwargs = {'context': self.context, 'port': new_parent,
                   'original_port': original_parent}
         self.trunk_plugin._trigger_trunk_status_change(resources.PORT,
-                                                  events.AFTER_UPDATE,
-                                                  None, **kwargs)
-        trunk = self._get_trunk_obj(trunk.id)
-        self.assertEqual(final_trunk_status, trunk.status)
+                                                       events.AFTER_UPDATE,
+                                                       None, **kwargs)
+        current_trunk = self._get_trunk_obj(trunk.id)
+        self.assertEqual(final_trunk_status, current_trunk.status)
+        return trunk, current_trunk
 
 
 class TrunkPluginCompatDriversTestCase(test_plugin.Ml2PluginV2TestCase):

@@ -10,14 +10,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import context
 from oslo_config import cfg
 from oslo_log import log as logging
-import oslo_messaging
-import osprofiler.notifier
+import osprofiler.initializer
 from osprofiler import opts as profiler_opts
 import osprofiler.web
 
 from neutron._i18n import _LI
+
 
 CONF = cfg.CONF
 profiler_opts.set_defaults(CONF)
@@ -33,11 +34,13 @@ def setup(name, host='0.0.0.0'):  # nosec
                  specified host name / address usage is highly recommended.
     """
     if CONF.profiler.enabled:
-        _notifier = osprofiler.notifier.create(
-            "Messaging", oslo_messaging, {},
-            oslo_messaging.get_transport(CONF), "neutron", name, host)
-        osprofiler.notifier.set(_notifier)
-        osprofiler.web.enable(CONF.profiler.hmac_keys)
+        osprofiler.initializer.init_from_conf(
+            conf=CONF,
+            context=context.get_admin_context().to_dict(),
+            project="neutron",
+            service=name,
+            host=host
+        )
         LOG.info(_LI("OSProfiler is enabled.\n"
                      "Traces provided from the profiler "
                      "can only be subscribed to using the same HMAC keys that "

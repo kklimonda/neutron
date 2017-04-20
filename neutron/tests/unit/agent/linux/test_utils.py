@@ -38,6 +38,16 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
         self.process.return_value.returncode = 0
         self.mock_popen = self.process.return_value.communicate
 
+    def test_xenapi_root_helper(self):
+        token = utils.xenapi_root_helper.ROOT_HELPER_DAEMON_TOKEN
+        self.config(group='AGENT', root_helper_daemon=token)
+        with mock.patch(
+                'neutron.agent.linux.utils.xenapi_root_helper.XenAPIClient')\
+                as mock_xenapi_class:
+            mock_client = mock_xenapi_class.return_value
+            cmd_client = utils.RootwrapDaemonHelper.get_client()
+            self.assertEqual(cmd_client, mock_client)
+
     def test_without_helper(self):
         expected = "%s\n" % self.test_file
         self.mock_popen.return_value = [expected, ""]
@@ -50,6 +60,17 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
         self.config(group='AGENT', root_helper='echo')
         result = utils.execute(["ls", self.test_file], run_as_root=True)
         self.assertEqual(result, expected)
+
+    @mock.patch.object(utils.RootwrapDaemonHelper, 'get_client')
+    def test_with_helper_exception(self, get_client):
+        client_inst = mock.Mock()
+        client_inst.execute.side_effect = RuntimeError
+        get_client.return_value = client_inst
+        self.config(group='AGENT', root_helper_daemon='echo')
+        with mock.patch.object(utils, 'LOG') as log:
+            self.assertRaises(RuntimeError, utils.execute,
+                              ['ls'], run_as_root=True)
+            self.assertTrue(log.error.called)
 
     def test_stderr_true(self):
         expected = "%s\n" % self.test_file
@@ -171,17 +192,6 @@ class AgentUtilsExecuteEncodeTest(base.BaseTestCase):
         self.assertEqual((str_data, ''), result)
 
 
-class AgentUtilsGetInterfaceMAC(base.BaseTestCase):
-    def test_get_interface_mac(self):
-        expect_val = '01:02:03:04:05:06'
-        with mock.patch('fcntl.ioctl') as ioctl:
-            ioctl.return_value = ''.join(['\x00' * 18,
-                                          '\x01\x02\x03\x04\x05\x06',
-                                          '\x00' * 232])
-            actual_val = utils.get_interface_mac('eth0')
-        self.assertEqual(actual_val, expect_val)
-
-
 class TestFindParentPid(base.BaseTestCase):
     def setUp(self):
         super(TestFindParentPid, self).setUp()
@@ -249,15 +259,17 @@ class TestFindForkTopParent(base.BaseTestCase):
 
 
 class TestKillProcess(base.BaseTestCase):
-    def _test_kill_process(self, pid, exception_message=None,
-                           kill_signal=signal.SIGKILL):
-        if exception_message:
-            exc = utils.ProcessExecutionError(exception_message, returncode=0)
+    def _test_kill_process(self, pid, raise_exception=False,
+                           kill_signal=signal.SIGKILL, pid_killed=True):
+        if raise_exception:
+            exc = utils.ProcessExecutionError('', returncode=0)
         else:
             exc = None
         with mock.patch.object(utils, 'execute',
                                side_effect=exc) as mock_execute:
-            utils.kill_process(pid, kill_signal, run_as_root=True)
+            with mock.patch.object(utils, 'process_is_running',
+                                   return_value=not pid_killed):
+                utils.kill_process(pid, kill_signal, run_as_root=True)
 
         mock_execute.assert_called_with(['kill', '-%d' % kill_signal, pid],
                                         run_as_root=True)
@@ -266,11 +278,14 @@ class TestKillProcess(base.BaseTestCase):
         self._test_kill_process('1')
 
     def test_kill_process_returns_none_for_stale_pid(self):
-        self._test_kill_process('1', 'No such process')
+        self._test_kill_process('1', raise_exception=True)
 
     def test_kill_process_raises_exception_for_execute_exception(self):
         with testtools.ExpectedException(utils.ProcessExecutionError):
-            self._test_kill_process('1', 'Invalid')
+            # Simulate that the process is running after trying to kill due to
+            # any reason such as, for example, Permission denied
+            self._test_kill_process('1', raise_exception=True,
+                                    pid_killed=False)
 
     def test_kill_process_with_different_signal(self):
         self._test_kill_process('1', kill_signal=signal.SIGTERM)
@@ -468,8 +483,9 @@ class TestUnixDomainHttpConnection(base.BaseTestCase):
 
 class TestUnixDomainHttpProtocol(base.BaseTestCase):
     def test_init_empty_client(self):
-        u = utils.UnixDomainHttpProtocol(mock.Mock(), '', mock.Mock())
-        self.assertEqual(u.client_address, ('<local>', 0))
+        for addr in ('', b''):
+            u = utils.UnixDomainHttpProtocol(mock.Mock(), addr, mock.Mock())
+            self.assertEqual(u.client_address, ('<local>', 0))
 
     def test_init_with_client(self):
         u = utils.UnixDomainHttpProtocol(mock.Mock(), 'foo', mock.Mock())

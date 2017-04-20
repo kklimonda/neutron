@@ -13,10 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.db import constants as db_const
 from neutron_lib.db import model_base
 import sqlalchemy as sa
 
-from neutron.api.v2 import attributes as attrs
 from neutron.common import constants
 from neutron.db import models_v2
 from neutron.db import rbac_db_models
@@ -26,9 +26,9 @@ from neutron.db import standard_attr
 class QosPolicy(standard_attr.HasStandardAttributes, model_base.BASEV2,
                 model_base.HasId, model_base.HasProject):
     __tablename__ = 'qos_policies'
-    name = sa.Column(sa.String(attrs.NAME_MAX_LEN))
+    name = sa.Column(sa.String(db_const.NAME_FIELD_SIZE))
     rbac_entries = sa.orm.relationship(rbac_db_models.QosPolicyRBAC,
-                                       backref='qos_policy', lazy='joined',
+                                       backref='qos_policy', lazy='subquery',
                                        cascade='all, delete, delete-orphan')
     api_collections = ['policies']
 
@@ -48,10 +48,9 @@ class QosNetworkPolicyBinding(model_base.BASEV2):
                            primary_key=True)
     revises_on_change = ('network', )
     network = sa.orm.relationship(
-        models_v2.Network,
+        models_v2.Network, load_on_pending=True,
         backref=sa.orm.backref("qos_policy_binding", uselist=False,
                                cascade='delete', lazy='joined'))
-    revises_on_change = ('network', )
 
 
 class QosPortPolicyBinding(model_base.BASEV2):
@@ -69,10 +68,9 @@ class QosPortPolicyBinding(model_base.BASEV2):
                         primary_key=True)
     revises_on_change = ('port', )
     port = sa.orm.relationship(
-        models_v2.Port,
+        models_v2.Port, load_on_pending=True,
         backref=sa.orm.backref("qos_policy_binding", uselist=False,
                                cascade='delete', lazy='joined'))
-    revises_on_change = ('port', )
 
 
 class QosBandwidthLimitRule(model_base.HasId, model_base.BASEV2):
@@ -85,7 +83,7 @@ class QosBandwidthLimitRule(model_base.HasId, model_base.BASEV2):
     max_kbps = sa.Column(sa.Integer)
     max_burst_kbps = sa.Column(sa.Integer)
     revises_on_change = ('qos_policy', )
-    qos_policy = sa.orm.relationship(QosPolicy)
+    qos_policy = sa.orm.relationship(QosPolicy, load_on_pending=True)
 
 
 class QosDscpMarkingRule(model_base.HasId, model_base.BASEV2):
@@ -97,7 +95,7 @@ class QosDscpMarkingRule(model_base.HasId, model_base.BASEV2):
                               unique=True)
     dscp_mark = sa.Column(sa.Integer)
     revises_on_change = ('qos_policy', )
-    qos_policy = sa.orm.relationship(QosPolicy)
+    qos_policy = sa.orm.relationship(QosPolicy, load_on_pending=True)
 
 
 class QosMinimumBandwidthRule(model_base.HasId, model_base.BASEV2):
@@ -114,7 +112,7 @@ class QosMinimumBandwidthRule(model_base.HasId, model_base.BASEV2):
                           nullable=False,
                           server_default=constants.EGRESS_DIRECTION)
     revises_on_change = ('qos_policy', )
-    qos_policy = sa.orm.relationship(QosPolicy)
+    qos_policy = sa.orm.relationship(QosPolicy, load_on_pending=True)
 
     __table_args__ = (
         sa.UniqueConstraint(

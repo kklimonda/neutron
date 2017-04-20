@@ -16,10 +16,15 @@ import mock
 
 from neutron.agent.common import ovs_lib
 from neutron.agent.linux import ovsdb_monitor
+from neutron.agent.ovsdb.native import helpers
 from neutron.tests import base
 
 
 class TestOvsdbMonitor(base.BaseTestCase):
+
+    def setUp(self):
+        super(TestOvsdbMonitor, self).setUp()
+        mock.patch.object(helpers, 'enable_connection_uri').start()
 
     def test___init__(self):
         ovsdb_monitor.OvsdbMonitor('Interface')
@@ -38,6 +43,18 @@ class TestOvsdbMonitor(base.BaseTestCase):
             ovsdb_monitor.OvsdbMonitor('Interface', format='blob')
             cmd = init.call_args_list[0][0][0]
             self.assertEqual('--format=blob', cmd[-1])
+
+    def test__init__with_connection_columns(self):
+        conn_info = 'tcp:10.10.10.10:6640'
+        columns = ['col1', 'col2']
+        with mock.patch(
+            'neutron.agent.linux.async_process.AsyncProcess.__init__') as init:
+            ovsdb_monitor.OvsdbMonitor('Interface', columns=columns,
+                                       ovsdb_connection=conn_info)
+            cmd_all = init.call_args_list[0][0][0]
+            cmd_expect = ['ovsdb-client', 'monitor', 'tcp:10.10.10.10:6640',
+                          'Interface', 'col1,col2']
+            self.assertEqual(cmd_expect, cmd_all)
 
 
 class TestSimpleInterfaceMonitor(base.BaseTestCase):

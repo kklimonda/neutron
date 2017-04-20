@@ -20,6 +20,7 @@ from oslo_utils import uuidutils
 from six import moves
 
 from neutron.common import constants as n_const
+from neutron.common import ipv6_utils
 
 _uuid = uuidutils.generate_uuid
 
@@ -132,18 +133,29 @@ def get_subnet_id(port):
 
 
 def router_append_interface(router, count=1, ip_version=4, ra_mode=None,
-                            addr_mode=None, dual_stack=False):
+                            addr_mode=None, dual_stack=False, same_port=False):
     interfaces = router[lib_constants.INTERFACE_KEY]
     current = sum(
         [netaddr.IPNetwork(subnet['cidr']).version == ip_version
          for p in interfaces for subnet in p['subnets']])
+
+    # If dual_stack=True, create IPv4 and IPv6 subnets on each port
+    # If same_port=True, create ip_version number of subnets on a single port
+    # Else create just an ip_version subnet on each port
+    if dual_stack:
+        ip_versions = [4, 6]
+    elif same_port:
+        ip_versions = [ip_version] * count
+        count = 1
+    else:
+        ip_versions = [ip_version]
 
     mac_address = netaddr.EUI('ca:fe:de:ad:be:ef')
     mac_address.dialect = netaddr.mac_unix
     for i in range(current, current + count):
         fixed_ips = []
         subnets = []
-        for loop_version in (4, 6):
+        for loop_version in ip_versions:
             if loop_version == 4 and (ip_version == 4 or dual_stack):
                 ip_pool = '35.4.%i.4'
                 cidr_pool = '35.4.%i.0/24'
@@ -276,6 +288,26 @@ def router_append_pd_enabled_subnet(router, count=1):
         interfaces.append(intf)
         pd_intfs.append(intf)
         mac_address.value += 1
+
+
+def get_unassigned_pd_interfaces(router):
+    pd_intfs = []
+    for intf in router[lib_constants.INTERFACE_KEY]:
+        for subnet in intf['subnets']:
+            if (ipv6_utils.is_ipv6_pd_enabled(subnet) and
+                subnet['cidr'] == n_const.PROVISIONAL_IPV6_PD_PREFIX):
+                pd_intfs.append(intf)
+    return pd_intfs
+
+
+def assign_prefix_for_pd_interfaces(router):
+    pd_intfs = []
+    for ifno, intf in enumerate(router[lib_constants.INTERFACE_KEY]):
+        for subnet in intf['subnets']:
+            if (ipv6_utils.is_ipv6_pd_enabled(subnet) and
+                subnet['cidr'] == n_const.PROVISIONAL_IPV6_PD_PREFIX):
+                subnet['cidr'] = "2001:db8:%d::/64" % ifno
+                pd_intfs.append(intf)
     return pd_intfs
 
 

@@ -15,11 +15,11 @@
 import mock
 from oslo_config import cfg
 
-from neutron.agent.common import config
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.common import utils as common_utils
+from neutron.conf.agent import common as config
 from neutron.conf.agent import dhcp as dhcp_conf
 from neutron.conf import common as common_conf
 from neutron.tests import base as tests_base
@@ -77,7 +77,8 @@ class TestDhcp(functional_base.BaseSudoTestCase):
         ipw = ip_lib.IPWrapper(namespace="qdhcp-foo_id")
         devices = ipw.get_devices(exclude_loopback=True)
         self.addCleanup(ipw.netns.delete, 'qdhcp-foo_id')
-        self.assertEqual(2, len(devices))
+        self.assertEqual(sorted(["tapfoo_id2", "tapfoo_id3"]),
+                         sorted(map(str, devices)))
         # setting up dhcp for the network
         dev_mgr.setup(tests_base.AttributeDict(network))
         common_utils.wait_until_true(

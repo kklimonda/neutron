@@ -17,19 +17,17 @@ import collections
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from neutron.agent.l2.extensions import qos
-from neutron.plugins.ml2.drivers.openvswitch.mech_driver import (
-    mech_openvswitch)
+from neutron.agent.l2.extensions import qos_linux as qos
+from neutron.services.qos.drivers.openvswitch import driver
 from neutron.services.qos import qos_consts
 
 
 LOG = logging.getLogger(__name__)
 
 
-class QosOVSAgentDriver(qos.QosAgentDriver):
+class QosOVSAgentDriver(qos.QosLinuxAgentDriver):
 
-    SUPPORTED_RULES = (
-        mech_openvswitch.OpenvswitchMechanismDriver.supported_qos_rule_types)
+    SUPPORTED_RULES = driver.SUPPORTED_RULES
 
     def __init__(self):
         super(QosOVSAgentDriver, self).__init__()
@@ -125,7 +123,7 @@ class QosOVSAgentDriver(qos.QosAgentDriver):
                                                     RULE_TYPE_DSCP_MARKING, 0)
         if dscp_port:
             port_num = dscp_port['vif_port'].ofport
-            self.br_int.delete_flows(in_port=port_num, table=0, reg2=0)
+            self.br_int.uninstall_flows(in_port=port_num, table_id=0, reg2=0)
         else:
             LOG.debug("delete_dscp_marking was received for port %s but "
                       "no port information was stored to be deleted",

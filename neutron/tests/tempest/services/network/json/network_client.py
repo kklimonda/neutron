@@ -87,6 +87,7 @@ class NetworkClientJSON(service_client.RestClient):
             'quotas': 'quotas',
             'qos_policy': 'policies',
             'rbac_policy': 'rbac_policies',
+            'network_ip_availability': 'network_ip_availabilities',
         }
         return resource_plural_map.get(resource_name, resource_name + 's')
 
@@ -248,6 +249,18 @@ class NetworkClientJSON(service_client.RestClient):
         uri = self.get_uri('ports')
         resp, body = self.post(uri, body)
         body = {'ports': self.deserialize_list(body)}
+        self.expected_success(201, resp.status)
+        return service_client.ResponseBody(resp, body)
+
+    def create_bulk_security_groups(self, security_group_list):
+        group_list = [{'security_group': {'name': name}}
+                      for name in security_group_list]
+        post_data = {'security_groups': group_list}
+        body = self.serialize_list(post_data, 'security_groups',
+                                   'security_group')
+        uri = self.get_uri("security-groups")
+        resp, body = self.post(uri, body)
+        body = {'security_groups': self.deserialize_list(body)}
         self.expected_success(201, resp.status)
         return service_client.ResponseBody(resp, body)
 
@@ -895,3 +908,44 @@ class NetworkClientJSON(service_client.RestClient):
         body = {'extensions': self.deserialize_list(body)}
         self.expected_success(200, resp.status)
         return service_client.ResponseBody(resp, body)
+
+    def get_tags(self, resource_type, resource_id):
+        uri = '%s/%s/%s/tags' % (
+            self.uri_prefix, resource_type, resource_id)
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def get_tag(self, resource_type, resource_id, tag):
+        uri = '%s/%s/%s/tags/%s' % (
+            self.uri_prefix, resource_type, resource_id, tag)
+        resp, body = self.get(uri)
+        self.expected_success(204, resp.status)
+
+    def update_tag(self, resource_type, resource_id, tag):
+        uri = '%s/%s/%s/tags/%s' % (
+            self.uri_prefix, resource_type, resource_id, tag)
+        resp, body = self.put(uri, None)
+        self.expected_success(201, resp.status)
+
+    def update_tags(self, resource_type, resource_id, tags):
+        uri = '%s/%s/%s/tags' % (
+            self.uri_prefix, resource_type, resource_id)
+        req_body = jsonutils.dumps({'tags': tags})
+        resp, body = self.put(uri, req_body)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def delete_tags(self, resource_type, resource_id):
+        uri = '%s/%s/%s/tags' % (
+            self.uri_prefix, resource_type, resource_id)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)
+
+    def delete_tag(self, resource_type, resource_id, tag):
+        uri = '%s/%s/%s/tags/%s' % (
+            self.uri_prefix, resource_type, resource_id, tag)
+        resp, body = self.delete(uri)
+        self.expected_success(204, resp.status)

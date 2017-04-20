@@ -15,10 +15,10 @@
 #    under the License.
 
 from neutron._i18n import _LE
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 from oslo_log import log
 
-from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.macvtap import macvtap_common
@@ -64,6 +64,9 @@ class MacvtapMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         # The only safe way to detect a migration is to look into the binding
         # profiles 'migrating_to' attribute, which is set by Nova since patch
         # https://review.openstack.org/#/c/275073/.
+        if not context.original:
+            # new port
+            return False
         port_profile = context.original.get(portbindings.PROFILE)
         if port_profile and port_profile.get('migrating_to', None):
             LOG.debug("Live migration with profile %s detected.", port_profile)

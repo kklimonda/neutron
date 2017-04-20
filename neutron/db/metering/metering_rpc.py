@@ -13,13 +13,12 @@
 # under the License.
 
 from neutron_lib import constants as consts
+from neutron_lib.plugins import directory
 from oslo_log import log as logging
 import oslo_messaging
 
 from neutron._i18n import _LE
 from neutron.common import utils
-from neutron import manager
-from neutron.plugins.common import constants as service_constants
 
 LOG = logging.getLogger(__name__)
 
@@ -32,15 +31,15 @@ class MeteringRpcCallbacks(object):
         self.meter_plugin = meter_plugin
 
     def get_sync_data_metering(self, context, **kwargs):
-        l3_plugin = manager.NeutronManager.get_service_plugins().get(
-            service_constants.L3_ROUTER_NAT)
+        l3_plugin = directory.get_plugin(consts.L3)
         if not l3_plugin:
             return
 
+        metering_data = self.meter_plugin.get_sync_data_metering(context)
         host = kwargs.get('host')
         if not utils.is_extension_supported(
             l3_plugin, consts.L3_AGENT_SCHEDULER_EXT_ALIAS) or not host:
-            return self.meter_plugin.get_sync_data_metering(context)
+            return metering_data
         else:
             agents = l3_plugin.get_l3_agents(context, filters={'host': [host]})
             if not agents:
@@ -51,6 +50,8 @@ class MeteringRpcCallbacks(object):
             router_ids = [router['id'] for router in routers['routers']]
             if not router_ids:
                 return
-
-        return self.meter_plugin.get_sync_data_metering(context,
-                                                        router_ids=router_ids)
+            else:
+                return [
+                    router for router in metering_data
+                    if router['id'] in router_ids
+                ]

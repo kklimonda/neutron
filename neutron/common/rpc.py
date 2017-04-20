@@ -18,10 +18,12 @@ import collections
 import random
 import time
 
+from neutron_lib import context
 from neutron_lib import exceptions as lib_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
+from oslo_messaging.rpc import dispatcher
 from oslo_messaging import serializer as om_serializer
 from oslo_service import service
 from oslo_utils import excutils
@@ -29,7 +31,6 @@ from osprofiler import profiler
 
 from neutron._i18n import _LE, _LW
 from neutron.common import exceptions
-from neutron import context
 
 
 LOG = logging.getLogger(__name__)
@@ -46,17 +47,6 @@ ALLOWED_EXMODS = [
 EXTRA_EXMODS = []
 
 
-TRANSPORT_ALIASES = {
-    'neutron.openstack.common.rpc.impl_fake': 'fake',
-    'neutron.openstack.common.rpc.impl_qpid': 'qpid',
-    'neutron.openstack.common.rpc.impl_kombu': 'rabbit',
-    'neutron.openstack.common.rpc.impl_zmq': 'zmq',
-    'neutron.rpc.impl_fake': 'fake',
-    'neutron.rpc.impl_qpid': 'qpid',
-    'neutron.rpc.impl_kombu': 'rabbit',
-    'neutron.rpc.impl_zmq': 'zmq',
-}
-
 # NOTE(salv-orlando): I am afraid this is a global variable. While not ideal,
 # they're however widely used throughout the code base. It should be set to
 # true if the RPC server is not running in the current process space. This
@@ -68,10 +58,9 @@ def init(conf):
     global TRANSPORT, NOTIFICATION_TRANSPORT, NOTIFIER
     exmods = get_allowed_exmods()
     TRANSPORT = oslo_messaging.get_transport(conf,
-                                             allowed_remote_exmods=exmods,
-                                             aliases=TRANSPORT_ALIASES)
+                                             allowed_remote_exmods=exmods)
     NOTIFICATION_TRANSPORT = oslo_messaging.get_notification_transport(
-        conf, allowed_remote_exmods=exmods, aliases=TRANSPORT_ALIASES)
+        conf, allowed_remote_exmods=exmods)
     serializer = RequestContextSerializer()
     NOTIFIER = oslo_messaging.Notifier(NOTIFICATION_TRANSPORT,
                                        serializer=serializer)
@@ -100,6 +89,14 @@ def get_allowed_exmods():
     return ALLOWED_EXMODS + EXTRA_EXMODS
 
 
+def _get_default_method_timeout():
+    return TRANSPORT.conf.rpc_response_timeout
+
+
+def _get_default_method_timeouts():
+    return collections.defaultdict(_get_default_method_timeout)
+
+
 class _ContextWrapper(object):
     """Wraps oslo messaging contexts to set the timeout for calls.
 
@@ -110,12 +107,28 @@ class _ContextWrapper(object):
     servers are more frequently the cause of timeouts rather than lost
     messages.
     """
-    _METHOD_TIMEOUTS = collections.defaultdict(
-        lambda: TRANSPORT.conf.rpc_response_timeout)
+    _METHOD_TIMEOUTS = _get_default_method_timeouts()
+    _max_timeout = None
 
     @classmethod
     def reset_timeouts(cls):
-        cls._METHOD_TIMEOUTS.clear()
+        # restore the original default timeout factory
+        cls._METHOD_TIMEOUTS = _get_default_method_timeouts()
+        cls._max_timeout = None
+
+    @classmethod
+    def get_max_timeout(cls):
+        return cls._max_timeout or _get_default_method_timeout() * 10
+
+    @classmethod
+    def set_max_timeout(cls, max_timeout):
+        if max_timeout < cls.get_max_timeout():
+            cls._METHOD_TIMEOUTS = collections.defaultdict(
+                lambda: max_timeout, **{
+                    k: min(v, max_timeout)
+                    for k, v in cls._METHOD_TIMEOUTS.items()
+                })
+            cls._max_timeout = max_timeout
 
     def __init__(self, original_context):
         self._original_context = original_context
@@ -138,7 +151,11 @@ class _ContextWrapper(object):
             return self._original_context.call(ctxt, method, **kwargs)
         except oslo_messaging.MessagingTimeout:
             with excutils.save_and_reraise_exception():
-                wait = random.uniform(0, TRANSPORT.conf.rpc_response_timeout)
+                wait = random.uniform(
+                    0,
+                    min(self._METHOD_TIMEOUTS[scoped_method],
+                        TRANSPORT.conf.rpc_response_timeout)
+                )
                 LOG.error(_LE("Timeout in RPC method %(method)s. Waiting for "
                               "%(wait)s seconds before next attempt. If the "
                               "server is not down, consider increasing the "
@@ -146,8 +163,8 @@ class _ContextWrapper(object):
                               "server(s) may be overloaded and unable to "
                               "respond quickly enough."),
                           {'wait': int(round(wait)), 'method': scoped_method})
-                ceiling = TRANSPORT.conf.rpc_response_timeout * 10
-                new_timeout = min(self._original_context.timeout * 2, ceiling)
+                new_timeout = min(
+                    self._original_context.timeout * 2, self.get_max_timeout())
                 if new_timeout > self._METHOD_TIMEOUTS[scoped_method]:
                     LOG.warning(_LW("Increasing timeout for %(method)s calls "
                                     "to %(new)s seconds. Restart the agent to "
@@ -170,6 +187,11 @@ class BackingOffClient(oslo_messaging.RPCClient):
         # don't enclose Contexts that explicitly set a timeout
         return _ContextWrapper(ctx) if 'timeout' not in kwargs else ctx
 
+    @staticmethod
+    def set_max_timeout(max_timeout):
+        '''Set RPC timeout ceiling for all backing-off RPC clients.'''
+        _ContextWrapper.set_max_timeout(max_timeout)
+
 
 def get_client(target, version_cap=None, serializer=None):
     assert TRANSPORT is not None
@@ -183,8 +205,10 @@ def get_client(target, version_cap=None, serializer=None):
 def get_server(target, endpoints, serializer=None):
     assert TRANSPORT is not None
     serializer = RequestContextSerializer(serializer)
+    access_policy = dispatcher.LegacyRPCAccessPolicy
     return oslo_messaging.get_rpc_server(TRANSPORT, target, endpoints,
-                                         'eventlet', serializer)
+                                         'eventlet', serializer,
+                                         access_policy=access_policy)
 
 
 def get_notifier(service=None, host=None, publisher_id=None):

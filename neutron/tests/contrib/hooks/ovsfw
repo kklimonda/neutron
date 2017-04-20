@@ -1,0 +1,4 @@
+[[post-config|/$NEUTRON_CORE_PLUGIN_CONF]]
+
+[securitygroup]
+firewall_driver = openvswitch

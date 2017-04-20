@@ -12,10 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import errno
 import os.path
 import random
-import re
 import sys
 
 import eventlet
@@ -33,7 +31,6 @@ from neutron.common import utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
 from neutron.tests import base
-from neutron.tests.common import helpers
 from neutron.tests.unit import tests
 
 load_tests = testscenarios.load_tests_apply_scenarios
@@ -94,54 +91,6 @@ def _port_rule_masking(port_min, port_max):
         port_range.shake()
         current = port_range
     return current.get_list()
-
-
-class TestParseMappings(base.BaseTestCase):
-    def parse(self, mapping_list, unique_values=True, unique_keys=True):
-        return utils.parse_mappings(mapping_list, unique_values, unique_keys)
-
-    def test_parse_mappings_fails_for_missing_separator(self):
-        with testtools.ExpectedException(ValueError):
-            self.parse(['key'])
-
-    def test_parse_mappings_fails_for_missing_key(self):
-        with testtools.ExpectedException(ValueError):
-            self.parse([':val'])
-
-    def test_parse_mappings_fails_for_missing_value(self):
-        with testtools.ExpectedException(ValueError):
-            self.parse(['key:'])
-
-    def test_parse_mappings_fails_for_extra_separator(self):
-        with testtools.ExpectedException(ValueError):
-            self.parse(['key:val:junk'])
-
-    def test_parse_mappings_fails_for_duplicate_key(self):
-        with testtools.ExpectedException(ValueError):
-            self.parse(['key:val1', 'key:val2'])
-
-    def test_parse_mappings_fails_for_duplicate_value(self):
-        with testtools.ExpectedException(ValueError):
-            self.parse(['key1:val', 'key2:val'])
-
-    def test_parse_mappings_succeeds_for_one_mapping(self):
-        self.assertEqual({'key': 'val'}, self.parse(['key:val']))
-
-    def test_parse_mappings_succeeds_for_n_mappings(self):
-        self.assertEqual({'key1': 'val1', 'key2': 'val2'},
-                         self.parse(['key1:val1', 'key2:val2']))
-
-    def test_parse_mappings_succeeds_for_duplicate_value(self):
-        self.assertEqual({'key1': 'val', 'key2': 'val'},
-                         self.parse(['key1:val', 'key2:val'], False))
-
-    def test_parse_mappings_succeeds_for_no_mappings(self):
-        self.assertEqual({}, self.parse(['']))
-
-    def test_parse_mappings_succeeds_for_nonuniq_key(self):
-        self.assertEqual({'key': ['val1', 'val2']},
-                         self.parse(['key:val1', 'key:val2', 'key:val2'],
-                                    unique_keys=False))
 
 
 class TestParseTunnelRangesMixin(object):
@@ -444,41 +393,6 @@ class TestParseVlanRangeList(UtilTestParseVlanRanges):
         self.assertEqual(expected_networks, self.parse_list(config_list))
 
 
-class TestDictUtils(base.BaseTestCase):
-    def test_dict2str(self):
-        dic = {"key1": "value1", "key2": "value2", "key3": "value3"}
-        expected = "key1=value1,key2=value2,key3=value3"
-        self.assertEqual(expected, utils.dict2str(dic))
-
-    def test_str2dict(self):
-        string = "key1=value1,key2=value2,key3=value3"
-        expected = {"key1": "value1", "key2": "value2", "key3": "value3"}
-        self.assertEqual(expected, utils.str2dict(string))
-
-    def test_dict_str_conversion(self):
-        dic = {"key1": "value1", "key2": "value2"}
-        self.assertEqual(dic, utils.str2dict(utils.dict2str(dic)))
-
-    def test_diff_list_of_dict(self):
-        old_list = [{"key1": "value1"},
-                    {"key2": "value2"},
-                    {"key3": "value3"}]
-        new_list = [{"key1": "value1"},
-                    {"key2": "value2"},
-                    {"key4": "value4"}]
-        added, removed = utils.diff_list_of_dict(old_list, new_list)
-        self.assertEqual([dict(key4="value4")], added)
-        self.assertEqual([dict(key3="value3")], removed)
-
-
-class TestDict2Tuples(base.BaseTestCase):
-    def test_dict(self):
-        input_dict = {'foo': 'bar', '42': 'baz', 'aaa': 'zzz'}
-        expected = (('42', 'baz'), ('aaa', 'zzz'), ('foo', 'bar'))
-        output_tuple = utils.dict2tuple(input_dict)
-        self.assertEqual(expected, output_tuple)
-
-
 class TestExceptionLogger(base.BaseTestCase):
     def test_normal_call(self):
         result = "Result"
@@ -680,71 +594,6 @@ class TestDelayedStringRenderer(base.BaseTestCase):
         self.assertTrue(my_func.called)
 
 
-class TestEnsureDir(base.BaseTestCase):
-    @mock.patch('os.makedirs')
-    def test_ensure_dir_no_fail_if_exists(self, makedirs):
-        error = OSError()
-        error.errno = errno.EEXIST
-        makedirs.side_effect = error
-        utils.ensure_dir("/etc/create/concurrently")
-
-    @mock.patch('os.makedirs')
-    def test_ensure_dir_calls_makedirs(self, makedirs):
-        utils.ensure_dir("/etc/create/directory")
-        makedirs.assert_called_once_with("/etc/create/directory", 0o755)
-
-
-class TestCamelize(base.BaseTestCase):
-    def test_camelize(self):
-        data = {'bandwidth_limit': 'BandwidthLimit',
-                'test': 'Test',
-                'some__more__dashes': 'SomeMoreDashes',
-                'a_penguin_walks_into_a_bar': 'APenguinWalksIntoABar'}
-
-        for s, expected in data.items():
-            self.assertEqual(expected, utils.camelize(s))
-
-
-class TestRoundVal(base.BaseTestCase):
-    def test_round_val_ok(self):
-        for expected, value in ((0, 0),
-                                (0, 0.1),
-                                (1, 0.5),
-                                (1, 1.49),
-                                (2, 1.5)):
-            self.assertEqual(expected, utils.round_val(value))
-
-
-class TestGetRandomString(base.BaseTestCase):
-    def test_get_random_string(self):
-        length = 127
-        random_string = utils.get_random_string(length)
-        self.assertEqual(length, len(random_string))
-        regex = re.compile('^[0-9a-fA-F]+$')
-        self.assertIsNotNone(regex.match(random_string))
-
-
-class TestSafeDecodeUtf8(base.BaseTestCase):
-
-    @helpers.requires_py2
-    def test_py2_does_nothing(self):
-        s = 'test-py2'
-        self.assertIs(s, utils.safe_decode_utf8(s))
-
-    @helpers.requires_py3
-    def test_py3_decoded_valid_bytes(self):
-        s = bytes('test-py2', 'utf-8')
-        decoded_str = utils.safe_decode_utf8(s)
-        self.assertIsInstance(decoded_str, six.text_type)
-        self.assertEqual(s, decoded_str.encode('utf-8'))
-
-    @helpers.requires_py3
-    def test_py3_decoded_invalid_bytes(self):
-        s = bytes('test-py2', 'utf_16')
-        decoded_str = utils.safe_decode_utf8(s)
-        self.assertIsInstance(decoded_str, six.text_type)
-
-
 class TestPortRuleMasking(base.BaseTestCase):
     def test_port_rule_wrong_input(self):
         with testtools.ExpectedException(ValueError):
@@ -854,3 +703,53 @@ class ImportModulesRecursivelyTestCase(base.BaseTestCase):
         for module in expected_modules:
             self.assertIn(module, modules)
             self.assertIn(module, sys.modules)
+
+
+class TestThrottler(base.BaseTestCase):
+    def test_throttler(self):
+        threshold = 1
+        orig_function = mock.Mock()
+        # Add this magic name as it's required by functools
+        orig_function.__name__ = 'mock_func'
+        throttled_func = utils.throttler(threshold)(orig_function)
+
+        throttled_func()
+
+        sleep = utils.eventlet.sleep
+
+        def sleep_mock(amount_to_sleep):
+            sleep(amount_to_sleep)
+            self.assertTrue(threshold > amount_to_sleep)
+
+        with mock.patch.object(utils.eventlet, "sleep",
+                               side_effect=sleep_mock):
+            throttled_func()
+
+        self.assertEqual(2, orig_function.call_count)
+
+        lock_with_timer = six.get_function_closure(
+            throttled_func)[1].cell_contents
+        timestamp = lock_with_timer.timestamp - threshold
+        lock_with_timer.timestamp = timestamp
+
+        throttled_func()
+
+        self.assertEqual(3, orig_function.call_count)
+        self.assertTrue(timestamp < lock_with_timer.timestamp)
+
+    def test_method_docstring_is_preserved(self):
+        class Klass(object):
+            @utils.throttler()
+            def method(self):
+                """Docstring"""
+
+        self.assertEqual("Docstring", Klass.method.__doc__)
+
+    def test_method_still_callable(self):
+        class Klass(object):
+            @utils.throttler()
+            def method(self):
+                pass
+
+        obj = Klass()
+        obj.method()

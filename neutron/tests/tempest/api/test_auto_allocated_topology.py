@@ -14,6 +14,7 @@
 #    under the License.
 
 from oslo_config import cfg
+from tempest.lib import decorators
 from tempest import test
 
 from neutron.tests.tempest.api import base
@@ -53,6 +54,9 @@ class TestAutoAllocatedTopology(base.BaseAdminNetworkTest):
         # Ensure the public external network is the default external network
         public_net_id = cfg.CONF.network.public_network_id
         cls.admin_client.update_network(public_net_id, is_default=True)
+        # Ensure that is_default does not accidentally flip back to False
+        # because of network_update requests that do not contain is_default.
+        cls.admin_client.update_network(public_net_id, description="gman")
 
     def _count_topology_resources(self):
         '''Count the resources whose names begin with 'auto_allocated_'.'''
@@ -79,7 +83,7 @@ class TestAutoAllocatedTopology(base.BaseAdminNetworkTest):
         body = client.list_networks(name='auto_allocated_network')
         self.networks.extend(body['networks'])
 
-    @test.idempotent_id('64bc0b02-cee4-11e5-9f3c-080027605a2b')
+    @decorators.idempotent_id('64bc0b02-cee4-11e5-9f3c-080027605a2b')
     def test_get_allocated_net_topology_as_tenant(self):
         resources_before = self._count_topology_resources()
         self.assertEqual((0, 0, 0), resources_before)
@@ -105,7 +109,7 @@ class TestAutoAllocatedTopology(base.BaseAdminNetworkTest):
         self.assertEqual(network_id1, network_id2)
         self.assertEqual(resources_after1, resources_after2)
 
-    @test.idempotent_id('aabc0b02-cee4-11e5-9f3c-091127605a2b')
+    @decorators.idempotent_id('aabc0b02-cee4-11e5-9f3c-091127605a2b')
     def test_delete_allocated_net_topology_as_tenant(self):
         resources_before = self._count_topology_resources()
         self.assertEqual((0, 0, 0), resources_before)

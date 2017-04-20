@@ -33,8 +33,8 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
     def test_setup_default_table(self):
         self.br.setup_default_table()
         expected = [
-            call.add_flow(priority=0, table=0, actions='normal'),
             call.add_flow(priority=0, table=23, actions='drop'),
+            call.add_flow(priority=0, table=0, actions='normal'),
             call.add_flow(priority=0, table=24, actions='drop'),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
@@ -165,7 +165,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         mac = '00:02:b3:13:fe:3d'
         self.br.remove_dvr_mac_vlan(mac=mac)
         expected = [
-            call.delete_flows(eth_src=mac, table_id=0),
+            call.delete_flows(dl_src=mac, table=0),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
 
@@ -184,7 +184,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         port = 8888
         self.br.remove_dvr_mac_tun(mac=mac, port=port)
         expected = [
-            call.delete_flows(eth_src=mac, table_id=0, in_port=port),
+            call.delete_flows(dl_src=mac, table=0, in_port=port),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
 
@@ -231,10 +231,10 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         port = 8888
         self.br.delete_arp_spoofing_protection(port)
         expected = [
-            call.delete_flows(table_id=0, in_port=8888, proto='arp'),
-            call.delete_flows(table_id=0, in_port=8888,
+            call.delete_flows(table=0, in_port=8888, proto='arp'),
+            call.delete_flows(table=0, in_port=8888,
                               icmp_type=const.ICMPV6_TYPE_NA,
                               nw_proto=const.PROTO_NUM_IPV6_ICMP),
-            call.delete_flows(table_id=24, in_port=8888),
+            call.delete_flows(table=24, in_port=8888),
         ]
         self.assertEqual(expected, self.mock.mock_calls)

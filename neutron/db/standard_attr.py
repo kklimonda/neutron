@@ -12,14 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from neutron_lib.db import constants as db_const
 from neutron_lib.db import model_base
 from oslo_utils import timeutils
 import sqlalchemy as sa
+from sqlalchemy import event  # noqa
 from sqlalchemy.ext.associationproxy import association_proxy
 from sqlalchemy.ext import declarative
+from sqlalchemy.orm import session as se
 
 from neutron._i18n import _LE
-from neutron.api.v2 import attributes as attr
 from neutron.db import sqlalchemytypes
 
 
@@ -51,7 +53,7 @@ class StandardAttribute(model_base.BASEV2):
     # before a 2-byte prefix is required. We shouldn't get anywhere near this
     # limit with our table names...
     resource_type = sa.Column(sa.String(255), nullable=False)
-    description = sa.Column(sa.String(attr.DESCRIPTION_MAX_LEN))
+    description = sa.Column(sa.String(db_const.DESCRIPTION_FIELD_SIZE))
 
     revision_number = sa.Column(
         sa.BigInteger().with_variant(sa.Integer(), 'sqlite'),
@@ -66,6 +68,12 @@ class StandardAttribute(model_base.BASEV2):
         # details about how this works
         "version_id_col": revision_number
     }
+
+    def bump_revision(self):
+        if self.revision_number is None:
+            # this is a brand new object uncommitted so we don't bump now
+            return
+        self.revision_number += 1
 
 
 class HasStandardAttributes(object):
@@ -149,10 +157,7 @@ class HasStandardAttributes(object):
         # standard attr record is being modified, but we must call this
         # for all other modifications or when relevant children are being
         # modified (e.g. fixed_ips change should bump port revision)
-        if self.standard_attr.revision_number is None:
-            # this is a brand new object uncommited so we don't bump now
-            return
-        self.standard_attr.revision_number += 1
+        self.standard_attr.bump_revision()
 
 
 def get_standard_attr_resource_model_map():
@@ -167,3 +172,13 @@ def get_standard_attr_resource_model_map():
                                         res=resource))
             rs_map[resource] = subclass
     return rs_map
+
+
+@event.listens_for(se.Session, 'after_bulk_delete')
+def throw_exception_on_bulk_delete_of_listened_for_objects(delete_context):
+    if hasattr(delete_context.mapper.class_, 'revises_on_change'):
+        raise RuntimeError(_LE("%s may not be deleted in bulk because it "
+                               "bumps the revision of other resources via "
+                               "SQLAlchemy event handlers, which are not "
+                               "compatible with bulk deletes.") %
+                           delete_context.mapper.class_)

@@ -14,12 +14,14 @@
 #    under the License.
 
 import mock
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as const
+from neutron_lib import context
+from neutron_lib.plugins import directory
+from oslo_serialization import jsonutils
 
-from neutron import context
-from neutron.extensions import portbindings
-from neutron import manager
-from neutron.plugins.ml2 import config as config
+from neutron.conf.plugins.ml2.drivers import driver_type
+from neutron.plugins.ml2 import config
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2 import models as ml2_models
 from neutron.tests.unit.db import test_db_base_plugin_v2 as test_plugin
@@ -34,12 +36,18 @@ class PortBindingTestCase(test_plugin.NeutronDbPluginV2TestCase):
         config.cfg.CONF.set_override('mechanism_drivers',
                                      ['logger', 'test'],
                                      'ml2')
+
+        # NOTE(dasm): ml2_type_vlan requires to be registered before used.
+        # This piece was refactored and removed from .config, so it causes
+        # a problem, when tests are executed with pdb.
+        # There is no problem when tests are running without debugger.
+        driver_type.register_ml2_drivers_vlan_opts()
         config.cfg.CONF.set_override('network_vlan_ranges',
                                      ['physnet1:1000:1099'],
                                      group='ml2_type_vlan')
         super(PortBindingTestCase, self).setUp('ml2')
         self.port_create_status = 'DOWN'
-        self.plugin = manager.NeutronManager.get_plugin()
+        self.plugin = directory.get_plugin()
         self.plugin.start_rpc_listeners()
 
     def _check_response(self, port, vif_type, has_port_filter, bound, status):
@@ -176,7 +184,7 @@ class PortBindingTestCase(test_plugin.NeutronDbPluginV2TestCase):
 
     def test_process_binding_port_host_id_changed(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         host_id = {portbindings.HOST_ID: 'host1'}
         with self.port(**host_id) as port:
             # Since the port is DOWN at first
@@ -194,7 +202,7 @@ class PortBindingTestCase(test_plugin.NeutronDbPluginV2TestCase):
                 port_id=original_port['id'],
                 host=original_port['binding:host_id'],
                 vnic_type=original_port['binding:vnic_type'],
-                profile=original_port['binding:profile'],
+                profile=jsonutils.dumps(original_port['binding:profile']),
                 vif_type=original_port['binding:vif_type'],
                 vif_details=original_port['binding:vif_details'])
             levels = 1

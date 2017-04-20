@@ -21,6 +21,7 @@ from neutron_lib import constants as const
 
 from neutron.agent.common import ovs_lib
 from neutron.agent.linux import ip_lib
+from neutron.agent.ovsdb.native import idlutils
 from neutron.common import utils
 from neutron.tests.common.exclusive_resources import port
 from neutron.tests.common import net_helpers
@@ -98,6 +99,23 @@ class OVSBridgeTestCase(OVSBridgeTestBase):
         self.assertEqual([], self.ovs.db_get_val('Port', port_name, 'tag'))
         self.assertEqual([], self.br.get_port_tag_dict()[port_name])
 
+    def test_attribute_map_handling(self):
+        (pname, ofport) = self.create_ovs_port()
+        expected = {'a': 'b'}
+        self.ovs.set_db_attribute('Port', pname, 'other_config', expected)
+        self.assertEqual(expected,
+                         self.ovs.db_get_val('Port', pname, 'other_config'))
+        other = {'c': 'd'}
+        expected.update(other)
+        self.ovs.set_db_attribute('Port', pname, 'other_config', other)
+        self.assertEqual(expected,
+                         self.ovs.db_get_val('Port', pname, 'other_config'))
+        other = {'a': 'x'}
+        expected.update(other)
+        self.ovs.set_db_attribute('Port', pname, 'other_config', other)
+        self.assertEqual(expected,
+                         self.ovs.db_get_val('Port', pname, 'other_config'))
+
     def test_get_bridge_external_bridge_id(self):
         self.ovs.set_db_attribute('Bridge', self.br.br_name,
                                   'external_ids',
@@ -141,6 +159,33 @@ class OVSBridgeTestCase(OVSBridgeTestBase):
         self.assertEqual(
             self.br.db_get_val('Bridge', self.br.br_name, 'protocols'),
             "OpenFlow10")
+
+    def test_add_protocols_start_with_one(self):
+        self.br.set_db_attribute('Bridge', self.br.br_name, 'protocols',
+                                 ['OpenFlow10'],
+                                 check_error=True)
+        self.br.add_protocols('OpenFlow13')
+        self.assertEqual(
+            self.br.db_get_val('Bridge', self.br.br_name, 'protocols'),
+            ['OpenFlow10', 'OpenFlow13'])
+
+    def test_add_protocols_start_with_two_add_two(self):
+        self.br.set_db_attribute('Bridge', self.br.br_name, 'protocols',
+                                 ['OpenFlow10', 'OpenFlow12'],
+                                 check_error=True)
+        self.br.add_protocols('OpenFlow13', 'OpenFlow14')
+        self.assertEqual(
+            self.br.db_get_val('Bridge', self.br.br_name, 'protocols'),
+            ['OpenFlow10', 'OpenFlow12', 'OpenFlow13', 'OpenFlow14'])
+
+    def test_add_protocols_add_existing(self):
+        self.br.set_db_attribute('Bridge', self.br.br_name, 'protocols',
+                                 ['OpenFlow10', 'OpenFlow12', 'OpenFlow13'],
+                                 check_error=True)
+        self.br.add_protocols('OpenFlow13')
+        self.assertEqual(
+            self.br.db_get_val('Bridge', self.br.br_name, 'protocols'),
+            ['OpenFlow10', 'OpenFlow12', 'OpenFlow13'])
 
     def test_get_datapath_id(self):
         brdev = ip_lib.IPDevice(self.br.br_name)
@@ -336,6 +381,99 @@ class OVSBridgeTestCase(OVSBridgeTestBase):
         self.assertIsNone(max_rate)
         self.assertIsNone(burst)
 
+    def test_db_create_references(self):
+        with self.ovs.ovsdb.transaction(check_error=True) as txn:
+            queue = txn.add(self.ovs.ovsdb.db_create("Queue",
+                                                     other_config={'a': '1'}))
+            qos = txn.add(self.ovs.ovsdb.db_create("QoS", queues={0: queue}))
+            txn.add(self.ovs.ovsdb.db_set("Port", self.br.br_name,
+                                          ('qos', qos)))
+
+        def cleanup():
+            with self.ovs.ovsdb.transaction() as t:
+                t.add(self.ovs.ovsdb.db_destroy("QoS", qos.result))
+                t.add(self.ovs.ovsdb.db_destroy("Queue", queue.result))
+                t.add(self.ovs.ovsdb.db_clear("Port", self.br.br_name, 'qos'))
+
+        self.addCleanup(cleanup)
+        val = self.ovs.ovsdb.db_get("Port", self.br.br_name, 'qos').execute()
+        self.assertEqual(qos.result, val)
+
+    def test_db_add_set(self):
+        protocols = ["OpenFlow10", "OpenFlow11"]
+        self.br.ovsdb.db_add("Bridge", self.br.br_name, "protocols",
+                             *protocols).execute(check_error=True)
+        self.assertEqual(protocols,
+                         self.br.db_get_val('Bridge',
+                                            self.br.br_name, "protocols"))
+
+    def test_db_add_map(self):
+        key = "testdata"
+        data = {key: "testvalue"}
+        self.br.ovsdb.db_add("Bridge", self.br.br_name, "external_ids",
+                             data).execute(check_error=True)
+        self.assertEqual(data, self.br.db_get_val('Bridge', self.br.br_name,
+                                                  'external_ids'))
+        self.br.ovsdb.db_add("Bridge", self.br.br_name, "external_ids",
+                             {key: "newdata"}).execute(check_error=True)
+        self.assertEqual(data, self.br.db_get_val('Bridge', self.br.br_name,
+                                                  'external_ids'))
+
+    def test_db_add_map_multiple_one_dict(self):
+        data = {"one": "1", "two": "2", "three": "3"}
+        self.br.ovsdb.db_add("Bridge", self.br.br_name, "external_ids",
+                             data).execute(check_error=True)
+        self.assertEqual(data, self.br.db_get_val('Bridge', self.br.br_name,
+                                                  'external_ids'))
+
+    def test_db_add_map_multiple_dicts(self):
+        data = ({"one": "1"}, {"two": "2"}, {"three": "3"})
+        self.br.ovsdb.db_add("Bridge", self.br.br_name, "external_ids",
+                             *data).execute(check_error=True)
+        combined = {k: v for a in data for k, v in a.items()}
+        self.assertEqual(combined, self.br.db_get_val('Bridge',
+                                                      self.br.br_name,
+                                                      'external_ids'))
+
+    def test_db_add_ref(self):
+        ovsdb = self.ovs.ovsdb
+        brname = utils.get_rand_name(prefix=net_helpers.BR_PREFIX)
+        br = ovs_lib.OVSBridge(brname)  # doesn't create
+        self.addCleanup(br.destroy)
+        with ovsdb.transaction(check_error=True) as txn:
+            br = txn.add(ovsdb.db_create('Bridge', name=brname))
+            txn.add(ovsdb.db_add('Open_vSwitch', '.', 'bridges', br))
+
+        self.assertIn(brname, self.ovs.get_bridges())
+
+    def test_db_add_to_new_object(self):
+        ovsdb = self.ovs.ovsdb
+        brname = utils.get_rand_name(prefix=net_helpers.BR_PREFIX)
+        br = ovs_lib.OVSBridge(brname)  # doesn't create
+        self.addCleanup(br.destroy)
+        with ovsdb.transaction(check_error=True) as txn:
+            txn.add(ovsdb.add_br(brname))
+            txn.add(ovsdb.db_add('Bridge', brname, 'protocols', 'OpenFlow10'))
+
+    def test_cascading_del_in_txn(self):
+        ovsdb = self.ovs.ovsdb
+        port_name, _ = self.create_ovs_port()
+
+        def del_port_mod_iface():
+            with ovsdb.transaction(check_error=True) as txn:
+                txn.add(ovsdb.del_port(port_name, self.br.br_name,
+                                       if_exists=False))
+                txn.add(ovsdb.db_set('Interface', port_name,
+                                     ('type', 'internal')))
+        # native gives a more specific exception than vsctl
+        self.assertRaises((RuntimeError, idlutils.RowNotFound),
+                          del_port_mod_iface)
+
+    def test_delete_flows_all(self):
+        self.br.add_flow(in_port=1, actions="output:2")
+        self.br.delete_flows(cookie=ovs_lib.COOKIE_ANY)
+        self.assertEqual([], self.br.dump_all_flows())
+
 
 class OVSLibTestCase(base.BaseOVSLinuxTestCase):
 
@@ -372,6 +510,9 @@ class OVSLibTestCase(base.BaseOVSLinuxTestCase):
         self.addCleanup(self.ovs.remove_manager, conn_uri)
         self.ovs.add_manager(conn_uri)
         self.assertIn(conn_uri, self.ovs.get_manager())
+        self.assertEqual(self.ovs.db_get_val('Manager', conn_uri,
+                                             'inactivity_probe'),
+                         self.ovs.vsctl_timeout * 1000)
         self.ovs.remove_manager(conn_uri)
         self.assertNotIn(conn_uri, self.ovs.get_manager())
 

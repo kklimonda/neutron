@@ -23,6 +23,7 @@ import sys
 
 import netaddr
 from neutron_lib import constants
+from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -33,13 +34,12 @@ from six import moves
 from neutron._i18n import _LE, _LI, _LW
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import utils
-from neutron.agent import securitygroups_rpc as sg_rpc
+from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
 from neutron.common import config as common_config
 from neutron.common import exceptions
 from neutron.common import profiler as setup_profiler
 from neutron.common import topics
-from neutron.common import utils as n_utils
+from neutron.common import utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as p_utils
 from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
@@ -211,8 +211,7 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             return self.ensure_bridge(phy_bridge_name)
         else:
             bridge_name = self.get_bridge_name(network_id)
-            ips, gateway = self.get_interface_details(interface)
-            if self.ensure_bridge(bridge_name, interface, ips, gateway):
+            if self.ensure_bridge(bridge_name, interface):
                 return interface
 
     def ensure_vxlan_bridge(self, network_id, segmentation_id):
@@ -224,15 +223,17 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                       {segmentation_id: segmentation_id})
             return
         bridge_name = self.get_bridge_name(network_id)
-        self.ensure_bridge(bridge_name, interface)
+        self.ensure_bridge(bridge_name, interface, update_interface=False)
         return interface
 
-    def get_interface_details(self, interface):
+    def get_interface_details(self, interface, ip_version):
         device = self.ip.device(interface)
-        ips = device.addr.list(scope='global')
+        ips = device.addr.list(scope='global',
+                               ip_version=ip_version)
 
         # Update default gateway if necessary
-        gateway = device.route.get_gateway(scope='global')
+        gateway = device.route.get_gateway(scope='global',
+                                           ip_version=ip_version)
         return ips, gateway
 
     def ensure_flat_bridge(self, network_id, phy_bridge_name,
@@ -242,9 +243,7 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             return self.ensure_bridge(phy_bridge_name)
         else:
             bridge_name = self.get_bridge_name(network_id)
-            ips, gateway = self.get_interface_details(physical_interface)
-            if self.ensure_bridge(bridge_name, physical_interface, ips,
-                                  gateway):
+            if self.ensure_bridge(bridge_name, physical_interface):
                 return physical_interface
 
     def ensure_local_bridge(self, network_id, phy_bridge_name):
@@ -315,11 +314,9 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             LOG.debug("Done creating vxlan interface %s", interface)
         return interface
 
-    def update_interface_ip_details(self, destination, source, ips,
-                                    gateway):
-        if ips or gateway:
-            dst_device = self.ip.device(destination)
-            src_device = self.ip.device(source)
+    def _update_interface_ip_details(self, destination, source, ips, gateway):
+        dst_device = self.ip.device(destination)
+        src_device = self.ip.device(source)
 
         # Append IP's to bridge if necessary
         if ips:
@@ -340,6 +337,18 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             for ip in ips:
                 src_device.addr.delete(cidr=ip['cidr'])
 
+    def update_interface_ip_details(self, destination, source):
+        # Returns True if there were IPs or a gateway moved
+        updated = False
+        for ip_version in (constants.IP_VERSION_4, constants.IP_VERSION_6):
+            ips, gateway = self.get_interface_details(source, ip_version)
+            if ips or gateway:
+                self._update_interface_ip_details(destination, source, ips,
+                                                  gateway)
+                updated = True
+
+        return updated
+
     def _bridge_exists_and_ensure_up(self, bridge_name):
         """Check if the bridge exists and make sure it is up."""
         br = ip_lib.IPDevice(bridge_name)
@@ -351,8 +360,8 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             return False
         return True
 
-    def ensure_bridge(self, bridge_name, interface=None, ips=None,
-                      gateway=None):
+    def ensure_bridge(self, bridge_name, interface=None,
+                      update_interface=True):
         """Create a bridge unless it already exists."""
         # _bridge_exists_and_ensure_up instead of device_exists is used here
         # because there are cases where the bridge exists but it's not UP,
@@ -371,8 +380,6 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                 return
             if bridge_device.disable_stp():
                 return
-            if bridge_device.disable_ipv6():
-                return
             if bridge_device.link.set_up():
                 return
             LOG.debug("Done starting bridge %(bridge_name)s for "
@@ -385,7 +392,8 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             return bridge_name
 
         # Update IP info if necessary
-        self.update_interface_ip_details(bridge_name, interface, ips, gateway)
+        if update_interface:
+            self.update_interface_ip_details(bridge_name, interface)
 
         # Check if the interface is part of the bridge
         if not bridge_device.owns_interface(interface):
@@ -470,17 +478,14 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
         if network_type == p_const.TYPE_LOCAL:
             self.ensure_local_bridge(network_id, bridge_name)
-        else:
-            phy_dev_name = self.ensure_physical_in_bridge(network_id,
-                                                          network_type,
-                                                          physical_network,
-                                                          segmentation_id)
-            if not phy_dev_name:
-                return False
-            self.ensure_tap_mtu(tap_device_name, phy_dev_name)
+        elif not self.ensure_physical_in_bridge(network_id,
+                                                network_type,
+                                                physical_network,
+                                                segmentation_id):
+            return False
         # Avoid messing with plugging devices into a bridge that the agent
         # does not own
-        if device_owner.startswith(constants.DEVICE_OWNER_PREFIXES):
+        if not device_owner.startswith(constants.DEVICE_OWNER_COMPUTE_PREFIX):
             # Check if device needs to be added to bridge
             if not bridge_lib.BridgeDevice.get_interface_bridge(
                 tap_device_name):
@@ -498,11 +503,6 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                       "%(bridge_name)s. It is owned by %(device_owner)s and "
                       "thus added elsewhere.", data)
         return True
-
-    def ensure_tap_mtu(self, tap_dev_name, phy_dev_name):
-        """Ensure the MTU on the tap is the same as the physical device."""
-        phy_dev_mtu = ip_lib.IPDevice(phy_dev_name).link.mtu
-        ip_lib.IPDevice(tap_dev_name).link.set_mtu(phy_dev_mtu)
 
     def plug_interface(self, network_id, network_segment, tap_name,
                        device_owner):
@@ -526,12 +526,9 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                     # If the bridge has an IP, it mean that this IP was moved
                     # from the current interface, which also mean that this
                     # interface was not created by the agent.
-                    ips, gateway = self.get_interface_details(bridge_name)
-                    if ips:
-                        self.update_interface_ip_details(interface,
-                                                         bridge_name,
-                                                         ips, gateway)
-                    elif interface not in physical_interfaces:
+                    updated = self.update_interface_ip_details(interface,
+                                                               bridge_name)
+                    if not updated and interface not in physical_interfaces:
                         self.delete_interface(interface)
 
             try:
@@ -675,10 +672,10 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
         LOG.debug('Using %s VXLAN mode', self.vxlan_mode)
 
     def fdb_ip_entry_exists(self, mac, ip, interface):
-        entries = utils.execute(['ip', 'neigh', 'show', 'to', ip,
-                                 'dev', interface],
-                                run_as_root=True)
-        return mac in entries
+        ip_version = utils.get_ip_version(ip)
+        entry = ip_lib.dump_neigh_entries(ip_version, interface, dst=ip,
+                                          lladdr=mac)
+        return entry != []
 
     def fdb_bridge_entry_exists(self, mac, interface, agent_ip=None):
         entries = bridge_lib.FdbInterface.show(interface)
@@ -689,11 +686,11 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
     def add_fdb_ip_entry(self, mac, ip, interface):
         if cfg.CONF.VXLAN.arp_responder:
-            ip_lib.IPDevice(interface).neigh.add(ip, mac)
+            ip_lib.add_neigh_entry(ip, mac, interface)
 
     def remove_fdb_ip_entry(self, mac, ip, interface):
         if cfg.CONF.VXLAN.arp_responder:
-            ip_lib.IPDevice(interface).neigh.delete(ip, mac)
+            ip_lib.delete_neigh_entry(ip, mac, interface)
 
     def add_fdb_entries(self, agent_ip, ports, interface):
         for mac, ip in ports:
@@ -721,12 +718,14 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
     def get_agent_id(self):
         if self.bridge_mappings:
-            mac = utils.get_interface_mac(
+            mac = ip_lib.get_device_mac(
                 list(self.bridge_mappings.values())[0])
         else:
             devices = ip_lib.IPWrapper().get_devices(True)
-            if devices:
-                mac = utils.get_interface_mac(devices[0].name)
+            for device in devices:
+                mac = ip_lib.get_device_mac(device.name)
+                if mac:
+                    break
             else:
                 LOG.error(_LE("Unable to obtain MAC address for unique ID. "
                               "Agent terminated!"))
@@ -911,7 +910,7 @@ def main():
 
     common_config.setup_logging()
     try:
-        interface_mappings = n_utils.parse_mappings(
+        interface_mappings = helpers.parse_mappings(
             cfg.CONF.LINUX_BRIDGE.physical_interface_mappings)
     except ValueError as e:
         LOG.error(_LE("Parsing physical_interface_mappings failed: %s. "
@@ -920,7 +919,7 @@ def main():
     LOG.info(_LI("Interface mappings: %s"), interface_mappings)
 
     try:
-        bridge_mappings = n_utils.parse_mappings(
+        bridge_mappings = helpers.parse_mappings(
             cfg.CONF.LINUX_BRIDGE.bridge_mappings)
     except ValueError as e:
         LOG.error(_LE("Parsing bridge_mappings failed: %s. "

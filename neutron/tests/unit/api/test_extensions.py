@@ -13,11 +13,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import abc
 import copy
 
 import fixtures
 import mock
+from neutron_lib import constants as lib_const
+from neutron_lib.plugins import directory
+from neutron_lib.services import base as service_base
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
@@ -34,7 +36,6 @@ from neutron.api import extensions
 from neutron.api.v2 import attributes
 from neutron.common import config
 from neutron.common import exceptions
-from neutron import manager
 from neutron.plugins.common import constants
 from neutron import quota
 from neutron.tests import base
@@ -84,13 +85,19 @@ class ExtensionsTestApp(base_wsgi.Router):
         super(ExtensionsTestApp, self).__init__(mapper)
 
 
-class FakePluginWithExtension(object):
+class FakePluginWithExtension(service_base.ServicePluginBase):
     """A fake plugin used only for extension testing in this file."""
 
     supported_extension_aliases = ["FOXNSOX"]
 
     def method_to_support_foxnsox_extension(self, context):
         self._log("method_to_support_foxnsox_extension", context)
+
+    def get_plugin_type(self):
+        pass
+
+    def get_plugin_description(self):
+        pass
 
 
 class ExtensionPathTest(base.BaseTestCase):
@@ -101,7 +108,7 @@ class ExtensionPathTest(base.BaseTestCase):
 
     def test_get_extensions_path_with_plugins(self):
         path = extensions.get_extensions_path(
-            {constants.CORE: FakePluginWithExtension()})
+            {lib_const.CORE: FakePluginWithExtension()})
         self.assertEqual(path,
                          '%s:neutron/tests/unit/extensions' % self.base_path)
 
@@ -125,47 +132,6 @@ class ExtensionPathTest(base.BaseTestCase):
         cfg.CONF.set_override('api_extensions_path', 'path1:path1')
         path = extensions.get_extensions_path()
         self.assertEqual(path, '%s:path1' % self.base_path)
-
-
-class PluginInterfaceTest(base.BaseTestCase):
-    def test_issubclass_hook(self):
-        class A(object):
-            def f(self):
-                pass
-
-        class B(extensions.PluginInterface):
-            @abc.abstractmethod
-            def f(self):
-                pass
-
-        self.assertTrue(issubclass(A, B))
-
-    def test_issubclass_hook_class_without_abstract_methods(self):
-        class A(object):
-            def f(self):
-                pass
-
-        class B(extensions.PluginInterface):
-            def f(self):
-                pass
-
-        self.assertFalse(issubclass(A, B))
-
-    def test_issubclass_hook_not_all_methods_implemented(self):
-        class A(object):
-            def f(self):
-                pass
-
-        class B(extensions.PluginInterface):
-            @abc.abstractmethod
-            def f(self):
-                pass
-
-            @abc.abstractmethod
-            def g(self):
-                pass
-
-        self.assertFalse(issubclass(A, B))
 
 
 class ResourceExtensionTest(base.BaseTestCase):
@@ -707,7 +673,7 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
 
     def test_unsupported_extensions_are_not_loaded(self):
         stub_plugin = ext_stubs.StubPlugin(supported_extensions=["e1", "e3"])
-        plugin_info = {constants.CORE: stub_plugin}
+        plugin_info = {lib_const.CORE: stub_plugin}
         with mock.patch("neutron.api.extensions.PluginAwareExtensionManager."
                         "check_if_plugin_extensions_loaded"):
             ext_mgr = extensions.PluginAwareExtensionManager('', plugin_info)
@@ -728,7 +694,7 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
             """
             pass
 
-        plugin_info = {constants.CORE: ExtensionUnawarePlugin()}
+        plugin_info = {lib_const.CORE: ExtensionUnawarePlugin()}
         ext_mgr = extensions.PluginAwareExtensionManager('', plugin_info)
         ext_mgr.add_extension(ext_stubs.StubExtension("e1"))
 
@@ -740,7 +706,7 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
             """Does not implement get_foo method as expected by extension."""
             supported_extension_aliases = ["supported_extension"]
 
-        plugin_info = {constants.CORE: PluginWithoutExpectedIface()}
+        plugin_info = {lib_const.CORE: PluginWithoutExpectedIface()}
         with mock.patch("neutron.api.extensions.PluginAwareExtensionManager."
                         "check_if_plugin_extensions_loaded"):
             ext_mgr = extensions.PluginAwareExtensionManager('', plugin_info)
@@ -751,14 +717,20 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
 
     def test_extensions_are_loaded_for_plugin_with_expected_interface(self):
 
-        class PluginWithExpectedInterface(object):
+        class PluginWithExpectedInterface(service_base.ServicePluginBase):
             """Implements get_foo method as expected by extension."""
             supported_extension_aliases = ["supported_extension"]
 
             def get_foo(self, bar=None):
                 pass
 
-        plugin_info = {constants.CORE: PluginWithExpectedInterface()}
+            def get_plugin_type(self):
+                pass
+
+            def get_plugin_description(self):
+                pass
+
+        plugin_info = {lib_const.CORE: PluginWithExpectedInterface()}
         with mock.patch("neutron.api.extensions.PluginAwareExtensionManager."
                         "check_if_plugin_extensions_loaded"):
             ext_mgr = extensions.PluginAwareExtensionManager('', plugin_info)
@@ -775,7 +747,7 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
             """
             pass
         stub_plugin = ext_stubs.StubPlugin(supported_extensions=["e1"])
-        plugin_info = {constants.CORE: stub_plugin}
+        plugin_info = {lib_const.CORE: stub_plugin}
 
         with mock.patch("neutron.api.extensions.PluginAwareExtensionManager."
                         "check_if_plugin_extensions_loaded"):
@@ -794,7 +766,7 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
                 return None
 
         stub_plugin = ext_stubs.StubPlugin(supported_extensions=["e1"])
-        plugin_info = {constants.CORE: stub_plugin}
+        plugin_info = {lib_const.CORE: stub_plugin}
         with mock.patch("neutron.api.extensions.PluginAwareExtensionManager."
                         "check_if_plugin_extensions_loaded"):
             ext_mgr = extensions.PluginAwareExtensionManager('', plugin_info)
@@ -819,7 +791,7 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
     def test_unloaded_supported_extensions_raises_exception(self):
         stub_plugin = ext_stubs.StubPlugin(
             supported_extensions=["unloaded_extension"])
-        plugin_info = {constants.CORE: stub_plugin}
+        plugin_info = {lib_const.CORE: stub_plugin}
         self.assertRaises(exceptions.ExtensionsNotFound,
                           extensions.PluginAwareExtensionManager,
                           '', plugin_info)
@@ -837,7 +809,7 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
 
         ext = FakeExtension()
 
-        plugin_info = {constants.CORE: FakePlugin()}
+        plugin_info = {lib_const.CORE: FakePlugin()}
         ext_mgr = extensions.PluginAwareExtensionManager('', plugin_info)
         ext_mgr.add_extension(ext)
         self.assertIn("stub_extension", ext_mgr.extensions)
@@ -860,7 +832,7 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
                 'stub_plugin_extension', lambda: True, plugin_agnostic=False
             )
 
-        plugin_info = {constants.CORE: FakePlugin()}
+        plugin_info = {lib_const.CORE: FakePlugin()}
         self.assertRaises(
             exceptions.ExtensionsNotFound,
             extensions.PluginAwareExtensionManager, '', plugin_info)
@@ -908,7 +880,7 @@ def setup_extensions_middleware(extension_manager=None):
     extension_manager = (extension_manager or
                          extensions.PluginAwareExtensionManager(
                              extensions_path,
-                             {constants.CORE: FakePluginWithExtension()}))
+                             {lib_const.CORE: FakePluginWithExtension()}))
     base.BaseTestCase.config_parse()
     app = config.load_paste_app('extensions_test_app')
     return extensions.ExtensionMiddleware(app, ext_mgr=extension_manager)
@@ -985,7 +957,7 @@ class ExtensionExtendedAttributeTestCase(base.BaseTestCase):
 
         ext_mgr = extensions.PluginAwareExtensionManager(
             extensions_path,
-            {constants.CORE: ExtensionExtendedAttributeTestPlugin()}
+            {lib_const.CORE: ExtensionExtendedAttributeTestPlugin()}
         )
         ext_mgr.extend_resources("2.0", {})
         extensions.PluginAwareExtensionManager._instance = ext_mgr
@@ -1004,7 +976,7 @@ class ExtensionExtendedAttributeTestCase(base.BaseTestCase):
         # the global attribute map
         attributes.RESOURCE_ATTRIBUTE_MAP.update(
             extattr.EXTENDED_ATTRIBUTES_2_0)
-        self.agentscheduler_dbMinxin = manager.NeutronManager.get_plugin()
+        self.agentscheduler_dbMinxin = directory.get_plugin()
         self.addCleanup(self.restore_attribute_map)
 
         quota.QUOTAS._driver = None

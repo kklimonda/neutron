@@ -18,6 +18,7 @@ import copy
 import itertools
 
 import netaddr
+from neutron_lib.api.definitions import portbindings
 from neutron_lib.api import validators
 from neutron_lib import constants as const
 from neutron_lib import exceptions as exc
@@ -32,17 +33,16 @@ from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
+from neutron.db import _utils as db_utils
 from neutron.db import db_base_plugin_common
+from neutron.db.models import segment as segment_model
 from neutron.db.models import subnet_service_type as sst_model
 from neutron.db import models_v2
-from neutron.db import segments_db
 from neutron.extensions import ip_allocation as ipa
-from neutron.extensions import portbindings
 from neutron.extensions import segment
 from neutron.ipam import exceptions as ipam_exceptions
 from neutron.ipam import utils as ipam_utils
 from neutron.objects import subnet as subnet_obj
-from neutron.services.segments import db as segment_svc_db
 from neutron.services.segments import exceptions as segment_exc
 
 LOG = logging.getLogger(__name__)
@@ -108,13 +108,13 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         if (new_mac and new_mac != db_port.mac_address and
                 self._is_mac_in_use(context, network_id, new_mac)):
             raise exc.MacAddressInUse(net_id=network_id, mac=new_mac)
-        db_port.update(self._filter_non_model_columns(new_port,
-                                                      models_v2.Port))
+        db_port.update(db_utils.filter_non_model_columns(new_port,
+                                                         models_v2.Port))
 
     def _update_subnet_host_routes(self, context, id, s):
 
         def _combine(ht):
-            return ht['destination'] + "_" + ht['nexthop']
+            return "{}_{}".format(ht['destination'], ht['nexthop'])
 
         old_route_list = self._get_route_by_subnet(context, id)
 
@@ -127,13 +127,14 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         for route_str in old_route_set - new_route_set:
             for route in old_route_list:
                 if _combine(route) == route_str:
-                    context.session.delete(route)
+                    route.delete()
         for route_str in new_route_set - old_route_set:
-            route = models_v2.SubnetRoute(
-                destination=route_str.partition("_")[0],
-                nexthop=route_str.partition("_")[2],
+            route = subnet_obj.Route(context,
+                destination=common_utils.AuthenticIPNetwork(
+                    route_str.partition("_")[0]),
+                nexthop=netaddr.IPAddress(route_str.partition("_")[2]),
                 subnet_id=id)
-            context.session.add(route)
+            route.create()
 
         # Gather host routes for result
         new_routes = []
@@ -145,14 +146,12 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         return new_routes
 
     def _update_subnet_dns_nameservers(self, context, id, s):
-        old_dns_list = self._get_dns_by_subnet(context, id)
         new_dns_addr_list = s["dns_nameservers"]
 
         # NOTE(changzhi) delete all dns nameservers from db
         # when update subnet's DNS nameservers. And store new
         # nameservers with order one by one.
-        for dns in old_dns_list:
-            dns.delete()
+        subnet_obj.DNSNameServer.delete_objects(context, subnet_id=id)
 
         for order, server in enumerate(new_dns_addr_list):
             dns = subnet_obj.DNSNameServer(context,
@@ -181,16 +180,14 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         return result_pools
 
     def _update_subnet_service_types(self, context, subnet_id, s):
-        old_types = context.session.query(
-            sst_model.SubnetServiceType).filter_by(subnet_id=subnet_id)
-        for service_type in old_types:
-            context.session.delete(service_type)
+        subnet_obj.SubnetServiceType.delete_objects(context,
+                                                    subnet_id=subnet_id)
         updated_types = s.pop('service_types')
         for service_type in updated_types:
-            new_type = sst_model.SubnetServiceType(
-                           subnet_id=subnet_id,
-                           service_type=service_type)
-            context.session.add(new_type)
+            new_type = subnet_obj.SubnetServiceType(context,
+                                                    subnet_id=subnet_id,
+                                                    service_type=service_type)
+            new_type.create()
         return updated_types
 
     def update_db_subnet(self, context, subnet_id, s, oldpools):
@@ -323,7 +320,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
             return
 
         if len(fixed_ip_list) > cfg.CONF.max_fixed_ips_per_port:
-            msg = _('Exceeded maximum amount of fixed ips per port.')
+            msg = _('Exceeded maximum amount of fixed ips per port')
             raise exc.InvalidInput(error_message=msg)
 
     def _validate_segment(self, context, network_id, segment_id):
@@ -335,14 +332,15 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                 network_id=network_id)
 
         if segment_id:
-            query = context.session.query(segments_db.NetworkSegment)
-            query = query.filter(segments_db.NetworkSegment.id == segment_id)
-            segment_model = query.one()
-            if segment_model.network_id != network_id:
+            query = context.session.query(segment_model.NetworkSegment)
+            query = query.filter(
+                segment_model.NetworkSegment.id == segment_id)
+            segment = query.one()
+            if segment.network_id != network_id:
                 raise segment_exc.NetworkIdsDontMatch(
                     subnet_network=network_id,
                     segment_id=segment_id)
-            if segment_model.is_dynamic:
+            if segment.is_dynamic:
                 raise segment_exc.SubnetCantAssociateToDynamicSegment()
 
     def _get_subnet_for_fixed_ip(self, context, fixed, subnets):
@@ -540,18 +538,19 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
 
         if validators.is_attr_set(host_routes):
             for rt in host_routes:
-                route = models_v2.SubnetRoute(
+                route = subnet_obj.Route(
+                    context,
                     subnet_id=subnet.id,
-                    destination=rt['destination'],
-                    nexthop=rt['nexthop'])
-                context.session.add(route)
+                    destination=common_utils.AuthenticIPNetwork(
+                        rt['destination']),
+                    nexthop=netaddr.IPAddress(rt['nexthop']))
+                route.create()
 
         if validators.is_attr_set(service_types):
             for service_type in service_types:
-                service_type_entry = sst_model.SubnetServiceType(
-                    subnet_id=subnet.id,
-                    service_type=service_type)
-                context.session.add(service_type_entry)
+                service_type_obj = subnet_obj.SubnetServiceType(
+                    context, subnet_id=subnet.id, service_type=service_type)
+                service_type_obj.create()
 
         self.save_allocation_pools(context, subnet,
                                    subnet_request.allocation_pools)
@@ -595,6 +594,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         return query.filter(models_v2.Subnet.network_id == network_id)
 
     def _query_filter_service_subnets(self, query, service_type):
+        # TODO(korzen) use SubnetServiceType OVO here
         Subnet = models_v2.Subnet
         ServiceType = sst_model.SubnetServiceType
         query = query.add_entity(ServiceType)
@@ -618,7 +618,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         *cannot* reach are excluded.
         """
         Subnet = models_v2.Subnet
-        SegmentHostMapping = segment_svc_db.SegmentHostMapping
+        SegmentHostMapping = segment_model.SegmentHostMapping
 
         # A host has been provided.  Consider these two scenarios
         # 1. Not a routed network:  subnets are not on segments

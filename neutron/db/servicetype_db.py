@@ -15,22 +15,12 @@
 
 from itertools import chain
 
-from neutron_lib.db import model_base
 from oslo_log import log as logging
-import sqlalchemy as sa
 
-from neutron.api.v2 import attributes as attr
+from neutron.objects import servicetype as servicetype_obj
 from neutron.services import provider_configuration as pconf
 
 LOG = logging.getLogger(__name__)
-
-
-class ProviderResourceAssociation(model_base.BASEV2):
-    provider_name = sa.Column(sa.String(attr.NAME_MAX_LEN),
-                              nullable=False, primary_key=True)
-    # should be manually deleted on resource deletion
-    resource_id = sa.Column(sa.String(36), nullable=False, primary_key=True,
-                            unique=True)
 
 
 class ServiceTypeManager(object):
@@ -79,10 +69,9 @@ class ServiceTypeManager(object):
         return providers[0]
 
     def get_provider_names_by_resource_ids(self, context, resource_ids):
-        query = (
-            context.session.query(ProviderResourceAssociation).
-            filter(ProviderResourceAssociation.resource_id.in_(resource_ids)))
-        return {rec.resource_id: rec.provider_name for rec in query}
+        objs = servicetype_obj.ProviderResourceAssociation.get_objects(
+            context, resource_id=resource_ids)
+        return {rec.resource_id: rec.provider_name for rec in objs}
 
     def add_resource_association(self, context, service_type, provider_name,
                                  resource_id):
@@ -92,13 +81,12 @@ class ServiceTypeManager(object):
             raise pconf.ServiceProviderNotFound(provider=provider_name,
                                                 service_type=service_type)
 
-        with context.session.begin(subtransactions=True):
-            # we don't actually need service type for association.
-            # resource_id is unique and belongs to specific service
-            # which knows its type
-            assoc = ProviderResourceAssociation(provider_name=provider_name,
-                                                resource_id=resource_id)
-            context.session.add(assoc)
+        # we don't actually need service type for association.
+        # resource_id is unique and belongs to specific service
+        # which knows its type
+        servicetype_obj.ProviderResourceAssociation(
+            context, provider_name=provider_name,
+            resource_id=resource_id).create()
         # NOTE(blogan): the ProviderResourceAssociation relationship will not
         # be populated if a resource was created before this.  The expire_all
         # will force the session to go retrieve the new data when that
@@ -111,8 +99,5 @@ class ServiceTypeManager(object):
     def del_resource_associations(self, context, resource_ids):
         if not resource_ids:
             return
-        with context.session.begin(subtransactions=True):
-            (context.session.query(ProviderResourceAssociation).
-             filter(
-                 ProviderResourceAssociation.resource_id.in_(resource_ids)).
-             delete(synchronize_session='fetch'))
+        servicetype_obj.ProviderResourceAssociation.delete_objects(
+            context, resource_id=resource_ids)

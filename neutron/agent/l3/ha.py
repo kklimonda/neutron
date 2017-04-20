@@ -16,44 +16,18 @@
 import os
 
 import eventlet
-from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import fileutils
 import webob
 
-from neutron._i18n import _, _LI
-from neutron.agent.linux import keepalived
+from neutron._i18n import _LI
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import constants
-from neutron.common import utils as common_utils
 from neutron.notifiers import batch_notifier
 
 LOG = logging.getLogger(__name__)
 
 KEEPALIVED_STATE_CHANGE_SERVER_BACKLOG = 4096
-
-OPTS = [
-    cfg.StrOpt('ha_confs_path',
-               default='$state_path/ha_confs',
-               help=_('Location to store keepalived/conntrackd '
-                      'config files')),
-    cfg.StrOpt('ha_vrrp_auth_type',
-               default='PASS',
-               choices=keepalived.VALID_AUTH_TYPES,
-               help=_('VRRP authentication type')),
-    cfg.StrOpt('ha_vrrp_auth_password',
-               help=_('VRRP authentication password'),
-               secret=True),
-    cfg.IntOpt('ha_vrrp_advert_int',
-               default=2,
-               help=_('The advertisement interval in seconds')),
-    cfg.IntOpt('ha_keepalived_state_change_server_threads',
-               default=(1 + common_utils.cpu_count()) // 2,
-               min=1,
-               help=_('Number of concurrent threads for '
-                      'keepalived server connection requests.'
-                      'More threads create a higher CPU load '
-                      'on the agent node.')),
-]
 
 TRANSLATION_MAP = {'master': constants.HA_ROUTER_STATE_ACTIVE,
                    'backup': constants.HA_ROUTER_STATE_STANDBY,
@@ -147,25 +121,36 @@ class AgentMixin(object):
         if ri is None:
             return
 
-        self._configure_ipv6_ra_on_ext_gw_port_if_necessary(ri, state)
+        # TODO(dalvarez): Fix bug 1677279 by moving the IPv6 parameters
+        # configuration to keepalived-state-change in order to remove the
+        # dependency that currently exists on l3-agent running for the IPv6
+        # failover.
+        self._configure_ipv6_params_on_ext_gw_port_if_necessary(ri, state)
         if self.conf.enable_metadata_proxy:
             self._update_metadata_proxy(ri, router_id, state)
         self._update_radvd_daemon(ri, state)
+        self.pd.process_ha_state(router_id, state == 'master')
         self.state_change_notifier.queue_event((router_id, state))
 
-    def _configure_ipv6_ra_on_ext_gw_port_if_necessary(self, ri, state):
+    def _configure_ipv6_params_on_ext_gw_port_if_necessary(self, ri, state):
         # If ipv6 is enabled on the platform, ipv6_gateway config flag is
         # not set and external_network associated to the router does not
         # include any IPv6 subnet, enable the gateway interface to accept
-        # Router Advts from upstream router for default route.
+        # Router Advts from upstream router for default route on master
+        # instances as well as ipv6 forwarding. Otherwise, disable them.
         ex_gw_port_id = ri.ex_gw_port and ri.ex_gw_port['id']
-        if state == 'master' and ex_gw_port_id:
-            interface_name = ri.get_external_device_name(ex_gw_port_id)
-            if ri.router.get('distributed', False):
-                namespace = ri.ha_namespace
-            else:
-                namespace = ri.ns_name
-            ri._enable_ra_on_gw(ri.ex_gw_port, namespace, interface_name)
+        if not ex_gw_port_id:
+            return
+
+        interface_name = ri.get_external_device_name(ex_gw_port_id)
+        if ri.router.get('distributed', False):
+            namespace = ri.ha_namespace
+        else:
+            namespace = ri.ns_name
+
+        enable = state == 'master'
+        ri._configure_ipv6_params_on_gw(ri.ex_gw_port, namespace,
+                                        interface_name, enable)
 
     def _update_metadata_proxy(self, ri, router_id, state):
         if state == 'master':
@@ -196,4 +181,4 @@ class AgentMixin(object):
 
     def _init_ha_conf_path(self):
         ha_full_path = os.path.dirname("/%s/" % self.conf.ha_confs_path)
-        common_utils.ensure_dir(ha_full_path)
+        fileutils.ensure_tree(ha_full_path, mode=0o755)

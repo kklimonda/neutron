@@ -1,0 +1,4 @@
+---
+features:
+  - Initial support for ``oslo.privsep`` has been added. Most external commands
+    are still executed using ``oslo.rootwrap``.

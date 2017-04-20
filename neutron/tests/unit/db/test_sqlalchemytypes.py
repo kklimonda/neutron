@@ -13,14 +13,14 @@
 import abc
 import netaddr
 
+from neutron_lib import context
 from oslo_db import exception
-from oslo_db.sqlalchemy import test_base
+from oslo_db.tests.sqlalchemy import base as test_base
 from oslo_utils import timeutils
 from oslo_utils import uuidutils
 import six
 import sqlalchemy as sa
 
-from neutron import context
 from neutron.db import sqlalchemytypes
 from neutron.tests import tools
 

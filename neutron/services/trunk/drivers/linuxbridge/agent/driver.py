@@ -20,7 +20,6 @@ from neutron.api.rpc.handlers import resources_rpc
 from neutron.callbacks import events as local_events
 from neutron.callbacks import registry
 from neutron.callbacks import resources as local_resources
-from neutron import context as n_ctx
 from neutron.services.trunk import constants as t_const
 from neutron.services.trunk.drivers.linuxbridge.agent import trunk_plumber
 from neutron.services.trunk.rpc import agent as trunk_rpc
@@ -35,6 +34,7 @@ def init_handler(resource, event, trigger, agent=None):
         LinuxBridgeTrunkDriver()
 
 
+@registry.has_registry_receivers
 class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
     """Driver responsible for handling trunk/subport/port events.
 
@@ -46,17 +46,10 @@ class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
     def __init__(self, plumber=None, trunk_api=None):
         self._plumber = plumber or trunk_plumber.Plumber()
         self._tapi = trunk_api or _TrunkAPI(trunk_rpc.TrunkStub())
-        registry.subscribe(self.agent_port_change,
-                           local_resources.PORT_DEVICE,
-                           local_events.AFTER_UPDATE)
-        registry.subscribe(self.agent_port_delete,
-                           local_resources.PORT_DEVICE,
-                           local_events.AFTER_DELETE)
         super(LinuxBridgeTrunkDriver, self).__init__()
 
-    def handle_trunks(self, trunks, event_type):
+    def handle_trunks(self, context, resource_type, trunks, event_type):
         """Trunk data model change from the server."""
-        context = n_ctx.get_admin_context()
         for trunk in trunks:
             if event_type in (events.UPDATED, events.CREATED):
                 self._tapi.put_trunk(trunk.port_id, trunk)
@@ -65,9 +58,8 @@ class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
                 self._tapi.put_trunk(trunk.port_id, None)
                 self._plumber.delete_trunk_subports(trunk)
 
-    def handle_subports(self, subports, event_type):
+    def handle_subports(self, context, resource_type, subports, event_type):
         """Subport data model change from the server."""
-        context = n_ctx.get_admin_context()
         affected_trunks = set()
         if event_type == events.DELETED:
             method = self._tapi.delete_trunk_subport
@@ -82,6 +74,8 @@ class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
                 continue
             self.wire_trunk(context, trunk)
 
+    @registry.receives(local_resources.PORT_DEVICE,
+                       [local_events.AFTER_DELETE])
     def agent_port_delete(self, resource, event, trigger, context, port_id,
                           **kwargs):
         """Agent informed us a VIF was removed."""
@@ -91,6 +85,8 @@ class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
         # don't want to race with another agent that the trunk may have been
         # moved to.
 
+    @registry.receives(local_resources.PORT_DEVICE,
+                       [local_events.AFTER_UPDATE])
     def agent_port_change(self, resource, event, trigger, context,
                           device_details, **kwargs):
         """The agent hath informed us thusly of a port update or create."""
@@ -102,12 +98,6 @@ class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
         # clear any VLANs in case this was a trunk that changed status while
         # agent was offline.
         self._plumber.delete_subports_by_port_id(device_details['port_id'])
-        if self._tapi.get_trunk_for_subport(context,
-                                            device_details['port_id']):
-            # This is a subport. We need to ensure the correct mac address is
-            # set now that we have the port data to see the data model MAC.
-            self._plumber.set_port_mac(device_details['port_id'],
-                                       device_details['mac_address'])
 
     def wire_trunk(self, context, trunk):
         """Wire up subports while keeping the server trunk status apprised."""

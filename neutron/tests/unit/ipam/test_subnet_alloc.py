@@ -16,15 +16,16 @@
 import mock
 import netaddr
 from neutron_lib import constants
+from neutron_lib import context
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_utils import uuidutils
 
 from neutron.common import exceptions as n_exc
-from neutron import context
+from neutron.db import api as db_api
 from neutron.ipam import requests as ipam_req
 from neutron.ipam import subnet_alloc
-from neutron import manager
 from neutron.tests.unit.db import test_db_base_plugin_v2
 from neutron.tests.unit import testlib_api
 
@@ -35,7 +36,7 @@ class TestSubnetAllocation(testlib_api.SqlTestCase):
         super(TestSubnetAllocation, self).setUp()
         self._tenant_id = 'test-tenant'
         self.setup_coreplugin(test_db_base_plugin_v2.DB_PLUGIN_KLASS)
-        self.plugin = manager.NeutronManager.get_plugin()
+        self.plugin = directory.get_plugin()
         self.ctx = context.get_admin_context()
         cfg.CONF.set_override('allow_overlapping_ips', True)
 
@@ -64,7 +65,7 @@ class TestSubnetAllocation(testlib_api.SqlTestCase):
         sp = self._create_subnet_pool(self.plugin, self.ctx, 'test-sp',
                                       prefix_list, 21, 4)
         sp = self.plugin._get_subnetpool(self.ctx, sp['id'])
-        with self.ctx.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(self.ctx):
             sa = subnet_alloc.SubnetAllocator(sp, self.ctx)
             req = ipam_req.AnySubnetRequest(self._tenant_id,
                                         uuidutils.generate_uuid(),
@@ -80,7 +81,7 @@ class TestSubnetAllocation(testlib_api.SqlTestCase):
         sp = self._create_subnet_pool(self.plugin, self.ctx, 'test-sp',
                                       ['10.1.0.0/16', '192.168.1.0/24'],
                                       21, 4)
-        with self.ctx.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(self.ctx):
             sp = self.plugin._get_subnetpool(self.ctx, sp['id'])
             sa = subnet_alloc.SubnetAllocator(sp, self.ctx)
             req = ipam_req.SpecificSubnetRequest(self._tenant_id,
@@ -122,7 +123,7 @@ class TestSubnetAllocation(testlib_api.SqlTestCase):
                                       ['10.1.0.0/16', '192.168.1.0/24'],
                                       21, 4)
         sp = self.plugin._get_subnetpool(self.ctx, sp['id'])
-        with self.ctx.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(self.ctx):
             sa = subnet_alloc.SubnetAllocator(sp, self.ctx)
             req = ipam_req.AnySubnetRequest(self._tenant_id,
                                         uuidutils.generate_uuid(),
@@ -137,7 +138,7 @@ class TestSubnetAllocation(testlib_api.SqlTestCase):
                                       ['10.1.0.0/16', '192.168.1.0/24'],
                                       21, 4)
         sp = self.plugin._get_subnetpool(self.ctx, sp['id'])
-        with self.ctx.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(self.ctx):
             sa = subnet_alloc.SubnetAllocator(sp, self.ctx)
             req = ipam_req.SpecificSubnetRequest(self._tenant_id,
                                              uuidutils.generate_uuid(),
@@ -154,7 +155,7 @@ class TestSubnetAllocation(testlib_api.SqlTestCase):
                                       ['2210::/64'],
                                       64, 6)
         sp = self.plugin._get_subnetpool(self.ctx, sp['id'])
-        with self.ctx.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(self.ctx):
             sa = subnet_alloc.SubnetAllocator(sp, self.ctx)
             req = ipam_req.SpecificSubnetRequest(self._tenant_id,
                                                  uuidutils.generate_uuid(),

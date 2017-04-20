@@ -16,11 +16,12 @@
 from neutron_lib.api import validators
 
 from neutron.api.v2 import attributes as attr
-from neutron.db import db_base_plugin_v2
+from neutron.db import _resource_extend as resource_extend
+from neutron.db import _utils as db_utils
 
 from neutron.common import utils
 from neutron.extensions import allowedaddresspairs as addr_pair
-from neutron.objects import base as obj_base
+from neutron.objects import exceptions
 from neutron.objects.port.extensions import (allowedaddresspairs
     as obj_addr_pair)
 
@@ -49,7 +50,7 @@ class AllowedAddressPairsMixin(object):
                         mac_address=mac_address,
                         ip_address=ip_address)
                     pair_obj.create()
-        except obj_base.NeutronDbObjectDuplicateEntry:
+        except exceptions.NeutronDbObjectDuplicateEntry:
             raise addr_pair.DuplicateAddressPairInRequest(
                 mac_address=address_pair['mac_address'],
                 ip_address=address_pair['ip_address'])
@@ -57,14 +58,10 @@ class AllowedAddressPairsMixin(object):
         return allowed_address_pairs
 
     def get_allowed_address_pairs(self, context, port_id):
-        pairs = self._get_allowed_address_pairs_objs(context, port_id)
-        return [self._make_allowed_address_pairs_dict(pair.db_obj)
-                for pair in pairs]
-
-    def _get_allowed_address_pairs_objs(self, context, port_id):
         pairs = obj_addr_pair.AllowedAddressPair.get_objects(
             context, port_id=port_id)
-        return pairs
+        return [self._make_allowed_address_pairs_dict(pair.db_obj)
+                for pair in pairs]
 
     def _extend_port_dict_allowed_address_pairs(self, port_res, port_db):
         # If port_db is provided, allowed address pairs will be accessed via
@@ -76,21 +73,19 @@ class AllowedAddressPairsMixin(object):
         port_res[addr_pair.ADDRESS_PAIRS] = allowed_address_pairs
         return port_res
 
-    # Register dict extend functions for ports
-    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+    resource_extend.register_funcs(
         attr.PORTS, ['_extend_port_dict_allowed_address_pairs'])
 
     def _delete_allowed_address_pairs(self, context, id):
-        pairs = self._get_allowed_address_pairs_objs(context, port_id=id)
-        with context.session.begin(subtransactions=True):
-            for pair in pairs:
-                pair.delete()
+        obj_addr_pair.AllowedAddressPair.delete_objects(
+            context, port_id=id)
 
-    def _make_allowed_address_pairs_dict(self, allowed_address_pairs,
+    @staticmethod
+    def _make_allowed_address_pairs_dict(allowed_address_pairs,
                                          fields=None):
         res = {'mac_address': allowed_address_pairs['mac_address'],
                'ip_address': allowed_address_pairs['ip_address']}
-        return self._fields(res, fields)
+        return db_utils.resource_fields(res, fields)
 
     def _has_address_pairs(self, port):
         return (validators.is_attr_set(port['port'][addr_pair.ADDRESS_PAIRS])

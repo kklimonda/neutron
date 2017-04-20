@@ -15,11 +15,8 @@
 import os
 import re
 
-from debtcollector import moves
 from hacking import core
 from neutron_lib.hacking import checks
-import pep8
-import six
 
 
 def flake8ext(f):
@@ -64,13 +61,6 @@ def _regex_for_level(level, hint):
     }
 
 
-log_string_interpolation = re.compile(r".*LOG\.(?:error|warn|warning|info"
-                                      r"|critical|exception|debug)"
-                                      r"\([^,]*%[^,]*[,)]")
-log_translation_hint = re.compile(
-    '|'.join('(?:%s)' % _regex_for_level(level, hint)
-             for level, hint in six.iteritems(_all_log_levels)))
-
 log_warn = re.compile(
     r"(.)*LOG\.(warn)\(\s*('|\"|_)")
 unittest_imports_dot = re.compile(r"\bimport[\s]+unittest\b")
@@ -80,20 +70,6 @@ filter_match = re.compile(r".*filter\(lambda ")
 tests_imports_dot = re.compile(r"\bimport[\s]+neutron.tests\b")
 tests_imports_from1 = re.compile(r"\bfrom[\s]+neutron.tests\b")
 tests_imports_from2 = re.compile(r"\bfrom[\s]+neutron[\s]+import[\s]+tests\b")
-
-
-@flake8ext
-def validate_log_translations(logical_line, physical_line, filename):
-    """N320 - Log messages require translation."""
-    # Translations are not required in the test directory
-    if "neutron/tests" in filename:
-        return
-    if pep8.noqa(physical_line):
-        return
-
-    msg = "N320: Log messages require translation hints!"
-    if log_translation_hint.match(logical_line):
-        yield (0, msg)
 
 
 @flake8ext
@@ -217,18 +193,6 @@ def check_asserttruefalse(logical_line, filename):
             msg = ("N328: Use assertFalse(observed) instead of "
                    "assertEqual(False, observed)")
             yield (0, msg)
-
-
-check_asserttrue = flake8ext(
-    moves.moved_function(
-        check_asserttruefalse, 'check_asserttrue', __name__,
-        version='Newton', removal_version='Ocata'))
-
-
-check_assertfalse = flake8ext(
-    moves.moved_function(
-        check_asserttruefalse, 'check_assertfalse', __name__,
-        version='Newton', removal_version='Ocata'))
 
 
 @flake8ext
@@ -365,28 +329,6 @@ def check_unittest_imports(logical_line):
 
 
 @flake8ext
-def check_delayed_string_interpolation(logical_line, filename, noqa):
-    """N342 String interpolation should be delayed at logging calls.
-
-    N342: LOG.debug('Example: %s' % 'bad')
-    Okay: LOG.debug('Example: %s', 'good')
-    """
-    msg = ("N342 String interpolation should be delayed to be "
-           "handled by the logging code, rather than being done "
-           "at the point of the logging call. "
-           "Use ',' instead of '%'.")
-
-    if noqa:
-        return
-
-    if 'neutron/tests/' in filename:
-        return
-
-    if log_string_interpolation.match(logical_line):
-        yield(0, msg)
-
-
-@flake8ext
 def check_no_imports_from_tests(logical_line, filename, noqa):
     """N343 Production code must not import from neutron.tests.*
     """
@@ -407,15 +349,44 @@ def check_no_imports_from_tests(logical_line, filename, noqa):
 def check_python3_no_filter(logical_line):
     """N344 - Use list comprehension instead of filter(lambda)."""
 
-    msg = ("N343: Use list comprehension instead of "
+    msg = ("N344: Use list comprehension instead of "
            "filter(lambda obj: test(obj), data) on python3.")
 
     if filter_match.match(logical_line):
         yield(0, msg)
 
 
+@flake8ext
+def check_assertIsNone(logical_line, filename):
+    """N345 - Enforce using assertIsNone."""
+    if 'neutron/tests/' in filename:
+        asse_eq_end_with_none_re = re.compile(r"assertEqual\(.*?,\s+None\)$")
+        asse_eq_start_with_none_re = re.compile(r"assertEqual\(None,")
+        res = (asse_eq_start_with_none_re.search(logical_line) or
+               asse_eq_end_with_none_re.search(logical_line))
+        if res:
+            yield (0, "N345: assertEqual(A, None) or assertEqual(None, A) "
+                   "sentences not allowed")
+
+
+@flake8ext
+def check_no_sqlalchemy_event_import(logical_line, filename, noqa):
+    """N346 - Use neutron.db.api.sqla_listen instead of sqlalchemy event."""
+    if noqa:
+        return
+    is_import = (logical_line.startswith('import') or
+                 logical_line.startswith('from'))
+    if not is_import:
+        return
+    for kw in ('sqlalchemy', 'event'):
+        if kw not in logical_line:
+            return
+    yield (0, "N346: Register sqlalchemy events through "
+              "neutron.db.api.sqla_listen so they can be cleaned up between "
+              "unit tests")
+
+
 def factory(register):
-    register(validate_log_translations)
     register(use_jsonutils)
     register(check_assert_called_once_with)
     register(no_translate_debug_logs)
@@ -432,6 +403,7 @@ def factory(register):
     register(check_oslo_i18n_wrapper)
     register(check_builtins_gettext)
     register(check_unittest_imports)
-    register(check_delayed_string_interpolation)
     register(check_no_imports_from_tests)
     register(check_python3_no_filter)
+    register(check_assertIsNone)
+    register(check_no_sqlalchemy_event_import)

@@ -20,7 +20,6 @@ import httplib2
 import netaddr
 from oslo_config import cfg
 from oslo_log import log as logging
-import requests
 
 from neutron._i18n import _, _LE
 from neutron.agent.l3 import ha
@@ -33,10 +32,6 @@ from neutron.conf.agent.l3 import keepalived
 
 
 LOG = logging.getLogger(__name__)
-
-
-class L3HAConfig(object):
-    send_arp_for_ha = 3
 
 
 class KeepalivedUnixDomainConnection(agent_utils.UnixDomainHTTPConnection):
@@ -109,7 +104,7 @@ class MonitorDaemon(daemon.Daemon):
                      'X-Neutron-State': state},
             connection_type=KeepalivedUnixDomainConnection)
 
-        if resp.status != requests.codes.ok:
+        if resp.status != 200:
             raise Exception(_('Unexpected response: %s') % resp)
 
         LOG.debug('Notified agent router %s, state %s', self.router_id, state)
@@ -120,7 +115,6 @@ class MonitorDaemon(daemon.Daemon):
             self.namespace,
             event.interface,
             str(netaddr.IPNetwork(event.cidr).ip),
-            L3HAConfig,
             log_exception=False
         )
 
@@ -144,6 +138,7 @@ def configure(conf):
     config.init(sys.argv[1:])
     conf.set_override('log_dir', cfg.CONF.conf_dir)
     conf.set_override('debug', True)
+    conf.set_override('use_syslog', True)
     config.setup_logging()
 
 

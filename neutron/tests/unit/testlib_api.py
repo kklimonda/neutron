@@ -20,6 +20,7 @@ import testscenarios
 import testtools
 
 from neutron_lib.db import model_base
+from oslo_config import cfg
 from oslo_db import exception as oslodb_exception
 from oslo_db.sqlalchemy import enginefacade
 from oslo_db.sqlalchemy import provision
@@ -98,15 +99,15 @@ class SqlFixture(fixtures.Fixture):
 
         self.sessionmaker = session.get_maker(engine)
 
-        self.enginefacade_factory = enginefacade._TestTransactionFactory(
-            self.engine, self.sessionmaker, apply_global=False,
-            synchronous_reader=True)
-
         _restore_factory = db_api.context_manager._root_factory
+
+        self.enginefacade_factory = enginefacade._TestTransactionFactory(
+            self.engine, self.sessionmaker, from_factory=_restore_factory,
+            apply_global=False)
 
         db_api.context_manager._root_factory = self.enginefacade_factory
 
-        engine = db_api.context_manager.get_legacy_facade().get_engine()
+        engine = db_api.context_manager.writer.get_engine()
 
         self.addCleanup(
             lambda: setattr(
@@ -160,7 +161,7 @@ class StaticSqlFixture(SqlFixture):
         else:
             cls._GLOBAL_RESOURCES = True
             cls.schema_resource = provision.SchemaResource(
-                provision.DatabaseResource("sqlite"),
+                provision.DatabaseResource("sqlite", db_api.context_manager),
                 cls._generate_schema, teardown=False)
             dependency_resources = {}
             for name, resource in cls.schema_resource.resources:
@@ -183,7 +184,8 @@ class StaticSqlFixtureNoSchema(SqlFixture):
             return
         else:
             cls._GLOBAL_RESOURCES = True
-            cls.database_resource = provision.DatabaseResource("sqlite")
+            cls.database_resource = provision.DatabaseResource(
+                "sqlite", db_api.context_manager)
             dependency_resources = {}
             for name, resource in cls.database_resource.resources:
                 dependency_resources[name] = resource.getResource()
@@ -209,11 +211,15 @@ class OpportunisticSqlFixture(SqlFixture):
 
     @classmethod
     def _generate_schema_w_migrations(cls, engine):
-        alembic_config = migration.get_neutron_config()
+        alembic_configs = migration.get_alembic_configs()
         with engine.connect() as conn:
-            alembic_config.attributes['connection'] = conn
-            migration.do_alembic_command(
-                alembic_config, 'upgrade', 'heads')
+            for alembic_config in alembic_configs:
+                alembic_config.attributes['connection'] = conn
+                alembic_config.neutron_config = cfg.CONF
+                alembic_config.neutron_config.set_override(
+                    'connection', str(engine.url), group='database')
+                migration.do_alembic_command(
+                    alembic_config, 'upgrade', 'heads')
 
     def _delete_from_schema(self, engine):
         if self.test.BUILD_SCHEMA:

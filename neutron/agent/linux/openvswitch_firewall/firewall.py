@@ -15,13 +15,13 @@
 
 import netaddr
 from neutron_lib import constants as lib_const
-from neutron_lib import exceptions
 from oslo_log import log as logging
 from oslo_utils import netutils
 
-from neutron._i18n import _, _LE, _LW
+from neutron._i18n import _LE
 from neutron.agent import firewall
 from neutron.agent.linux.openvswitch_firewall import constants as ovsfw_consts
+from neutron.agent.linux.openvswitch_firewall import exceptions
 from neutron.agent.linux.openvswitch_firewall import rules
 from neutron.common import constants
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants \
@@ -55,8 +55,21 @@ def create_reg_numbers(flow_params):
     _replace_register(flow_params, ovsfw_consts.REG_NET, 'reg_net')
 
 
-class OVSFWPortNotFound(exceptions.NeutronException):
-    message = _("Port %(port_id)s is not managed by this agent. ")
+def get_tag_from_other_config(bridge, port_name):
+    """Return tag stored in OVSDB other_config metadata.
+
+    :param bridge: OVSBridge instance where port is.
+    :param port_name: Name of the port.
+    :raises OVSFWTagNotFound: In case tag cannot be found in OVSDB.
+    """
+    other_config = None
+    try:
+        other_config = bridge.db_get_val(
+            'Port', port_name, 'other_config')
+        return int(other_config['tag'])
+    except (KeyError, TypeError, ValueError):
+        raise exceptions.OVSFWTagNotFound(
+            port_name=port_name, other_config=other_config)
 
 
 class SecurityGroup(object):
@@ -186,18 +199,12 @@ class OVSFirewallDriver(firewall.FirewallDriver):
         self._deferred = False
         self._drop_all_unmatched_flows()
 
-    def apply_port_filter(self, port):
-        """We never call this method
-
-        It exists here to override abstract method of parent abstract class.
-        """
-
     def security_group_updated(self, action_type, sec_group_ids,
                                device_ids=None):
-        """This method is obsolete
+        """The current driver doesn't make use of this method.
 
-        The current driver only supports enhanced rpc calls into security group
-        agent. This method is never called from that place.
+        It exists here to avoid NotImplementedError raised from the parent
+        class's method.
         """
 
     def _accept_flow(self, **flow):
@@ -229,35 +236,38 @@ class OVSFirewallDriver(firewall.FirewallDriver):
 
     @staticmethod
     def initialize_bridge(int_br):
-        int_br.set_protocols(OVSFirewallDriver.REQUIRED_PROTOCOLS)
+        int_br.add_protocols(*OVSFirewallDriver.REQUIRED_PROTOCOLS)
         return int_br.deferred(full_ordered=True)
 
     def _drop_all_unmatched_flows(self):
         for table in ovs_consts.OVS_FIREWALL_TABLES:
             self.int_br.br.add_flow(table=table, priority=0, actions='drop')
 
-    def get_or_create_ofport(self, port):
+    def get_ofport(self, port):
         port_id = port['device']
+        return self.sg_port_map.ports.get(port_id)
+
+    def get_or_create_ofport(self, port):
+        """Get ofport specified by port['device'], checking and reflecting
+        ofport changes.
+        If ofport is nonexistent, create and return one.
+        """
+        port_id = port['device']
+        ovs_port = self.int_br.br.get_vif_port_by_id(port_id)
+        if not ovs_port:
+            raise exceptions.OVSFWPortNotFound(port_id=port_id)
+
         try:
             of_port = self.sg_port_map.ports[port_id]
         except KeyError:
-            ovs_port = self.int_br.br.get_vif_port_by_id(port_id)
-            if not ovs_port:
-                raise OVSFWPortNotFound(port_id=port_id)
-
-            try:
-                other_config = self.int_br.br.db_get_val(
-                    'Port', ovs_port.port_name, 'other_config')
-                port_vlan_id = int(other_config['tag'])
-            except (KeyError, TypeError):
-                LOG.warning(_LW("Can't get tag for port %(port_id)s from its "
-                                "other_config: %(other_config)s"),
-                            port_id=port_id,
-                            other_config=other_config)
-                port_vlan_id = ovs_consts.DEAD_VLAN_TAG
+            port_vlan_id = get_tag_from_other_config(
+                self.int_br.br, ovs_port.port_name)
             of_port = OFPort(port, ovs_port, port_vlan_id)
             self.sg_port_map.create_port(of_port, port)
         else:
+            if of_port.ofport != ovs_port.ofport:
+                self.sg_port_map.remove_port(of_port)
+                of_port = OFPort(port, ovs_port, of_port.vlan_tag)
             self.sg_port_map.update_port(of_port, port)
 
         return of_port
@@ -268,13 +278,13 @@ class OVSFirewallDriver(firewall.FirewallDriver):
     def prepare_port_filter(self, port):
         if not firewall.port_sec_enabled(port):
             return
-        port_exists = self.is_port_managed(port)
+        old_of_port = self.get_ofport(port)
         of_port = self.get_or_create_ofport(port)
-        if port_exists:
+        if old_of_port:
             LOG.error(_LE("Initializing port %s that was already "
                           "initialized."),
                       port['device'])
-            self.delete_all_port_flows(of_port)
+            self.delete_all_port_flows(old_of_port)
         self.initialize_port_flows(of_port)
         self.add_flows_from_rules(of_port)
 
@@ -291,9 +301,10 @@ class OVSFirewallDriver(firewall.FirewallDriver):
         elif not self.is_port_managed(port):
             self.prepare_port_filter(port)
             return
+        old_of_port = self.get_ofport(port)
         of_port = self.get_or_create_ofport(port)
         # TODO(jlibosva): Handle firewall blink
-        self.delete_all_port_flows(of_port)
+        self.delete_all_port_flows(old_of_port)
         self.initialize_port_flows(of_port)
         self.add_flows_from_rules(of_port)
 
@@ -305,7 +316,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
 
         """
         if self.is_port_managed(port):
-            of_port = self.get_or_create_ofport(port)
+            of_port = self.get_ofport(port)
             self.delete_all_port_flows(of_port)
             self.sg_port_map.remove_port(of_port)
 

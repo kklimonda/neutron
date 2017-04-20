@@ -16,12 +16,12 @@
 import os
 import re
 
+from neutron_lib.utils import helpers
 from oslo_log import log as logging
 import six
 
 from neutron._i18n import _, _LE, _LW
 from neutron.agent.linux import ip_link_support
-from neutron.common import utils
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
 from neutron.plugins.ml2.drivers.mech_sriov.agent import pci_lib
@@ -63,6 +63,10 @@ class PciOsWrapper(object):
         return vf_list
 
     @classmethod
+    def pf_device_exists(cls, dev_name):
+        return os.path.isdir(cls.DEVICE_PATH % dev_name)
+
+    @classmethod
     def is_assigned_vf(cls, dev_name, vf_index, ip_link_show_output):
         """Check if VF is assigned.
 
@@ -75,12 +79,19 @@ class PciOsWrapper(object):
         @param vf_index: vf index
         @param ip_link_show_output: 'ip link show' output
         """
+
+        if not cls.pf_device_exists(dev_name):
+            # If the root PCI path does not exist, then the VF cannot
+            # actually have been allocated and there is no way we can
+            # manage it.
+            return False
+
         path = cls.PCI_PATH % (dev_name, vf_index)
 
         try:
             ifname_list = os.listdir(path)
         except OSError:
-            # PCI_PATH does not exist means that the DIRECT VF assigend
+            # PCI_PATH does not exist means that the DIRECT VF assigned
             return True
 
         # Note(moshele) kernel < 3.13 doesn't create symbolic link
@@ -104,14 +115,12 @@ class EmbSwitch(object):
     @ivar pci_dev_wrapper: pci device wrapper
     """
 
-    def __init__(self, phys_net, dev_name, exclude_devices):
+    def __init__(self, dev_name, exclude_devices):
         """Constructor
 
-        @param phys_net: physical network
         @param dev_name: network device name
         @param exclude_devices: list of pci slots to exclude
         """
-        self.phys_net = phys_net
         self.dev_name = dev_name
         self.pci_slot_map = {}
         self.pci_dev_wrapper = pci_lib.PciDeviceIPWrapper(dev_name)
@@ -186,7 +195,7 @@ class EmbSwitch(object):
         if rate_kbps > 0 and rate_kbps < 1000:
             rate_mbps = 1
         else:
-            rate_mbps = utils.round_val(rate_kbps / 1000.0)
+            rate_mbps = helpers.round_val(rate_kbps / 1000.0)
 
         log_dict = {
             'rate_mbps': rate_mbps,
@@ -351,6 +360,26 @@ class ESwitchManager(object):
             embedded_switch.set_device_spoofcheck(pci_slot,
                                                   enabled)
 
+    def _process_emb_switch_map(self, phys_net, dev_name, exclude_devices):
+        """Process emb_switch_map
+        @param phys_net: physical network
+        @param dev_name: device name
+        @param exclude_devices: PCI devices to ignore.
+        """
+        emb_switches = self.emb_switches_map.get(phys_net, [])
+        for switch in emb_switches:
+            if switch.dev_name == dev_name:
+                if not PciOsWrapper.pf_device_exists(dev_name):
+                    # If the device is given to the VM as PCI-PT
+                    # then delete the respective emb_switch from map
+                    self.emb_switches_map.get(phys_net).remove(switch)
+                return
+
+        # We don't know about this device at the moment, so add to the map.
+        if PciOsWrapper.pf_device_exists(dev_name):
+            self._create_emb_switch(phys_net, dev_name,
+                exclude_devices.get(dev_name, set()))
+
     def discover_devices(self, device_mappings, exclude_devices):
         """Discover which Virtual functions to manage.
 
@@ -362,11 +391,11 @@ class ESwitchManager(object):
             exclude_devices = {}
         for phys_net, dev_names in six.iteritems(device_mappings):
             for dev_name in dev_names:
-                self._create_emb_switch(phys_net, dev_name,
-                                        exclude_devices.get(dev_name, set()))
+                self._process_emb_switch_map(phys_net, dev_name,
+                                             exclude_devices)
 
     def _create_emb_switch(self, phys_net, dev_name, exclude_devices):
-        embedded_switch = EmbSwitch(phys_net, dev_name, exclude_devices)
+        embedded_switch = EmbSwitch(dev_name, exclude_devices)
         self.emb_switches_map.setdefault(phys_net, []).append(embedded_switch)
         for pci_slot in embedded_switch.get_pci_slot_list():
             self.pci_slot_map[pci_slot] = embedded_switch
@@ -388,8 +417,26 @@ class ESwitchManager(object):
                 embedded_switch = None
         return embedded_switch
 
-    def clear_rate(self, pci_slot, rate_type):
-        """Clear the VF rate
+    def clear_max_rate(self, pci_slot):
+        """Clear the VF "rate" parameter
+
+        Clear the "rate" configuration from VF by setting it to 0.
+        @param pci_slot: VF PCI slot
+        """
+        self._clear_rate(pci_slot,
+            ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE)
+
+    def clear_min_tx_rate(self, pci_slot):
+        """Clear the VF "min_tx_rate" parameter
+
+        Clear the "min_tx_rate" configuration from VF by setting it to 0.
+        @param pci_slot: VF PCI slot
+        """
+        self._clear_rate(pci_slot,
+            ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_MIN_TX_RATE)
+
+    def _clear_rate(self, pci_slot, rate_type):
+        """Clear the VF rate parameter specified in rate_type
 
         Clear the rate configuration from VF by setting it to 0.
         @param pci_slot: VF PCI slot

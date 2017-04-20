@@ -14,26 +14,39 @@
 
 import functools
 
-from oslo_db import api as oslo_db_api
-from oslo_db import exception as db_exc
+from neutron_lib.plugins import directory
 from oslo_log import helpers as log_helpers
 from sqlalchemy.orm import exc
 
 from neutron.api.v2 import attributes
+from neutron.db import _model_query as model_query
+from neutron.db import _resource_extend as resource_extend
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
+from neutron.db.models import l3 as l3_model
 from neutron.db import models_v2
-from neutron.db import tag_db as tag_model
+from neutron.db import tag_db as tag_methods
+from neutron.extensions import l3 as l3_ext
 from neutron.extensions import tag as tag_ext
+from neutron.objects import exceptions as obj_exc
+from neutron.objects import tag as tag_obj
 
 
+# Taggable resources
 resource_model_map = {
+    # When we'll add other resources, we must add new extension for them
+    # if we don't have better discovery mechanism instead of it.
     attributes.NETWORKS: models_v2.Network,
-    # other resources can be added
+    attributes.SUBNETS: models_v2.Subnet,
+    attributes.PORTS: models_v2.Port,
+    attributes.SUBNETPOOLS: models_v2.SubnetPool,
+    l3_ext.ROUTERS: l3_model.Router,
 }
 
 
 def _extend_tags_dict(plugin, response_data, db_data):
+    if not directory.get_plugin(tag_ext.TAG_PLUGIN_TYPE):
+        return
     tags = [tag_db.tag for tag_db in db_data.standard_attr.tags]
     response_data['tags'] = tags
 
@@ -41,7 +54,7 @@ def _extend_tags_dict(plugin, response_data, db_data):
 class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
     """Implementation of the Neutron Tag Service Plugin."""
 
-    supported_extension_aliases = ['tag']
+    supported_extension_aliases = ['tag', 'tag-ext']
 
     def _get_resource(self, context, resource, resource_id):
         model = resource_model_map[resource]
@@ -64,23 +77,28 @@ class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
             raise tag_ext.TagNotFound(tag=tag)
 
     @log_helpers.log_method_call
-    @oslo_db_api.wrap_db_retry(
-        max_retries=db_api.MAX_RETRIES,
-        exception_checker=lambda e: isinstance(e, db_exc.DBDuplicateEntry))
+    @db_api.retry_if_session_inactive()
     def update_tags(self, context, resource, resource_id, body):
-        res = self._get_resource(context, resource, resource_id)
-        new_tags = set(body['tags'])
-        old_tags = {tag_db.tag for tag_db in res.standard_attr.tags}
-        tags_added = new_tags - old_tags
-        tags_removed = old_tags - new_tags
-        with context.session.begin(subtransactions=True):
-            for tag_db in res.standard_attr.tags:
-                if tag_db.tag in tags_removed:
-                    context.session.delete(tag_db)
+        with db_api.context_manager.writer.using(context):
+            # We get and do all operations with objects in one session
+            res = self._get_resource(context, resource, resource_id)
+            new_tags = set(body['tags'])
+            old_tags = {tag_db.tag for tag_db in res.standard_attr.tags}
+            tags_added = new_tags - old_tags
+            tags_removed = old_tags - new_tags
+            if tags_removed:
+                tag_obj.Tag.delete_objects(
+                    context,
+                    standard_attr_id=res.standard_attr_id,
+                    tag=[
+                        tag_db.tag
+                        for tag_db in res.standard_attr.tags
+                        if tag_db.tag in tags_removed
+                    ]
+                )
             for tag in tags_added:
-                tag_db = tag_model.Tag(standard_attr_id=res.standard_attr_id,
-                                       tag=tag)
-                context.session.add(tag_db)
+                tag_obj.Tag(context, standard_attr_id=res.standard_attr_id,
+                            tag=tag).create()
         return body
 
     @log_helpers.log_method_call
@@ -89,36 +107,32 @@ class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
         if any(tag == tag_db.tag for tag_db in res.standard_attr.tags):
             return
         try:
-            with context.session.begin(subtransactions=True):
-                tag_db = tag_model.Tag(standard_attr_id=res.standard_attr_id,
-                                       tag=tag)
-                context.session.add(tag_db)
-        except db_exc.DBDuplicateEntry:
+            tag_obj.Tag(context, standard_attr_id=res.standard_attr_id,
+                tag=tag).create()
+        except obj_exc.NeutronDbObjectDuplicateEntry:
             pass
 
     @log_helpers.log_method_call
     def delete_tags(self, context, resource, resource_id):
         res = self._get_resource(context, resource, resource_id)
-        with context.session.begin(subtransactions=True):
-            query = context.session.query(tag_model.Tag)
-            query = query.filter_by(standard_attr_id=res.standard_attr_id)
-            query.delete()
+        tag_obj.Tag.delete_objects(context,
+                                   standard_attr_id=res.standard_attr_id)
 
     @log_helpers.log_method_call
     def delete_tag(self, context, resource, resource_id, tag):
         res = self._get_resource(context, resource, resource_id)
-        with context.session.begin(subtransactions=True):
-            query = context.session.query(tag_model.Tag)
-            query = query.filter_by(tag=tag,
-                                    standard_attr_id=res.standard_attr_id)
-            if not query.delete():
-                raise tag_ext.TagNotFound(tag=tag)
+        if not tag_obj.Tag.delete_objects(context,
+            tag=tag, standard_attr_id=res.standard_attr_id):
+            raise tag_ext.TagNotFound(tag=tag)
 
-    # support only _apply_dict_extend_functions supported resources
-    # at the moment.
-    for resource, model in resource_model_map.items():
-        common_db_mixin.CommonDbMixin.register_dict_extend_funcs(
-            resource, [_extend_tags_dict])
-        common_db_mixin.CommonDbMixin.register_model_query_hook(
-            model, "tag", None, None,
-            functools.partial(tag_model.apply_tag_filters, model))
+    def __new__(cls, *args, **kwargs):
+        inst = super(TagPlugin, cls).__new__(cls, *args, **kwargs)
+        inst._filter_methods = []  # prevent GC of our partial functions
+        for resource, model in resource_model_map.items():
+            resource_extend.register_funcs(
+                resource, [_extend_tags_dict])
+            method = functools.partial(tag_methods.apply_tag_filters, model)
+            inst._filter_methods.append(method)
+            model_query.register_hook(
+                model, "tag", None, None, method)
+        return inst

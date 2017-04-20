@@ -14,6 +14,10 @@
 #    under the License.
 
 import mock
+from neutron_lib.api.definitions import provider_net
+from neutron_lib import constants
+from neutron_lib import context
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_utils import uuidutils
 from webob import exc as web_exc
@@ -21,9 +25,7 @@ import webtest
 
 from neutron.api import extensions
 from neutron.api.v2 import router
-from neutron import context
 from neutron.extensions import providernet as pnet
-from neutron import manager
 from neutron import quota
 from neutron.tests import tools
 from neutron.tests.unit.api import test_extensions
@@ -43,7 +45,7 @@ class ProviderExtensionManager(object):
         return []
 
     def get_extended_resources(self, version):
-        return pnet.get_extended_resources(version)
+        return pnet.Providernet().get_extended_resources(version)
 
 
 class ProvidernetExtensionTestCase(testlib_api.WebTestCase):
@@ -60,17 +62,15 @@ class ProvidernetExtensionTestCase(testlib_api.WebTestCase):
         self.useFixture(tools.AttributeMapMemento())
 
         # Update the plugin and extensions path
-        self.setup_coreplugin(plugin)
-        cfg.CONF.set_override('allow_pagination', True)
-        cfg.CONF.set_override('allow_sorting', True)
+        self.setup_coreplugin(plugin, load_plugins=False)
         self._plugin_patcher = mock.patch(plugin, autospec=True)
         self.plugin = self._plugin_patcher.start()
         # Ensure Quota checks never fail because of mock
         instance = self.plugin.return_value
         instance.get_networks_count.return_value = 1
-        # Instantiate mock plugin and enable the 'provider' extension
-        manager.NeutronManager.get_plugin().supported_extension_aliases = (
-            ["provider"])
+        # Register mock plugin and enable the 'provider' extension
+        instance.supported_extension_aliases = ["provider"]
+        directory.add_plugin(constants.CORE, instance)
         ext_mgr = ProviderExtensionManager()
         self.ext_mdw = test_extensions.setup_extensions_middleware(ext_mgr)
         self.addCleanup(self._plugin_patcher.stop)
@@ -82,9 +82,9 @@ class ProvidernetExtensionTestCase(testlib_api.WebTestCase):
 
     def _prepare_net_data(self):
         return {'name': 'net1',
-                pnet.NETWORK_TYPE: 'sometype',
-                pnet.PHYSICAL_NETWORK: 'physnet',
-                pnet.SEGMENTATION_ID: 666}
+                provider_net.NETWORK_TYPE: 'sometype',
+                provider_net.PHYSICAL_NETWORK: 'physnet',
+                provider_net.SEGMENTATION_ID: 666}
 
     def _put_network_with_provider_attrs(self, ctx, expect_errors=False):
         data = self._prepare_net_data()
@@ -141,7 +141,7 @@ class ProvidernetExtensionTestCase(testlib_api.WebTestCase):
     def test_network_create_with_bad_provider_attrs_400(self):
         ctx = context.get_admin_context()
         ctx.tenant_id = 'an_admin'
-        bad_data = {pnet.SEGMENTATION_ID: "abc"}
+        bad_data = {provider_net.SEGMENTATION_ID: "abc"}
         res, _1 = self._post_network_with_bad_provider_attrs(ctx, bad_data,
                                                              True)
         self.assertEqual(web_exc.HTTPBadRequest.code, res.status_int)

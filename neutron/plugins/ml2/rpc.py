@@ -13,8 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as n_const
 from neutron_lib import exceptions
+from neutron_lib.plugins import directory
 from oslo_log import log
 import oslo_messaging
 from sqlalchemy.orm import exc
@@ -27,9 +29,7 @@ from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.db import l3_hamode_db
 from neutron.db import provisioning_blocks
-from neutron.extensions import portbindings
 from neutron.extensions import portsecurity as psec
-from neutron import manager
 from neutron.plugins.ml2 import db as ml2_db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import type_tunnel
@@ -70,7 +70,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                   "%(agent_id)s with host %(host)s",
                   {'device': device, 'agent_id': agent_id, 'host': host})
 
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         port_id = plugin._device_to_port_id(rpc_context, device)
         port_context = plugin.get_bound_port_context(rpc_context,
                                                      port_id,
@@ -127,8 +127,6 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                  'qos_policy_id': port.get(qos_consts.QOS_POLICY_ID),
                  'network_qos_policy_id': network_qos_policy_id,
                  'profile': port[portbindings.PROFILE]}
-        if 'security_groups' in port:
-            entry['security_groups'] = port['security_groups']
         LOG.debug("Returning: %s", entry)
         return entry
 
@@ -175,7 +173,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
         LOG.debug("Device %(device)s no longer exists at agent "
                   "%(agent_id)s",
                   {'device': device, 'agent_id': agent_id})
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         port_id = plugin._device_to_port_id(rpc_context, device)
         port_exists = True
         if (host and not plugin.port_bound_to_host(rpc_context,
@@ -206,7 +204,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
         host = kwargs.get('host')
         LOG.debug("Device %(device)s up at agent %(agent_id)s",
                   {'device': device, 'agent_id': agent_id})
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         port_id = plugin._device_to_port_id(rpc_context, device)
         port = plugin.port_bound_to_host(rpc_context, port_id, host)
         if host and not port:
@@ -232,7 +230,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                                    n_const.PORT_STATUS_ACTIVE, host, port=port)
 
     def update_port_status_to_active(self, port, rpc_context, port_id, host):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         if port and port['device_owner'] == n_const.DEVICE_OWNER_DVR_INTERFACE:
             # NOTE(kevinbenton): we have to special case DVR ports because of
             # the special multi-binding status update logic they have that
@@ -244,7 +242,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
             # agent did not provide a full one (e.g. Linux Bridge case). We
             # need to look up the full one before calling provisioning_complete
             if not port:
-                port = ml2_db.get_port(rpc_context.session, port_id)
+                port = ml2_db.get_port(rpc_context, port_id)
             if not port:
                 # port doesn't exist, no need to add a provisioning block
                 return
@@ -254,16 +252,17 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
 
     def notify_ha_port_status(self, port_id, rpc_context,
                               status, host, port=None):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         l2pop_driver = plugin.mechanism_manager.mech_drivers.get(
                 'l2population')
         if not l2pop_driver:
             return
         if not port:
-            port = ml2_db.get_port(rpc_context.session, port_id)
+            port = ml2_db.get_port(rpc_context, port_id)
             if not port:
                 return
-        is_ha_port = l3_hamode_db.is_ha_router_port(port['device_owner'],
+        is_ha_port = l3_hamode_db.is_ha_router_port(rpc_context,
+                                                    port['device_owner'],
                                                     port['device_id'])
         if is_ha_port:
             port_context = plugin.get_bound_port_context(

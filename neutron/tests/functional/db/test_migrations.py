@@ -23,7 +23,7 @@ from oslo_db.sqlalchemy import test_migrations
 from oslotest import base as oslotest_base
 import six
 import sqlalchemy
-from sqlalchemy import event
+from sqlalchemy import event  # noqa
 from sqlalchemy.sql import ddl as sqla_ddl
 import subprocess
 
@@ -319,6 +319,22 @@ class _TestModelsMigrations(test_migrations.ModelsMigrationsSync):
     def test_has_offline_migrations_all_heads_upgraded(self):
         self._test_has_offline_migrations('heads', False)
 
+    # NOTE(ihrachys): if this test fails for you, it probably means that you
+    # attempt to add an unsafe contract migration script, that is in
+    # contradiction to blueprint online-upgrades
+    # TODO(ihrachys): revisit later in Pike+ where some contract scripts may be
+    # safe again
+    def test_forbid_offline_migrations_starting_newton(self):
+        engine = self.get_engine()
+        cfg.CONF.set_override('connection', engine.url, group='database')
+        # the following revisions are Newton heads
+        for revision in ('5cd92597d11d', '5c85685d616d'):
+            migration.do_alembic_command(
+                self.alembic_config, 'upgrade', revision)
+        self.assertFalse(migration.has_offline_migrations(
+            self.alembic_config, 'unused'),
+            msg='Offline contract migration scripts are forbidden for Ocata+')
+
 
 class TestModelsMigrationsMysql(testlib_api.MySQLTestCaseMixin,
                                 _TestModelsMigrations,
@@ -334,8 +350,8 @@ class TestModelsMigrationsMysql(testlib_api.MySQLTestCaseMixin,
             insp = sqlalchemy.engine.reflection.Inspector.from_engine(engine)
             # Test that table creation on MySQL only builds InnoDB tables
             tables = insp.get_table_names()
-            self.assertTrue(len(tables) > 0,
-                            "No tables found. Wrong schema?")
+            self.assertGreater(len(tables), 0,
+                               "No tables found. Wrong schema?")
             res = [table for table in tables if
                    insp.get_table_options(table)['mysql_engine'] != 'InnoDB'
                    and table != 'alembic_version']
@@ -475,7 +491,7 @@ class TestWalkDowngrade(oslotest_base.BaseTestCase):
 
 
 class _TestWalkMigrations(object):
-    '''This will add framework for testing schema migarations
+    '''This will add framework for testing schema migration
        for different backends.
 
     '''

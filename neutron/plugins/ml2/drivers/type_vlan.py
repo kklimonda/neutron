@@ -15,15 +15,16 @@
 
 import sys
 
-from neutron_lib.db import model_base
+from neutron_lib import context
 from neutron_lib import exceptions as exc
 from oslo_config import cfg
 from oslo_log import log
 from six import moves
-import sqlalchemy as sa
 
 from neutron._i18n import _, _LE, _LI, _LW
+from neutron.conf.plugins.ml2.drivers import driver_type
 from neutron.db import api as db_api
+from neutron.db.models.plugins.ml2 import vlanallocation as vlan_alloc_model
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
 from neutron.plugins.ml2 import driver_api as api
@@ -31,44 +32,7 @@ from neutron.plugins.ml2.drivers import helpers
 
 LOG = log.getLogger(__name__)
 
-vlan_opts = [
-    cfg.ListOpt('network_vlan_ranges',
-                default=[],
-                help=_("List of <physical_network>:<vlan_min>:<vlan_max> or "
-                       "<physical_network> specifying physical_network names "
-                       "usable for VLAN provider and tenant networks, as "
-                       "well as ranges of VLAN tags on each available for "
-                       "allocation to tenant networks."))
-]
-
-cfg.CONF.register_opts(vlan_opts, "ml2_type_vlan")
-
-
-class VlanAllocation(model_base.BASEV2):
-    """Represent allocation state of a vlan_id on a physical network.
-
-    If allocated is False, the vlan_id on the physical_network is
-    available for allocation to a tenant network. If allocated is
-    True, the vlan_id on the physical_network is in use, either as a
-    tenant or provider network.
-
-    When an allocation is released, if the vlan_id for the
-    physical_network is inside the pool described by
-    VlanTypeDriver.network_vlan_ranges, then allocated is set to
-    False. If it is outside the pool, the record is deleted.
-    """
-
-    __tablename__ = 'ml2_vlan_allocations'
-    __table_args__ = (
-        sa.Index('ix_ml2_vlan_allocations_physical_network_allocated',
-                 'physical_network', 'allocated'),
-        model_base.BASEV2.__table_args__,)
-
-    physical_network = sa.Column(sa.String(64), nullable=False,
-                                 primary_key=True)
-    vlan_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
-                        autoincrement=False)
-    allocated = sa.Column(sa.Boolean, nullable=False)
+driver_type.register_ml2_drivers_vlan_opts()
 
 
 class VlanTypeDriver(helpers.SegmentTypeDriver):
@@ -83,7 +47,7 @@ class VlanTypeDriver(helpers.SegmentTypeDriver):
     """
 
     def __init__(self):
-        super(VlanTypeDriver, self).__init__(VlanAllocation)
+        super(VlanTypeDriver, self).__init__(vlan_alloc_model.VlanAllocation)
         self._parse_network_vlan_ranges()
 
     def _parse_network_vlan_ranges(self):
@@ -96,13 +60,13 @@ class VlanTypeDriver(helpers.SegmentTypeDriver):
             sys.exit(1)
         LOG.info(_LI("Network VLAN ranges: %s"), self.network_vlan_ranges)
 
+    @db_api.retry_db_errors
     def _sync_vlan_allocations(self):
-        session = db_api.get_session()
-        with session.begin(subtransactions=True):
+        ctx = context.get_admin_context()
+        with db_api.context_manager.writer.using(ctx):
             # get existing allocations for all physical networks
             allocations = dict()
-            allocs = (session.query(VlanAllocation).
-                      with_lockmode('update'))
+            allocs = ctx.session.query(vlan_alloc_model.VlanAllocation)
             for alloc in allocs:
                 if alloc.physical_network not in allocations:
                     allocations[alloc.physical_network] = set()
@@ -134,15 +98,28 @@ class VlanTypeDriver(helpers.SegmentTypeDriver):
                                           {'vlan_id': alloc.vlan_id,
                                            'physical_network':
                                            physical_network})
-                                session.delete(alloc)
+                                # This UPDATE WHERE statement blocks anyone
+                                # from concurrently changing the allocation
+                                # values to True while our transaction is
+                                # open so we don't accidentally delete
+                                # allocated segments. If someone has already
+                                # allocated, count will return 0 so we don't
+                                # delete.
+                                count = allocs.filter_by(
+                                    allocated=False, vlan_id=alloc.vlan_id,
+                                    physical_network=physical_network
+                                ).update({"allocated": False})
+                                if count:
+                                    ctx.session.delete(alloc)
                     del allocations[physical_network]
 
                 # add missing allocatable vlans to table
                 for vlan_id in sorted(vlan_ids):
-                    alloc = VlanAllocation(physical_network=physical_network,
+                    alloc = vlan_alloc_model.VlanAllocation(
+                                           physical_network=physical_network,
                                            vlan_id=vlan_id,
                                            allocated=False)
-                    session.add(alloc)
+                    ctx.session.add(alloc)
 
             # remove from table unallocated vlans for any unconfigured
             # physical networks
@@ -154,7 +131,7 @@ class VlanTypeDriver(helpers.SegmentTypeDriver):
                                   {'vlan_id': alloc.vlan_id,
                                    'physical_network':
                                    alloc.physical_network})
-                        session.delete(alloc)
+                        ctx.session.delete(alloc)
 
     def get_type(self):
         return p_const.TYPE_VLAN
@@ -172,7 +149,7 @@ class VlanTypeDriver(helpers.SegmentTypeDriver):
         if physical_network:
             if physical_network not in self.network_vlan_ranges:
                 msg = (_("physical_network '%s' unknown "
-                         " for VLAN provider network") % physical_network)
+                         "for VLAN provider network") % physical_network)
                 raise exc.InvalidInput(error_message=msg)
             if segmentation_id:
                 if not plugin_utils.is_valid_vlan_tag(segmentation_id):
@@ -193,7 +170,7 @@ class VlanTypeDriver(helpers.SegmentTypeDriver):
                 msg = _("%s prohibited for VLAN provider network") % key
                 raise exc.InvalidInput(error_message=msg)
 
-    def reserve_provider_segment(self, session, segment):
+    def reserve_provider_segment(self, context, segment):
         filters = {}
         physical_network = segment.get(api.PHYSICAL_NETWORK)
         if physical_network is not None:
@@ -204,12 +181,12 @@ class VlanTypeDriver(helpers.SegmentTypeDriver):
 
         if self.is_partial_segment(segment):
             alloc = self.allocate_partially_specified_segment(
-                session, **filters)
+                context, **filters)
             if not alloc:
                 raise exc.NoNetworkAvailable()
         else:
             alloc = self.allocate_fully_specified_segment(
-                session, **filters)
+                context, **filters)
             if not alloc:
                 raise exc.VlanIdInUse(**filters)
 
@@ -218,8 +195,8 @@ class VlanTypeDriver(helpers.SegmentTypeDriver):
                 api.SEGMENTATION_ID: alloc.vlan_id,
                 api.MTU: self.get_mtu(alloc.physical_network)}
 
-    def allocate_tenant_segment(self, session):
-        alloc = self.allocate_partially_specified_segment(session)
+    def allocate_tenant_segment(self, context):
+        alloc = self.allocate_partially_specified_segment(context)
         if not alloc:
             return
         return {api.NETWORK_TYPE: p_const.TYPE_VLAN,
@@ -227,15 +204,15 @@ class VlanTypeDriver(helpers.SegmentTypeDriver):
                 api.SEGMENTATION_ID: alloc.vlan_id,
                 api.MTU: self.get_mtu(alloc.physical_network)}
 
-    def release_segment(self, session, segment):
+    def release_segment(self, context, segment):
         physical_network = segment[api.PHYSICAL_NETWORK]
         vlan_id = segment[api.SEGMENTATION_ID]
 
         ranges = self.network_vlan_ranges.get(physical_network, [])
         inside = any(lo <= vlan_id <= hi for lo, hi in ranges)
 
-        with session.begin(subtransactions=True):
-            query = (session.query(VlanAllocation).
+        with context.session.begin(subtransactions=True):
+            query = (context.session.query(vlan_alloc_model.VlanAllocation).
                      filter_by(physical_network=physical_network,
                                vlan_id=vlan_id))
             if inside:

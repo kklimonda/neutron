@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from neutron_lib import constants
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -26,7 +27,6 @@ from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
-from neutron import manager
 
 
 LOG = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ class DhcpAgentNotifyAPI(object):
     @property
     def plugin(self):
         if self._plugin is None:
-            self._plugin = manager.NeutronManager.get_plugin()
+            self._plugin = directory.get_plugin()
         return self._plugin
 
     def _schedule_network(self, context, network, existing_agents):
@@ -166,8 +166,7 @@ class DhcpAgentNotifyAPI(object):
             if 'subnet' in payload and payload['subnet'].get('segment_id'):
                 # if segment_id exists then the segment service plugin
                 # must be loaded
-                nm = manager.NeutronManager
-                segment_plugin = nm.get_service_plugins()['segments']
+                segment_plugin = directory.get_plugin('segments')
                 segment = segment_plugin.get_segment(
                     context, payload['subnet']['segment_id'])
                 network['candidate_hosts'] = segment['hosts']
@@ -242,7 +241,27 @@ class DhcpAgentNotifyAPI(object):
         method_name = '.'.join((resource, action, 'end'))
         payload = kwargs[resource]
         data = {resource: payload}
+        if resource == resources.PORT:
+            if self._only_status_changed(kwargs.get('original_port'),
+                                         kwargs.get('port')):
+                # don't waste time updating the DHCP agent for status updates
+                return
         self.notify(context, data, method_name)
+
+    def _only_status_changed(self, orig, new):
+        # a status change will manifest as a bumped revision number, a new
+        # updated_at timestamp, and a new status. If that's all that changed,
+        # return True, else False
+        if not orig or not new:
+            return False
+        if set(orig.keys()) != set(new.keys()):
+            return False
+        for k in orig.keys():
+            if k in ('status', 'updated_at', 'revision_number'):
+                continue
+            if orig[k] != new[k]:
+                return False
+        return True
 
     def _send_dhcp_notification(self, resource, event, trigger, context=None,
                                 data=None, method_name=None, collection=None,

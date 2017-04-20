@@ -20,6 +20,7 @@ import mock
 from oslo_config import cfg
 import oslo_messaging as messaging
 from oslo_messaging import conffixture as messaging_conffixture
+from oslo_messaging.rpc import dispatcher
 import testtools
 
 from neutron.common import rpc
@@ -74,11 +75,9 @@ class TestRPC(base.DietTestCase):
         rpc.init(conf)
 
         mock_exmods.assert_called_once_with()
-        mock_trans.assert_called_once_with(conf, allowed_remote_exmods=['foo'],
-                                           aliases=rpc.TRANSPORT_ALIASES)
+        mock_trans.assert_called_once_with(conf, allowed_remote_exmods=['foo'])
         mock_noti_trans.assert_called_once_with(conf,
-                                                allowed_remote_exmods=['foo'],
-                                                aliases=rpc.TRANSPORT_ALIASES)
+                                                allowed_remote_exmods=['foo'])
         mock_not.assert_called_once_with(noti_transport,
                                          serializer=serializer)
         self.assertIsNotNone(rpc.TRANSPORT)
@@ -169,8 +168,10 @@ class TestRPC(base.DietTestCase):
         server = rpc.get_server(tgt, ends, serializer='foo')
 
         mock_ser.assert_called_once_with('foo')
+        access_policy = dispatcher.LegacyRPCAccessPolicy
         mock_get.assert_called_once_with(rpc.TRANSPORT, tgt, ends,
-                                         'eventlet', ser)
+                                         'eventlet', ser,
+                                         access_policy=access_policy)
         self.assertEqual('server', server)
 
     def test_get_notifier(self):
@@ -233,46 +234,41 @@ class TestRequestContextSerializer(base.DietTestCase):
 
         context.to_dict.assert_called_once_with()
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context(self, m, n):
+    def test_deserialize_context(self):
         context_dict = {'foo': 'bar',
                         'user_id': 1,
-                        'tenant_id': 1}
+                        'tenant_id': 1,
+                        'is_admin': True}
 
         c = self.ser.deserialize_context(context_dict)
 
         self.assertEqual(1, c.user_id)
         self.assertEqual(1, c.project_id)
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context_no_user_id(self, m, n):
+    def test_deserialize_context_no_user_id(self):
         context_dict = {'foo': 'bar',
                         'user': 1,
-                        'tenant_id': 1}
+                        'tenant_id': 1,
+                        'is_admin': True}
 
         c = self.ser.deserialize_context(context_dict)
 
         self.assertEqual(1, c.user_id)
         self.assertEqual(1, c.project_id)
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context_no_tenant_id(self, m, n):
+    def test_deserialize_context_no_tenant_id(self):
         context_dict = {'foo': 'bar',
                         'user_id': 1,
-                        'project_id': 1}
+                        'project_id': 1,
+                        'is_admin': True}
 
         c = self.ser.deserialize_context(context_dict)
 
         self.assertEqual(1, c.user_id)
         self.assertEqual(1, c.project_id)
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context_no_ids(self, m, n):
-        context_dict = {'foo': 'bar'}
+    def test_deserialize_context_no_ids(self):
+        context_dict = {'foo': 'bar', 'is_admin': True}
 
         c = self.ser.deserialize_context(context_dict)
 
@@ -436,6 +432,26 @@ class TimeoutTestCase(base.DietTestCase):
         timeouts = [call[1]['timeout']
                     for call in rpc.TRANSPORT._send.call_args_list]
         self.assertEqual([1, 2], timeouts)
+
+    def test_set_max_timeout_caps_all_methods(self):
+        rpc.TRANSPORT.conf.rpc_response_timeout = 300
+        rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'] = 100
+        rpc.BackingOffClient.set_max_timeout(50)
+        # both explicitly tracked
+        self.assertEqual(50, rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'])
+        # as well as new methods
+        self.assertEqual(50, rpc._ContextWrapper._METHOD_TIMEOUTS['method_2'])
+
+    def test_set_max_timeout_retains_lower_timeouts(self):
+        rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'] = 10
+        rpc.BackingOffClient.set_max_timeout(50)
+        self.assertEqual(10, rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'])
+
+    def test_set_max_timeout_overrides_default_timeout(self):
+        rpc.TRANSPORT.conf.rpc_response_timeout = 10
+        self.assertEqual(10 * 10, rpc._ContextWrapper.get_max_timeout())
+        rpc._ContextWrapper.set_max_timeout(10)
+        self.assertEqual(10, rpc._ContextWrapper.get_max_timeout())
 
 
 class TestConnection(base.DietTestCase):

@@ -18,6 +18,7 @@ import os
 import sys
 
 from neutron_lib import constants
+from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -25,15 +26,13 @@ from oslo_service import service
 
 from neutron._i18n import _LE, _LI
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import utils
-from neutron.agent import securitygroups_rpc as sg_rpc
+from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
 from neutron.common import config as common_config
 from neutron.common import topics
-from neutron.common import utils as n_utils
+from neutron.conf.plugins.ml2.drivers import macvtap as config
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
 from neutron.plugins.ml2.drivers.agent import _common_agent as ca
-from neutron.plugins.ml2.drivers.macvtap.agent import config  # noqa
 from neutron.plugins.ml2.drivers.macvtap import macvtap_common
 
 LOG = logging.getLogger(__name__)
@@ -41,6 +40,8 @@ LOG = logging.getLogger(__name__)
 MACVTAP_AGENT_BINARY = "neutron-macvtap-agent"
 MACVTAP_FS = "/sys/class/net/"
 EXTENSION_DRIVER_TYPE = 'macvtap'
+
+config.register_macvtap_opts()
 
 
 class MacvtapRPCCallBack(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
@@ -114,7 +115,7 @@ class MacvtapManager(amb.CommonAgentManagerBase):
     def get_agent_id(self):
         devices = ip_lib.IPWrapper().get_devices(True)
         if devices:
-            mac = utils.get_interface_mac(devices[0].name)
+            mac = ip_lib.get_device_mac(devices[0].name)
             return 'macvtap%s' % mac.replace(":", "")
         else:
             LOG.error(_LE("Unable to obtain MAC address for unique ID. "
@@ -133,7 +134,7 @@ class MacvtapManager(amb.CommonAgentManagerBase):
         self.mac_device_name_mappings = dict()
         for device_name in all_device_names:
             if device_name.startswith(constants.MACVTAP_DEVICE_PREFIX):
-                mac = utils.get_interface_mac(device_name)
+                mac = ip_lib.get_device_mac(device_name)
                 self.mac_device_name_mappings[mac] = device_name
                 devices.add(mac)
         return devices
@@ -173,8 +174,13 @@ class MacvtapManager(amb.CommonAgentManagerBase):
 
 
 def parse_interface_mappings():
+    if not cfg.CONF.macvtap.physical_interface_mappings:
+        LOG.error(_LE("No physical_interface_mappings provided, but at least "
+                      "one mapping is required. Agent terminated!"))
+        sys.exit(1)
+
     try:
-        interface_mappings = n_utils.parse_mappings(
+        interface_mappings = helpers.parse_mappings(
             cfg.CONF.macvtap.physical_interface_mappings)
         LOG.info(_LI("Interface mappings: %s"), interface_mappings)
         return interface_mappings

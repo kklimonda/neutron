@@ -13,11 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import abc
 import collections
 import imp
 import os
 
+from neutron_lib.api import extensions as api_extensions
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_middleware import base
@@ -28,8 +29,7 @@ import webob.exc
 
 from neutron._i18n import _, _LE, _LI, _LW
 from neutron.common import exceptions
-import neutron.extensions
-from neutron import manager
+from neutron import extensions as core_extensions
 from neutron.plugins.common import constants as const
 from neutron.services import provider_configuration
 from neutron import wsgi
@@ -57,162 +57,6 @@ def register_custom_supported_check(alias, f, plugin_agnostic=False):
     EXTENSION_SUPPORTED_CHECK_MAP[alias] = f
     if plugin_agnostic:
         _PLUGIN_AGNOSTIC_EXTENSIONS.add(alias)
-
-
-@six.add_metaclass(abc.ABCMeta)
-class PluginInterface(object):
-
-    @classmethod
-    def __subclasshook__(cls, klass):
-        """Checking plugin class.
-
-        The __subclasshook__ method is a class method
-        that will be called every time a class is tested
-        using issubclass(klass, PluginInterface).
-        In that case, it will check that every method
-        marked with the abstractmethod decorator is
-        provided by the plugin class.
-        """
-
-        if not cls.__abstractmethods__:
-            return NotImplemented
-
-        for method in cls.__abstractmethods__:
-            if any(method in base.__dict__ for base in klass.__mro__):
-                continue
-            return NotImplemented
-        return True
-
-
-@six.add_metaclass(abc.ABCMeta)
-class ExtensionDescriptor(object):
-    """Base class that defines the contract for extensions."""
-
-    @abc.abstractmethod
-    def get_name(self):
-        """The name of the extension.
-
-        e.g. 'Fox In Socks'
-        """
-
-    @abc.abstractmethod
-    def get_alias(self):
-        """The alias for the extension.
-
-        e.g. 'FOXNSOX'
-        """
-
-    @abc.abstractmethod
-    def get_description(self):
-        """Friendly description for the extension.
-
-        e.g. 'The Fox In Socks Extension'
-        """
-
-    @abc.abstractmethod
-    def get_updated(self):
-        """The timestamp when the extension was last updated.
-
-        e.g. '2011-01-22T13:25:27-06:00'
-        """
-        # NOTE(justinsb): Not sure of the purpose of this is, vs the XML NS
-
-    def get_resources(self):
-        """List of extensions.ResourceExtension extension objects.
-
-        Resources define new nouns, and are accessible through URLs.
-        """
-        resources = []
-        return resources
-
-    def get_actions(self):
-        """List of extensions.ActionExtension extension objects.
-
-        Actions are verbs callable from the API.
-        """
-        actions = []
-        return actions
-
-    def get_request_extensions(self):
-        """List of extensions.RequestException extension objects.
-
-        Request extensions are used to handle custom request data.
-        """
-        request_exts = []
-        return request_exts
-
-    def get_extended_resources(self, version):
-        """Retrieve extended resources or attributes for core resources.
-
-        Extended attributes are implemented by a core plugin similarly
-        to the attributes defined in the core, and can appear in
-        request and response messages. Their names are scoped with the
-        extension's prefix. The core API version is passed to this
-        function, which must return a
-        map[<resource_name>][<attribute_name>][<attribute_property>]
-        specifying the extended resource attribute properties required
-        by that API version.
-
-        Extension can add resources and their attr definitions too.
-        The returned map can be integrated into RESOURCE_ATTRIBUTE_MAP.
-        """
-        return {}
-
-    def get_plugin_interface(self):
-        """Returns an abstract class which defines contract for the plugin.
-
-        The abstract class should inherit from extensions.PluginInterface,
-        Methods in this abstract class  should be decorated as abstractmethod
-        """
-        return None
-
-    def get_required_extensions(self):
-        """Returns a list of extensions to be processed before this one."""
-        return []
-
-    def get_optional_extensions(self):
-        """Returns a list of extensions to be processed before this one.
-
-        Unlike get_required_extensions. This will not fail the loading of
-        the extension if one of these extensions is not present. This is
-        useful for an extension that extends multiple resources across
-        other extensions that should still work for the remaining extensions
-        when one is missing.
-        """
-        return []
-
-    def update_attributes_map(self, extended_attributes,
-                              extension_attrs_map=None):
-        """Update attributes map for this extension.
-
-        This is default method for extending an extension's attributes map.
-        An extension can use this method and supplying its own resource
-        attribute map in extension_attrs_map argument to extend all its
-        attributes that needs to be extended.
-
-        If an extension does not implement update_attributes_map, the method
-        does nothing and just return.
-        """
-        if not extension_attrs_map:
-            return
-
-        for resource, attrs in six.iteritems(extension_attrs_map):
-            extended_attrs = extended_attributes.get(resource)
-            if extended_attrs:
-                attrs.update(extended_attrs)
-
-    def get_pecan_resources(self):
-        """List of PecanResourceExtension extension objects.
-
-        Resources define new nouns, and are accessible through URLs.
-        The controllers associated with each instance of
-        extensions.ResourceExtension should be a subclass of
-        neutron.pecan_wsgi.controllers.utils.NeutronPecanController.
-
-        If a resource is defined in both get_resources and get_pecan_resources,
-        the resource defined in get_pecan_resources will take precedence.
-        """
-        return []
 
 
 class ActionExtensionController(wsgi.Controller):
@@ -458,12 +302,6 @@ class ExtensionManager(object):
         """Returns a list of PecanResourceExtension objects."""
         resources = []
         for ext in self.extensions.values():
-            # TODO(blogan): this is being called because there are side effects
-            # that the get_resources method does, like registering plural
-            # mappings and quotas. The side effects that get_resources does
-            # should probably be moved to another extension method, but that
-            # should be done some other time.
-            ext.get_resources()
             resources.extend(ext.get_pecan_resources())
         return resources
 
@@ -561,7 +399,7 @@ class ExtensionManager(object):
         except AttributeError:
             LOG.exception(_LE("Exception loading extension"))
             return False
-        return isinstance(extension, ExtensionDescriptor)
+        return isinstance(extension, api_extensions.ExtensionDescriptor)
 
     def _load_all_extensions(self):
         """Load extensions from the configured path.
@@ -591,7 +429,7 @@ class ExtensionManager(object):
                 ext_path = os.path.join(path, f)
                 if file_ext.lower() == '.py' and not mod_name.startswith('_'):
                     mod = imp.load_source(mod_name, ext_path)
-                    ext_name = mod_name[0].upper() + mod_name[1:]
+                    ext_name = mod_name.capitalize()
                     new_ext_class = getattr(mod, ext_name, None)
                     if not new_ext_class:
                         LOG.warning(_LW('Did not find expected name '
@@ -646,9 +484,9 @@ class PluginAwareExtensionManager(ExtensionManager):
         alias = extension.get_alias()
         supports_extension = alias in self.get_supported_extension_aliases()
         if not supports_extension:
-            LOG.warning(_LW("Extension %s not supported by any of loaded "
-                            "plugins"),
-                        alias)
+            LOG.info(_LI("Extension %s not supported by any of loaded "
+                         "plugins"),
+                    alias)
         return supports_extension
 
     def _plugins_implement_interface(self, extension):
@@ -665,7 +503,7 @@ class PluginAwareExtensionManager(ExtensionManager):
     @classmethod
     def get_instance(cls):
         if cls._instance is None:
-            service_plugins = manager.NeutronManager.get_service_plugins()
+            service_plugins = directory.get_plugins()
             cls._instance = cls(get_extensions_path(service_plugins),
                                 service_plugins)
         return cls._instance
@@ -760,7 +598,7 @@ def get_extensions_path(service_plugins=None):
     paths = collections.OrderedDict()
 
     # Add Neutron core extensions
-    paths[neutron.extensions.__path__[0]] = 1
+    paths[core_extensions.__path__[0]] = 1
     if service_plugins:
         # Add Neutron *-aas extensions
         for plugin in service_plugins.values():

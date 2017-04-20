@@ -15,7 +15,10 @@
 
 from keystoneauth1 import loading as ks_loading
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib import exceptions as exc
+from neutron_lib.plugins import directory
+from novaclient import api_versions
 from novaclient import client as nova_client
 from novaclient import exceptions as nova_exceptions
 from oslo_config import cfg
@@ -27,8 +30,6 @@ from neutron._i18n import _LE, _LI, _LW
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron import context
-from neutron import manager
 from neutron.notifiers import batch_notifier
 
 
@@ -40,9 +41,10 @@ VIF_DELETED = 'network-vif-deleted'
 NEUTRON_NOVA_EVENT_STATUS_MAP = {constants.PORT_STATUS_ACTIVE: 'completed',
                                  constants.PORT_STATUS_ERROR: 'failed',
                                  constants.PORT_STATUS_DOWN: 'completed'}
-NOVA_API_VERSION = "2"
+NOVA_API_VERSION = "2.1"
 
 
+@registry.has_registry_receivers
 class Notifier(object):
 
     _instance = None
@@ -62,10 +64,11 @@ class Notifier(object):
             auth=auth)
 
         extensions = [
-            ext for ext in nova_client.discover_extensions(NOVA_API_VERSION)
+            ext for ext in nova_client.discover_extensions(NOVA_API_VERSION,
+                                                           only_contrib=True)
             if ext.name == "server_external_events"]
         self.nclient = nova_client.Client(
-            NOVA_API_VERSION,
+            api_versions.APIVersion(NOVA_API_VERSION),
             session=session,
             region_name=cfg.CONF.nova.region_name,
             endpoint_type=cfg.CONF.nova.endpoint_type,
@@ -73,21 +76,11 @@ class Notifier(object):
         self.batch_notifier = batch_notifier.BatchNotifier(
             cfg.CONF.send_events_interval, self.send_events)
 
-        # register callbacks for events pertaining resources affecting Nova
-        callback_resources = (
-            resources.FLOATING_IP,
-            resources.PORT,
-        )
-        for resource in callback_resources:
-            registry.subscribe(self._send_nova_notification,
-                               resource, events.BEFORE_RESPONSE)
-
     def _is_compute_port(self, port):
         try:
             if (port['device_id'] and uuidutils.is_uuid_like(port['device_id'])
-                    and port['device_owner'].startswith((
-                        constants.DEVICE_OWNER_COMPUTE_PREFIX,
-                        constants.DEVICE_OWNER_BAREMETAL_PREFIX))):
+                    and port['device_owner'].startswith(
+                        constants.DEVICE_OWNER_COMPUTE_PREFIX)):
                 return True
         except (KeyError, AttributeError):
             pass
@@ -102,15 +95,8 @@ class Notifier(object):
                 'name': VIF_DELETED,
                 'tag': port['id']}
 
-    @property
-    def _plugin(self):
-        # NOTE(arosen): this cannot be set in __init__ currently since
-        # this class is initialized at the same time as NeutronManager()
-        # which is decorated with synchronized()
-        if not hasattr(self, '_plugin_ref'):
-            self._plugin_ref = manager.NeutronManager.get_plugin()
-        return self._plugin_ref
-
+    @registry.receives(resources.PORT, events.BEFORE_RESPONSE)
+    @registry.receives(resources.FLOATING_IP, events.BEFORE_RESPONSE)
     def _send_nova_notification(self, resource, event, trigger,
                                 action=None, original=None, data=None,
                                 **kwargs):
@@ -162,7 +148,7 @@ class Notifier(object):
 
             ctx = context.get_admin_context()
             try:
-                port = self._plugin.get_port(ctx, port_id)
+                port = directory.get_plugin().get_port(ctx, port_id)
             except exc.PortNotFound:
                 LOG.debug("Port %s was deleted, no need to send any "
                           "notification", port_id)

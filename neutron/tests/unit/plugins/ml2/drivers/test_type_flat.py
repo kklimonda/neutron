@@ -13,11 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import context
 from neutron_lib import exceptions as exc
 
 from neutron.common import exceptions as n_exc
-import neutron.db.api as db
-from neutron.db.models.plugins.ml2 import flatallocation as type_flat_model
+from neutron.objects.plugins.ml2 import flatallocation as flat_obj
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import config
 from neutron.plugins.ml2 import driver_api as api
@@ -27,21 +27,23 @@ from neutron.tests.unit import testlib_api
 
 
 FLAT_NETWORKS = ['flat_net1', 'flat_net2']
+CORE_PLUGIN = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
 
 
 class FlatTypeTest(testlib_api.SqlTestCase):
 
     def setUp(self):
         super(FlatTypeTest, self).setUp()
+        self.setup_coreplugin(CORE_PLUGIN)
         config.cfg.CONF.set_override('flat_networks', FLAT_NETWORKS,
                               group='ml2_type_flat')
         self.driver = type_flat.FlatTypeDriver()
-        self.session = db.get_session()
+        self.context = context.Context()
         self.driver.physnet_mtus = []
 
-    def _get_allocation(self, session, segment):
-        return session.query(type_flat_model.FlatAllocation).filter_by(
-            physical_network=segment[api.PHYSICAL_NETWORK]).first()
+    def _get_allocation(self, context, segment):
+        return flat_obj.FlatAllocation.get_object(
+            context, physical_network=segment[api.PHYSICAL_NETWORK])
 
     def test_is_partial_segment(self):
         segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
@@ -100,28 +102,28 @@ class FlatTypeTest(testlib_api.SqlTestCase):
     def test_reserve_provider_segment(self):
         segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
                    api.PHYSICAL_NETWORK: 'flat_net1'}
-        observed = self.driver.reserve_provider_segment(self.session, segment)
-        alloc = self._get_allocation(self.session, observed)
+        observed = self.driver.reserve_provider_segment(self.context, segment)
+        alloc = self._get_allocation(self.context, observed)
         self.assertEqual(segment[api.PHYSICAL_NETWORK], alloc.physical_network)
 
     def test_release_segment(self):
         segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
                    api.PHYSICAL_NETWORK: 'flat_net1'}
-        self.driver.reserve_provider_segment(self.session, segment)
-        self.driver.release_segment(self.session, segment)
-        alloc = self._get_allocation(self.session, segment)
+        self.driver.reserve_provider_segment(self.context, segment)
+        self.driver.release_segment(self.context, segment)
+        alloc = self._get_allocation(self.context, segment)
         self.assertIsNone(alloc)
 
     def test_reserve_provider_segment_already_reserved(self):
         segment = {api.NETWORK_TYPE: p_const.TYPE_FLAT,
                    api.PHYSICAL_NETWORK: 'flat_net1'}
-        self.driver.reserve_provider_segment(self.session, segment)
+        self.driver.reserve_provider_segment(self.context, segment)
         self.assertRaises(n_exc.FlatNetworkInUse,
                           self.driver.reserve_provider_segment,
-                          self.session, segment)
+                          self.context, segment)
 
     def test_allocate_tenant_segment(self):
-        observed = self.driver.allocate_tenant_segment(self.session)
+        observed = self.driver.allocate_tenant_segment(self.context)
         self.assertIsNone(observed)
 
     def test_get_mtu(self):

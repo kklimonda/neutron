@@ -10,23 +10,23 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import uuid
-
 import mock
 from neutron_lib import constants as n_const
+from neutron_lib import context
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_policy import policy as oslo_policy
 from oslo_serialization import jsonutils
+from oslo_utils import uuidutils
 import pecan
 from pecan import request
 
 from neutron.api import extensions
-from neutron import context
+from neutron.conf import quota as qconf
 from neutron import manager
 from neutron.pecan_wsgi.controllers import root as controllers
 from neutron.pecan_wsgi.controllers import utils as controller_utils
-from neutron.plugins.common import constants
 from neutron import policy
 from neutron.tests.common import helpers
 from neutron.tests.functional.pecan_wsgi import test_functional
@@ -56,7 +56,7 @@ class TestRootController(test_functional.PecanFunctionalTest):
     def setUp(self):
         super(TestRootController, self).setUp()
         self.setup_service_plugin()
-        self.plugin = manager.NeutronManager.get_plugin()
+        self.plugin = directory.get_plugin()
         self.ctx = context.get_admin_context()
 
     def setup_service_plugin(self):
@@ -81,11 +81,11 @@ class TestRootController(test_functional.PecanFunctionalTest):
             self.assertEqual(value, versions[0][attr])
 
     def test_methods(self):
-        self._test_method_returns_code('post')
-        self._test_method_returns_code('patch')
-        self._test_method_returns_code('delete')
-        self._test_method_returns_code('head')
-        self._test_method_returns_code('put')
+        self._test_method_returns_code('post', 405)
+        self._test_method_returns_code('patch', 405)
+        self._test_method_returns_code('delete', 405)
+        self._test_method_returns_code('head', 405)
+        self._test_method_returns_code('put', 405)
 
 
 class TestV2Controller(TestRootController):
@@ -146,12 +146,12 @@ class TestExtensionsController(TestRootController):
         self.assertEqual(test_alias, json_body['extension']['alias'])
 
     def test_methods(self):
-        self._test_method_returns_code('post', 405)
-        self._test_method_returns_code('put', 405)
-        self._test_method_returns_code('patch', 405)
-        self._test_method_returns_code('delete', 405)
-        self._test_method_returns_code('head', 405)
-        self._test_method_returns_code('delete', 405)
+        self._test_method_returns_code('post', 404)
+        self._test_method_returns_code('put', 404)
+        self._test_method_returns_code('patch', 404)
+        self._test_method_returns_code('delete', 404)
+        self._test_method_returns_code('head', 404)
+        self._test_method_returns_code('delete', 404)
 
 
 class TestQuotasController(test_functional.PecanFunctionalTest):
@@ -159,9 +159,9 @@ class TestQuotasController(test_functional.PecanFunctionalTest):
 
     base_url = '/v2.0/quotas'
     default_expected_limits = {
-        'network': 10,
-        'port': 50,
-        'subnet': 10}
+        'network': qconf.DEFAULT_QUOTA_NETWORK,
+        'port': qconf.DEFAULT_QUOTA_PORT,
+        'subnet': qconf.DEFAULT_QUOTA_SUBNET}
 
     def _verify_limits(self, response, limits):
         for resource, limit in limits.items():
@@ -229,11 +229,64 @@ class TestQuotasController(test_functional.PecanFunctionalTest):
         response = self.app.delete(url, headers={'X-Project-Id': 'admin',
                                                  'X-Roles': 'admin'})
         self.assertEqual(204, response.status_int)
+        self.assertFalse(response.body)
         # As DELETE does not return a body we need another GET
         response = self.app.get(url, headers={'X-Project-Id': 'foo'})
         self.assertEqual(200, response.status_int)
         json_body = jsonutils.loads(response.body)
         self._verify_default_limits(json_body)
+
+    def test_update_list_delete(self):
+        # PUT and DELETE actions are in the same test as a meaningful DELETE
+        # test would require a put anyway
+        url = '%s/foo.json' % self.base_url
+        response = self.app.put_json(url,
+                                     params={'quota': {'network': 99}},
+                                     headers={'X-Project-Id': 'admin',
+                                              'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        json_body = jsonutils.loads(response.body)
+        self._verify_after_update(json_body, {'network': 99})
+
+        response = self.app.get(self.base_url,
+                                headers={'X-Project-Id': 'admin',
+                                         'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        json_body = jsonutils.loads(response.body)
+        found = False
+        for qs in json_body['quotas']:
+            if qs['tenant_id'] == 'foo':
+                found = True
+        self.assertTrue(found)
+
+        response = self.app.delete(url, headers={'X-Project-Id': 'admin',
+                                                 'X-Roles': 'admin'})
+        self.assertEqual(204, response.status_int)
+        self.assertFalse(response.body)
+        response = self.app.get(self.base_url,
+                                headers={'X-Project-Id': 'admin',
+                                         'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        json_body = jsonutils.loads(response.body)
+        for qs in json_body['quotas']:
+            self.assertNotEqual('foo', qs['tenant_id'])
+
+    def test_quotas_get_defaults(self):
+        response = self.app.get('%s/foo/default.json' % self.base_url,
+                                headers={'X-Project-Id': 'admin',
+                                         'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        # As quota limits have not been updated, expect default values
+        json_body = jsonutils.loads(response.body)
+        self._verify_default_limits(json_body)
+
+    def test_get_tenant_info(self):
+        response = self.app.get('%s/tenant.json' % self.base_url,
+                                headers={'X-Project-Id': 'admin',
+                                         'X-Roles': 'admin'})
+        self.assertEqual(200, response.status_int)
+        json_body = jsonutils.loads(response.body)
+        self.assertEqual('admin', json_body['tenant']['tenant_id'])
 
 
 class TestResourceController(TestRootController):
@@ -244,6 +297,8 @@ class TestResourceController(TestRootController):
 
     def setUp(self):
         super(TestResourceController, self).setUp()
+        policy.init()
+        self.addCleanup(policy.reset)
         self._gen_port()
 
     def _gen_port(self):
@@ -354,6 +409,7 @@ class TestResourceController(TestRootController):
         response = self.app.delete('/v2.0/ports/%s.json' % self.port['id'],
                                    headers={'X-Project-Id': 'tenid'})
         self.assertEqual(response.status_int, 204)
+        self.assertFalse(response.body)
 
     def test_plugin_initialized(self):
         self.assertIsNotNone(manager.NeutronManager._instance)
@@ -366,16 +422,45 @@ class TestResourceController(TestRootController):
         self._test_method_returns_code('head', 405)
         self._test_method_returns_code('delete', 405)
 
+    def test_bulk_create(self):
+        response = self.app.post_json(
+            '/v2.0/ports.json',
+            params={'ports': [{'network_id': self.port['network_id'],
+                             'admin_state_up': True,
+                             'tenant_id': 'tenid'},
+                             {'network_id': self.port['network_id'],
+                              'admin_state_up': True,
+                              'tenant_id': 'tenid'}]
+                    },
+            headers={'X-Project-Id': 'tenid'})
+        self.assertEqual(response.status_int, 201)
+        json_body = jsonutils.loads(response.body)
+        self.assertIn('ports', json_body)
+        self.assertEqual(2, len(json_body['ports']))
+
+    def test_bulk_create_one_item(self):
+        response = self.app.post_json(
+            '/v2.0/ports.json',
+            params={'ports': [{'network_id': self.port['network_id'],
+                               'admin_state_up': True,
+                               'tenant_id': 'tenid'}]
+                    },
+            headers={'X-Project-Id': 'tenid'})
+        self.assertEqual(response.status_int, 201)
+        json_body = jsonutils.loads(response.body)
+        self.assertIn('ports', json_body)
+        self.assertEqual(1, len(json_body['ports']))
+
 
 class TestPaginationAndSorting(test_functional.PecanFunctionalTest):
 
     RESOURCE_COUNT = 6
 
     def setUp(self):
-        cfg.CONF.set_override('allow_pagination', True)
-        cfg.CONF.set_override('allow_sorting', True)
         super(TestPaginationAndSorting, self).setUp()
-        self.plugin = manager.NeutronManager.get_plugin()
+        policy.init()
+        self.addCleanup(policy.reset)
+        self.plugin = directory.get_plugin()
         self.ctx = context.get_admin_context()
         self._create_networks(self.RESOURCE_COUNT)
         self.networks = self._get_collection()['networks']
@@ -487,7 +572,7 @@ class TestRequestProcessing(TestRootController):
 
     def setUp(self):
         super(TestRequestProcessing, self).setUp()
-
+        mock.patch('neutron.pecan_wsgi.hooks.notifier.registry').start()
         # request.context is thread-local storage so it has to be accessed by
         # the controller. We can capture it into a list here to assert on after
         # the request finishes.
@@ -535,9 +620,11 @@ class TestRequestProcessing(TestRootController):
         self.assertEqual('network', self.captured_context['resource'])
         self.assertEqual('networks', self.captured_context['collection'])
         resources = self.captured_context['resources']
+        is_bulk = self.captured_context['is_bulk']
         self.assertEqual(1, len(resources))
         self.assertEqual('the_net', resources[0]['name'])
         self.assertTrue(resources[0]['admin_state_up'])
+        self.assertFalse(is_bulk)
 
     def test_resource_processing_post_bulk(self):
         self.app.post_json(
@@ -548,11 +635,24 @@ class TestRequestProcessing(TestRootController):
                                   'admin_state_up': False}]},
             headers={'X-Project-Id': 'tenid'})
         resources = self.captured_context['resources']
+        is_bulk = self.captured_context['is_bulk']
         self.assertEqual(2, len(resources))
         self.assertTrue(resources[0]['admin_state_up'])
         self.assertEqual('the_net_1', resources[0]['name'])
         self.assertFalse(resources[1]['admin_state_up'])
         self.assertEqual('the_net_2', resources[1]['name'])
+        self.assertTrue(is_bulk)
+
+    def test_resource_processing_post_bulk_one_item(self):
+        self.app.post_json(
+            '/v2.0/networks.json',
+            params={'networks': [{'name': 'the_net_1',
+                                  'admin_state_up': True}]},
+            headers={'X-Project-Id': 'tenid'})
+        resources = self.captured_context['resources']
+        is_bulk = self.captured_context['is_bulk']
+        self.assertEqual(1, len(resources))
+        self.assertTrue(is_bulk)
 
     def test_resource_processing_post_unknown_attribute_returns_400(self):
         response = self.app.post_json(
@@ -580,7 +680,7 @@ class TestRequestProcessing(TestRootController):
         self.assertEqual('router', self.req_stash['resource_type'])
         # make sure the core plugin was identified as the handler for ports
         self.assertEqual(
-            manager.NeutronManager.get_service_plugins()['L3_ROUTER_NAT'],
+            directory.get_plugin(n_const.L3),
             self.req_stash['plugin'])
 
     def test_service_plugin_uri(self):
@@ -606,10 +706,11 @@ class TestRouterController(TestResourceController):
             ['neutron.services.l3_router.l3_router_plugin.L3RouterPlugin',
              'neutron.services.flavors.flavors_plugin.FlavorsPlugin'])
         super(TestRouterController, self).setUp()
-        plugin = manager.NeutronManager.get_plugin()
+        policy.init()
+        self.addCleanup(policy.reset)
+        plugin = directory.get_plugin()
         ctx = context.get_admin_context()
-        service_plugins = manager.NeutronManager.get_service_plugins()
-        l3_plugin = service_plugins[constants.L3_ROUTER_NAT]
+        l3_plugin = directory.get_plugin(n_const.L3)
         network_id = pecan_utils.create_network(ctx, plugin)['id']
         self.subnet = pecan_utils.create_subnet(ctx, plugin, network_id)
         self.router = pecan_utils.create_router(ctx, l3_plugin)
@@ -656,7 +757,7 @@ class TestDHCPAgentShimControllers(test_functional.PecanFunctionalTest):
                  'create_dhcp-networks': 'role:admin',
                  'delete_dhcp-networks': 'role:admin'}),
             overwrite=False)
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         ctx = context.get_admin_context()
         self.network = pecan_utils.create_network(ctx, plugin)
         self.agent = helpers.register_dhcp_agent()
@@ -710,8 +811,7 @@ class TestL3AgentShimControllers(test_functional.PecanFunctionalTest):
                  'get_l3-routers': 'role:admin'}),
             overwrite=False)
         ctx = context.get_admin_context()
-        service_plugins = manager.NeutronManager.get_service_plugins()
-        l3_plugin = service_plugins[constants.L3_ROUTER_NAT]
+        l3_plugin = directory.get_plugin(n_const.L3)
         self.router = pecan_utils.create_router(ctx, l3_plugin)
         self.agent = helpers.register_l3_agent()
         # NOTE(blogan): Not sending notifications because this test is for
@@ -745,6 +845,7 @@ class TestL3AgentShimControllers(test_functional.PecanFunctionalTest):
             '/v2.0/agents/%(a)s/l3-routers/%(n)s.json' % {
                 'a': self.agent.id, 'n': self.router['id']}, headers=headers)
         self.assertEqual(204, response.status_int)
+        self.assertFalse(response.body)
         response = self.app.get(
             '/v2.0/routers/%s/l3-agents.json' % self.router['id'],
             headers=headers)
@@ -793,7 +894,7 @@ class TestShimControllers(test_functional.PecanFunctionalTest):
         # there is only one subresource so far
         sub_resource_collection = (
             pecan_utils.FakeExtension.FAKE_SUB_RESOURCE_COLLECTION)
-        temp_id = str(uuid.uuid1())
+        temp_id = uuidutils.generate_uuid()
         url = '/v2.0/{0}/{1}/{2}'.format(
             uri_collection,
             temp_id,
@@ -850,3 +951,60 @@ class TestMemberActionController(test_functional.PecanFunctionalTest):
         url = '/v2.0/{}/something/put_meh.json'.format(self.collection)
         resp = self.app.get(url, expect_errors=True)
         self.assertEqual(405, resp.status_int)
+
+
+class TestParentSubresourceController(test_functional.PecanFunctionalTest):
+    def setUp(self):
+        fake_ext = pecan_utils.FakeExtension()
+        fake_plugin = pecan_utils.FakePlugin()
+        plugins = {pecan_utils.FakePlugin.PLUGIN_TYPE: fake_plugin}
+        new_extensions = {fake_ext.get_alias(): fake_ext}
+        super(TestParentSubresourceController, self).setUp(
+            service_plugins=plugins, extensions=new_extensions)
+        policy.init()
+        policy._ENFORCER.set_rules(
+            oslo_policy.Rules.from_dict(
+                {'get_fake_duplicate': '',
+                 'get_meh_meh_fake_duplicate': ''}),
+            overwrite=False)
+        self.addCleanup(policy.reset)
+        hyphen_collection = pecan_utils.FakeExtension.HYPHENATED_COLLECTION
+        self.collection = hyphen_collection.replace('_', '-')
+        self.fake_collection = (pecan_utils.FakeExtension.
+                                FAKE_PARENT_SUBRESOURCE_COLLECTION)
+
+    def test_get_duplicate_parent_resource(self):
+        url = '/v2.0/{}'.format(self.fake_collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({'fake_duplicates': [{'fake': 'fakeduplicates'}]},
+                         resp.json)
+
+    def test_get_duplicate_parent_resource_item(self):
+        url = '/v2.0/{}/something'.format(self.fake_collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({'fake_duplicate': {'fake': 'something'}}, resp.json)
+
+    def test_get_parent_resource_and_duplicate_subresources(self):
+        url = '/v2.0/{0}/something/{1}'.format(self.collection,
+                                               self.fake_collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({'fake_duplicates': [{'fake': 'something'}]},
+                         resp.json)
+
+    def test_get_child_resource_policy_check(self):
+        policy.reset()
+        policy.init()
+        policy._ENFORCER.set_rules(
+            oslo_policy.Rules.from_dict(
+                {'get_meh_meh_fake_duplicate': ''}
+            )
+        )
+        url = '/v2.0/{0}/something/{1}'.format(self.collection,
+                                               self.fake_collection)
+        resp = self.app.get(url)
+        self.assertEqual(200, resp.status_int)
+        self.assertEqual({'fake_duplicates': [{'fake': 'something'}]},
+                         resp.json)

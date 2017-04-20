@@ -19,6 +19,7 @@ from oslo_log import log as logging
 from pecan import hooks
 
 from neutron.common import exceptions
+from neutron.db import api as db_api
 from neutron import manager
 from neutron import quota
 from neutron.quota import resource_registry
@@ -31,11 +32,12 @@ class QuotaEnforcementHook(hooks.PecanHook):
     priority = 130
 
     def before(self, state):
+        collection = state.request.context.get('collection')
         resource = state.request.context.get('resource')
         items = state.request.context.get('resources')
         if state.request.method != 'POST' or not resource or not items:
             return
-        plugin = manager.NeutronManager.get_plugin_for_resource(resource)
+        plugin = manager.NeutronManager.get_plugin_for_resource(collection)
         # Store requested resource amounts grouping them by tenant
         deltas = collections.Counter(map(lambda x: x['tenant_id'], items))
         # Perform quota enforcement
@@ -65,7 +67,7 @@ class QuotaEnforcementHook(hooks.PecanHook):
         if not reservations:
             return
         neutron_context = state.request.context.get('neutron_context')
-        with neutron_context.session.begin():
+        with db_api.context_manager.writer.using(neutron_context):
             # Commit the reservation(s)
             for reservation in reservations:
                 quota.QUOTAS.commit_reservation(

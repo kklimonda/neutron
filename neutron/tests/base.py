@@ -16,21 +16,24 @@
 """Base test cases for all neutron tests.
 """
 
+import abc
 import contextlib
+import functools
 import gc
+import inspect
 import os
 import os.path
-import sys
 import weakref
 
-from debtcollector import moves
 import eventlet.timeout
 import fixtures
 import mock
+from neutron_lib import fixture
 from oslo_concurrency.fixture import lockutils
 from oslo_config import cfg
 from oslo_messaging import conffixture as messaging_conffixture
 from oslo_utils import excutils
+from oslo_utils import fileutils
 from oslo_utils import strutils
 from oslotest import base
 import six
@@ -39,12 +42,13 @@ import testtools
 from neutron._i18n import _
 from neutron.agent.linux import external_process
 from neutron.api.rpc.callbacks.consumer import registry as rpc_consumer_reg
+from neutron.api.rpc.callbacks.producer import registry as rpc_producer_reg
 from neutron.callbacks import manager as registry_manager
 from neutron.callbacks import registry
 from neutron.common import config
 from neutron.common import rpc as n_rpc
-from neutron.common import utils
 from neutron.db import agentschedulers_db
+from neutron.db import api as db_api
 from neutron import manager
 from neutron import policy
 from neutron.quota import resource_registry
@@ -68,16 +72,6 @@ def fake_use_fatal_exceptions(*args):
     return True
 
 
-for _name in ('get_related_rand_names',
-              'get_rand_name',
-              'get_rand_device_name',
-              'get_related_rand_device_names'):
-    setattr(sys.modules[__name__], _name, moves.moved_function(
-        getattr(utils, _name), _name, __name__,
-        message='use "neutron.common.utils.%s" instead' % _name,
-        version='Newton', removal_version='Ocata'))
-
-
 def bool_from_env(key, strict=False, default=False):
     value = os.environ.get(key)
     return strutils.bool_from_string(value, strict=strict, default=default)
@@ -86,7 +80,7 @@ def bool_from_env(key, strict=False, default=False):
 def setup_test_logging(config_opts, log_dir, log_file_path_template):
     # Have each test log into its own log file
     config_opts.set_override('debug', True)
-    utils.ensure_dir(log_dir)
+    fileutils.ensure_tree(log_dir, mode=0o755)
     log_file = sanitize_log_path(
         os.path.join(log_dir, log_file_path_template))
     config_opts.set_override('log_file', log_file)
@@ -115,6 +109,32 @@ class AttributeDict(dict):
         raise AttributeError(_("Unknown attribute '%s'.") % name)
 
 
+def _catch_timeout(f):
+    @functools.wraps(f)
+    def func(self, *args, **kwargs):
+        try:
+            return f(self, *args, **kwargs)
+        except eventlet.timeout.Timeout as e:
+            self.fail('Execution of this test timed out: %s' % e)
+    return func
+
+
+class _CatchTimeoutMetaclass(abc.ABCMeta):
+    def __init__(cls, name, bases, dct):
+        super(_CatchTimeoutMetaclass, cls).__init__(name, bases, dct)
+        for name, method in inspect.getmembers(
+                # NOTE(ihrachys): we should use isroutine because it will catch
+                # both unbound methods (python2) and functions (python3)
+                cls, predicate=inspect.isroutine):
+            if name.startswith('test_'):
+                setattr(cls, name, _catch_timeout(method))
+
+
+# Test worker cannot survive eventlet's Timeout exception, which effectively
+# kills the whole worker, with all test cases scheduled to it. This metaclass
+# makes all test cases convert Timeout exceptions into unittest friendly
+# failure mode (self.fail).
+@six.add_metaclass(_CatchTimeoutMetaclass)
 class DietTestCase(base.BaseTestCase):
     """Same great taste, less filling.
 
@@ -272,16 +292,20 @@ class BaseTestCase(DietTestCase):
         self.setup_rpc_mocks()
         self.setup_config()
         self.setup_test_registry_instance()
+        # Give a private copy of the directory to each test.
+        self.useFixture(fixture.PluginDirectoryFixture())
 
         policy.init()
         self.addCleanup(policy.reset)
         self.addCleanup(resource_registry.unregister_all_resources)
+        self.addCleanup(db_api.sqla_remove_all)
         self.addCleanup(rpc_consumer_reg.clear)
+        self.addCleanup(rpc_producer_reg.clear)
 
     def get_new_temp_dir(self):
         """Create a new temporary directory.
 
-        :returns fixtures.TempDir
+        :returns: fixtures.TempDir
         """
         return self.useFixture(fixtures.TempDir())
 
@@ -290,7 +314,7 @@ class BaseTestCase(DietTestCase):
 
         Returns the same directory during the whole test case.
 
-        :returns fixtures.TempDir
+        :returns: fixtures.TempDir
         """
         if not hasattr(self, '_temp_dir'):
             self._temp_dir = self.get_new_temp_dir()
@@ -309,7 +333,7 @@ class BaseTestCase(DietTestCase):
         :type filename: string
         :param root: temporary directory to create a new file in
         :type root: fixtures.TempDir
-        :returns absolute file path string
+        :returns: absolute file path string
         """
         root = root or self.get_default_temp_dir()
         return root.join(filename)
@@ -361,11 +385,13 @@ class BaseTestCase(DietTestCase):
         for k, v in six.iteritems(kw):
             CONF.set_override(k, v, group)
 
-    def setup_coreplugin(self, core_plugin=None):
+    def setup_coreplugin(self, core_plugin=None, load_plugins=True):
         cp = PluginFixture(core_plugin)
         self.useFixture(cp)
         self.patched_dhcp_periodic = cp.patched_dhcp_periodic
         self.patched_default_svc_plugins = cp.patched_default_svc_plugins
+        if load_plugins:
+            manager.init()
 
     def setup_notification_driver(self, notification_driver=None):
         self.addCleanup(fake_notifier.reset)

@@ -14,7 +14,6 @@
 
 import functools
 import os
-import re
 
 import eventlet
 import mock
@@ -25,32 +24,17 @@ from oslo_utils import uuidutils
 from neutron.agent.l3 import keepalived_state_change
 from neutron.agent.linux import ip_lib
 from neutron.common import utils
-from neutron.conf.agent.l3 import config
 from neutron.conf.agent.l3 import keepalived as kd
 from neutron.tests.common import machine_fixtures as mf
 from neutron.tests.common import net_helpers
 from neutron.tests.functional import base
 
-IPV4_NEIGH_REGEXP = re.compile(
-    r'(?P<ip>(\d{1,3}\.){3}\d{1,3}) '
-    '.*(?P<mac>([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]){2}).*')
-
-
-def get_arp_ip_mac_pairs(device_name, namespace):
-    """Generate (ip, mac) pairs from device's ip neigh.
-
-    Each neigh entry has following format:
-    192.168.0.1 lladdr fa:16:3e:01:ba:d3 STALE
-    """
-    device = ip_lib.IPDevice(device_name, namespace)
-    for entry in device.neigh.show(ip_version=4).splitlines():
-        match = IPV4_NEIGH_REGEXP.match(entry)
-        if match:
-            yield match.group('ip'), match.group('mac')
-
 
 def has_expected_arp_entry(device_name, namespace, ip, mac):
-    return (ip, mac) in get_arp_ip_mac_pairs(device_name, namespace)
+    ip_version = utils.get_ip_version(ip)
+    entry = ip_lib.dump_neigh_entries(ip_version, device_name, namespace,
+                                      dst=ip, lladdr=mac)
+    return entry != []
 
 
 class TestKeepalivedStateChange(base.BaseSudoTestCase):
@@ -106,7 +90,6 @@ class TestMonitorDaemon(base.BaseSudoTestCase):
         bridge = self.useFixture(net_helpers.OVSBridgeFixture()).bridge
         self.machines = self.useFixture(mf.PeerMachines(bridge))
         self.router, self.peer = self.machines.machines[:2]
-        config.register_l3_agent_config_opts(config.OPTS)
 
         conf_dir = self.get_default_temp_dir().path
         monitor = keepalived_state_change.MonitorDaemon(

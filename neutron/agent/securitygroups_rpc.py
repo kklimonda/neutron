@@ -16,6 +16,7 @@
 
 import functools
 
+from debtcollector import moves
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -32,24 +33,7 @@ LOG = logging.getLogger(__name__)
 sc_cfg.register_securitygroups_opts()
 
 
-#This is backward compatibility check for Havana
-def _is_valid_driver_combination():
-    return ((cfg.CONF.SECURITYGROUP.enable_security_group and
-             (cfg.CONF.SECURITYGROUP.firewall_driver and
-              cfg.CONF.SECURITYGROUP.firewall_driver !=
-             'neutron.agent.firewall.NoopFirewallDriver')) or
-            (not cfg.CONF.SECURITYGROUP.enable_security_group and
-             (cfg.CONF.SECURITYGROUP.firewall_driver ==
-             'neutron.agent.firewall.NoopFirewallDriver' or
-              cfg.CONF.SECURITYGROUP.firewall_driver is None)
-             ))
-
-
 def is_firewall_enabled():
-    if not _is_valid_driver_combination():
-        LOG.warning(_LW("Driver configuration doesn't match with "
-                        "enable_security_group"))
-
     return cfg.CONF.SECURITYGROUP.enable_security_group
 
 
@@ -79,9 +63,6 @@ class SecurityGroupAgentRpc(object):
                       integration_bridge=None):
         firewall_driver = cfg.CONF.SECURITYGROUP.firewall_driver or 'noop'
         LOG.debug("Init firewall settings (driver=%s)", firewall_driver)
-        if not _is_valid_driver_combination():
-            LOG.warning(_LW("Driver configuration doesn't match "
-                            "with enable_security_group"))
         firewall_class = firewall.load_firewall_driver_class(firewall_driver)
         try:
             self.firewall = firewall_class(
@@ -204,15 +185,26 @@ class SecurityGroupAgentRpc(object):
             else:
                 self.refresh_firewall(devices)
 
-    def security_groups_provider_updated(self, devices_to_update):
+    def security_groups_provider_updated(self, port_ids_to_update):
         LOG.info(_LI("Provider rule updated"))
-        if self.defer_refresh_firewall:
-            if devices_to_update is None:
+        if port_ids_to_update is None:
+            # Update all devices
+            if self.defer_refresh_firewall:
                 self.global_refresh_firewall = True
             else:
-                self.devices_to_refilter |= set(devices_to_update)
+                self.refresh_firewall()
         else:
-            self.refresh_firewall(devices_to_update)
+            devices = []
+            for device in self.firewall.ports.values():
+                # neutron server will give port ids for update, However, L2
+                # agent will use device name in firewall. Here change port id
+                # to device name, so that the L2 agent can consume it
+                if device['id'] in port_ids_to_update:
+                    devices.append(device['device'])
+            if self.defer_refresh_firewall:
+                self.devices_to_refilter |= set(devices)
+            else:
+                self.refresh_firewall(devices)
 
     def remove_devices_filter(self, device_ids):
         if not device_ids:
@@ -283,16 +275,24 @@ class SecurityGroupAgentRpc(object):
                 self.refresh_firewall(updated_devices)
 
 
-# TODO(armax): For bw compat with external dependencies; to be dropped in M.
-SG_RPC_VERSION = (
-    securitygroups_rpc.SecurityGroupAgentRpcApiMixin.SG_RPC_VERSION
+# TODO(armax): For bw compat with external dependencies; to be dropped in P.
+# NOTE(dasm): Should be already removed, but didn't have  DeprecationWarning.
+SG_RPC_VERSION = moves.moved_function(
+    securitygroups_rpc.SecurityGroupAgentRpcApiMixin.SG_RPC_VERSION,
+    'SG_RPC_VERSION', __name__, version='Liberty', removal_version='Pike'
 )
-SecurityGroupServerRpcApi = (
-    securitygroups_rpc.SecurityGroupServerRpcApi
+SecurityGroupServerRpcApi = moves.moved_class(
+    securitygroups_rpc.SecurityGroupServerRpcApi,
+    'SecurityGroupServerRpcApi', old_module_name=__name__, version='Liberty',
+    removal_version='Pike'
 )
-SecurityGroupAgentRpcApiMixin = (
-    securitygroups_rpc.SecurityGroupAgentRpcApiMixin
+SecurityGroupAgentRpcApiMixin = moves.moved_class(
+    securitygroups_rpc.SecurityGroupAgentRpcApiMixin,
+    'SecurityGroupAgentRpcApiMixin', old_module_name=__name__,
+    version='Liberty', removal_version='Pike'
 )
-SecurityGroupAgentRpcCallbackMixin = (
-    securitygroups_rpc.SecurityGroupAgentRpcCallbackMixin
+SecurityGroupAgentRpcCallbackMixin = moves.moved_class(
+    securitygroups_rpc.SecurityGroupAgentRpcCallbackMixin,
+    'SecurityGroupAgentRpcCallbackMixin', old_module_name=__name__,
+    version='Liberty', removal_version='Pike'
 )

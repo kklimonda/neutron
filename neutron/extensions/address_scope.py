@@ -15,15 +15,17 @@
 import abc
 
 from neutron_lib.api import converters
+from neutron_lib.api import extensions as api_extensions
 from neutron_lib import constants
+from neutron_lib.db import constants as db_const
 from neutron_lib import exceptions as nexception
+from neutron_lib.plugins import directory
 import six
 
 from neutron._i18n import _
 from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
-from neutron import manager
 
 ADDRESS_SCOPE = 'address_scope'
 ADDRESS_SCOPES = '%ss' % ADDRESS_SCOPE
@@ -42,11 +44,12 @@ RESOURCE_ATTRIBUTE_MAP = {
         'name': {'allow_post': True,
                  'allow_put': True,
                  'default': '',
-                 'validate': {'type:string': attr.NAME_MAX_LEN},
+                 'validate': {'type:string': db_const.NAME_FIELD_SIZE},
                  'is_visible': True},
         'tenant_id': {'allow_post': True,
                       'allow_put': False,
-                      'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
+                      'validate': {
+                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
                       'required_by_policy': True,
                       'is_visible': True},
         attr.SHARED: {'allow_post': True,
@@ -94,7 +97,7 @@ class AddressScopeUpdateError(nexception.BadRequest):
                 "%(reason)s")
 
 
-class Address_scope(extensions.ExtensionDescriptor):
+class Address_scope(api_extensions.ExtensionDescriptor):
     """Extension class supporting Address Scopes."""
 
     @classmethod
@@ -116,9 +119,7 @@ class Address_scope(extensions.ExtensionDescriptor):
     @classmethod
     def get_resources(cls):
         """Returns Ext Resources."""
-        my_plurals = [(key, key[:-1]) for key in RESOURCE_ATTRIBUTE_MAP.keys()]
-        attr.PLURALS.update(dict(my_plurals))
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         collection_name = ADDRESS_SCOPES.replace('_', '-')
         params = RESOURCE_ATTRIBUTE_MAP.get(ADDRESS_SCOPES, dict())
         controller = base.create_resource(collection_name,

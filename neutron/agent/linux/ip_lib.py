@@ -16,6 +16,7 @@
 import os
 import re
 
+from debtcollector import removals
 import eventlet
 import netaddr
 from neutron_lib import constants
@@ -29,6 +30,7 @@ from neutron._i18n import _, _LE, _LW
 from neutron.agent.common import utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils as common_utils
+from neutron.privileged.agent.linux import ip_lib as privileged
 
 LOG = logging.getLogger(__name__)
 
@@ -281,6 +283,10 @@ class IPDevice(SubProcessBase):
     def __str__(self):
         return self.name
 
+    def __repr__(self):
+        return "<IPDevice(name=%s, namespace=%s)>" % (self._name,
+                                                      self.namespace)
+
     def exists(self):
         """Return True if the device exists in the namespace."""
         # we must save and restore this before returning
@@ -329,36 +335,10 @@ class IPDevice(SubProcessBase):
             LOG.exception(_LE("Failed deleting egress connection state of"
                               " floatingip %s"), ip_str)
 
-    def _sysctl(self, cmd):
-        """execute() doesn't return the exit status of the command it runs,
-        it returns stdout and stderr. Setting check_exit_code=True will cause
-        it to raise a RuntimeError if the exit status of the command is
-        non-zero, which in sysctl's case is an error. So we're normalizing
-        that into zero (success) and one (failure) here to mimic what
-        "echo $?" in a shell would be.
-
-        This is all because sysctl is too verbose and prints the value you
-        just set on success, unlike most other utilities that print nothing.
-
-        execute() will have dumped a message to the logs with the actual
-        output on failure, so it's not lost, and we don't need to print it
-        here.
-        """
-        cmd = ['sysctl', '-w'] + cmd
-        ip_wrapper = IPWrapper(self.namespace)
-        try:
-            ip_wrapper.netns.execute(cmd, run_as_root=True,
-                                     check_exit_code=True)
-        except RuntimeError:
-            LOG.exception(_LE("Failed running %s"), cmd)
-            return 1
-
-        return 0
-
     def disable_ipv6(self):
         sysctl_name = re.sub(r'\.', '/', self.name)
-        cmd = 'net.ipv6.conf.%s.disable_ipv6=1' % sysctl_name
-        return self._sysctl([cmd])
+        cmd = ['net.ipv6.conf.%s.disable_ipv6=1' % sysctl_name]
+        return sysctl(cmd, namespace=self.namespace)
 
     @property
     def name(self):
@@ -488,9 +468,12 @@ class IpRuleCommand(IpCommandBase):
         return tuple(args)
 
     def add(self, ip, **kwargs):
-        ip_version = get_ip_version(ip)
+        ip_version = common_utils.get_ip_version(ip)
 
-        kwargs.update({'from': ip})
+        # In case if we need to add in a rule based on incoming
+        # interface we don't need to pass in the ip.
+        if not kwargs.get('iif'):
+            kwargs.update({'from': ip})
         canonical_kwargs = self._make_canonical(ip_version, kwargs)
 
         if not self._exists(ip_version, **canonical_kwargs):
@@ -498,7 +481,7 @@ class IpRuleCommand(IpCommandBase):
             self._as_root([ip_version], args_tuple)
 
     def delete(self, ip, **kwargs):
-        ip_version = get_ip_version(ip)
+        ip_version = common_utils.get_ip_version(ip)
 
         # TODO(Carl) ip ignored in delete, okay in general?
 
@@ -600,7 +583,7 @@ class IpAddrCommand(IpDeviceCommandBase):
         self._as_root([net.version], tuple(args))
 
     def delete(self, cidr):
-        ip_version = get_ip_version(cidr)
+        ip_version = common_utils.get_ip_version(cidr)
         self._as_root([ip_version],
                       ('del', cidr,
                        'dev', self.name))
@@ -707,7 +690,7 @@ class IpRouteCommand(IpDeviceCommandBase):
         return ['dev', self.name] if self.name else []
 
     def add_gateway(self, gateway, metric=None, table=None):
-        ip_version = get_ip_version(gateway)
+        ip_version = common_utils.get_ip_version(gateway)
         args = ['replace', 'default', 'via', gateway]
         if metric:
             args += ['metric', metric]
@@ -725,7 +708,7 @@ class IpRouteCommand(IpDeviceCommandBase):
                     raise exceptions.DeviceNotFoundError(device_name=self.name)
 
     def delete_gateway(self, gateway, table=None):
-        ip_version = get_ip_version(gateway)
+        ip_version = common_utils.get_ip_version(gateway)
         args = ['del', 'default',
                 'via', gateway]
         args += self._dev_args()
@@ -811,7 +794,7 @@ class IpRouteCommand(IpDeviceCommandBase):
         self._as_root([ip_version], tuple(args))
 
     def add_route(self, cidr, via=None, table=None, **kwargs):
-        ip_version = get_ip_version(cidr)
+        ip_version = common_utils.get_ip_version(cidr)
         args = ['replace', cidr]
         if via:
             args += ['via', via]
@@ -822,7 +805,7 @@ class IpRouteCommand(IpDeviceCommandBase):
         self._run_as_root_detect_device_not_found([ip_version], tuple(args))
 
     def delete_route(self, cidr, via=None, table=None, **kwargs):
-        ip_version = get_ip_version(cidr)
+        ip_version = common_utils.get_ip_version(cidr)
         args = ['del', cidr]
         if via:
             args += ['via', via]
@@ -843,21 +826,29 @@ class IPRoute(SubProcessBase):
 class IpNeighCommand(IpDeviceCommandBase):
     COMMAND = 'neigh'
 
-    def add(self, ip_address, mac_address):
-        ip_version = get_ip_version(ip_address)
-        self._as_root([ip_version],
-                      ('replace', ip_address,
-                       'lladdr', mac_address,
-                       'nud', 'permanent',
-                       'dev', self.name))
+    def add(self, ip_address, mac_address, **kwargs):
+        add_neigh_entry(ip_address,
+                        mac_address,
+                        self.name,
+                        self._parent.namespace,
+                        **kwargs)
 
-    def delete(self, ip_address, mac_address):
-        ip_version = get_ip_version(ip_address)
-        self._as_root([ip_version],
-                      ('del', ip_address,
-                       'lladdr', mac_address,
-                       'dev', self.name))
+    def delete(self, ip_address, mac_address, **kwargs):
+        delete_neigh_entry(ip_address,
+                           mac_address,
+                           self.name,
+                           self._parent.namespace,
+                           **kwargs)
 
+    def dump(self, ip_version, **kwargs):
+        return dump_neigh_entries(ip_version,
+                                  self.name,
+                                  self._parent.namespace,
+                                  **kwargs)
+
+    @removals.remove(
+        version='Ocata', removal_version='Pike',
+        message="Use 'dump' in IpNeighCommand() class instead")
     def show(self, ip_version):
         options = [ip_version]
         return self._as_root(options,
@@ -873,6 +864,7 @@ class IpNeighCommand(IpDeviceCommandBase):
         :param ip_version: Either 4 or 6 for IPv4 or IPv6 respectively
         :param ip_address: The prefix selecting the neighbours to flush
         """
+        # NOTE(haleyb): There is no equivalent to 'flush' in pyroute2
         self._as_root([ip_version], ('flush', 'to', ip_address))
 
 
@@ -956,39 +948,13 @@ def device_exists_with_ips_and_mac(device_name, ip_cidrs, mac, namespace=None):
         return True
 
 
-_IP_ROUTE_PARSE_KEYS = {
-    'via': 'nexthop',
-    'dev': 'device',
-    'scope': 'scope'
-}
+def get_device_mac(device_name, namespace=None):
+    """Return the MAC address of the device."""
+    return IPDevice(device_name, namespace=namespace).link.address
 
 
-def _parse_ip_route_line(line):
-    """Parse a line output from ip route.
-    Example for output from 'ip route':
-    default via 192.168.3.120 dev wlp3s0  proto static  metric 1024
-    10.0.0.0/8 dev tun0  proto static  scope link  metric 1024
-    10.0.1.0/8 dev tun1  proto static  scope link  metric 1024 linkdown
-    The first column is the destination, followed by key/value pairs and flags.
-    @param line A line output from ip route
-    @return: a dictionary representing a route.
-    """
-    line = line.split()
-    result = {
-        'destination': line[0],
-        'nexthop': None,
-        'device': None,
-        'scope': None
-    }
-    idx = 1
-    while idx < len(line):
-        field = _IP_ROUTE_PARSE_KEYS.get(line[idx])
-        if not field:
-            idx = idx + 1
-        else:
-            result[field] = line[idx + 1]
-            idx = idx + 2
-    return result
+NetworkNamespaceNotFound = privileged.NetworkNamespaceNotFound
+NetworkInterfaceNotFound = privileged.NetworkInterfaceNotFound
 
 
 def get_routing_table(ip_version, namespace=None):
@@ -1002,14 +968,63 @@ def get_routing_table(ip_version, namespace=None):
                                'device': device_name,
                                'scope': scope}
     """
+    # oslo.privsep turns lists to tuples in its IPC code. Change it back
+    return list(privileged.get_routing_table(ip_version, namespace))
 
-    ip_wrapper = IPWrapper(namespace=namespace)
-    table = ip_wrapper.netns.execute(
-        ['ip', '-%s' % ip_version, 'route'],
-        check_exit_code=True)
 
-    return [_parse_ip_route_line(line)
-            for line in table.split('\n') if line.strip()]
+# NOTE(haleyb): These neighbour functions live outside the IpNeighCommand
+# class since not all callers require it.
+def add_neigh_entry(ip_address, mac_address, device, namespace=None, **kwargs):
+    """Add a neighbour entry.
+
+    :param ip_address: IP address of entry to add
+    :param mac_address: MAC address of entry to add
+    :param device: Device name to use in adding entry
+    :param namespace: The name of the namespace in which to add the entry
+    """
+    ip_version = common_utils.get_ip_version(ip_address)
+    privileged.add_neigh_entry(ip_version,
+                               ip_address,
+                               mac_address,
+                               device,
+                               namespace,
+                               **kwargs)
+
+
+def delete_neigh_entry(ip_address, mac_address, device, namespace=None,
+                       **kwargs):
+    """Delete a neighbour entry.
+
+    :param ip_address: IP address of entry to delete
+    :param mac_address: MAC address of entry to delete
+    :param device: Device name to use in deleting entry
+    :param namespace: The name of the namespace in which to delete the entry
+    """
+    ip_version = common_utils.get_ip_version(ip_address)
+    privileged.delete_neigh_entry(ip_version,
+                                  ip_address,
+                                  mac_address,
+                                  device,
+                                  namespace,
+                                  **kwargs)
+
+
+def dump_neigh_entries(ip_version, device=None, namespace=None, **kwargs):
+    """Dump all neighbour entries.
+
+    :param ip_version: IP version of entries to show (4 or 6)
+    :param device: Device name to use in dumping entries
+    :param namespace: The name of the namespace in which to dump the entries
+    :param kwargs: Callers add any filters they use as kwargs
+    :return: a list of dictionaries, each representing a neighbour.
+    The dictionary format is: {'dst': ip_address,
+                               'lladdr': mac_address,
+                               'device': device_name}
+    """
+    return list(privileged.dump_neigh_entries(ip_version,
+                                              device,
+                                              namespace,
+                                              **kwargs))
 
 
 def ensure_device_is_ready(device_name, namespace=None):
@@ -1054,7 +1069,7 @@ def _arping(ns_name, iface_name, address, count, log_exception):
 
 
 def send_ip_addr_adv_notif(
-        ns_name, iface_name, address, config, log_exception=True):
+        ns_name, iface_name, address, count=3, log_exception=True):
     """Send advance notification of an IP address assignment.
 
     If the address is in the IPv4 family, send gratuitous ARP.
@@ -1068,19 +1083,53 @@ def send_ip_addr_adv_notif(
     :param ns_name: Namespace name which GARPs are gonna be sent from.
     :param iface_name: Name of interface which GARPs are gonna be sent from.
     :param address: Advertised IP address.
-    :param config: An object with send_arp_for_ha member, about
-                   how many GARPs are gonna be sent.
+    :param count: (Optional) How many GARPs are gonna be sent. Default is 3.
     :param log_exception: (Optional) True if possible failures should be logged
                           on exception level. Otherwise they are logged on
                           WARNING level. Default is True.
     """
-    count = config.send_arp_for_ha
-
     def arping():
         _arping(ns_name, iface_name, address, count, log_exception)
 
     if count > 0 and netaddr.IPAddress(address).version == 4:
         eventlet.spawn_n(arping)
+
+
+def sysctl(cmd, namespace=None, log_fail_as_error=True):
+    """Run sysctl command 'cmd'
+
+    @param cmd: a list containing the sysctl command to run
+    @param namespace: network namespace to run command in
+    @param log_fail_as_error: failure logged as LOG.error
+
+    execute() doesn't return the exit status of the command it runs,
+    it returns stdout and stderr. Setting check_exit_code=True will cause
+    it to raise a RuntimeError if the exit status of the command is
+    non-zero, which in sysctl's case is an error. So we're normalizing
+    that into zero (success) and one (failure) here to mimic what
+    "echo $?" in a shell would be.
+
+    This is all because sysctl is too verbose and prints the value you
+    just set on success, unlike most other utilities that print nothing.
+
+    execute() will have dumped a message to the logs with the actual
+    output on failure, so it's not lost, and we don't need to print it
+    here.
+    """
+    cmd = ['sysctl', '-w'] + cmd
+    ip_wrapper = IPWrapper(namespace=namespace)
+    try:
+        ip_wrapper.netns.execute(cmd, run_as_root=True,
+                                 log_fail_as_error=log_fail_as_error)
+    except RuntimeError as rte:
+        LOG.warning(
+            _LW("Setting %(cmd)s in namespace %(ns)s failed: %(err)s."),
+            {'cmd': cmd,
+             'ns': namespace,
+             'err': rte})
+        return 1
+
+    return 0
 
 
 def add_namespace_to_cmd(cmd, namespace=None):
@@ -1089,8 +1138,12 @@ def add_namespace_to_cmd(cmd, namespace=None):
     return ['ip', 'netns', 'exec', namespace] + cmd if namespace else cmd
 
 
+@removals.remove(
+    message="This will be removed in the future. "
+            "Please use 'neutron.common.utils.get_ip_version' instead.",
+    version='Pike', removal_version='Queens')
 def get_ip_version(ip_or_cidr):
-    return netaddr.IPNetwork(ip_or_cidr).version
+    return common_utils.get_ip_version(ip_or_cidr)
 
 
 def get_ipv6_lladdr(mac_addr):
@@ -1106,25 +1159,20 @@ def get_ip_nonlocal_bind(namespace=None):
 
 def set_ip_nonlocal_bind(value, namespace=None, log_fail_as_error=True):
     """Set sysctl knob of ip_nonlocal_bind to given value."""
-    cmd = ['sysctl', '-w', '%s=%d' % (IP_NONLOCAL_BIND, value)]
-    ip_wrapper = IPWrapper(namespace)
-    ip_wrapper.netns.execute(
-        cmd, run_as_root=True, log_fail_as_error=log_fail_as_error)
+    cmd = ['%s=%d' % (IP_NONLOCAL_BIND, value)]
+    return sysctl(cmd, namespace=namespace,
+                  log_fail_as_error=log_fail_as_error)
 
 
 def set_ip_nonlocal_bind_for_namespace(namespace):
     """Set ip_nonlocal_bind but don't raise exception on failure."""
-    try:
-        set_ip_nonlocal_bind(
-            value=0, namespace=namespace, log_fail_as_error=False)
-    except RuntimeError as rte:
+    failed = set_ip_nonlocal_bind(value=0, namespace=namespace,
+                                  log_fail_as_error=False)
+    if failed:
         LOG.warning(
-            _LW("Setting %(knob)s=0 in namespace %(ns)s failed: %(err)s. It "
-                "will not be set to 0 in the root namespace in order to not "
-                "break DVR, which requires this value be set to 1. This "
+            _LW("%s will not be set to 0 in the root namespace in order to "
+                "not break DVR, which requires this value be set to 1. This "
                 "may introduce a race between moving a floating IP to a "
                 "different network node, and the peer side getting a "
                 "populated ARP cache for a given floating IP address."),
-            {'knob': IP_NONLOCAL_BIND,
-             'ns': namespace,
-             'err': rte})
+            IP_NONLOCAL_BIND)

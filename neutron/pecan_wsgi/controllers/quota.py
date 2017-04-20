@@ -14,12 +14,12 @@
 #    under the License.
 
 from neutron_lib.api import converters
+from neutron_lib.db import constants as db_const
 from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_utils import importutils
 import pecan
 from pecan import request
-from pecan import response
 
 from neutron._i18n import _
 from neutron.api.v2 import attributes
@@ -32,7 +32,7 @@ TENANT_ID_ATTR = {'tenant_id':
                   {'allow_post': False,
                    'allow_put': False,
                    'required_by_policy': True,
-                   'validate': {'type:string': attributes.TENANT_ID_MAX_LEN},
+                   'validate': {'type:string': db_const.PROJECT_ID_FIELD_SIZE},
                    'is_visible': True}}
 
 
@@ -112,12 +112,11 @@ class QuotaController(utils.NeutronPecanController):
                 neutron_context, self._tenant_id, key, value)
         return get_tenant_quotas(self._tenant_id, self._driver)
 
-    @utils.when(index, method='DELETE')
+    @utils.when_delete(index)
     def delete(self):
         neutron_context = request.context.get('neutron_context')
         self._driver.delete_tenant_quota(neutron_context,
                                          self._tenant_id)
-        response.status = 204
 
     @utils.when(index, method='POST')
     def not_supported(self):

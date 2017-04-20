@@ -13,11 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.db import constants as db_const
 from neutron_lib.db import model_base
 import sqlalchemy as sa
 from sqlalchemy import orm
 
-from neutron.api.v2 import attributes
 from neutron.db import models_v2
 
 
@@ -30,10 +30,10 @@ class SubnetServiceType(model_base.BASEV2):
                           sa.ForeignKey('subnets.id', ondelete="CASCADE"))
     # Service types must be valid device owners, therefore share max length
     service_type = sa.Column(sa.String(
-                                length=attributes.DEVICE_OWNER_MAX_LEN))
-    subnet = orm.relationship(models_v2.Subnet,
+                                length=db_const.DEVICE_OWNER_FIELD_SIZE))
+    subnet = orm.relationship(models_v2.Subnet, load_on_pending=True,
                               backref=orm.backref('service_types',
-                                                  lazy='joined',
+                                                  lazy='subquery',
                                                   cascade='all, delete-orphan',
                                                   uselist=True))
     __table_args__ = (

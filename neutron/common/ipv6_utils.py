@@ -18,42 +18,22 @@ IPv6-related utilities and helper functions.
 """
 import os
 
-from debtcollector import removals
+from debtcollector import moves
 import netaddr
 from neutron_lib import constants as const
 from oslo_log import log
 
-from neutron._i18n import _, _LI
+from neutron._i18n import _LI
 
 
 LOG = log.getLogger(__name__)
 _IS_IPV6_ENABLED = None
 
 
-@removals.remove(
-    message="use get_ipv6_addr_by_EUI64 from oslo_utils.netutils",
-    version="Newton",
-    removal_version="Ocata")
-def get_ipv6_addr_by_EUI64(prefix, mac):
-    # Check if the prefix is IPv4 address
-    isIPv4 = netaddr.valid_ipv4(prefix)
-    if isIPv4:
-        msg = _("Unable to generate IP address by EUI64 for IPv4 prefix")
-        raise TypeError(msg)
-    try:
-        eui64 = int(netaddr.EUI(mac).eui64())
-        prefix = netaddr.IPNetwork(prefix)
-        return netaddr.IPAddress(prefix.first + eui64 ^ (1 << 57))
-    except (ValueError, netaddr.AddrFormatError):
-        raise TypeError(_('Bad prefix or mac format for generating IPv6 '
-                          'address by EUI-64: %(prefix)s, %(mac)s:')
-                        % {'prefix': prefix, 'mac': mac})
-    except TypeError:
-        raise TypeError(_('Bad prefix type for generate IPv6 address by '
-                          'EUI-64: %s') % prefix)
-
-
-def is_enabled():
+def is_enabled_and_bind_by_default():
+    """Check if host has the IPv6 support and is configured to bind IPv6
+    address to new interfaces by default.
+    """
     global _IS_IPV6_ENABLED
 
     if _IS_IPV6_ENABLED is None:
@@ -65,8 +45,16 @@ def is_enabled():
         else:
             _IS_IPV6_ENABLED = False
         if not _IS_IPV6_ENABLED:
-            LOG.info(_LI("IPv6 is not enabled on this system."))
+            LOG.info(_LI("IPv6 not present or configured not to bind to new "
+                         "interfaces on this system. Please ensure IPv6 is "
+                         "enabled and /proc/sys/net/ipv6/conf/default/"
+                         "disable_ipv6 is set to 0 to enable IPv6."))
     return _IS_IPV6_ENABLED
+
+
+is_enabled = moves.moved_function(is_enabled_and_bind_by_default,
+                                  'is_enabled', __name__, version='Ocata',
+                                  removal_version='Pike')
 
 
 def is_auto_address_subnet(subnet):

@@ -14,10 +14,10 @@ import mock
 from neutron_lib import constants as lib_constants
 from oslo_utils import uuidutils
 
-from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import router_info
 from neutron.agent.linux import ip_lib
 from neutron.common import exceptions as n_exc
+from neutron.conf.agent import common as config
 from neutron.tests import base
 
 
@@ -28,7 +28,7 @@ class TestRouterInfo(base.BaseTestCase):
     def setUp(self):
         super(TestRouterInfo, self).setUp()
 
-        conf = agent_config.setup_conf()
+        conf = config.setup_conf()
 
         self.ip_cls_p = mock.patch('neutron.agent.linux.ip_lib.IPWrapper')
         ip_cls = self.ip_cls_p.start()
@@ -43,7 +43,7 @@ class TestRouterInfo(base.BaseTestCase):
             any_order=True)
 
     def test_routing_table_update(self):
-        ri = router_info.RouterInfo(_uuid(), {}, **self.ri_kwargs)
+        ri = router_info.RouterInfo(mock.Mock(), _uuid(), {}, **self.ri_kwargs)
         ri.router = {}
 
         fake_route1 = {'destination': '135.207.0.0/16',
@@ -78,7 +78,8 @@ class TestRouterInfo(base.BaseTestCase):
         fake_route1 = {'destination': '135.207.0.0/16',
                        'nexthop': '1.2.3.4'}
 
-        ri = router_info.RouterInfo(uuid, {'id': uuid}, **self.ri_kwargs)
+        ri = router_info.RouterInfo(mock.Mock(), uuid,
+                                    {'id': uuid}, **self.ri_kwargs)
         ri._update_routing_table = mock.Mock()
 
         ri.update_routing_table('replace', fake_route1)
@@ -87,7 +88,7 @@ class TestRouterInfo(base.BaseTestCase):
                                                          netns)
 
     def test_routes_updated(self):
-        ri = router_info.RouterInfo(_uuid(), {}, **self.ri_kwargs)
+        ri = router_info.RouterInfo(mock.Mock(), _uuid(), {}, **self.ri_kwargs)
         ri.router = {}
 
         fake_old_routes = []
@@ -122,8 +123,30 @@ class TestRouterInfo(base.BaseTestCase):
                     'via', '10.100.10.30']]
         self._check_agent_method_called(expected)
 
+    def test__process_pd_iptables_rules(self):
+        subnet_id = _uuid()
+        ex_gw_port = {'id': _uuid()}
+        prefix = '2001:db8:cafe::/64'
+
+        ri = router_info.RouterInfo(mock.Mock(), _uuid(), {}, **self.ri_kwargs)
+
+        ipv6_mangle = ri.iptables_manager.ipv6['mangle'] = mock.MagicMock()
+        ri.get_ex_gw_port = mock.Mock(return_value=ex_gw_port)
+        ri.get_external_device_name = mock.Mock(return_value='fake_device')
+        ri.get_address_scope_mark_mask = mock.Mock(return_value='fake_mark')
+
+        ri._process_pd_iptables_rules(prefix, subnet_id)
+
+        mangle_rule = '-d %s ' % prefix
+        mangle_rule += ri.address_scope_mangle_rule('fake_device', 'fake_mark')
+
+        ipv6_mangle.add_rule.assert_called_once_with(
+            'scope',
+            mangle_rule,
+            tag='prefix_delegation_%s' % subnet_id)
+
     def test_add_ports_address_scope_iptables(self):
-        ri = router_info.RouterInfo(_uuid(), {}, **self.ri_kwargs)
+        ri = router_info.RouterInfo(mock.Mock(), _uuid(), {}, **self.ri_kwargs)
         port = {
             'id': _uuid(),
             'fixed_ips': [{'ip_address': '172.9.9.9'}],
@@ -146,7 +169,7 @@ class TestRouterInfo(base.BaseTestCase):
     def test_address_scope_mark_ids_handling(self):
         mark_ids = set(range(router_info.ADDRESS_SCOPE_MARK_ID_MIN,
                              router_info.ADDRESS_SCOPE_MARK_ID_MAX))
-        ri = router_info.RouterInfo(_uuid(), {}, **self.ri_kwargs)
+        ri = router_info.RouterInfo(mock.Mock(), _uuid(), {}, **self.ri_kwargs)
         # first mark id is used for the default address scope
         scope_to_mark_id = {router_info.DEFAULT_ADDRESS_SCOPE: mark_ids.pop()}
         self.assertEqual(scope_to_mark_id, ri._address_scope_to_mark_id)
@@ -161,27 +184,28 @@ class TestRouterInfo(base.BaseTestCase):
         # new router should have it's own mark ids set
         new_mark_ids = set(range(router_info.ADDRESS_SCOPE_MARK_ID_MIN,
                                  router_info.ADDRESS_SCOPE_MARK_ID_MAX))
-        new_ri = router_info.RouterInfo(_uuid(), {}, **self.ri_kwargs)
+        new_ri = router_info.RouterInfo(mock.Mock(), _uuid(),
+                                        {}, **self.ri_kwargs)
         new_mark_ids.pop()
         self.assertEqual(new_mark_ids, new_ri.available_mark_ids)
         self.assertTrue(ri.available_mark_ids != new_ri.available_mark_ids)
 
     def test_process_delete(self):
-        ri = router_info.RouterInfo(_uuid(), {}, **self.ri_kwargs)
+        ri = router_info.RouterInfo(mock.Mock(), _uuid(), {}, **self.ri_kwargs)
         ri.router = {'id': _uuid()}
         with mock.patch.object(ri, '_process_internal_ports') as p_i_p,\
             mock.patch.object(ri, '_process_external_on_delete') as p_e_o_d:
             self.mock_ip.netns.exists.return_value = False
-            ri.process_delete(mock.Mock())
+            ri.process_delete()
             self.assertFalse(p_i_p.called)
             self.assertFalse(p_e_o_d.called)
 
             p_i_p.reset_mock()
             p_e_o_d.reset_mock()
             self.mock_ip.netns.exists.return_value = True
-            ri.process_delete(mock.Mock())
-            p_i_p.assert_called_once_with(mock.ANY)
-            p_e_o_d.assert_called_once_with(mock.ANY)
+            ri.process_delete()
+            p_i_p.assert_called_once_with()
+            p_e_o_d.assert_called_once_with()
 
 
 class BasicRouterTestCaseFramework(base.BaseTestCase):
@@ -190,7 +214,8 @@ class BasicRouterTestCaseFramework(base.BaseTestCase):
             router = mock.MagicMock()
         self.agent_conf = mock.Mock()
         self.router_id = _uuid()
-        return router_info.RouterInfo(self.router_id,
+        return router_info.RouterInfo(mock.Mock(),
+                                      self.router_id,
                                       router,
                                       self.agent_conf,
                                       mock.sentinel.interface_driver,

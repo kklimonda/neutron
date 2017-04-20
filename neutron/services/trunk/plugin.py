@@ -14,6 +14,9 @@
 
 import copy
 
+from neutron_lib.api.definitions import portbindings
+from neutron_lib import context
+from neutron_lib.services import base as service_base
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 
@@ -21,15 +24,12 @@ from neutron.api.v2 import attributes
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron import context
+from neutron.db import _resource_extend as resource_extend
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
 from neutron.db import db_base_plugin_common
-from neutron.db import db_base_plugin_v2
-from neutron.extensions import portbindings
 from neutron.objects import base as objects_base
 from neutron.objects import trunk as trunk_objects
-from neutron.services import service_base
 from neutron.services.trunk import callbacks
 from neutron.services.trunk import constants
 from neutron.services.trunk import drivers
@@ -60,6 +60,7 @@ def _extend_port_trunk_details(core_plugin, port_res, port_db):
     return port_res
 
 
+@registry.has_registry_receivers
 class TrunkPlugin(service_base.ServicePluginBase,
                   common_db_mixin.CommonDbMixin):
 
@@ -69,7 +70,7 @@ class TrunkPlugin(service_base.ServicePluginBase,
     __native_sorting_support = True
 
     def __init__(self):
-        db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+        resource_extend.register_funcs(
             attributes.PORTS, [_extend_port_trunk_details])
         self._rpc_backend = None
         self._drivers = []
@@ -79,11 +80,6 @@ class TrunkPlugin(service_base.ServicePluginBase,
         drivers.register()
         registry.subscribe(rules.enforce_port_deletion_rules,
                            resources.PORT, events.BEFORE_DELETE)
-        # NOTE(tidwellr) Consider keying off of PRECOMMIT_UPDATE if we find
-        # AFTER_UPDATE to be problematic for setting trunk status when a
-        # a parent port becomes unbound.
-        registry.subscribe(self._trigger_trunk_status_change,
-                           resources.PORT, events.AFTER_UPDATE)
         registry.notify(constants.TRUNK_PLUGIN, events.AFTER_INIT, self)
         for driver in self._drivers:
             LOG.debug('Trunk plugin loaded with driver %s', driver.name)
@@ -219,11 +215,11 @@ class TrunkPlugin(service_base.ServicePluginBase,
                                         id=uuidutils.generate_uuid(),
                                         name=trunk.get('name', ""),
                                         description=trunk_description,
-                                        tenant_id=trunk['tenant_id'],
+                                        project_id=trunk['tenant_id'],
                                         port_id=trunk['port_id'],
                                         status=constants.DOWN_STATUS,
                                         sub_ports=sub_ports)
-        with db_api.autonested_transaction(context.session):
+        with db_api.context_manager.writer.using(context):
             trunk_obj.create()
             payload = callbacks.TrunkPayload(context, trunk_obj.id,
                                              current_trunk=trunk_obj)
@@ -238,7 +234,7 @@ class TrunkPlugin(service_base.ServicePluginBase,
     def update_trunk(self, context, trunk_id, trunk):
         """Update information for the specified trunk."""
         trunk_data = trunk['trunk']
-        with db_api.autonested_transaction(context.session):
+        with db_api.context_manager.writer.using(context):
             trunk_obj = self._get_trunk(context, trunk_id)
             original_trunk = copy.deepcopy(trunk_obj)
             # NOTE(status_police): a trunk status should not change during an
@@ -258,7 +254,7 @@ class TrunkPlugin(service_base.ServicePluginBase,
 
     def delete_trunk(self, context, trunk_id):
         """Delete the specified trunk."""
-        with db_api.autonested_transaction(context.session):
+        with db_api.context_manager.writer.using(context):
             trunk = self._get_trunk(context, trunk_id)
             rules.trunk_can_be_managed(context, trunk)
             trunk_port_validator = rules.TrunkPortValidator(trunk.port_id)
@@ -280,7 +276,7 @@ class TrunkPlugin(service_base.ServicePluginBase,
     @db_base_plugin_common.convert_result_to_dict
     def add_subports(self, context, trunk_id, subports):
         """Add one or more subports to trunk."""
-        with db_api.autonested_transaction(context.session):
+        with db_api.context_manager.writer.using(context):
             trunk = self._get_trunk(context, trunk_id)
 
             # Check for basic validation since the request body here is not
@@ -334,7 +330,7 @@ class TrunkPlugin(service_base.ServicePluginBase,
     def remove_subports(self, context, trunk_id, subports):
         """Remove one or more subports from trunk."""
         subports = subports['sub_ports']
-        with db_api.autonested_transaction(context.session):
+        with db_api.context_manager.writer.using(context):
             trunk = self._get_trunk(context, trunk_id)
             original_trunk = copy.deepcopy(trunk)
             rules.trunk_can_be_managed(context, trunk)
@@ -396,6 +392,10 @@ class TrunkPlugin(service_base.ServicePluginBase,
 
         return obj
 
+    # NOTE(tidwellr) Consider keying off of PRECOMMIT_UPDATE if we find
+    # AFTER_UPDATE to be problematic for setting trunk status when a
+    # a parent port becomes unbound.
+    @registry.receives(resources.PORT, [events.AFTER_UPDATE])
     def _trigger_trunk_status_change(self, resource, event, trigger, **kwargs):
         updated_port = kwargs['port']
         trunk_details = updated_port.get('trunk_details')
@@ -409,8 +409,9 @@ class TrunkPlugin(service_base.ServicePluginBase,
         new_vif_type = updated_port.get(portbindings.VIF_TYPE)
         vif_type_changed = orig_vif_type != new_vif_type
         if vif_type_changed and new_vif_type == portbindings.VIF_TYPE_UNBOUND:
-            trunk = self._get_trunk(context, trunk_details['trunk_id'])
+            trunk_id = trunk_details['trunk_id']
             # NOTE(status_police) Trunk status goes to DOWN when the parent
             # port is unbound. This means there are no more physical resources
             # associated with the logical resource.
-            trunk.update(status=constants.DOWN_STATUS)
+            self.update_trunk(context, trunk_id,
+                              {'trunk': {'status': constants.DOWN_STATUS}})

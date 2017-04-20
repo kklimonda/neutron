@@ -14,9 +14,9 @@
 #    under the License.
 
 import mock
+from neutron_lib import context
 
 from neutron.common import exceptions as n_exc
-from neutron import context
 from neutron.core_extensions import base as base_core
 from neutron.core_extensions import qos as qos_core
 from neutron.plugins.common import constants as plugin_constants
@@ -48,7 +48,7 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
         plugins = {}
         if plugin_loaded:
             plugins[plugin_constants.QOS] = None
-        return mock.patch('neutron.manager.NeutronManager.get_service_plugins',
+        return mock.patch('neutron_lib.plugins.directory.get_plugins',
                           return_value=plugins)
 
     def test_process_fields_no_qos_plugin_loaded(self):
