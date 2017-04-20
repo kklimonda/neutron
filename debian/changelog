@@ -1,5 +1,6 @@
-neutron (2:10.0.0-0ubuntu6) UNRELEASED; urgency=medium
+neutron (2:11.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
 
+  [ Chuck Short ]
   * d/pydist-overrides: Dropped no longer needed.
   * d/rules:
     - Removed missing patch
@@ -10,7 +11,10 @@ neutron (2:10.0.0-0ubuntu6) UNRELEASED; urgency=medium
   * d/control: Add python-os-xenapi as a depdendency.
   * d/rules: Fix running unit tests.
 
- -- Chuck Short <zulcss@ubuntu.com>  Tue, 28 Mar 2017 10:01:44 -0400
+  [ James Page ]
+  * New upstream milestone for OpenStack Pike.
+
+ -- James Page <james.page@ubuntu.com>  Thu, 20 Apr 2017 15:44:00 +0100
 
 neutron (2:10.0.0-0ubuntu5) zesty; urgency=medium
 
