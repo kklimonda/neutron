@@ -14,18 +14,18 @@
 # limitations under the License.
 
 import mock
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib.plugins import directory
 
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron import context
 from neutron.db import api as db_api
 from neutron.db import dvr_mac_db
 from neutron.db.models import dvr as dvr_models
 from neutron.extensions import dvr
-from neutron.extensions import portbindings
 from neutron.tests.unit.plugins.ml2 import test_plugin
 
 
@@ -64,7 +64,7 @@ class DvrDbMixinTestCase(test_plugin.Ml2PluginV2TestCase):
 
     def test__create_dvr_mac_address_success(self):
         entry = {'host': 'foo_host', 'mac_address': '00:11:22:33:44:55:66'}
-        with mock.patch.object(dvr_mac_db.utils, 'get_random_mac') as f:
+        with mock.patch.object(dvr_mac_db.net, 'get_random_mac') as f:
             f.return_value = entry['mac_address']
             expected = self.mixin._create_dvr_mac_address(
                 self.ctx, entry['host'])
@@ -75,7 +75,7 @@ class DvrDbMixinTestCase(test_plugin.Ml2PluginV2TestCase):
         mock.patch('neutron.db.api._retry_db_errors.max_retries',
                    new=2).start()
         self._create_dvr_mac_entry('foo_host_1', 'non_unique_mac')
-        with mock.patch.object(dvr_mac_db.utils, 'get_random_mac') as f:
+        with mock.patch.object(dvr_mac_db.net, 'get_random_mac') as f:
             f.return_value = 'non_unique_mac'
             self.assertRaises(dvr.MacAddressGenerationFailure,
                               self.mixin._create_dvr_mac_address,

@@ -28,7 +28,6 @@ from sqlalchemy.orm import exc
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import _deprecate
 from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
@@ -38,8 +37,6 @@ from neutron.extensions import segment as extension
 from neutron import manager
 from neutron.objects import network
 from neutron.services.segments import exceptions
-
-_deprecate._moved_global('SegmentHostMapping', new_module=segment_model)
 
 
 class SegmentDbMixin(common_db_mixin.CommonDbMixin):
@@ -80,7 +77,7 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
         return self._make_segment_dict(new_segment)
 
     def _create_segment_db(self, context, segment_id, segment):
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             network_id = segment['network_id']
             physical_network = segment[extension.PHYSICAL_NETWORK]
             if physical_network == constants.ATTR_NOT_SPECIFIED:
@@ -128,7 +125,7 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
     def update_segment(self, context, uuid, segment):
         """Update an existing segment."""
         segment = segment['segment']
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             curr_segment = self._get_segment(context, uuid)
             curr_segment.update(segment)
         return self._make_segment_dict(curr_segment)
@@ -169,16 +166,16 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
         return list({mapping.segment_id for mapping in segment_host_mapping})
 
     @log_helpers.log_method_call
-    def delete_segment(self, context, uuid):
+    def delete_segment(self, context, uuid, for_net_delete=False):
         """Delete an existing segment."""
         segment = self.get_segment(context, uuid)
         # Do some preliminary operations before deleting the segment
         registry.notify(resources.SEGMENT, events.BEFORE_DELETE,
                         self.delete_segment, context=context,
-                        segment=segment)
+                        segment=segment, for_net_delete=for_net_delete)
 
         # Delete segment in DB
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             query = self._model_query(context, segment_model.NetworkSegment)
             query = query.filter(segment_model.NetworkSegment.id == uuid)
             if 0 == query.delete():
@@ -194,7 +191,7 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
 
 
 def update_segment_host_mapping(context, host, current_segment_ids):
-    with context.session.begin(subtransactions=True):
+    with db_api.context_manager.writer.using(context):
         segment_host_mapping = network.SegmentHostMapping.get_objects(
             context, host=host)
         previous_segment_ids = {
@@ -244,7 +241,7 @@ def get_segments_with_phys_nets(context, phys_nets):
     if not phys_nets:
         return []
 
-    with context.session.begin(subtransactions=True):
+    with db_api.context_manager.reader.using(context):
         segments = context.session.query(segment_model.NetworkSegment).filter(
             segment_model.NetworkSegment.physical_network.in_(phys_nets))
         return segments
@@ -252,7 +249,7 @@ def get_segments_with_phys_nets(context, phys_nets):
 
 def map_segment_to_hosts(context, segment_id, hosts):
     """Map segment to a collection of hosts."""
-    with db_api.autonested_transaction(context.session):
+    with db_api.context_manager.writer.using(context):
         for host in hosts:
             network.SegmentHostMapping(
                 context, segment_id=segment_id, host=host).create()
@@ -312,7 +309,8 @@ def _delete_segments_for_network(resource, event, trigger,
     segments = segments_plugin.get_segments(
         admin_ctx, filters={'network_id': [network_id]})
     for segment in segments:
-        segments_plugin.delete_segment(admin_ctx, segment['id'])
+        segments_plugin.delete_segment(admin_ctx, segment['id'],
+                                       for_net_delete=True)
 
 
 def subscribe():
@@ -326,9 +324,6 @@ def subscribe():
                        resources.SEGMENT, events.PRECOMMIT_CREATE)
     registry.subscribe(_delete_segments_for_network,
                        resources.NETWORK,
-                       events.PRECOMMIT_DELETE)
+                       events.BEFORE_DELETE)
 
 subscribe()
-
-
-_deprecate._MovedGlobals()

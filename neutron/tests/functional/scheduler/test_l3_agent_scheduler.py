@@ -17,11 +17,11 @@ import collections
 import random
 
 from neutron_lib import constants
+from neutron_lib import context
 from oslo_utils import uuidutils
 import testscenarios
 
-from neutron import context
-from neutron.db.models import external_net as ext_net_models
+from neutron.objects import network as net_obj
 from neutron.scheduler import l3_agent_scheduler
 from neutron.services.l3_router import l3_router_plugin
 from neutron.tests.common import helpers
@@ -570,9 +570,9 @@ class L3DVRSchedulerBaseTest(L3SchedulerBaseTest):
         network = self.plugin.create_network(self.adminContext,
                                              {'network': network_dict})
         if external:
-            with self.adminContext.session.begin():
-                network = ext_net_models.ExternalNetwork(network_id=net_id)
-                self.adminContext.session.add(network)
+            network = net_obj.ExternalNetwork(
+                self.adminContext, network_id=net_id)
+            network.create()
 
         return network
 

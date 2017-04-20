@@ -80,12 +80,23 @@ class QosRule(base.NeutronDbObject):
         this method, or we could make it abstract to allow different
         rule behaviour.
         """
-        is_network_rule = self.qos_policy_id != port[qos_consts.QOS_POLICY_ID]
+        is_port_policy = self.qos_policy_id == port[qos_consts.QOS_POLICY_ID]
+        is_network_policy_only = port[qos_consts.QOS_POLICY_ID] is None
         is_network_device_port = any(port['device_owner'].startswith(prefix)
                                      for prefix
                                      in constants.DEVICE_OWNER_PREFIXES)
-
-        return not (is_network_rule and is_network_device_port)
+        # NOTE(miouge): Network QoS policies should apply to ext routers ports:
+        # - DEVICE_OWNER_AGENT_GW for DVR routers
+        # - DEVICE_OWNER_ROUTER_GW for normal neutron routers
+        is_router_gw = any(port['device_owner'].startswith(prefix)
+                           for prefix in [constants.DEVICE_OWNER_AGENT_GW,
+                                          constants.DEVICE_OWNER_ROUTER_GW])
+        # NOTE(ralonsoh): return True if:
+        #    - Is a port QoS policy (not a network QoS policy)
+        #    - Is not an internal network device (e.g. router) and is a network
+        #      QoS policy and there is no port QoS policy
+        return (is_port_policy or ((is_router_gw or not is_network_device_port)
+                                   and is_network_policy_only))
 
 
 @obj_base.VersionedObjectRegistry.register

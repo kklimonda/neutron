@@ -14,12 +14,12 @@
 
 import mock
 import netaddr
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as lib_constants
 from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import uuidutils
 
-from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import agent as l3_agent
 from neutron.agent.l3 import dvr_local_router as dvr_router
 from neutron.agent.l3 import link_local_allocator as lla
@@ -29,10 +29,10 @@ from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.common import constants as n_const
 from neutron.common import utils as common_utils
+from neutron.conf.agent import common as agent_config
 from neutron.conf.agent.l3 import config as l3_config
 from neutron.conf.agent.l3 import ha as ha_conf
 from neutron.conf import common as base_config
-from neutron.extensions import portbindings
 from neutron.tests import base
 from neutron.tests.common import l3_test_common
 
@@ -190,6 +190,71 @@ class TestDvrRouterOperations(base.BaseTestCase):
         fips = ri.get_floating_ips()
 
         self.assertEqual([{'host': HOSTNAME}], fips)
+
+    def test_floating_forward_rules_no_fip_ns(self):
+        router = mock.MagicMock()
+        router.get.return_value = [{'host': HOSTNAME},
+                                   {'host': mock.sentinel.otherhost}]
+        ri = self._create_router(router)
+        floating_ip = mock.Mock()
+        fixed_ip = mock.Mock()
+        self.assertFalse(ri.floating_forward_rules(floating_ip, fixed_ip))
+
+    def test_floating_forward_rules(self):
+        router = mock.MagicMock()
+        router.get.return_value = [{'host': HOSTNAME},
+                                   {'host': mock.sentinel.otherhost}]
+        ri = self._create_router(router)
+        floating_ip = '15.1.2.3'
+        rtr_2_fip_name = 'fake_router'
+        fixed_ip = '192.168.0.1'
+        instance = mock.Mock()
+        instance.get_rtr_ext_device_name = mock.Mock(
+                                               return_value=rtr_2_fip_name)
+        ri.fip_ns = instance
+        dnat_from_floatingip_to_fixedip = (
+            'PREROUTING', '-d %s/32 -i %s -j DNAT --to-destination %s' % (
+                floating_ip, rtr_2_fip_name, fixed_ip))
+        snat_from_fixedip_to_floatingip = (
+            'float-snat', '-s %s/32 -j SNAT --to-source %s' % (
+                fixed_ip, floating_ip))
+        actual = ri.floating_forward_rules(floating_ip, fixed_ip)
+        expected = [dnat_from_floatingip_to_fixedip,
+                    snat_from_fixedip_to_floatingip]
+        self.assertEqual(expected, actual)
+
+    def test_floating_mangle_rules_no_fip_ns(self):
+        router = mock.MagicMock()
+        router.get.return_value = [{'host': HOSTNAME},
+                                   {'host': mock.sentinel.otherhost}]
+        ri = self._create_router(router)
+        floating_ip = mock.Mock()
+        fixed_ip = mock.Mock()
+        internal_mark = mock.Mock()
+        self.assertFalse(ri.floating_mangle_rules(floating_ip, fixed_ip,
+                                                  internal_mark))
+
+    def test_floating_mangle_rules(self):
+        router = mock.MagicMock()
+        router.get.return_value = [{'host': HOSTNAME},
+                                   {'host': mock.sentinel.otherhost}]
+        ri = self._create_router(router)
+        floating_ip = '15.1.2.3'
+        fixed_ip = '192.168.0.1'
+        internal_mark = 'fake_mark'
+        rtr_2_fip_name = 'fake_router'
+        instance = mock.Mock()
+        instance.get_rtr_ext_device_name = mock.Mock(
+                                               return_value=rtr_2_fip_name)
+        ri.fip_ns = instance
+        mark_traffic_to_floating_ip = (
+            'floatingip', '-d %s/32 -i %s -j MARK --set-xmark %s' % (
+                floating_ip, rtr_2_fip_name, internal_mark))
+        mark_traffic_from_fixed_ip = (
+            'FORWARD', '-s %s/32 -j $float-snat' % fixed_ip)
+        actual = ri.floating_mangle_rules(floating_ip, fixed_ip, internal_mark)
+        expected = [mark_traffic_to_floating_ip, mark_traffic_from_fixed_ip]
+        self.assertEqual(expected, actual)
 
     @mock.patch.object(ip_lib, 'send_ip_addr_adv_notif')
     @mock.patch.object(ip_lib, 'IPDevice')
@@ -651,3 +716,25 @@ class TestDvrRouterOperations(base.BaseTestCase):
 
         ri.remove_floating_ip.assert_called_once_with(self.mock_ip_dev,
                                                       '19.4.4.2/32')
+
+    def test_get_router_cidrs_no_fip_ns(self):
+        router = mock.MagicMock()
+        router.get.return_value = [{'host': HOSTNAME},
+                                   {'host': mock.sentinel.otherhost}]
+        ri = self._create_router(router)
+        device = mock.Mock()
+        self.assertFalse(ri.get_router_cidrs(device))
+
+    def test_get_router_cidrs_no_device_exists(self):
+        router = mock.MagicMock()
+        router.get.return_value = [{'host': HOSTNAME},
+                                   {'host': mock.sentinel.otherhost}]
+        ri = self._create_router(router)
+        fake_fip_ns = mock.Mock(return_value=True)
+        fake_fip_ns.get_name = mock.Mock(return_value=None)
+        fake_fip_ns.get_int_device_name = mock.Mock(return_value=None)
+        ri.fip_ns = fake_fip_ns
+        device = mock.Mock()
+        device.exists = mock.Mock(return_value=False)
+        with mock.patch.object(ip_lib, 'IPDevice', return_value=device):
+            self.assertFalse(ri.get_router_cidrs(device))

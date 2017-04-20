@@ -21,7 +21,6 @@ from oslo_config import cfg
 import six
 import testtools
 
-from neutron.agent.common import config as a_cfg
 from neutron.agent import firewall
 from neutron.agent.linux import ip_conntrack
 from neutron.agent.linux import ipset_manager
@@ -29,6 +28,7 @@ from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_firewall
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
+from neutron.conf.agent import common as agent_config
 from neutron.conf.agent import securitygroups_rpc as security_config
 from neutron.tests import base
 from neutron.tests.unit.api.v2 import test_base
@@ -71,8 +71,8 @@ COMMIT
 class BaseIptablesFirewallTestCase(base.BaseTestCase):
     def setUp(self):
         super(BaseIptablesFirewallTestCase, self).setUp()
-        cfg.CONF.register_opts(a_cfg.ROOT_HELPER_OPTS, 'AGENT')
         security_config.register_securitygroups_opts()
+        agent_config.register_root_helper(cfg.CONF)
         cfg.CONF.set_override('comment_iptables_rules', False, 'AGENT')
         self.utils_exec_p = mock.patch(
             'neutron.agent.linux.utils.execute')
@@ -126,6 +126,12 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      'sg-fallback', '-j DROP',
                      comment=ic.UNMATCH_DROP),
                  mock.call.add_chain('sg-chain'),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule('FORWARD',
                                     '-m physdev --physdev-out tapfake_dev '
@@ -360,6 +366,30 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         egress = None
         self._test_prepare_port_filter(rule, ingress, egress)
 
+    def test_filter_ipv4_ingress_dccp_port(self):
+        rule = {'ethertype': 'IPv4',
+                'direction': 'ingress',
+                'protocol': 'dccp',
+                'port_range_min': 10,
+                'port_range_max': 10}
+        ingress = mock.call.add_rule('ifake_dev',
+                                     '-p dccp -m dccp --dport 10 -j RETURN',
+                                     comment=None)
+        egress = None
+        self._test_prepare_port_filter(rule, ingress, egress)
+
+    def test_filter_ipv4_ingress_sctp_port(self):
+        rule = {'ethertype': 'IPv4',
+                'direction': 'ingress',
+                'protocol': 'sctp',
+                'port_range_min': 10,
+                'port_range_max': 10}
+        ingress = mock.call.add_rule('ifake_dev',
+                                     '-p sctp -m sctp --dport 10 -j RETURN',
+                                     comment=None)
+        egress = None
+        self._test_prepare_port_filter(rule, ingress, egress)
+
     def test_filter_ipv4_egress(self):
         rule = {'ethertype': 'IPv4',
                 'direction': 'egress'}
@@ -367,7 +397,17 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
 
-    def test_filter_ipv4_egress_prefix(self):
+    def test_filter_ipv4_egress_dest_prefix(self):
+        prefix = FAKE_PREFIX['IPv4']
+        rule = {'ethertype': 'IPv4',
+                'direction': 'egress',
+                'dest_ip_prefix': prefix}
+        egress = mock.call.add_rule(
+            'ofake_dev', '-d %s -j RETURN' % prefix, comment=None)
+        ingress = None
+        self._test_prepare_port_filter(rule, ingress, egress)
+
+    def test_filter_ipv4_egress_source_prefix(self):
         prefix = FAKE_PREFIX['IPv4']
         rule = {'ethertype': 'IPv4',
                 'direction': 'egress',
@@ -391,9 +431,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv4',
                 'direction': 'egress',
                 'protocol': 'tcp',
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule('ofake_dev',
-                                    '-s %s -p tcp -j RETURN' % prefix,
+                                    '-d %s -p tcp -j RETURN' % prefix,
                                     comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -412,9 +452,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv4',
                 'direction': 'egress',
                 'protocol': 'icmp',
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
-            'ofake_dev', '-s %s -p icmp -j RETURN' % prefix,
+            'ofake_dev', '-d %s -p icmp -j RETURN' % prefix,
             comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -424,11 +464,11 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv4',
                 'direction': 'egress',
                 'protocol': 'icmp',
-                'source_port_range_min': 8,
-                'source_ip_prefix': prefix}
+                'port_range_min': 8,
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p icmp -m icmp --icmp-type 8 -j RETURN' % prefix,
+            '-d %s -p icmp -m icmp --icmp-type 8 -j RETURN' % prefix,
             comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -438,11 +478,11 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv4',
                 'direction': 'egress',
                 'protocol': 'icmp',
-                'source_port_range_min': 'echo-request',
-                'source_ip_prefix': prefix}
+                'port_range_min': 'echo-request',
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p icmp -m icmp --icmp-type echo-request '
+            '-d %s -p icmp -m icmp --icmp-type echo-request '
             '-j RETURN' % prefix,
             comment=None)
         ingress = None
@@ -453,12 +493,12 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv4',
                 'direction': 'egress',
                 'protocol': 'icmp',
-                'source_port_range_min': 8,
-                'source_port_range_max': 0,
-                'source_ip_prefix': prefix}
+                'port_range_min': 8,
+                'port_range_max': 0,
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p icmp -m icmp --icmp-type 8/0 -j RETURN' % prefix,
+            '-d %s -p icmp -m icmp --icmp-type 8/0 -j RETURN' % prefix,
             comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -495,10 +535,10 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                 'protocol': 'tcp',
                 'port_range_min': 10,
                 'port_range_max': 100,
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p tcp -m tcp -m multiport --dports 10:100 '
+            '-d %s -p tcp -m tcp -m multiport --dports 10:100 '
             '-j RETURN' % prefix, comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -517,9 +557,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv4',
                 'direction': 'egress',
                 'protocol': 'udp',
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule('ofake_dev',
-                                    '-s %s -p udp -j RETURN' % prefix,
+                                    '-d %s -p udp -j RETURN' % prefix,
                                     comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -556,10 +596,10 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                 'protocol': 'udp',
                 'port_range_min': 10,
                 'port_range_max': 100,
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p udp -m udp -m multiport --dports 10:100 '
+            '-d %s -p udp -m udp -m multiport --dports 10:100 '
             '-j RETURN' % prefix, comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -755,9 +795,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         prefix = FAKE_PREFIX['IPv6']
         rule = {'ethertype': 'IPv6',
                 'direction': 'egress',
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
-            'ofake_dev', '-s %s -j RETURN' % prefix, comment=None)
+            'ofake_dev', '-d %s -j RETURN' % prefix, comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
 
@@ -775,9 +815,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv6',
                 'direction': 'egress',
                 'protocol': 'tcp',
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule('ofake_dev',
-                                    '-s %s -p tcp -j RETURN' % prefix,
+                                    '-d %s -p tcp -j RETURN' % prefix,
                                     comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -796,9 +836,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv6',
                 'direction': 'egress',
                 'protocol': 'icmp',
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
-            'ofake_dev', '-s %s -p ipv6-icmp -j RETURN' % prefix,
+            'ofake_dev', '-d %s -p ipv6-icmp -j RETURN' % prefix,
             comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -808,11 +848,11 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv6',
                 'direction': 'egress',
                 'protocol': 'icmp',
-                'source_port_range_min': 8,
-                'source_ip_prefix': prefix}
+                'port_range_min': 8,
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p ipv6-icmp -m icmp6 --icmpv6-type 8 -j RETURN' % prefix,
+            '-d %s -p ipv6-icmp -m icmp6 --icmpv6-type 8 -j RETURN' % prefix,
             comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -822,11 +862,11 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv6',
                 'direction': 'egress',
                 'protocol': 'icmp',
-                'source_port_range_min': 'echo-request',
-                'source_ip_prefix': prefix}
+                'port_range_min': 'echo-request',
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p ipv6-icmp -m icmp6 --icmpv6-type echo-request '
+            '-d %s -p ipv6-icmp -m icmp6 --icmpv6-type echo-request '
             '-j RETURN' % prefix,
             comment=None)
         ingress = None
@@ -837,12 +877,12 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv6',
                 'direction': 'egress',
                 'protocol': 'icmp',
-                'source_port_range_min': 8,
-                'source_port_range_max': 0,
-                'source_ip_prefix': prefix}
+                'port_range_min': 8,
+                'port_range_max': 0,
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p ipv6-icmp -m icmp6 --icmpv6-type 8/0 -j RETURN' % prefix,
+            '-d %s -p ipv6-icmp -m icmp6 --icmpv6-type 8/0 -j RETURN' % prefix,
             comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -879,10 +919,10 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                 'protocol': 'tcp',
                 'port_range_min': 10,
                 'port_range_max': 100,
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p tcp -m tcp -m multiport --dports 10:100 '
+            '-d %s -p tcp -m tcp -m multiport --dports 10:100 '
             '-j RETURN' % prefix, comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -901,9 +941,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         rule = {'ethertype': 'IPv6',
                 'direction': 'egress',
                 'protocol': 'udp',
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule('ofake_dev',
-                                    '-s %s -p udp -j RETURN' % prefix,
+                                    '-d %s -p udp -j RETURN' % prefix,
                                     comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -940,10 +980,10 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                 'protocol': 'udp',
                 'port_range_min': 10,
                 'port_range_max': 100,
-                'source_ip_prefix': prefix}
+                'dest_ip_prefix': prefix}
         egress = mock.call.add_rule(
             'ofake_dev',
-            '-s %s -p udp -m udp -m multiport --dports 10:100 '
+            '-d %s -p udp -m udp -m multiport --dports 10:100 '
             '-j RETURN' % prefix, comment=None)
         ingress = None
         self._test_prepare_port_filter(rule, ingress, egress)
@@ -981,6 +1021,12 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      '-j DROP',
                      comment=ic.UNMATCH_DROP),
                  mock.call.add_chain('sg-chain'),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule('FORWARD',
                                     '-m physdev --physdev-out tapfake_dev '
@@ -1103,10 +1149,13 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
              'protocol': protocol}]
 
         with mock.patch.dict(self.firewall.ipconntrack._device_zone_map,
-                             {port['device']: ct_zone}):
+                             {port['network_id']: ct_zone}):
             self.firewall.filter_defer_apply_on()
             self.firewall.sg_rules['fake_sg_id'] = []
             self.firewall.filter_defer_apply_off()
+            if not ct_zone:
+                self.assertFalse(self.utils_exec.called)
+                return
             cmd = ['conntrack', '-D']
             if protocol:
                 cmd.extend(['-p', protocol])
@@ -1123,8 +1172,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                 else:
                     cmd.extend(['-s', 'fe80::1'])
 
-            if ct_zone:
-                cmd.extend(['-w', ct_zone])
+            cmd.extend(['-w', ct_zone])
             calls = [
                 mock.call(cmd, run_as_root=True, check_exit_code=True,
                           extra_ok_codes=[1])]
@@ -1186,13 +1234,16 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         self.firewall.filtered_ports[port['device']] = port
         self.firewall.updated_sg_members = set(['tapfake_dev'])
         with mock.patch.dict(self.firewall.ipconntrack._device_zone_map,
-                             {port['device']: ct_zone}):
+                             {port['network_id']: ct_zone}):
             self.firewall.filter_defer_apply_on()
             new_port = copy.deepcopy(port)
             new_port['security_groups'] = ['fake_sg_id2']
 
             self.firewall.filtered_ports[port['device']] = new_port
             self.firewall.filter_defer_apply_off()
+            if not ct_zone:
+                self.assertFalse(self.utils_exec.called)
+                return
             calls = self._get_expected_conntrack_calls(
                 [('ipv4', '10.0.0.1'), ('ipv6', 'fe80::1')], ct_zone)
             self.utils_exec.assert_has_calls(calls)
@@ -1245,7 +1296,7 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
             members_after_delete = {'IPv6': ['fe80::3']}
 
         with mock.patch.dict(self.firewall.ipconntrack._device_zone_map,
-                             {port['device']: ct_zone}):
+                             {port['network_id']: ct_zone}):
             # add ['10.0.0.2', '10.0.0.3'] or ['fe80::2', 'fe80::3']
             self.firewall.security_group_updated('sg_member', ['fake_sg_id2'])
             self.firewall.update_security_group_members(
@@ -1266,8 +1317,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                 remote_ip_direction = '-s' if direction == '-d' else '-d'
                 conntrack_cmd = ['conntrack', '-D', '-f', ethertype,
                                  direction, ips[ethertype][0]]
-                if ct_zone:
-                    conntrack_cmd.extend(['-w', 10])
+                if not ct_zone:
+                    continue
+                conntrack_cmd.extend(['-w', 10])
                 conntrack_cmd.extend([remote_ip_direction, ips[ethertype][1]])
 
                 calls.append(mock.call(conntrack_cmd,
@@ -1301,6 +1353,12 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      '-j DROP',
                      comment=ic.UNMATCH_DROP),
                  mock.call.add_chain('sg-chain'),
+                 mock.call.add_rule('PREROUTING', mock.ANY,
+                                    comment=None),  # zone set
+                 mock.call.add_rule('PREROUTING', mock.ANY,
+                                    comment=None),  # zone set
+                 mock.call.add_rule('PREROUTING', mock.ANY,
+                                    comment=None),  # zone set
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule(
                      'FORWARD',
@@ -1378,8 +1436,17 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                  mock.call.remove_chain('ifake_dev'),
                  mock.call.remove_chain('ofake_dev'),
                  mock.call.remove_chain('sfake_dev'),
+                 mock.call.remove_rule('PREROUTING', mock.ANY),  # zone set
+                 mock.call.remove_rule('PREROUTING', mock.ANY),  # zone set
+                 mock.call.remove_rule('PREROUTING', mock.ANY),  # zone set
                  mock.call.remove_chain('sg-chain'),
                  mock.call.add_chain('sg-chain'),
+                 mock.call.add_rule('PREROUTING', mock.ANY,
+                                    comment=None),  # zone set
+                 mock.call.add_rule('PREROUTING', mock.ANY,
+                                    comment=None),  # zone set
+                 mock.call.add_rule('PREROUTING', mock.ANY,
+                                    comment=None),  # zone set
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule(
                      'FORWARD',
@@ -1457,6 +1524,9 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                  mock.call.remove_chain('ifake_dev'),
                  mock.call.remove_chain('ofake_dev'),
                  mock.call.remove_chain('sfake_dev'),
+                 mock.call.remove_rule('PREROUTING', mock.ANY),  # zone set
+                 mock.call.remove_rule('PREROUTING', mock.ANY),  # zone set
+                 mock.call.remove_rule('PREROUTING', mock.ANY),  # zone set
                  mock.call.remove_chain('sg-chain'),
                  mock.call.add_chain('sg-chain')]
 
@@ -1480,13 +1550,12 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
         new_port['fixed_ips'] = ['10.0.0.2', 'fe80::2']
         self.firewall.sg_members['fake_sg_id2'] = {'IPv4': ['10.0.0.2'],
                                                    'IPv6': ['fe80::2']}
-        if ct_zone:
-            self.firewall.ipconntrack._device_zone_map['tapfake_dev'] = ct_zone
-        else:
-            self.firewall.ipconntrack._device_zone_map.pop('tapfake_dev', None)
-
+        mock.patch.object(self.firewall.ipconntrack, 'get_device_zone',
+                          return_value=ct_zone).start()
         self.firewall.remove_port_filter(port)
-
+        if not ct_zone:
+            self.assertFalse(self.utils_exec.called)
+            return
         calls = self._get_expected_conntrack_calls(
             [('ipv4', '10.0.0.1'), ('ipv6', 'fe80::1')], ct_zone)
         self.utils_exec.assert_has_calls(calls)
@@ -1532,8 +1601,10 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
 
     def test_mock_chain_applies(self):
         chain_applies = self._mock_chain_applies()
-        port_prepare = {'device': 'd1', 'mac_address': 'prepare'}
-        port_update = {'device': 'd1', 'mac_address': 'update'}
+        port_prepare = {'device': 'd1', 'mac_address': 'prepare',
+                        'network_id': 'fake_net'}
+        port_update = {'device': 'd1', 'mac_address': 'update',
+                       'network_id': 'fake_net'}
         self.firewall.prepare_port_filter(port_prepare)
         self.firewall.update_port_filter(port_update)
         self.firewall.remove_port_filter(port_update)
@@ -1587,6 +1658,12 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      'sg-fallback', '-j DROP',
                      comment=ic.UNMATCH_DROP),
                  mock.call.add_chain('sg-chain'),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule('FORWARD',
                                     '-m physdev --physdev-out tapfake_dev '
@@ -1671,6 +1748,12 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                      'sg-fallback', '-j DROP',
                      comment=ic.UNMATCH_DROP),
                  mock.call.add_chain('sg-chain'),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
+                 mock.call.add_rule('PREROUTING', mock.ANY,  # zone set
+                                    comment=None),
                  mock.call.add_chain('ifake_dev'),
                  mock.call.add_rule('FORWARD',
                                     '-m physdev --physdev-out tapfake_dev '
@@ -2056,9 +2139,9 @@ class OVSHybridIptablesFirewallTestCase(BaseIptablesFirewallTestCase):
                    self.firewall.ipconntrack._device_zone_map)
 
     def test_get_device_zone(self):
+        dev = {'device': 'tap1234', 'network_id': '12345678901234567'}
         # initial data has 1, 2, and 9 in use.
-        self.assertEqual(10,
-               self.firewall.ipconntrack.get_device_zone('12345678901234567'))
+        self.assertEqual(10, self.firewall.ipconntrack.get_device_zone(dev))
         # should have been truncated to 11 chars
         self._dev_zone_map.update({'12345678901': 10})
         self.assertEqual(self._dev_zone_map,

@@ -17,22 +17,27 @@ import shutil
 import signal
 
 import netaddr
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as n_consts
 from oslo_log import log as logging
 
-from neutron._i18n import _LE
+from neutron._i18n import _, _LE
 from neutron.agent.l3 import namespaces
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
 from neutron.common import utils as common_utils
-from neutron.extensions import portbindings
 
 LOG = logging.getLogger(__name__)
 HA_DEV_PREFIX = 'ha-'
 IP_MONITOR_PROCESS_SERVICE = 'ip_monitor'
 SIGTERM_TIMEOUT = 10
+
+# The multiplier is used to compensate execution time of function sending
+# SIGHUP to keepalived process. The constant multiplies ha_vrrp_advert_int
+# config option and the result is the throttle delay.
+THROTTLER_MULTIPLIER = 1.5
 
 
 class HaRouterNamespace(namespaces.RouterNamespace):
@@ -95,13 +100,23 @@ class HaRouter(router.RouterInfo):
     def ha_namespace(self):
         return self.ns_name
 
+    def is_router_master(self):
+        """this method is normally called before the ha_router object is fully
+        initialized
+        """
+        if self.router.get('_ha_state') == 'active':
+            return True
+        else:
+            return False
+
     def initialize(self, process_monitor):
-        super(HaRouter, self).initialize(process_monitor)
         ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
         if not ha_port:
-            LOG.error(_LE('Unable to process HA router %s without HA port'),
-                      self.router_id)
-            return
+            msg = _("Unable to process HA router %s without "
+                    "HA port") % self.router_id
+            LOG.exception(msg)
+            raise Exception(msg)
+        super(HaRouter, self).initialize(process_monitor)
 
         self.ha_port = ha_port
         self._init_keepalived_manager(process_monitor)
@@ -115,7 +130,9 @@ class HaRouter(router.RouterInfo):
             keepalived.KeepalivedConf(),
             process_monitor,
             conf_path=self.agent_conf.ha_confs_path,
-            namespace=self.ha_namespace)
+            namespace=self.ha_namespace,
+            throttle_restart_value=(
+                self.agent_conf.ha_vrrp_advert_int * THROTTLER_MULTIPLIER))
 
         config = self.keepalived_manager.config
 
@@ -379,8 +396,13 @@ class HaRouter(router.RouterInfo):
         self._plug_external_gateway(ex_gw_port, interface_name, self.ns_name)
         self._add_gateway_vip(ex_gw_port, interface_name)
         self._disable_ipv6_addressing_on_interface(interface_name)
-        if self.ha_state == 'master':
-            self._enable_ra_on_gw(ex_gw_port, self.ns_name, interface_name)
+
+        # Enable RA and IPv6 forwarding only for master instances. This will
+        # prevent backup routers from sending packets to the upstream switch
+        # and disrupt connections.
+        enable = self.ha_state == 'master'
+        self._configure_ipv6_params_on_gw(ex_gw_port, self.ns_name,
+                                          interface_name, enable)
 
     def external_gateway_updated(self, ex_gw_port, interface_name):
         self._plug_external_gateway(

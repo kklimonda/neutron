@@ -14,6 +14,7 @@
 #    under the License.
 
 import mock
+from neutron_lib import context
 from neutron_lib.db import constants as db_const
 from neutron_lib.plugins import directory
 from oslo_policy import policy as oslo_policy
@@ -21,7 +22,6 @@ from oslo_serialization import jsonutils
 
 from neutron.api.v2 import attributes
 from neutron.callbacks import events
-from neutron import context
 from neutron.db.quota import driver as quota_driver
 from neutron import manager
 from neutron.pecan_wsgi.controllers import resource
@@ -220,6 +220,17 @@ class TestPolicyEnforcementHook(test_functional.PecanFunctionalTest):
         self.assertEqual(200, response.status_int)
         json_response = jsonutils.loads(response.body)
         self.assertNotIn('restricted_attr', json_response['mehs'][0])
+
+    def test_after_inits_policy(self):
+        self.mock_plugin.get_mehs.return_value = [{
+            'id': 'xxx',
+            'attr': 'meh',
+            'restricted_attr': '',
+            'tenant_id': 'tenid'}]
+        policy.reset()
+        response = self.app.get('/v2.0/mehs',
+                                headers={'X-Project-Id': 'tenid'})
+        self.assertEqual(200, response.status_int)
 
 
 class TestMetricsNotifierHook(test_functional.PecanFunctionalTest):

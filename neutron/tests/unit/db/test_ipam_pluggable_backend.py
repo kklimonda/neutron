@@ -372,6 +372,9 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
     @mock.patch('neutron.ipam.driver.Pool')
     def test_create_ipv6_pd_subnet_over_ipam(self, pool_mock):
         mocks = self._prepare_mocks_with_pool_mock(pool_mock)
+        # TODO(kevinbenton): remove after bug/1666493 is resolved
+        sub = pool_mock.get_instance.return_value.get_subnet.return_value
+        sub.subnet_manager.neutron_id = mock.ANY
         cfg.CONF.set_override('ipv6_pd_enabled', True)
         cidr = n_const.PROVISIONAL_IPV6_PD_PREFIX
         allocation_pools = [netaddr.IPRange('::2', '::ffff:ffff:ffff:ffff')]
@@ -645,7 +648,7 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         fixed_ips_mock = mock.Mock(return_value=changes.add)
         mocks['ipam'] = ipam_pluggable_backend.IpamPluggableBackend()
         mocks['ipam']._get_changed_ips_for_port = changes_mock
-        mocks['ipam']._ipam_get_subnets = mock.Mock()
+        mocks['ipam']._ipam_get_subnets = mock.Mock(return_value=[])
         mocks['ipam']._test_fixed_ips_for_port = fixed_ips_mock
         mocks['ipam']._update_ips_for_pd_subnet = mock.Mock(return_value=[])
 

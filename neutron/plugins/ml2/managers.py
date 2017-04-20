@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.api.definitions import provider_net as provider
 from neutron_lib.api import validators
 from neutron_lib import constants
 from neutron_lib import exceptions as exc
@@ -27,8 +29,6 @@ from neutron.db import api as db_api
 from neutron.db import segments_db
 from neutron.extensions import external_net
 from neutron.extensions import multiprovidernet as mpnet
-from neutron.extensions import portbindings
-from neutron.extensions import providernet as provider
 from neutron.extensions import vlantransparent
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import driver_api as api
@@ -190,8 +190,7 @@ class TypeManager(stevedore.named.NamedExtensionManager):
     def create_network_segments(self, context, network, tenant_id):
         """Call type drivers to create network segments."""
         segments = self._process_provider_create(network)
-        session = context.session
-        with session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             network_id = network['id']
             if segments:
                 for segment_index, segment in enumerate(segments):
@@ -224,7 +223,7 @@ class TypeManager(stevedore.named.NamedExtensionManager):
         self.validate_provider_segment(segment)
 
         # Reserve segment in type driver
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             return self.reserve_provider_segment(context, segment)
 
     def is_partial_segment(self, segment):
@@ -937,9 +936,9 @@ class ExtensionManager(stevedore.named.NamedExtensionManager):
             try:
                 getattr(driver.obj, method_name)(session, base_model, result)
             except Exception:
-                LOG.error(_LE("Extension driver '%(name)s' failed in "
-                          "%(method)s"),
-                          {'name': driver.name, 'method': method_name})
+                LOG.exception(_LE("Extension driver '%(name)s' failed in "
+                                  "%(method)s"),
+                              {'name': driver.name, 'method': method_name})
                 raise ml2_exc.ExtensionDriverError(driver=driver.name)
 
     def extend_network_dict(self, session, base_model, result):

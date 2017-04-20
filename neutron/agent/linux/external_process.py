@@ -21,12 +21,14 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import fileutils
+import psutil
 import six
 
 from neutron._i18n import _, _LW, _LE
-from neutron.agent.common import config as agent_cfg
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
+
+from neutron.conf.agent import common as agent_cfg
 
 LOG = logging.getLogger(__name__)
 
@@ -138,16 +140,18 @@ class ProcessManager(MonitoredProcess):
 
     @property
     def active(self):
-        pid = self.pid
-        if pid is None:
-            return False
+        cmdline = self.cmdline
+        return self.uuid in cmdline if cmdline else False
 
-        cmdline = '/proc/%s/cmdline' % pid
+    @property
+    def cmdline(self):
+        pid = self.pid
+        if not pid:
+            return
         try:
-            with open(cmdline, "r") as f:
-                return self.uuid in f.readline()
-        except IOError:
-            return False
+            return ' '.join(psutil.Process(pid).cmdline())
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return
 
 
 ServiceId = collections.namedtuple('ServiceId', ['uuid', 'service'])

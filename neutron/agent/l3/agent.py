@@ -16,6 +16,7 @@
 import eventlet
 import netaddr
 from neutron_lib import constants as lib_const
+from neutron_lib import context as n_context
 from oslo_config import cfg
 from oslo_context import context as common_context
 from oslo_log import log as logging
@@ -53,7 +54,6 @@ from neutron.common import ipv6_utils
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
-from neutron import context as n_context
 from neutron import manager
 
 LOG = logging.getLogger(__name__)
@@ -343,7 +343,20 @@ class L3NATAgent(ha.AgentMixin,
 
         self.router_info[router_id] = ri
 
-        ri.initialize(self.process_monitor)
+        # If initialize() fails, cleanup and retrigger complete sync
+        try:
+            ri.initialize(self.process_monitor)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                del self.router_info[router_id]
+                LOG.exception(_LE('Error while initializing router %s'),
+                              router_id)
+                self.namespaces_manager.ensure_router_cleanup(router_id)
+                try:
+                    ri.delete()
+                except Exception:
+                    LOG.exception(_LE('Error while deleting router %s'),
+                                  router_id)
 
     def _safe_router_removed(self, router_id):
         """Try to delete a router and return True if successful."""

@@ -15,13 +15,14 @@
 
 import contextlib
 import copy
+import weakref
 
 from debtcollector import removals
+from neutron_lib.db import api
 from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_db import api as oslo_db_api
 from oslo_db import exception as db_exc
-from oslo_db.sqlalchemy import enginefacade
 from oslo_log import log as logging
 from oslo_utils import excutils
 from osprofiler import opts as profiler_opts
@@ -31,8 +32,8 @@ import six
 import sqlalchemy
 from sqlalchemy import event  # noqa
 from sqlalchemy import exc as sql_exc
+from sqlalchemy import orm
 from sqlalchemy.orm import exc
-import traceback
 
 from neutron._i18n import _LE
 from neutron.objects import exceptions as obj_exc
@@ -44,9 +45,7 @@ def set_hook(engine):
         osprofiler.sqlalchemy.add_tracing(sqlalchemy, engine, 'neutron.db')
 
 
-context_manager = enginefacade.transaction_context()
-
-context_manager.configure(sqlite_fk=True)
+context_manager = api.get_context_manager()
 
 # TODO(ihrachys) the hook assumes options defined by osprofiler, and the only
 # public function that is provided by osprofiler that will register them is
@@ -127,8 +126,7 @@ def retry_db_errors(f):
         except Exception as e:
             with excutils.save_and_reraise_exception():
                 if is_retriable(e):
-                    LOG.debug("Retry wrapper got retriable exception: %s",
-                              traceback.format_exc())
+                    LOG.debug("Retry wrapper got retriable exception: %s", e)
     return wrapped
 
 
@@ -185,9 +183,13 @@ def reraise_as_retryrequest(f):
 
 def _is_nested_instance(e, etypes):
     """Check if exception or its inner excepts are an instance of etypes."""
-    return (isinstance(e, etypes) or
-            isinstance(e, exceptions.MultipleExceptions) and
-            any(_is_nested_instance(i, etypes) for i in e.inner_exceptions))
+    if isinstance(e, etypes):
+        return True
+    if isinstance(e, exceptions.MultipleExceptions):
+        return any(_is_nested_instance(i, etypes) for i in e.inner_exceptions)
+    if isinstance(e, db_exc.DBError):
+        return _is_nested_instance(e.inner_exception, etypes)
+    return False
 
 
 @contextlib.contextmanager
@@ -261,3 +263,49 @@ def sqla_remove_all():
             # already removed
             pass
     del _REGISTERED_SQLA_EVENTS[:]
+
+
+@event.listens_for(orm.session.Session, "after_flush")
+def add_to_rel_load_list(session, flush_context=None):
+    # keep track of new items to load relationships on during commit
+    session.info.setdefault('_load_rels', weakref.WeakSet()).update(
+        session.new)
+
+
+@event.listens_for(orm.session.Session, "before_commit")
+def load_one_to_manys(session):
+    # TODO(kevinbenton): we should be able to remove this after we
+    # have eliminated all places where related objects are constructed
+    # using a key rather than a relationship.
+
+    # capture any new objects
+    if session.new:
+        session.flush()
+
+    if session.transaction.nested:
+        # wait until final commit
+        return
+
+    for new_object in session.info.pop('_load_rels', []):
+        state = sqlalchemy.inspect(new_object)
+
+        # set up relationship loading so that we can call lazy
+        # loaders on the object even though the ".key" is not set up yet
+        # (normally happens by in after_flush_postexec, but we're trying
+        # to do this more succinctly).  in this context this is only
+        # setting a simple flag on the object's state.
+        session.enable_relationship_loading(new_object)
+
+        # look for eager relationships and do normal load.
+        # For relationships where the related object is also
+        # in the session these lazy loads will pull from the
+        # identity map and not emit SELECT.  Otherwise, we are still
+        # local in the transaction so a normal SELECT load will work fine.
+        for relationship_attr in state.mapper.relationships:
+            if relationship_attr.lazy not in ('joined', 'subquery'):
+                # we only want to automatically load relationships that would
+                # automatically load during a lookup operation
+                continue
+            if relationship_attr.key not in state.dict:
+                getattr(new_object, relationship_attr.key)
+                assert relationship_attr.key in state.dict

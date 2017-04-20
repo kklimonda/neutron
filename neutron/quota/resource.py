@@ -177,7 +177,7 @@ class TrackedResource(BaseResource):
     def mark_dirty(self, context):
         if not self._dirty_tenants:
             return
-        with db_api.autonested_transaction(context.session):
+        with db_api.context_manager.writer.using(context):
             # It is not necessary to protect this operation with a lock.
             # Indeed when this method is called the request has been processed
             # and therefore all resources created or deleted.
@@ -250,7 +250,7 @@ class TrackedResource(BaseResource):
         """
         # Load current usage data, setting a row-level lock on the DB
         usage_info = quota_api.get_quota_usage_by_resource_and_tenant(
-            context, self.name, tenant_id, lock_for_update=True)
+            context, self.name, tenant_id)
         # Always fetch reservations, as they are not tracked by usage counters
         reservations = quota_api.get_reservations_for_resources(
             context, tenant_id, [self.name])

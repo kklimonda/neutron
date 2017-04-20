@@ -25,19 +25,17 @@ import os.path
 import random
 import signal
 import sys
+import threading
 import time
 import uuid
 import weakref
 
-import debtcollector
 from debtcollector import removals
 import eventlet
 from eventlet.green import subprocess
 import netaddr
 from neutron_lib import constants as n_const
-from neutron_lib.utils import file as file_utils
 from neutron_lib.utils import helpers
-from neutron_lib.utils import host
 from neutron_lib.utils import net
 from oslo_concurrency import lockutils
 from oslo_config import cfg
@@ -57,23 +55,58 @@ TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 LOG = logging.getLogger(__name__)
 SYNCHRONIZED_PREFIX = 'neutron-'
 
+DEFAULT_THROTTLER_VALUE = 2
+
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
 
 
-class WaitTimeout(Exception, eventlet.TimeoutError):
-    """Default exception coming from wait_until_true() function.
+class WaitTimeout(Exception):
+    """Default exception coming from wait_until_true() function."""
 
-    The reason is that eventlet.TimeoutError inherits from BaseException and
-    testtools.TestCase consumes only Exceptions. Which means in case
-    TimeoutError is raised, test runner stops and exits while it still has test
-    cases scheduled for execution.
+
+class LockWithTimer(object):
+    def __init__(self, threshold):
+        self._threshold = threshold
+        self.timestamp = 0
+        self._lock = threading.Lock()
+
+    def acquire(self):
+        return self._lock.acquire(False)
+
+    def release(self):
+        return self._lock.release()
+
+    def time_to_wait(self):
+        return self.timestamp - time.time() + self._threshold
+
+
+# REVISIT(jlibosva): Some parts of throttler may be similar to what
+#                    neutron.notifiers.batch_notifier.BatchNotifier does. They
+#                    could be refactored and unified.
+def throttler(threshold=DEFAULT_THROTTLER_VALUE):
+    """Throttle number of calls to a function to only once per 'threshold'.
     """
+    def decorator(f):
+        lock_with_timer = LockWithTimer(threshold)
 
-    def __str__(self):
-        return Exception.__str__(self)
-
-    def __repr__(self):
-        return Exception.__repr__(self)
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            if lock_with_timer.acquire():
+                try:
+                    fname = f.__name__
+                    time_to_wait = lock_with_timer.time_to_wait()
+                    if time_to_wait > 0:
+                        LOG.debug("Call of function %s scheduled, sleeping "
+                                  "%.1f seconds", fname, time_to_wait)
+                        # Decorated function has been called recently, wait.
+                        eventlet.sleep(time_to_wait)
+                    lock_with_timer.timestamp = time.time()
+                finally:
+                    lock_with_timer.release()
+                LOG.debug("Calling throttled function %s", fname)
+                return f(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 @removals.remove(
@@ -97,57 +130,8 @@ def subprocess_popen(args, stdin=None, stdout=None, stderr=None, shell=False,
                             close_fds=close_fds, env=env)
 
 
-@removals.remove(
-    message="Use parse_mappings from neutron_lib.utils.helpers")
-def parse_mappings(mapping_list, unique_values=True, unique_keys=True):
-    return helpers.parse_mappings(mapping_list, unique_values=unique_values,
-                                  unique_keys=unique_keys)
-
-
-@removals.remove(
-    message="Use get_hostname from neutron_lib.utils.net")
-def get_hostname():
-    return net.get_hostname()
-
-
 def get_first_host_ip(net, ip_version):
     return str(netaddr.IPAddress(net.first + 1, ip_version))
-
-
-@removals.remove(
-    message="Use compare_elements from neutron_lib.utils.helpers")
-def compare_elements(a, b):
-    return helpers.compare_elements(a, b)
-
-
-@removals.remove(
-    message="Use safe_sort_key from neutron_lib.utils.helpers")
-def safe_sort_key(value):
-    return helpers.safe_sort_key(value)
-
-
-@removals.remove(
-    message="Use dict2str from neutron_lib.utils.helpers")
-def dict2str(dic):
-    return helpers.dict2str(dic)
-
-
-@removals.remove(
-    message="Use str2dict from neutron_lib.utils.helpers")
-def str2dict(string):
-    return helpers.str2dict(string)
-
-
-@removals.remove(
-    message="Use dict2tuple from neutron_lib.utils.helpers")
-def dict2tuple(d):
-    return helpers.dict2tuple(d)
-
-
-@removals.remove(
-    message="Use diff_list_of_dict from neutron_lib.utils.helpers")
-def diff_list_of_dict(old_list, new_list):
-    return helpers.diff_list_of_dict(old_list, new_list)
 
 
 def is_extension_supported(plugin, ext_alias):
@@ -159,13 +143,13 @@ def log_opt_values(log):
     cfg.CONF.log_opt_values(log, logging.DEBUG)
 
 
+@removals.remove(
+    message="Use get_random_mac from neutron_lib.utils.net",
+    version="Pike",
+    removal_version="Queens"
+)
 def get_random_mac(base_mac):
-    mac = [int(base_mac[0], 16), int(base_mac[1], 16),
-           int(base_mac[2], 16), random.randint(0x00, 0xff),
-           random.randint(0x00, 0xff), random.randint(0x00, 0xff)]
-    if base_mac[3] != '00':
-        mac[3] = int(base_mac[3], 16)
-    return ':'.join(["%02x" % x for x in mac])
+    return net.get_random_mac(base_mac)
 
 
 def get_dhcp_agent_device_id(network_id, host):
@@ -175,12 +159,6 @@ def get_dhcp_agent_device_id(network_id, host):
     local_hostname = host.split('.')[0]
     host_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, str(local_hostname))
     return 'dhcp%s-%s' % (host_uuid, network_id)
-
-
-@removals.remove(
-    message="Use cpu_count from neutron_lib.utils.host")
-def cpu_count():
-    return host.cpu_count()
 
 
 class exception_logger(object):
@@ -287,6 +265,10 @@ def is_cidr_host(cidr):
     return net.prefixlen == n_const.IPv6_BITS
 
 
+def get_ip_version(ip_or_cidr):
+    return netaddr.IPNetwork(ip_or_cidr).version
+
+
 def ip_version_from_int(ip_version_int):
     if ip_version_int == 4:
         return n_const.IPv4
@@ -321,41 +303,12 @@ class DelayedStringRenderer(object):
         return str(self.function(*self.args, **self.kwargs))
 
 
-@removals.remove(
-    message="Use round_val from neutron_lib.utils.helpers")
-def round_val(val):
-    return helpers.round_val(val)
-
-
-@removals.remove(
-    message="Use replace_file from neutron_lib.utils")
-def replace_file(file_name, data, file_mode=0o644):
-    file_utils.replace_file(file_name, data, file_mode=file_mode)
-
-
-class _SilentDriverManager(driver.DriverManager):
-    """The lamest of hacks to allow us to pass a kwarg to DriverManager parent.
-
-    DriverManager doesn't accept the warn_on_missing_entrypoint param
-    to pass to its parent on __init__ so we mirror the __init__ here and bypass
-    the one in DriverManager in order to silence the warnings.
-    TODO(kevinbenton): remove once Ia6f5f749fc2f73ca6091fa6d58506fddb058902a
-    is released or we stop supporting loading by class path.
-    """
-    def __init__(self, namespace, name):
-        p = super(driver.DriverManager, self)  # pylint: disable=bad-super-call
-        p.__init__(
-            namespace=namespace, names=[name],
-            on_load_failure_callback=self._default_on_load_failure,
-            warn_on_missing_entrypoint=False
-        )
-
-
 def load_class_by_alias_or_classname(namespace, name):
     """Load class using stevedore alias or the class name
+
     :param namespace: namespace where the alias is defined
     :param name: alias or class name of the class to be loaded
-    :returns class if calls can be loaded
+    :returns: class if calls can be loaded
     :raises ImportError if class cannot be loaded
     """
 
@@ -364,7 +317,8 @@ def load_class_by_alias_or_classname(namespace, name):
         raise ImportError(_("Class not found."))
     try:
         # Try to resolve class by alias
-        mgr = _SilentDriverManager(namespace, name)
+        mgr = driver.DriverManager(
+            namespace, name, warn_on_missing_entrypoint=False)
         class_to_load = mgr.driver
     except RuntimeError:
         e1_info = sys.exc_info()
@@ -378,12 +332,6 @@ def load_class_by_alias_or_classname(namespace, name):
                       exc_info=True)
             raise ImportError(_("Class not found."))
     return class_to_load
-
-
-@removals.remove(
-    message="Use safe_decode_utf8 from neutron_lib.utils.helpers")
-def safe_decode_utf8(s):
-    return helpers.safe_decode_utf8(s)
 
 
 def _hex_format(port, mask=0):
@@ -740,18 +688,10 @@ def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
             while not predicate():
                 eventlet.sleep(sleep)
     except eventlet.TimeoutError:
-        if exception is None:
-            debtcollector.deprecate(
-                "Raising eventlet.TimeoutError by default has been deprecated",
-                message="wait_until_true() now raises WaitTimeout error by "
-                        "default.",
-                version="Ocata",
-                removal_version="Pike")
-            exception = WaitTimeout("Timed out after %d seconds" % timeout)
-        #NOTE(jlibosva): In case None is passed exception is instantiated on
-        #                the line above.
-        #pylint: disable=raising-bad-type
-        raise exception
+        if exception is not None:
+            #pylint: disable=raising-bad-type
+            raise exception
+        raise WaitTimeout("Timed out after %d seconds" % timeout)
 
 
 class _AuthenticBase(object):

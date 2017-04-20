@@ -13,11 +13,11 @@
 import collections
 import copy
 import itertools
-import os.path
 import random
 
 import mock
 import netaddr
+from neutron_lib import context
 from neutron_lib import exceptions as n_exc
 from neutron_lib.utils import helpers
 from oslo_db import exception as obj_exc
@@ -29,13 +29,11 @@ from oslo_versionedobjects import fixture
 import testtools
 
 from neutron.common import constants
-from neutron.common import utils
-from neutron import context
-from neutron.db import db_base_plugin_v2
-from neutron.db.models import external_net as ext_net_model
+from neutron.db import _model_query as model_query
 from neutron.db.models import l3 as l3_model
 from neutron.db import standard_attr
 from neutron import objects
+from neutron.objects import agent
 from neutron.objects import base
 from neutron.objects import common_types
 from neutron.objects.db import api as obj_db_api
@@ -495,7 +493,7 @@ class _BaseObjectTestCase(object):
         # neutron.objects.db.api from core plugin instance
         self.setup_coreplugin(self.CORE_PLUGIN)
         # make sure all objects are loaded and registered in the registry
-        utils.import_modules_recursively(os.path.dirname(objects.__file__))
+        objects.register_objects()
         self.context = context.get_admin_context()
         self._unique_tracker = collections.defaultdict(set)
         self.db_objs = [
@@ -653,10 +651,10 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
                 'is_shared_with_tenant', return_value=False).start()
 
     def fake_get_object(self, context, model, **kwargs):
-        objects = self.model_map[model]
-        if not objects:
+        objs = self.model_map[model]
+        if not objs:
             return None
-        return [obj for obj in objects if obj['id'] == kwargs['id']][0]
+        return [obj for obj in objs if obj['id'] == kwargs['id']][0]
 
     def fake_get_objects(self, context, model, **kwargs):
         return self.model_map[model]
@@ -1278,12 +1276,10 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
 
     def _create_external_network(self):
         test_network = self._create_network()
-        # TODO(manjeets) replace this with ext_net ovo
-        # once it is implemented
-        return obj_db_api.create_object(
-            self.context,
-            ext_net_model.ExternalNetwork,
-            {'network_id': test_network['id']})
+        ext_net = net_obj.ExternalNetwork(self.context,
+            network_id=test_network['id'])
+        ext_net.create()
+        return ext_net
 
     def _create_test_fip(self):
         fake_fip = '172.23.3.0'
@@ -1362,6 +1358,11 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
                                                           **sg_fields)
         self._securitygroup.create()
         return self._securitygroup
+
+    def _create_test_agent(self):
+        attrs = self.get_random_object_fields(obj_cls=agent.Agent)
+        self._agent = agent.Agent(self.context, **attrs)
+        self._agent.create()
 
     def _create_test_port(self, network):
         self._port = self._create_port(network_id=network['id'])
@@ -1510,7 +1511,7 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
             return query
 
         self.obj_registry.register(self._test_class)
-        db_base_plugin_v2.NeutronDbPluginV2.register_model_query_hook(
+        model_query.register_hook(
             self._test_class.db_model,
             'foo_filter',
             None,

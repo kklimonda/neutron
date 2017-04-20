@@ -18,6 +18,7 @@ import functools
 import netaddr
 from neutron_lib.api import validators
 from neutron_lib import constants
+from neutron_lib import context as ctx
 from neutron_lib import exceptions as exc
 from neutron_lib.plugins import directory
 from oslo_config import cfg
@@ -26,6 +27,7 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 from oslo_utils import uuidutils
 from sqlalchemy import and_
+from sqlalchemy import exc as sql_exc
 from sqlalchemy import not_
 
 from neutron._i18n import _, _LE, _LI
@@ -39,7 +41,7 @@ from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils
-from neutron import context as ctx
+from neutron.db import _model_query as model_query
 from neutron.db import _utils as ndb_utils
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_common
@@ -320,14 +322,12 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         objects = []
         collection = "%ss" % resource
         items = request_items[collection]
-        context.session.begin(subtransactions=True)
         try:
-            for item in items:
-                obj_creator = getattr(self, 'create_%s' % resource)
-                objects.append(obj_creator(context, item))
-            context.session.commit()
+            with db_api.context_manager.writer.using(context):
+                for item in items:
+                    obj_creator = getattr(self, 'create_%s' % resource)
+                    objects.append(obj_creator(context, item))
         except Exception:
-            context.session.rollback()
             with excutils.save_and_reraise_exception():
                 LOG.error(_LE("An exception occurred while creating "
                               "the %(resource)s:%(item)s"),
@@ -348,11 +348,8 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
     def create_network_db(self, context, network):
         # single request processing
         n = network['network']
-        # NOTE(jkoelker) Get the tenant_id outside of the session to avoid
-        #                unneeded db action if the operation raises
-        tenant_id = n['tenant_id']
-        with context.session.begin(subtransactions=True):
-            args = {'tenant_id': tenant_id,
+        with db_api.context_manager.writer.using(context):
+            args = {'tenant_id': n['tenant_id'],
                     'id': n.get('id') or uuidutils.generate_uuid(),
                     'name': n['name'],
                     'admin_state_up': n['admin_state_up'],
@@ -370,7 +367,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
     @db_api.retry_if_session_inactive()
     def update_network(self, context, id, network):
         n = network['network']
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             network = self._get_network(context, id)
             # validate 'shared' parameter
             if 'shared' in n:
@@ -389,8 +386,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                         target_tenant='*', tenant_id=network['tenant_id'])
                     context.session.add(entry)
                 elif not update_shared and entry:
-                    context.session.delete(entry)
-                    context.session.expire(network, ['rbac_entries'])
+                    network.rbac_entries.remove(entry)
             # The filter call removes attributes from the body received from
             # the API that are logically tied to network resources but are
             # stored in other database tables handled by extensions
@@ -398,29 +394,39 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 ndb_utils.filter_non_model_columns(n, models_v2.Network))
         return self._make_network_dict(network, context=context)
 
+    def _ensure_network_not_in_use(self, context, net_id):
+        non_auto_ports = context.session.query(
+            models_v2.Port.id).filter_by(network_id=net_id).filter(
+            ~models_v2.Port.device_owner.in_(AUTO_DELETE_PORT_OWNERS))
+        if non_auto_ports.count():
+            raise exc.NetworkInUse(net_id=net_id)
+
     @db_api.retry_if_session_inactive()
     def delete_network(self, context, id):
-        with context.session.begin(subtransactions=True):
-            network = self._get_network(context, id)
-
-            auto_delete_ports = context.session.query(
-                models_v2.Port).filter_by(network_id=id).filter(
-                models_v2.Port.device_owner.in_(AUTO_DELETE_PORT_OWNERS))
-            for port in auto_delete_ports:
-                context.session.delete(port)
-
-            port_in_use = context.session.query(models_v2.Port).filter_by(
-                network_id=id).first()
-
-            if port_in_use:
-                raise exc.NetworkInUse(net_id=id)
-
-            # clean up subnets
-            subnets = self._get_subnets_by_network(context, id)
+        registry.notify(resources.NETWORK, events.BEFORE_DELETE, self,
+                        context=context, network_id=id)
+        self._ensure_network_not_in_use(context, id)
+        with db_api.context_manager.reader.using(context):
+            auto_delete_port_ids = [p.id for p in context.session.query(
+                models_v2.Port.id).filter_by(network_id=id).filter(
+                models_v2.Port.device_owner.in_(AUTO_DELETE_PORT_OWNERS))]
+        for port_id in auto_delete_port_ids:
+            self.delete_port(context.elevated(), port_id)
+        # clean up subnets
+        subnets = self._get_subnets_by_network(context, id)
+        with db_api.exc_to_retry(os_db_exc.DBReferenceError):
+            # retry reference errors so we can check the port type and
+            # cleanup if a network-owned port snuck in without failing
             for subnet in subnets:
                 self.delete_subnet(context, subnet['id'])
-
-            context.session.delete(network)
+            with db_api.context_manager.writer.using(context):
+                network_db = self._get_network(context, id)
+                network = self._make_network_dict(network_db, context=context)
+                registry.notify(resources.NETWORK, events.PRECOMMIT_DELETE,
+                                self, context=context, network_id=id)
+                context.session.delete(network_db)
+        registry.notify(resources.NETWORK, events.AFTER_DELETE,
+                        self, context=context, network=network)
 
     @db_api.retry_if_session_inactive()
     def get_network(self, context, id, fields=None):
@@ -732,7 +738,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 raise exc.BadRequest(resource='subnets', msg=msg)
             self._validate_subnet(context, s)
 
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             network = self._get_network(context,
                                         subnet['subnet']['network_id'])
             subnet, ipam_subnet = self.ipam.allocate_subnet(context,
@@ -816,14 +822,27 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             registry.notify(resources.SUBNET_GATEWAY, events.BEFORE_UPDATE,
                             self, **kwargs)
 
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             subnet, changes = self.ipam.update_db_subnet(context, id, s,
                                                          db_pools)
         # we expire here since ipam may have made changes to relationships
-        # that will be stale on any subsequent lookups while the subnet object
-        # is in the session otherwise.
-        context.session.expire(subnet)
+        # that will be stale on any subsequent lookups while the subnet
+        # object is in the session otherwise.
+        # Check if subnet attached to session before expire.
+        if subnet in context.session:
+            context.session.expire(subnet)
+
         return self._make_subnet_dict(subnet, context=context)
+
+    @property
+    def l3_rpc_notifier(self):
+        if not hasattr(self, '_l3_rpc_notifier'):
+            self._l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
+        return self._l3_rpc_notifier
+
+    @l3_rpc_notifier.setter
+    def l3_rpc_notifier(self, value):
+        self._l3_rpc_notifier = value
 
     def _update_subnet_postcommit(self, context, orig, result):
         """Subnet update operations that happen after transaction completes.
@@ -857,8 +876,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 self.update_port(context, port['id'], {'port': port})
             # Send router_update to l3_agent
             if routers:
-                l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
-                l3_rpc_notifier.routers_updated(context, routers)
+                self.l3_rpc_notifier.routers_updated(context, routers)
 
         if orig['gateway_ip'] != result['gateway_ip']:
             kwargs = {'context': context, 'subnet_id': result['id'],
@@ -867,10 +885,6 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                             self, **kwargs)
 
         return result
-
-    def _subnet_check_ip_allocations(self, context, subnet_id):
-        return (context.session.query(models_v2.IPAllocation).
-                filter_by(subnet_id=subnet_id).join(models_v2.Port).first())
 
     def _subnet_get_user_allocation(self, context, subnet_id):
         """Check if there are any user ports on subnet and return first."""
@@ -897,54 +911,70 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             raise exc.SubnetInUse(subnet_id=subnet_id)
 
     @db_api.retry_if_session_inactive()
+    def _remove_subnet_from_port(self, context, sub_id, port_id, auto_subnet):
+        try:
+            fixed = [f for f in self.get_port(context, port_id)['fixed_ips']
+                     if f['subnet_id'] != sub_id]
+            if auto_subnet:
+                # special flag to avoid re-allocation on auto subnets
+                fixed.append({'subnet_id': sub_id, 'delete_subnet': True})
+            data = {attributes.PORT: {'fixed_ips': fixed}}
+            self.update_port(context, port_id, data)
+        except exc.PortNotFound:
+            # port is gone
+            return
+        except exc.SubnetNotFound as e:
+            # another subnet in the fixed ips was concurrently removed. retry
+            raise os_db_exc.RetryRequest(e)
+
+    def _ensure_no_user_ports_on_subnet(self, context, id):
+        alloc = self._subnet_get_user_allocation(context, id)
+        if alloc:
+            LOG.info(_LI("Found port (%(port_id)s, %(ip)s) having IP "
+                         "allocation on subnet "
+                         "%(subnet)s, cannot delete"),
+                     {'ip': alloc.ip_address,
+                      'port_id': alloc.port_id,
+                      'subnet': id})
+            raise exc.SubnetInUse(subnet_id=id)
+
+    @db_api.retry_if_session_inactive()
+    def _remove_subnet_ip_allocations_from_ports(self, context, id):
+        # Do not allow a subnet to be deleted if a router is attached to it
+        self._subnet_check_ip_allocations_internal_router_ports(
+                context, id)
+        subnet = self._get_subnet(context, id)
+        is_auto_addr_subnet = ipv6_utils.is_auto_address_subnet(subnet)
+        if not is_auto_addr_subnet:
+            # we only automatically remove IP addresses from user ports if
+            # the IPs come from auto allocation subnets.
+            self._ensure_no_user_ports_on_subnet(context, id)
+        net_allocs = (context.session.query(models_v2.IPAllocation.port_id).
+                      filter_by(subnet_id=id))
+        port_ids_on_net = [ipal.port_id for ipal in net_allocs]
+        for port_id in port_ids_on_net:
+            self._remove_subnet_from_port(context, id, port_id,
+                                          auto_subnet=is_auto_addr_subnet)
+
+    @db_api.retry_if_session_inactive()
     def delete_subnet(self, context, id):
-        with context.session.begin(subtransactions=True):
-            subnet = self._get_subnet(context, id)
-
-            # Make sure the subnet isn't used by other resources
-            _check_subnet_not_used(context, id)
-
-            # Delete all network owned ports
-            qry_network_ports = (
-                context.session.query(models_v2.IPAllocation).
-                filter_by(subnet_id=subnet['id']).
-                join(models_v2.Port))
-            # Remove network owned ports, and delete IP allocations
-            # for IPv6 addresses which were automatically generated
-            # via SLAAC
-            is_auto_addr_subnet = ipv6_utils.is_auto_address_subnet(subnet)
-            if is_auto_addr_subnet:
-                self._subnet_check_ip_allocations_internal_router_ports(
-                        context, id)
-            else:
-                qry_network_ports = (
-                    qry_network_ports.filter(models_v2.Port.device_owner.
-                    in_(AUTO_DELETE_PORT_OWNERS)))
-            network_ports = qry_network_ports.all()
-            if network_ports:
-                for port in network_ports:
-                    context.session.delete(port)
-            # Check if there are more IP allocations, unless
-            # is_auto_address_subnet is True. In that case the check is
-            # unnecessary. This additional check not only would be wasteful
-            # for this class of subnet, but is also error-prone since when
-            # the isolation level is set to READ COMMITTED allocations made
-            # concurrently will be returned by this query
-            if not is_auto_addr_subnet:
-                alloc = self._subnet_check_ip_allocations(context, id)
-                if alloc:
-                    LOG.info(_LI("Found port (%(port_id)s, %(ip)s) having IP "
-                                 "allocation on subnet "
-                                 "%(subnet)s, cannot delete"),
-                             {'ip': alloc.ip_address,
-                              'port_id': alloc.port_id,
-                              'subnet': id})
-                    raise exc.SubnetInUse(subnet_id=id)
-
-            context.session.delete(subnet)
+        LOG.debug("Deleting subnet %s", id)
+        # Make sure the subnet isn't used by other resources
+        _check_subnet_not_used(context, id)
+        self._remove_subnet_ip_allocations_from_ports(context, id)
+        # retry integrity errors to catch ip allocation races
+        with db_api.exc_to_retry(sql_exc.IntegrityError), \
+                db_api.context_manager.writer.using(context):
+            subnet_db = self._get_subnet(context, id)
+            subnet = self._make_subnet_dict(subnet_db, context=context)
+            registry.notify(resources.SUBNET, events.PRECOMMIT_DELETE,
+                            self, context=context, subnet_id=id)
+            context.session.delete(subnet_db)
             # Delete related ipam subnet manually,
             # since there is no FK relationship
             self.ipam.delete_subnet(context, id)
+        registry.notify(resources.SUBNET, events.AFTER_DELETE,
+                        self, context=context, subnet=subnet)
 
     @db_api.retry_if_session_inactive()
     def get_subnet(self, context, id, fields=None):
@@ -1070,7 +1100,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
     def update_subnetpool(self, context, id, subnetpool):
         new_sp = subnetpool['subnetpool']
 
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             orig_sp = self._get_subnetpool(context, id=id)
             updated = _update_subnetpool_dict(orig_sp, new_sp)
             reader = subnet_alloc.SubnetPoolReader(updated)
@@ -1133,7 +1163,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
 
     @db_api.retry_if_session_inactive()
     def delete_subnetpool(self, context, id):
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             subnetpool = self._get_subnetpool(context, id=id)
             subnets = self._get_subnets_by_subnetpool(context, id)
             if subnets:
@@ -1174,14 +1204,12 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
         p = port['port']
         port_id = p.get('id') or uuidutils.generate_uuid()
         network_id = p['network_id']
-        # NOTE(jkoelker) Get the tenant_id outside of the session to avoid
-        #                unneeded db action if the operation raises
-        tenant_id = p['tenant_id']
         if p.get('device_owner'):
             self._enforce_device_owner_not_router_intf_or_device_id(
-                context, p.get('device_owner'), p.get('device_id'), tenant_id)
+                context, p.get('device_owner'), p.get('device_id'),
+                p['tenant_id'])
 
-        port_data = dict(tenant_id=tenant_id,
+        port_data = dict(tenant_id=p['tenant_id'],
                          name=p['name'],
                          id=port_id,
                          network_id=network_id,
@@ -1362,7 +1390,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                 if tenant_id != router['tenant_id']:
                     raise n_exc.DeviceIDNotOwnedByTenant(device_id=device_id)
 
-    db_base_plugin_common.DbBasePluginCommon.register_model_query_hook(
+    model_query.register_hook(
         models_v2.Port,
         "port",
         None,

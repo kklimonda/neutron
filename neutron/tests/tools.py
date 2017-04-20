@@ -21,11 +21,13 @@ import random
 import time
 import warnings
 
+from debtcollector import removals
 import fixtures
 import mock
 import netaddr
 from neutron_lib import constants
 from neutron_lib.utils import helpers
+from neutron_lib.utils import net
 from oslo_utils import netutils
 from oslo_utils import timeutils
 import six
@@ -33,7 +35,7 @@ import unittest2
 
 from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
-from neutron.db import common_db_mixin
+from neutron.db import _model_query as model_query
 from neutron.plugins.common import constants as p_const
 
 
@@ -123,13 +125,13 @@ class SafeCleanupFixture(fixtures.Fixture):
 
 class CommonDbMixinHooksFixture(fixtures.Fixture):
     def _setUp(self):
-        self.original_hooks = common_db_mixin.CommonDbMixin._model_query_hooks
+        self.original_hooks = model_query._model_query_hooks
         self.addCleanup(self.restore_hooks)
-        common_db_mixin.CommonDbMixin._model_query_hooks = copy.copy(
-            common_db_mixin.CommonDbMixin._model_query_hooks)
+        model_query._model_query_hooks = copy.copy(
+            model_query._model_query_hooks)
 
     def restore_hooks(self):
-        common_db_mixin.CommonDbMixin._model_query_hooks = self.original_hooks
+        model_query._model_query_hooks = self.original_hooks
 
 
 def setup_mock_calls(mocked_call, expected_calls_and_values):
@@ -254,17 +256,20 @@ def get_random_cidr(version=4):
     return '2001:db8:%x::/%d' % (random.getrandbits(16), 64)
 
 
+@removals.remove(
+    message="Use get_random_mac from neutron_lib.utils.net",
+    version="Pike",
+    removal_version="Queens"
+)
 def get_random_mac():
     """Generate a random mac address starting with fe:16:3e"""
-    mac = [0xfe, 0x16, 0x3e,
-        random.randint(0x00, 0xff),
-        random.randint(0x00, 0xff),
-        random.randint(0x00, 0xff)]
-    return ':'.join(map(lambda x: "%02x" % x, mac))
+    return net.get_random_mac(['fe', '16', '3e', '00', '00', '00'])
 
 
 def get_random_EUI():
-    return netaddr.EUI(get_random_mac())
+    return netaddr.EUI(
+        net.get_random_mac(['fe', '16', '3e', '00', '00', '00'])
+    )
 
 
 def get_random_ip_network(version=4):
@@ -278,8 +283,10 @@ def get_random_ip_address(version=4):
                                      random.randint(3, 254))
         return netaddr.IPAddress(ip_string)
     else:
-        ip = netutils.get_ipv6_addr_by_EUI64('2001:db8::/64',
-                                             get_random_mac())
+        ip = netutils.get_ipv6_addr_by_EUI64(
+            '2001:db8::/64',
+            net.get_random_mac(['fe', '16', '3e', '00', '00', '00'])
+        )
         return ip
 
 

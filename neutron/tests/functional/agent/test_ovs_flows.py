@@ -24,6 +24,7 @@ from oslo_serialization import jsonutils
 from oslo_utils import importutils
 from testtools.content import text_content
 
+from neutron.agent.common import ovs_lib
 from neutron.agent.common import utils
 from neutron.agent.linux import ip_lib
 from neutron.cmd.sanity import checks
@@ -32,6 +33,7 @@ from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
 from neutron.plugins.ml2.drivers.openvswitch.agent \
     import ovs_neutron_agent as ovsagt
 from neutron.tests.common import base as common_base
+from neutron.tests.common import helpers
 from neutron.tests.common import net_helpers
 from neutron.tests.functional.agent import test_ovs_lib
 from neutron.tests.functional import base
@@ -310,12 +312,48 @@ class ARPSpoofTestCase(OVSAgentTestBase):
 
 class CanaryTableTestCase(OVSAgentTestBase):
     def test_canary_table(self):
-        self.br_int.delete_flows()
+        self.br_int.uninstall_flows(cookie=ovs_lib.COOKIE_ANY)
         self.assertEqual(constants.OVS_RESTARTED,
                          self.br_int.check_canary_table())
         self.br_int.setup_canary_table()
         self.assertEqual(constants.OVS_NORMAL,
                          self.br_int.check_canary_table())
+
+
+class DeleteFlowsTestCase(OVSAgentTestBase):
+
+    def test_delete_flows_bridge_cookie_only(self):
+        PORT = 1
+
+        self.br_int.add_flow(in_port=PORT, ip=True, nw_dst="1.1.1.1",
+                             actions="output:11")
+        self.br_int.add_flow(in_port=PORT, ip=True, nw_dst="2.2.2.2",
+                             cookie=42, actions="output:42")
+
+        # delete (should only delete flows with the bridge cookie)
+        self.br_int.delete_flows(in_port=PORT)
+        flows = self.br_int.dump_flows_for(in_port=PORT,
+                                           cookie=self.br_int._default_cookie)
+        flows42 = self.br_int.dump_flows_for(in_port=PORT, cookie=42)
+
+        # check that only flows with cookie 42 remain
+        self.assertFalse(flows)
+        self.assertTrue(flows42)
+
+    def test_delete_flows_all(self):
+        PORT = 1
+
+        self.br_int.add_flow(in_port=PORT, ip=True, nw_dst="1.1.1.1",
+                             actions="output:11")
+        self.br_int.add_flow(in_port=PORT, ip=True, nw_dst="2.2.2.2",
+                             cookie=42, actions="output:42")
+
+        # delete both flows
+        self.br_int.delete_flows(in_port=PORT, cookie=ovs_lib.COOKIE_ANY)
+
+        # check that no flow remains
+        flows = self.br_int.dump_flows_for(in_port=PORT)
+        self.assertFalse(flows)
 
 
 class OVSFlowTestCase(OVSAgentTestBase):
@@ -387,6 +425,7 @@ class OVSFlowTestCase(OVSAgentTestBase):
         self.assertIn(("dl_src=%(gateway_mac)s" % kwargs),
                       trace["Final flow"])
 
+    @helpers.skip_if_ovs_older_than("2.5.1")
     def test_install_flood_to_tun(self):
         attrs = {
             'remote_ip': '192.0.2.1',  # RFC 5737 TEST-NET-1

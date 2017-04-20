@@ -22,9 +22,11 @@ import eventlet
 import mock
 import netaddr
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib import exceptions as lib_exc
 from neutron_lib.plugins import directory
 from neutron_lib.utils import helpers
+from neutron_lib.utils import net
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_utils import importutils
@@ -47,13 +49,13 @@ from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import test_lib
 from neutron.common import utils
-from neutron import context
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_common
 from neutron.db import ipam_backend_mixin
 from neutron.db.models import l3 as l3_models
 from neutron.db.models import securitygroup as sg_models
 from neutron.db import models_v2
+from neutron.db import rbac_db_models
 from neutron.db import standard_attr
 from neutron.ipam import exceptions as ipam_exc
 from neutron.tests import base
@@ -126,7 +128,7 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
              for key, default in six.iteritems(service_plugins or {})]
         )
 
-        cfg.CONF.set_override('base_mac', "12:34:56:78:90:ab")
+        cfg.CONF.set_override('base_mac', "12:34:56:78:00:00")
         cfg.CONF.set_override('max_dns_nameservers', 2)
         cfg.CONF.set_override('max_subnet_host_routes', 2)
         self.api = router.APIRouter()
@@ -1522,6 +1524,22 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
         res = req.get_response(self.api)
         self.assertEqual(webob.exc.HTTPNoContent.code, res.status_int)
 
+    def test_delete_network_port_exists_owned_by_network_race(self):
+        res = self._create_network(fmt=self.fmt, name='net',
+                                   admin_state_up=True)
+        network = self.deserialize(self.fmt, res)
+        network_id = network['network']['id']
+        self._create_port(self.fmt, network_id,
+                          device_owner=constants.DEVICE_OWNER_DHCP)
+        # skip first port delete to simulate create after auto clean
+        plugin = directory.get_plugin()
+        p = mock.patch.object(plugin, 'delete_port')
+        mock_del_port = p.start()
+        mock_del_port.side_effect = lambda *a, **k: p.stop()
+        req = self.new_delete_request('networks', network_id)
+        res = req.get_response(self.api)
+        self.assertEqual(webob.exc.HTTPNoContent.code, res.status_int)
+
     def test_update_port_delete_ip(self):
         with self.subnet() as subnet:
             with self.port(subnet=subnet) as port:
@@ -1666,25 +1684,29 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
             gateway_ip=constants.ATTR_NOT_SPECIFIED) as subnet:
             with self.port(subnet=subnet) as port:
                 ips = port['port']['fixed_ips']
+                ip_address = '2607:f0d0:1002:51::5'
                 self.assertEqual(1, len(ips))
                 port_mac = port['port']['mac_address']
+                subnet_id = subnet['subnet']['id']
                 subnet_cidr = subnet['subnet']['cidr']
                 eui_addr = str(netutils.get_ipv6_addr_by_EUI64(subnet_cidr,
                                                                port_mac))
                 self.assertEqual(ips[0]['ip_address'], eui_addr)
-                self.assertEqual(ips[0]['subnet_id'], subnet['subnet']['id'])
+                self.assertEqual(ips[0]['subnet_id'], subnet_id)
 
-                data = {'port': {'fixed_ips': [{'subnet_id':
-                                                subnet['subnet']['id'],
-                                                'ip_address':
-                                                '2607:f0d0:1002:51::5'}]}}
+                data = {'port': {'fixed_ips': [{'subnet_id': subnet_id,
+                                                'ip_address': ip_address}]}}
                 req = self.new_update_request('ports', data,
                                               port['port']['id'])
                 res = req.get_response(self.api)
                 err = self.deserialize(self.fmt, res)
                 self.assertEqual(webob.exc.HTTPClientError.code,
                                  res.status_int)
-                self.assertEqual('InvalidInput', err['NeutronError']['type'])
+                self.assertEqual('AllocationOnAutoAddressSubnet',
+                                 err['NeutronError']['type'])
+                msg = str(ipam_exc.AllocationOnAutoAddressSubnet(
+                    ip=ip_address, subnet_id=subnet_id))
+                self.assertEqual(err['NeutronError']['message'], msg)
 
     def test_requested_duplicate_mac(self):
         with self.port() as port:
@@ -1713,7 +1735,7 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
         # simulate duplicate mac generation to make sure DBDuplicate is retried
         responses = ['12:34:56:78:00:00', '12:34:56:78:00:00',
                      '12:34:56:78:00:01']
-        with mock.patch('neutron.common.utils.get_random_mac',
+        with mock.patch.object(net, 'get_random_mac',
                         side_effect=responses) as grand_mac:
             with self.subnet() as s:
                 with self.port(subnet=s) as p1, self.port(subnet=s) as p2:
@@ -2156,6 +2178,44 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
         self.assertEqual(1, len(ips))
         self.assertEqual(self._calc_ipv6_addr_by_EUI64(port, subnet_v6),
                          ips[0]['ip_address'])
+
+    def test_update_port_with_new_ipv6_slaac_subnet_in_fixed_ips(self):
+        """Test port update with a new IPv6 SLAAC subnet in fixed IPs."""
+        res = self._create_network(fmt=self.fmt, name='net',
+                                   admin_state_up=True)
+        network = self.deserialize(self.fmt, res)
+        # Create a port using an IPv4 subnet and an IPv6 SLAAC subnet
+        subnet_v4 = self._make_subnet(self.fmt, network, gateway='10.0.0.1',
+                                      cidr='10.0.0.0/24', ip_version=4)
+        subnet_v6 = self._make_v6_subnet(network, constants.IPV6_SLAAC)
+        res = self._create_port(self.fmt, net_id=network['network']['id'])
+        port = self.deserialize(self.fmt, res)
+        self.assertEqual(2, len(port['port']['fixed_ips']))
+        # Update port to have only IPv4 address
+        ips = [{'subnet_id': subnet_v4['subnet']['id']},
+               {'subnet_id': subnet_v6['subnet']['id'],
+                'delete_subnet': True}]
+        data = {'port': {'fixed_ips': ips}}
+        req = self.new_update_request('ports', data,
+                                      port['port']['id'])
+        res = self.deserialize(self.fmt, req.get_response(self.api))
+        # Port should only have an address corresponding to IPv4 subnet
+        ips = res['port']['fixed_ips']
+        self.assertEqual(1, len(ips))
+        self.assertEqual(subnet_v4['subnet']['id'], ips[0]['subnet_id'])
+        # Now update port and request an additional address on the IPv6 SLAAC
+        # subnet.
+        ips.append({'subnet_id': subnet_v6['subnet']['id']})
+        data = {'port': {'fixed_ips': ips}}
+        req = self.new_update_request('ports', data,
+                                      port['port']['id'])
+        res = self.deserialize(self.fmt, req.get_response(self.api))
+        ips = res['port']['fixed_ips']
+        # Port should have IPs on both IPv4 and IPv6 subnets
+        self.assertEqual(2, len(ips))
+        self.assertEqual(set([subnet_v4['subnet']['id'],
+                              subnet_v6['subnet']['id']]),
+                         set([ip['subnet_id'] for ip in ips]))
 
     def test_update_port_excluding_ipv6_slaac_subnet_from_fixed_ips(self):
         """Test port update excluding IPv6 SLAAC subnet from fixed ips."""
@@ -6040,6 +6100,31 @@ class TestSubnetPoolsV2(NeutronDbPluginV2TestCase):
 
 class DbModelMixin(object):
     """DB model tests."""
+    def test_make_network_dict_outside_engine_facade_manager(self):
+        mock.patch.object(directory, 'get_plugin').start()
+        ctx = context.get_admin_context()
+        with db_api.context_manager.writer.using(ctx):
+            network = models_v2.Network(name="net_net", status="OK",
+                                        admin_state_up=True)
+            ctx.session.add(network)
+            with db_api.autonested_transaction(ctx.session):
+                sg = sg_models.SecurityGroup(name='sg', description='sg')
+                ctx.session.add(sg)
+            # ensure db rels aren't loaded until commit for network object
+            # by sharing after a nested transaction
+            ctx.session.add(
+                rbac_db_models.NetworkRBAC(object_id=network.id,
+                                           action='access_as_shared',
+                                           tenant_id=network.tenant_id,
+                                           target_tenant='*')
+            )
+            net2 = models_v2.Network(name="net_net2", status="OK",
+                                     admin_state_up=True)
+            ctx.session.add(net2)
+        pl = db_base_plugin_common.DbBasePluginCommon()
+        self.assertTrue(pl._make_network_dict(network, context=ctx)['shared'])
+        self.assertFalse(pl._make_network_dict(net2, context=ctx)['shared'])
+
     def test_repr(self):
         """testing the string representation of 'model' classes."""
         network = models_v2.Network(name="net_net", status="OK",
@@ -6248,7 +6333,7 @@ class DbModelMixin(object):
 
 class DbModelTenantTestCase(DbModelMixin, testlib_api.SqlTestCase):
     def _make_network(self, ctx):
-        with ctx.session.begin():
+        with db_api.context_manager.writer.using(ctx):
             network = models_v2.Network(name="net_net", status="OK",
                                         tenant_id='dbcheck',
                                         admin_state_up=True)
@@ -6256,7 +6341,7 @@ class DbModelTenantTestCase(DbModelMixin, testlib_api.SqlTestCase):
         return network
 
     def _make_subnet(self, ctx, network_id):
-        with ctx.session.begin():
+        with db_api.context_manager.writer.using(ctx):
             subnet = models_v2.Subnet(name="subsub", ip_version=4,
                                       tenant_id='dbcheck',
                                       cidr='turn_down_for_what',
@@ -6274,7 +6359,7 @@ class DbModelTenantTestCase(DbModelMixin, testlib_api.SqlTestCase):
         return port
 
     def _make_subnetpool(self, ctx):
-        with ctx.session.begin():
+        with db_api.context_manager.writer.using(ctx):
             subnetpool = models_v2.SubnetPool(
                 ip_version=4, default_prefixlen=4, min_prefixlen=4,
                 max_prefixlen=4, shared=False, default_quota=4,
@@ -6287,7 +6372,7 @@ class DbModelTenantTestCase(DbModelMixin, testlib_api.SqlTestCase):
 
 class DbModelProjectTestCase(DbModelMixin, testlib_api.SqlTestCase):
     def _make_network(self, ctx):
-        with ctx.session.begin():
+        with db_api.context_manager.writer.using(ctx):
             network = models_v2.Network(name="net_net", status="OK",
                                         project_id='dbcheck',
                                         admin_state_up=True)
@@ -6295,7 +6380,7 @@ class DbModelProjectTestCase(DbModelMixin, testlib_api.SqlTestCase):
         return network
 
     def _make_subnet(self, ctx, network_id):
-        with ctx.session.begin():
+        with db_api.context_manager.writer.using(ctx):
             subnet = models_v2.Subnet(name="subsub", ip_version=4,
                                       project_id='dbcheck',
                                       cidr='turn_down_for_what',
@@ -6313,7 +6398,7 @@ class DbModelProjectTestCase(DbModelMixin, testlib_api.SqlTestCase):
         return port
 
     def _make_subnetpool(self, ctx):
-        with ctx.session.begin():
+        with db_api.context_manager.writer.using(ctx):
             subnetpool = models_v2.SubnetPool(
                 ip_version=4, default_prefixlen=4, min_prefixlen=4,
                 max_prefixlen=4, shared=False, default_quota=4,

@@ -18,7 +18,6 @@ from oslo_utils import uuidutils
 import testtools
 
 from neutron.agent.linux import ip_lib
-from neutron.common import utils
 from neutron.objects import trunk
 from neutron.plugins.ml2.drivers.linuxbridge.agent import \
     linuxbridge_neutron_agent
@@ -60,19 +59,6 @@ class LinuxBridgeAgentTests(test_ip_lib.IpLibTestFramework):
                                                     name='br-eth1'))
         lba.LinuxBridgeManager(mappings, {})
 
-    def test_set_port_mac(self):
-        attr = self.generate_device_details()
-        self.manage_device(attr)
-        plumber = trunk_plumber.Plumber(namespace=attr.namespace)
-        # force it to return name of above
-        plumber._get_tap_device_name = lambda x: attr.name
-        new_mac = utils.get_random_mac('fa:16:3e:00:00:00'.split(':'))
-        self.assertTrue(plumber.set_port_mac('port_id', new_mac))
-        self.assertFalse(plumber.set_port_mac('port_id', new_mac))
-        new_mac = utils.get_random_mac('fa:16:3e:00:00:00'.split(':'))
-        self.assertTrue(plumber.set_port_mac('port_id', new_mac))
-        self.assertFalse(plumber.set_port_mac('port_id', new_mac))
-
     def test_vlan_subinterfaces(self):
         attr = self.generate_device_details()
         device = self.manage_device(attr)
@@ -99,10 +85,10 @@ class LinuxBridgeAgentTests(test_ip_lib.IpLibTestFramework):
 
     def test_vlan_QinQ_subinterfaces(self):
         # the trunk model does not support this right now, but this is to
-        # the plumber on the agent side doesn't explode in their presense
-        # in case an operator does something fancy or we have a race where
-        # a trunk's parent port is converted to a subport while the agent
-        # is offline.
+        # ensure the plumber on the agent side doesn't explode in their
+        # presence in case an operator does something fancy or we have a
+        # race where a trunk's parent port is converted to a subport while
+        # the agent is offline.
         attr = self.generate_device_details()
         device = self.manage_device(attr)
         devname = device.name

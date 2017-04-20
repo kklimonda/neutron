@@ -26,21 +26,16 @@ from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import _deprecate
 from neutron.common import constants as n_const
 from neutron.common import utils
+from neutron.db import _resource_extend as resource_extend
 from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
-from neutron.db import db_base_plugin_v2
 from neutron.db.models import securitygroup as sg_models
 from neutron.extensions import securitygroup as ext_sg
 
 
-_deprecate._moved_global('DefaultSecurityGroup', new_module=sg_models)
-_deprecate._moved_global('SecurityGroupPortBinding', new_module=sg_models)
-_deprecate._moved_global('SecurityGroupRule', new_module=sg_models)
-
-
+@registry.has_registry_receivers
 class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
     """Mixin class to add security group to db_base_plugin_v2."""
 
@@ -498,8 +493,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
                'direction': [sgr['direction']]}
 
         include_if_present = ['protocol', 'port_range_max', 'port_range_min',
-                              'ethertype', 'remote_ip_prefix',
-                              'remote_group_id']
+                              'ethertype', 'remote_group_id']
         for key in include_if_present:
             value = sgr.get(key)
             if value:
@@ -538,6 +532,8 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         rule_dict.pop('description', None)
         keys = rule_dict.keys()
         fields = list(keys) + ['id']
+        if 'remote_ip_prefix' not in fields:
+            fields += ['remote_ip_prefix']
         db_rules = self.get_security_group_rules(context, filters,
                                                  fields=fields)
         # Note(arosen): the call to get_security_group_rules wildcards
@@ -551,6 +547,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         # below to check for these corner cases.
         rule_dict.pop('id', None)
         sg_protocol = rule_dict.pop('protocol', None)
+        remote_ip_prefix = rule_dict.pop('remote_ip_prefix', None)
         for db_rule in db_rules:
             rule_id = db_rule.pop('id', None)
             # remove protocol and match separately for number and type
@@ -558,8 +555,20 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
             is_protocol_matching = (
                 self._get_ip_proto_name_and_num(db_protocol) ==
                 self._get_ip_proto_name_and_num(sg_protocol))
-            if (is_protocol_matching and rule_dict == db_rule):
+            db_remote_ip_prefix = db_rule.pop('remote_ip_prefix', None)
+            duplicate_ip_prefix = self._validate_duplicate_ip_prefix(
+                                    remote_ip_prefix, db_remote_ip_prefix)
+            if (is_protocol_matching and duplicate_ip_prefix and
+                    rule_dict == db_rule):
                 raise ext_sg.SecurityGroupRuleExists(rule_id=rule_id)
+
+    def _validate_duplicate_ip_prefix(self, ip_prefix, other_ip_prefix):
+        all_address = ['0.0.0.0/0', '::/0', None]
+        if ip_prefix == other_ip_prefix:
+            return True
+        elif ip_prefix in all_address and other_ip_prefix in all_address:
+            return True
+        return False
 
     def _validate_ip_prefix(self, rule):
         """Check that a valid cidr was specified as remote_ip_prefix
@@ -654,8 +663,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         port_res[ext_sg.SECURITYGROUPS] = security_group_ids
         return port_res
 
-    # Register dict extend functions for ports
-    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+    resource_extend.register_funcs(
         attributes.PORTS, ['_extend_port_dict_security_group'])
 
     def _process_port_create_security_group(self, context, port,
@@ -676,6 +684,13 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
             return default_group['security_group_id']
         except exc.NoResultFound:
             pass
+
+    @registry.receives(resources.PORT, [events.BEFORE_CREATE])
+    @registry.receives(resources.NETWORK, [events.BEFORE_CREATE])
+    def _ensure_default_security_group_handler(self, resource, event, trigger,
+                                               context, **kwargs):
+        tenant_id = kwargs[resource]['tenant_id']
+        self._ensure_default_security_group(context, tenant_id)
 
     def _ensure_default_security_group(self, context, tenant_id):
         """Create a default security group if one doesn't exist.
@@ -779,6 +794,3 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
             updated_port[ext_sg.SECURITYGROUPS] = (
                 original_port[ext_sg.SECURITYGROUPS])
         return need_notify
-
-
-_deprecate._MovedGlobals()

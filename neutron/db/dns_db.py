@@ -19,10 +19,8 @@ from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron._i18n import _, _LE
-from neutron.common import _deprecate
 from neutron.common import utils
-from neutron.db import db_base_plugin_v2
-from neutron.db.models import dns as dns_models
+from neutron.db import _resource_extend as resource_extend
 from neutron.extensions import dns
 from neutron.extensions import l3
 from neutron.objects import floatingip as fip_obj
@@ -31,11 +29,6 @@ from neutron.objects import ports as port_obj
 from neutron.services.externaldns import driver
 
 LOG = logging.getLogger(__name__)
-
-
-_deprecate._moved_global('PortDNS', new_module=dns_models)
-_deprecate._moved_global('NetworkDNSDomain', new_module=dns_models)
-_deprecate._moved_global('FloatingIPDNS', new_module=dns_models)
 
 
 class DNSActionsData(object):
@@ -78,8 +71,7 @@ class DNSDbMixin(object):
             floatingip_res['dns_name'] = floatingip_db.dns['dns_name']
         return floatingip_res
 
-    # Register dict extend functions for floating ips
-    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+    resource_extend.register_funcs(
         l3.FLOATINGIPS, ['_extend_floatingip_dict_dns'])
 
     def _process_dns_floatingip_create_precommit(self, context,
@@ -256,6 +248,3 @@ class DNSDbMixin(object):
                           {"name": dns_name,
                            "domain": dns_domain,
                            "message": e.msg})
-
-
-_deprecate._MovedGlobals()

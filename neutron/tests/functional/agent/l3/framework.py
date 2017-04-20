@@ -25,7 +25,6 @@ from oslo_utils import uuidutils
 import testtools
 import textwrap
 
-from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
 from neutron.agent.l3 import agent as neutron_l3_agent
 from neutron.agent.l3 import namespaces
@@ -34,7 +33,9 @@ from neutron.agent import l3_agent as l3_agent_main
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
+from neutron.common import constants as n_const
 from neutron.common import utils as common_utils
+from neutron.conf.agent import common as agent_config
 from neutron.conf import common as common_config
 from neutron.tests.common import l3_test_common
 from neutron.tests.common import net_helpers
@@ -83,8 +84,6 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         get_temp_file_path = functools.partial(self.get_temp_file_path,
                                                root=temp_dir)
         conf.set_override('state_path', temp_dir.path)
-        # NOTE(cbrandily): log_file or log_dir must be set otherwise
-        # metadata_proxy_watch_log has no effect
         conf.set_override('log_file',
                           get_temp_file_path('log_file'))
         conf.set_override('metadata_proxy_socket',
@@ -217,14 +216,23 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
     def _assert_external_device(self, router):
         self.assertTrue(self._check_external_device(router))
 
-    def _assert_ipv6_accept_ra(self, router):
+    def _assert_ipv6_accept_ra(self, router, enabled=True):
         external_port = router.get_ex_gw_port()
         external_device_name = router.get_external_device_name(
             external_port['id'])
         ip_wrapper = ip_lib.IPWrapper(namespace=router.ns_name)
         ra_state = ip_wrapper.netns.execute(['sysctl', '-b',
             'net.ipv6.conf.%s.accept_ra' % external_device_name])
-        self.assertEqual('2', ra_state)
+        self.assertEqual(enabled, int(ra_state) != n_const.ACCEPT_RA_DISABLED)
+
+    def _assert_ipv6_forwarding(self, router, enabled=True):
+        external_port = router.get_ex_gw_port()
+        external_device_name = router.get_external_device_name(
+            external_port['id'])
+        ip_wrapper = ip_lib.IPWrapper(namespace=router.ns_name)
+        fwd_state = ip_wrapper.netns.execute(['sysctl', '-b',
+            'net.ipv6.conf.%s.forwarding' % external_device_name])
+        self.assertEqual(int(enabled), int(fwd_state))
 
     def _router_lifecycle(self, enable_ha, ip_version=4,
                           dual_stack=False, v6_ext_gw_with_sub=True,
@@ -464,7 +472,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
 
     def _assert_internal_devices(self, router):
         internal_devices = router.router[constants.INTERFACE_KEY]
-        self.assertTrue(len(internal_devices))
+        self.assertGreater(len(internal_devices), 0)
         for device in internal_devices:
             self.assertTrue(self.device_exists_with_ips_and_mac(
                 device, router.get_internal_device_name, router.ns_name))

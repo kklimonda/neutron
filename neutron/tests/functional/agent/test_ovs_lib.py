@@ -469,6 +469,11 @@ class OVSBridgeTestCase(OVSBridgeTestBase):
         self.assertRaises((RuntimeError, idlutils.RowNotFound),
                           del_port_mod_iface)
 
+    def test_delete_flows_all(self):
+        self.br.add_flow(in_port=1, actions="output:2")
+        self.br.delete_flows(cookie=ovs_lib.COOKIE_ANY)
+        self.assertEqual([], self.br.dump_all_flows())
+
 
 class OVSLibTestCase(base.BaseOVSLinuxTestCase):
 
@@ -505,6 +510,9 @@ class OVSLibTestCase(base.BaseOVSLinuxTestCase):
         self.addCleanup(self.ovs.remove_manager, conn_uri)
         self.ovs.add_manager(conn_uri)
         self.assertIn(conn_uri, self.ovs.get_manager())
+        self.assertEqual(self.ovs.db_get_val('Manager', conn_uri,
+                                             'inactivity_probe'),
+                         self.ovs.vsctl_timeout * 1000)
         self.ovs.remove_manager(conn_uri)
         self.assertNotIn(conn_uri, self.ovs.get_manager())
 

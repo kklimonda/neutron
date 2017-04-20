@@ -14,12 +14,13 @@
 #    under the License.
 
 import mock
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as const
+from neutron_lib import context
 from neutron_lib.plugins import directory
+from oslo_serialization import jsonutils
 
 from neutron.conf.plugins.ml2.drivers import driver_type
-from neutron import context
-from neutron.extensions import portbindings
 from neutron.plugins.ml2 import config
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2 import models as ml2_models
@@ -201,7 +202,7 @@ class PortBindingTestCase(test_plugin.NeutronDbPluginV2TestCase):
                 port_id=original_port['id'],
                 host=original_port['binding:host_id'],
                 vnic_type=original_port['binding:vnic_type'],
-                profile=original_port['binding:profile'],
+                profile=jsonutils.dumps(original_port['binding:profile']),
                 vif_type=original_port['binding:vif_type'],
                 vif_details=original_port['binding:vif_details'])
             levels = 1

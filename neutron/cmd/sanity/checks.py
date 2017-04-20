@@ -32,6 +32,7 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ip_link_support
 from neutron.agent.linux import keepalived
 from neutron.agent.linux import utils as agent_utils
+from neutron.cmd import runtime_checks
 from neutron.common import constants
 from neutron.common import utils as common_utils
 from neutron.plugins.common import constants as const
@@ -217,15 +218,7 @@ def dnsmasq_version_supported():
 
 
 def dhcp_release6_supported():
-    try:
-        cmd = ['dhcp_release6', '--help']
-        env = {'LC_ALL': 'C'}
-        agent_utils.execute(cmd, addl_env=env)
-    except (OSError, RuntimeError, IndexError, ValueError) as e:
-        LOG.debug("Exception while checking dhcp_release6. "
-                  "Exception: %s", e)
-        return False
-    return True
+    return runtime_checks.dhcp_release6_supported()
 
 
 def bridge_firewalling_enabled():
@@ -253,7 +246,7 @@ class KeepalivedIPv6Test(object):
         self.config = None
         self.config_path = None
         self.nsname = "keepalivedtest-" + uuidutils.generate_uuid()
-        self.pm = external_process.ProcessMonitor(cfg.CONF, 'router')
+        self.pm = None
         self.orig_interval = cfg.CONF.AGENT.check_child_processes_interval
 
     def configure(self):
@@ -278,6 +271,7 @@ class KeepalivedIPv6Test(object):
     def start_keepalived_process(self):
         # Disable process monitoring for Keepalived process.
         cfg.CONF.set_override('check_child_processes_interval', 0, 'AGENT')
+        self.pm = external_process.ProcessMonitor(cfg.CONF, 'router')
 
         # Create a temp directory to store keepalived configuration.
         self.config_path = tempfile.mkdtemp()
@@ -304,7 +298,8 @@ class KeepalivedIPv6Test(object):
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
-        self.pm.stop()
+        if self.pm:
+            self.pm.stop()
         if self.manager:
             self.manager.disable()
         if self.config_path:
@@ -416,6 +411,17 @@ def ip6tables_supported():
         return True
     except (OSError, RuntimeError, IndexError, ValueError) as e:
         LOG.debug("Exception while checking for installed ip6tables. "
+                  "Exception: %s", e)
+        return False
+
+
+def conntrack_supported():
+    try:
+        cmd = ['conntrack', '--version']
+        agent_utils.execute(cmd)
+        return True
+    except (OSError, RuntimeError, IndexError, ValueError) as e:
+        LOG.debug("Exception while checking for installed conntrack. "
                   "Exception: %s", e)
         return False
 

@@ -17,7 +17,9 @@ from keystoneauth1 import exceptions as ks_exc
 
 import mock
 import netaddr
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
 from novaclient import exceptions as nova_exc
@@ -32,7 +34,6 @@ from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.common import exceptions as neutron_exc
 from neutron.conf.plugins.ml2.drivers import driver_type
-from neutron import context
 from neutron.db import agents_db
 from neutron.db import agentschedulers_db
 from neutron.db import db_base_plugin_v2
@@ -40,7 +41,6 @@ from neutron.db import portbindings_db
 from neutron.db import segments_db
 from neutron.extensions import ip_allocation
 from neutron.extensions import l2_adjacency
-from neutron.extensions import portbindings
 from neutron.extensions import segment as ext_segment
 from neutron.objects import network
 from neutron.plugins.common import constants as p_constants

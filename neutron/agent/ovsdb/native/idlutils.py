@@ -84,7 +84,7 @@ def row_by_record(idl_, table, record):
     if rl.table is None:
         raise ValueError(_("Table %s can only be queried by UUID") % table)
     if rl.column is None:
-        return t.rows.values()[0]
+        return next(iter(t.rows.values()))
     row = row_by_value(idl_, rl.table, rl.column, record)
     if rl.uuid_column:
         rows = getattr(row, rl.uuid_column)
@@ -126,7 +126,7 @@ def get_schema_helper(connection, schema_name, retry=True):
             if not retry:
                 ctx.reraise = True
             # We may have failed due to set-manager not being called
-            helpers.enable_connection_uri(connection)
+            helpers.enable_connection_uri(connection, set_timeout=True)
 
             # There is a small window for a race, so retry up to a second
             @tenacity.retry(wait=tenacity.wait_exponential(multiplier=0.01),

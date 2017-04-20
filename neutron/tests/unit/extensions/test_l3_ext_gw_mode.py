@@ -17,6 +17,7 @@
 import mock
 import netaddr
 from neutron_lib import constants
+from neutron_lib import context as nctx
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
@@ -26,11 +27,9 @@ import testscenarios
 from webob import exc
 
 from neutron.common import utils
-from neutron import context as nctx
 from neutron.db import api as db_api
 from neutron.db import l3_db
 from neutron.db import l3_gwmode_db
-from neutron.db.models import external_net as ext_net_models
 from neutron.db.models import l3 as l3_models
 from neutron.db import models_v2
 from neutron.extensions import l3
@@ -121,7 +120,7 @@ class TestL3GwModeMixin(testlib_api.SqlTestCase):
         self.setup_coreplugin(plugin)
         self.target_object = TestDbIntPlugin()
         # Patch the context
-        ctx_patcher = mock.patch('neutron.context', autospec=True)
+        ctx_patcher = mock.patch('neutron_lib.context', autospec=True)
         mock_context = ctx_patcher.start()
         self.context = mock_context.get_admin_context()
         # This ensure also calls to elevated work in unit tests
@@ -138,10 +137,10 @@ class TestL3GwModeMixin(testlib_api.SqlTestCase):
             project_id=self.tenant_id,
             admin_state_up=True,
             status=constants.NET_STATUS_ACTIVE)
-        self.net_ext = ext_net_models.ExternalNetwork(
-            network_id=self.ext_net_id)
+        self.net_ext = net_obj.ExternalNetwork(
+            self.context, network_id=self.ext_net_id)
         self.network.create()
-        self.context.session.add(self.net_ext)
+        self.net_ext.create()
         self.router = l3_models.Router(
             id=_uuid(),
             name=None,
@@ -238,6 +237,7 @@ class TestL3GwModeMixin(testlib_api.SqlTestCase):
         self.context.session.add(self.fip_int_ip_info)
         self.context.session.add(self.fip)
         self.context.session.flush()
+        self.context.session.expire_all()
         self.fip_request = {'port_id': FAKE_FIP_INT_PORT_ID,
                             'tenant_id': self.tenant_id}
 

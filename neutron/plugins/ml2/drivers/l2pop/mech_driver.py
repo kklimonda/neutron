@@ -14,6 +14,7 @@
 #    under the License.
 
 from neutron_lib import constants as const
+from neutron_lib import context as n_context
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
 from oslo_config import cfg
@@ -21,7 +22,6 @@ from oslo_log import log as logging
 
 from neutron._i18n import _, _LW
 from neutron.conf.plugins.ml2.drivers import l2pop as config
-from neutron import context as n_context
 from neutron.db import api as db_api
 from neutron.db import l3_hamode_db
 from neutron.plugins.ml2 import driver_api as api
@@ -73,7 +73,8 @@ class L2populationMechanismDriver(api.MechanismDriver):
         agent_host = context.host
         fdb_entries = self._get_agent_fdb(
             context, context.bottom_bound_segment, port, agent_host)
-        if port['device_owner'] in l2pop_db.HA_ROUTER_PORTS and fdb_entries:
+        if fdb_entries and l3_hamode_db.is_ha_router_port(
+                context, port['device_owner'], port['device_id']):
             session = db_api.get_reader_session()
             network_id = port['network_id']
             other_fdb_ports = self._get_ha_port_agents_fdb(
@@ -312,6 +313,10 @@ class L2populationMechanismDriver(api.MechanismDriver):
 
         agent = l2pop_db.get_agent_by_host(session,
                                            agent_host)
+        if not agent:
+            LOG.warning(_LW("Unable to retrieve active L2 agent on host %s"),
+                        agent_host)
+            return
         if not self._validate_segment(segment, port['id'], agent):
             return
 

@@ -12,9 +12,9 @@
 # under the License.
 
 import mock
+from neutron_lib import context
 from neutron_lib.plugins import directory
 
-from neutron import context
 from neutron.objects import network
 from neutron.objects import securitygroup
 from neutron.objects import subnet
@@ -33,6 +33,7 @@ class OVOServerRpcInterfaceTestCase(test_plugin.Ml2PluginV2TestCase):
                    'ResourcesPushRpcApi.push', new=receive).start()
 
     def _assert_object_received(self, ovotype, oid=None, event=None):
+        self.plugin.ovo_notifier.wait()
         for obj, evt in self.received:
             if isinstance(obj, ovotype):
                 if (obj.id == oid or not oid) and (not event or event == evt):

@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
+from neutron_lib import context as neutron_context
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
 from oslo_config import cfg
@@ -23,10 +25,8 @@ import six
 
 from neutron.common import constants as n_const
 from neutron.common import utils
-from neutron import context as neutron_context
 from neutron.db import api as db_api
 from neutron.extensions import l3
-from neutron.extensions import portbindings
 
 
 LOG = logging.getLogger(__name__)

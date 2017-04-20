@@ -18,8 +18,10 @@ import time
 
 from oslo_log import log as logging
 from tempest.lib.common import ssh
+from tempest.lib import decorators
 from tempest.lib import exceptions
 from tempest import test
+import testtools
 
 from neutron.common import utils
 from neutron.services.qos import qos_consts
@@ -38,7 +40,6 @@ def _try_connect(host_ip, port):
         client_socket = socket.socket(socket.AF_INET,
                                       socket.SOCK_STREAM)
         client_socket.connect((host_ip, port))
-        client_socket.setblocking(0)
         return client_socket
     except socket.error as serr:
         if serr.errno == errno.ECONNREFUSED:
@@ -82,6 +83,7 @@ class QoSTest(base.BaseTempestTestCase):
     @classmethod
     @test.requires_ext(extension="qos", service="network")
     @base_api.require_qos_rule_type(qos_consts.RULE_TYPE_BANDWIDTH_LIMIT)
+    @testtools.skip('bug/1662109')
     def resource_setup(cls):
         super(QoSTest, cls).resource_setup()
 
@@ -97,10 +99,6 @@ class QoSTest(base.BaseTempestTestCase):
                 file=QoSTest.FILE_PATH)
 
     def _check_bw(self, ssh_client, host, port):
-        total_bytes_read = 0
-        cycle_start_time = time.time()
-        cycle_data_read = 0
-
         cmd = "killall -q nc"
         try:
             ssh_client.exec_command(cmd)
@@ -109,38 +107,28 @@ class QoSTest(base.BaseTempestTestCase):
         cmd = ("(nc -ll -p %(port)d < %(file_path)s > /dev/null &)" % {
                 'port': port, 'file_path': QoSTest.FILE_PATH})
         ssh_client.exec_command(cmd)
+
+        start_time = time.time()
         client_socket = _connect_socket(host, port)
+        total_bytes_read = 0
 
         while total_bytes_read < QoSTest.FILE_SIZE:
-            try:
-                data = client_socket.recv(QoSTest.BUFFER_SIZE)
-            except socket.error as e:
-                if e.args[0] in [errno.EAGAIN, errno.EWOULDBLOCK]:
-                    continue
-                else:
-                    raise
+            data = client_socket.recv(QoSTest.BUFFER_SIZE)
             total_bytes_read += len(data)
-            cycle_data_read += len(data)
-            time_elapsed = time.time() - cycle_start_time
-            should_check = (time_elapsed >= 5 or
-                            total_bytes_read == QoSTest.FILE_SIZE)
-            if should_check:
-                LOG.debug("time_elapsed =  %(time_elapsed)d,"
-                          "total_bytes_read = %(bytes_read)d,"
-                          "cycle_data_read = %(cycle_data)d",
-                          {"time_elapsed": time_elapsed,
-                           "bytes_read": total_bytes_read,
-                           "cycle_data": cycle_data_read})
 
-                if cycle_data_read / time_elapsed > QoSTest.LIMIT_BYTES_SEC:
-                    # Limit reached
-                    return False
-                else:
-                    cycle_start_time = time.time()
-                    cycle_data_read = 0
-        return True
+        time_elapsed = time.time() - start_time
+        bytes_per_second = total_bytes_read / time_elapsed
 
-    @test.idempotent_id('1f7ed39b-428f-410a-bd2b-db9f465680df')
+        LOG.debug("time_elapsed = %(time_elapsed)d, "
+                  "total_bytes_read = %(total_bytes_read)d, "
+                  "bytes_per_second = %(bytes_per_second)d",
+                  {'time_elapsed': time_elapsed,
+                   'total_bytes_read': total_bytes_read,
+                   'bytes_per_second': bytes_per_second})
+
+        return bytes_per_second <= QoSTest.LIMIT_BYTES_SEC
+
+    @decorators.idempotent_id('1f7ed39b-428f-410a-bd2b-db9f465680df')
     def test_qos(self):
         """This is a basic test that check that a QoS policy with
 

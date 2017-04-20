@@ -14,6 +14,9 @@
 
 import copy
 
+from neutron_lib.api.definitions import portbindings
+from neutron_lib import context
+from neutron_lib.services import base as service_base
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 
@@ -21,15 +24,12 @@ from neutron.api.v2 import attributes
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron import context
+from neutron.db import _resource_extend as resource_extend
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
 from neutron.db import db_base_plugin_common
-from neutron.db import db_base_plugin_v2
-from neutron.extensions import portbindings
 from neutron.objects import base as objects_base
 from neutron.objects import trunk as trunk_objects
-from neutron.services import service_base
 from neutron.services.trunk import callbacks
 from neutron.services.trunk import constants
 from neutron.services.trunk import drivers
@@ -60,6 +60,7 @@ def _extend_port_trunk_details(core_plugin, port_res, port_db):
     return port_res
 
 
+@registry.has_registry_receivers
 class TrunkPlugin(service_base.ServicePluginBase,
                   common_db_mixin.CommonDbMixin):
 
@@ -69,7 +70,7 @@ class TrunkPlugin(service_base.ServicePluginBase,
     __native_sorting_support = True
 
     def __init__(self):
-        db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+        resource_extend.register_funcs(
             attributes.PORTS, [_extend_port_trunk_details])
         self._rpc_backend = None
         self._drivers = []
@@ -79,11 +80,6 @@ class TrunkPlugin(service_base.ServicePluginBase,
         drivers.register()
         registry.subscribe(rules.enforce_port_deletion_rules,
                            resources.PORT, events.BEFORE_DELETE)
-        # NOTE(tidwellr) Consider keying off of PRECOMMIT_UPDATE if we find
-        # AFTER_UPDATE to be problematic for setting trunk status when a
-        # a parent port becomes unbound.
-        registry.subscribe(self._trigger_trunk_status_change,
-                           resources.PORT, events.AFTER_UPDATE)
         registry.notify(constants.TRUNK_PLUGIN, events.AFTER_INIT, self)
         for driver in self._drivers:
             LOG.debug('Trunk plugin loaded with driver %s', driver.name)
@@ -396,6 +392,10 @@ class TrunkPlugin(service_base.ServicePluginBase,
 
         return obj
 
+    # NOTE(tidwellr) Consider keying off of PRECOMMIT_UPDATE if we find
+    # AFTER_UPDATE to be problematic for setting trunk status when a
+    # a parent port becomes unbound.
+    @registry.receives(resources.PORT, [events.AFTER_UPDATE])
     def _trigger_trunk_status_change(self, resource, event, trigger, **kwargs):
         updated_port = kwargs['port']
         trunk_details = updated_port.get('trunk_details')

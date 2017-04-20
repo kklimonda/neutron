@@ -19,7 +19,9 @@ import copy
 
 import mock
 import netaddr
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as lib_constants
+from neutron_lib import context
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
 from oslo_config import cfg
@@ -36,7 +38,7 @@ from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron import context
+from neutron.db import _resource_extend as resource_extend
 from neutron.db import common_db_mixin
 from neutron.db import db_base_plugin_v2
 from neutron.db import dns_db
@@ -46,12 +48,12 @@ from neutron.db import l3_attrs_db
 from neutron.db import l3_db
 from neutron.db import l3_dvr_db
 from neutron.db import l3_dvrscheduler_db
+from neutron.db import l3_hamode_db
 from neutron.db.models import l3 as l3_models
 from neutron.db import models_v2
 from neutron.extensions import dns
 from neutron.extensions import external_net
 from neutron.extensions import l3
-from neutron.extensions import portbindings
 from neutron.plugins.ml2 import config
 from neutron.services.revisions import revision_plugin
 from neutron.tests import base
@@ -230,6 +232,17 @@ class L3NatExtensionTestCase(test_extensions_base.ExtensionTestCase):
         self.assertEqual(port_id, res['port_id'])
         self.assertEqual(subnet_id, res['subnet_id'])
 
+    def test_router_add_interface_empty_body(self):
+        router_id = _uuid()
+        instance = self.plugin.return_value
+
+        path = _get_path('routers', id=router_id,
+                         action="add_router_interface",
+                         fmt=self.fmt)
+        res = self.api.put(path)
+        self.assertEqual(exc.HTTPOk.code, res.status_int)
+        instance.add_router_interface.assert_called_with(mock.ANY, router_id)
+
 
 # This base plugin class is for tests.
 class TestL3NatBasePlugin(db_base_plugin_v2.NeutronDbPluginV2,
@@ -255,11 +268,6 @@ class TestL3NatBasePlugin(db_base_plugin_v2.NeutronDbPluginV2,
             self._process_l3_update(context, net, network['network'])
         return net
 
-    def delete_network(self, context, id):
-        with context.session.begin(subtransactions=True):
-            self._process_l3_delete(context, id)
-            super(TestL3NatBasePlugin, self).delete_network(context, id)
-
     def delete_port(self, context, id, l3_port_check=True):
         plugin = directory.get_plugin(lib_constants.L3)
         if plugin:
@@ -283,7 +291,8 @@ class TestL3NatIntPlugin(TestL3NatBasePlugin,
 # scheduling.
 class TestL3NatIntAgentSchedulingPlugin(TestL3NatIntPlugin,
                                         l3_agentschedulers_db.
-                                        L3AgentSchedulerDbMixin):
+                                        L3AgentSchedulerDbMixin,
+                                        l3_hamode_db.L3_HA_NAT_db_mixin):
 
     supported_extension_aliases = ["external-net", "router",
                                    "l3_agent_scheduler"]
@@ -323,7 +332,8 @@ class TestL3NatServicePlugin(common_db_mixin.CommonDbMixin,
 # plugins that delegate away L3 routing functionality
 class TestL3NatAgentSchedulingServicePlugin(TestL3NatServicePlugin,
                                             l3_dvrscheduler_db.
-                                            L3_DVRsch_db_mixin):
+                                            L3_DVRsch_db_mixin,
+                                            l3_hamode_db.L3_HA_NAT_db_mixin):
 
     supported_extension_aliases = ["router", "l3_agent_scheduler"]
 
@@ -618,7 +628,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
         def _extend_router_dict_test_attr(*args, **kwargs):
             self.extension_called = True
 
-        db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+        resource_extend.register_funcs(
             l3.ROUTERS, [_extend_router_dict_test_attr])
         self.assertFalse(self.extension_called)
         with self.router():

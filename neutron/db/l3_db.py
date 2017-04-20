@@ -20,10 +20,10 @@ from debtcollector import removals
 import netaddr
 from neutron_lib.api import validators
 from neutron_lib import constants
+from neutron_lib import context as n_ctx
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
 from oslo_log import log as logging
-from oslo_utils import excutils
 from oslo_utils import uuidutils
 import six
 from sqlalchemy import orm
@@ -35,12 +35,10 @@ from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.common import _deprecate
 from neutron.common import constants as n_const
 from neutron.common import ipv6_utils
 from neutron.common import rpc as n_rpc
 from neutron.common import utils
-from neutron import context as n_ctx
 from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
@@ -53,11 +51,6 @@ from neutron.plugins.common import utils as p_utils
 from neutron import worker as neutron_worker
 
 LOG = logging.getLogger(__name__)
-
-
-_deprecate._moved_global('RouterPort', new_module=l3_models)
-_deprecate._moved_global('Router', new_module=l3_models)
-_deprecate._moved_global('FloatingIP', new_module=l3_models)
 
 
 DEVICE_OWNER_HA_REPLICATED_INT = constants.DEVICE_OWNER_HA_REPLICATED_INT
@@ -443,11 +436,10 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                     resources.ROUTER_GATEWAY, events.BEFORE_DELETE, self,
                     **kwargs)
             except exceptions.CallbackFailure as e:
-                with excutils.save_and_reraise_exception():
-                    # NOTE(armax): preserve old check's behavior
-                    if len(e.errors) == 1:
-                        raise e.errors[0].error
-                    raise l3.RouterInUse(router_id=router.id, reason=e)
+                # NOTE(armax): preserve old check's behavior
+                if len(e.errors) == 1:
+                    raise e.errors[0].error
+                raise l3.RouterInUse(router_id=router.id, reason=e)
 
     def _create_gw_port(self, context, router_id, router, new_network_id,
                         ext_ips):
@@ -806,7 +798,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
         }
 
     @db_api.retry_if_session_inactive()
-    def add_router_interface(self, context, router_id, interface_info):
+    def add_router_interface(self, context, router_id, interface_info=None):
         router = self._get_router(context, router_id)
         add_by_port, add_by_sub = self._validate_interface_info(interface_info)
         device_owner = self._get_device_owner(context, router_id)
@@ -896,11 +888,10 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
                 resources.ROUTER_INTERFACE,
                 events.BEFORE_DELETE, self, **kwargs)
         except exceptions.CallbackFailure as e:
-            with excutils.save_and_reraise_exception():
-                # NOTE(armax): preserve old check's behavior
-                if len(e.errors) == 1:
-                    raise e.errors[0].error
-                raise l3.RouterInUse(router_id=router_id, reason=e)
+            # NOTE(armax): preserve old check's behavior
+            if len(e.errors) == 1:
+                raise e.errors[0].error
+            raise l3.RouterInUse(router_id=router_id, reason=e)
         for fip_db in fip_qry.filter_by(router_id=router_id):
             if netaddr.IPAddress(fip_db['fixed_ip_address']) in subnet_cidr:
                 raise l3.RouterInterfaceInUseByFloatingIP(
@@ -1824,7 +1815,7 @@ class L3_NAT_db_mixin(L3_NAT_dbonly_mixin, L3RpcNotifierMixin):
         notifier.info(context, router_event,
                       {'router_interface': router_interface_info})
 
-    def add_router_interface(self, context, router_id, interface_info):
+    def add_router_interface(self, context, router_id, interface_info=None):
         router_interface_info = super(
             L3_NAT_db_mixin, self).add_router_interface(
                 context, router_id, interface_info)
@@ -1957,6 +1948,3 @@ def _notify_subnetpool_address_scope_update(resource, event,
 )
 def subscribe():
     pass
-
-
-_deprecate._MovedGlobals()

@@ -11,7 +11,6 @@ neutron-macvtap-agent = neutron.cmd.eventlet.plugins.macvtap_neutron_agent:main
 neutron-metadata-agent = neutron.cmd.eventlet.agents.metadata:main
 neutron-metering-agent = neutron.cmd.eventlet.services.metering_agent:main
 neutron-netns-cleanup = neutron.cmd.netns_cleanup:main
-neutron-ns-metadata-proxy = neutron.cmd.eventlet.agents.metadata_proxy:main
 neutron-openvswitch-agent = neutron.cmd.eventlet.plugins.ovs_neutron_agent:main
 neutron-ovs-cleanup = neutron.cmd.ovs_cleanup:main
 neutron-pd-notify = neutron.cmd.pd_notify:main
@@ -102,6 +101,10 @@ trunk = neutron.services.trunk.plugin:TrunkPlugin
 
 [neutron.services.external_dns_drivers]
 designate = neutron.services.externaldns.drivers.designate.driver:Designate
+
+[neutron.services.metering_drivers]
+iptables = neutron.services.metering.iptables.iptables_driver:IptablesMeteringDriver
+noop = neutron.services.metering.drivers.noop.noop_driver:NoopMeteringDriver
 
 [oslo.config.opts]
 neutron = neutron.opts:list_opts

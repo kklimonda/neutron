@@ -10,20 +10,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import uuid
-
 import mock
 from neutron_lib import constants as n_const
+from neutron_lib import context
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_policy import policy as oslo_policy
 from oslo_serialization import jsonutils
+from oslo_utils import uuidutils
 import pecan
 from pecan import request
 
 from neutron.api import extensions
-from neutron import context
+from neutron.conf import quota as qconf
 from neutron import manager
 from neutron.pecan_wsgi.controllers import root as controllers
 from neutron.pecan_wsgi.controllers import utils as controller_utils
@@ -81,11 +81,11 @@ class TestRootController(test_functional.PecanFunctionalTest):
             self.assertEqual(value, versions[0][attr])
 
     def test_methods(self):
-        self._test_method_returns_code('post')
-        self._test_method_returns_code('patch')
-        self._test_method_returns_code('delete')
-        self._test_method_returns_code('head')
-        self._test_method_returns_code('put')
+        self._test_method_returns_code('post', 405)
+        self._test_method_returns_code('patch', 405)
+        self._test_method_returns_code('delete', 405)
+        self._test_method_returns_code('head', 405)
+        self._test_method_returns_code('put', 405)
 
 
 class TestV2Controller(TestRootController):
@@ -146,12 +146,12 @@ class TestExtensionsController(TestRootController):
         self.assertEqual(test_alias, json_body['extension']['alias'])
 
     def test_methods(self):
-        self._test_method_returns_code('post', 405)
-        self._test_method_returns_code('put', 405)
-        self._test_method_returns_code('patch', 405)
-        self._test_method_returns_code('delete', 405)
-        self._test_method_returns_code('head', 405)
-        self._test_method_returns_code('delete', 405)
+        self._test_method_returns_code('post', 404)
+        self._test_method_returns_code('put', 404)
+        self._test_method_returns_code('patch', 404)
+        self._test_method_returns_code('delete', 404)
+        self._test_method_returns_code('head', 404)
+        self._test_method_returns_code('delete', 404)
 
 
 class TestQuotasController(test_functional.PecanFunctionalTest):
@@ -159,9 +159,9 @@ class TestQuotasController(test_functional.PecanFunctionalTest):
 
     base_url = '/v2.0/quotas'
     default_expected_limits = {
-        'network': 10,
-        'port': 50,
-        'subnet': 10}
+        'network': qconf.DEFAULT_QUOTA_NETWORK,
+        'port': qconf.DEFAULT_QUOTA_PORT,
+        'subnet': qconf.DEFAULT_QUOTA_SUBNET}
 
     def _verify_limits(self, response, limits):
         for resource, limit in limits.items():
@@ -297,6 +297,8 @@ class TestResourceController(TestRootController):
 
     def setUp(self):
         super(TestResourceController, self).setUp()
+        policy.init()
+        self.addCleanup(policy.reset)
         self._gen_port()
 
     def _gen_port(self):
@@ -456,6 +458,8 @@ class TestPaginationAndSorting(test_functional.PecanFunctionalTest):
 
     def setUp(self):
         super(TestPaginationAndSorting, self).setUp()
+        policy.init()
+        self.addCleanup(policy.reset)
         self.plugin = directory.get_plugin()
         self.ctx = context.get_admin_context()
         self._create_networks(self.RESOURCE_COUNT)
@@ -702,6 +706,8 @@ class TestRouterController(TestResourceController):
             ['neutron.services.l3_router.l3_router_plugin.L3RouterPlugin',
              'neutron.services.flavors.flavors_plugin.FlavorsPlugin'])
         super(TestRouterController, self).setUp()
+        policy.init()
+        self.addCleanup(policy.reset)
         plugin = directory.get_plugin()
         ctx = context.get_admin_context()
         l3_plugin = directory.get_plugin(n_const.L3)
@@ -888,7 +894,7 @@ class TestShimControllers(test_functional.PecanFunctionalTest):
         # there is only one subresource so far
         sub_resource_collection = (
             pecan_utils.FakeExtension.FAKE_SUB_RESOURCE_COLLECTION)
-        temp_id = str(uuid.uuid1())
+        temp_id = uuidutils.generate_uuid()
         url = '/v2.0/{0}/{1}/{2}'.format(
             uri_collection,
             temp_id,
@@ -959,8 +965,7 @@ class TestParentSubresourceController(test_functional.PecanFunctionalTest):
         policy._ENFORCER.set_rules(
             oslo_policy.Rules.from_dict(
                 {'get_fake_duplicate': '',
-                 'get_fake_duplicates': '',
-                 'get_meh_meh_fake_duplicates': ''}),
+                 'get_meh_meh_fake_duplicate': ''}),
             overwrite=False)
         self.addCleanup(policy.reset)
         hyphen_collection = pecan_utils.FakeExtension.HYPHENATED_COLLECTION
@@ -994,7 +999,7 @@ class TestParentSubresourceController(test_functional.PecanFunctionalTest):
         policy.init()
         policy._ENFORCER.set_rules(
             oslo_policy.Rules.from_dict(
-                {'get_meh_meh_fake_duplicates': ''}
+                {'get_meh_meh_fake_duplicate': ''}
             )
         )
         url = '/v2.0/{0}/something/{1}'.format(self.collection,

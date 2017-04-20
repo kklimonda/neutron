@@ -14,7 +14,9 @@
 # limitations under the License.
 
 import mock
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as const
+from neutron_lib import context
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
@@ -23,13 +25,11 @@ from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.common import constants as n_const
-from neutron import context
 from neutron.db import agents_db
 from neutron.db import common_db_mixin
 from neutron.db import l3_agentschedulers_db
 from neutron.db import l3_dvr_db
 from neutron.extensions import l3
-from neutron.extensions import portbindings
 from neutron.tests.unit.db import test_db_base_plugin_v2
 
 _uuid = uuidutils.generate_uuid
@@ -810,7 +810,9 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                     RuntimeError,
                     self.mixin.add_router_interface,
                     self.ctx, router['id'], {'port_id': port['port']['id']})
-
+            # expire since we are re-using the session which might have stale
+            # ports in it
+            self.ctx.session.expire_all()
             port_info = self.core_plugin.get_port(self.ctx, port['port']['id'])
             self.assertEqual(port_dict['device_id'], port_info['device_id'])
             self.assertEqual(port_dict['device_owner'],

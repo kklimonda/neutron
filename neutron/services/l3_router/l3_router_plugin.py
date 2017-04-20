@@ -14,6 +14,7 @@
 #    under the License.
 
 from neutron_lib import constants as n_const
+from neutron_lib.services import base as service_base
 from oslo_config import cfg
 from oslo_log import helpers as log_helpers
 from oslo_utils import importutils
@@ -22,6 +23,7 @@ from neutron.api.rpc.agentnotifiers import l3_rpc_agent_api
 from neutron.api.rpc.handlers import l3_rpc
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
+from neutron.db import _resource_extend as resource_extend
 from neutron.db import common_db_mixin
 from neutron.db import dns_db
 from neutron.db import extraroute_db
@@ -35,7 +37,6 @@ from neutron.extensions import l3
 from neutron.quota import resource_registry
 from neutron import service
 from neutron.services.l3_router.service_providers import driver_controller
-from neutron.services import service_base
 
 
 class L3RouterPlugin(service_base.ServicePluginBase,
@@ -125,5 +126,5 @@ def add_flavor_id(plugin, router_res, router_db):
     router_res['flavor_id'] = router_db['flavor_id']
 
 
-common_db_mixin.CommonDbMixin.register_dict_extend_funcs(
+resource_extend.register_funcs(
     l3.ROUTERS, [add_flavor_id])

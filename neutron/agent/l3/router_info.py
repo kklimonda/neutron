@@ -116,6 +116,9 @@ class RouterInfo(object):
         # enable_snat by default if it wasn't specified by plugin
         self._snat_enabled = self._router.get('enable_snat', True)
 
+    def is_router_master(self):
+        return True
+
     def get_internal_device_name(self, port_id):
         return (INTERNAL_DEV_PREFIX + port_id)[:self.driver.DEV_NAME_LEN]
 
@@ -644,14 +647,22 @@ class RouterInfo(object):
                 device = ip_lib.IPDevice(device_name, namespace=namespace)
                 device.route.add_route(subnet['gateway_ip'], scope='link')
 
-    def _enable_ra_on_gw(self, ex_gw_port, ns_name, interface_name):
-        gateway_ips = self._get_external_gw_ips(ex_gw_port)
-        if not self.use_ipv6 or self.is_v6_gateway_set(gateway_ips):
+    def _configure_ipv6_params_on_gw(self, ex_gw_port, ns_name, interface_name,
+                                     enabled):
+        if not self.use_ipv6:
             return
 
-        # There is no IPv6 gw_ip, use RouterAdvt for default route.
-        self.driver.configure_ipv6_ra(ns_name, interface_name,
-                                      n_const.ACCEPT_RA_WITH_FORWARDING)
+        if not enabled:
+            self.driver.configure_ipv6_ra(ns_name, interface_name,
+                                          n_const.ACCEPT_RA_DISABLED)
+        else:
+            gateway_ips = self._get_external_gw_ips(ex_gw_port)
+            if self.is_v6_gateway_set(gateway_ips):
+                return
+            # There is no IPv6 gw_ip, use RouterAdvt for default route.
+            self.driver.configure_ipv6_ra(ns_name, interface_name,
+                                          n_const.ACCEPT_RA_WITH_FORWARDING)
+        self.driver.configure_ipv6_forwarding(ns_name, interface_name, enabled)
 
     def _external_gateway_added(self, ex_gw_port, interface_name,
                                 ns_name, preserve_ips):
@@ -687,7 +698,8 @@ class RouterInfo(object):
         for ip in gateway_ips:
             device.route.add_gateway(ip)
 
-        self._enable_ra_on_gw(ex_gw_port, ns_name, interface_name)
+        self._configure_ipv6_params_on_gw(ex_gw_port, ns_name, interface_name,
+                                          True)
 
         for fixed_ip in ex_gw_port['fixed_ips']:
             ip_lib.send_ip_addr_adv_notif(ns_name,
@@ -965,7 +977,7 @@ class RouterInfo(object):
             device_name = name_generator(p['id'])
             ip_cidrs = common_utils.fixed_ip_cidrs(p['fixed_ips'])
             port_as_marks = self.get_port_address_scope_mark(p)
-            for ip_version in {ip_lib.get_ip_version(cidr)
+            for ip_version in {common_utils.get_ip_version(cidr)
                                for cidr in ip_cidrs}:
                 devicename_scopemark[ip_version][device_name] = (
                     port_as_marks[ip_version])
@@ -1105,10 +1117,8 @@ class RouterInfo(object):
         self.routes_updated(self.routes, self.router['routes'])
         self.routes = self.router['routes']
 
-        # Update ex_gw_port and enable_snat on the router info cache
+        # Update ex_gw_port on the router info cache
         self.ex_gw_port = self.get_ex_gw_port()
         self.fip_map = dict([(fip['floating_ip_address'],
                               fip['fixed_ip_address'])
                              for fip in self.get_floating_ips()])
-        # TODO(Carl) FWaaS uses this.  Why is it set after processing is done?
-        self.enable_snat = self.router.get('enable_snat')

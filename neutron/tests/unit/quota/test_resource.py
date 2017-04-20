@@ -13,17 +13,20 @@
 #    under the License.
 
 import mock
+from neutron_lib import context
 from oslo_config import cfg
 from oslo_utils import uuidutils
 import testtools
 
-from neutron import context
 from neutron.db import api as db_api
 from neutron.db.quota import api as quota_api
 from neutron.quota import resource
 from neutron.tests import base
 from neutron.tests.unit import quota as test_quota
 from neutron.tests.unit import testlib_api
+
+
+DB_PLUGIN_KLASS = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
 
 
 meh_quota_flag = 'quota_meh'
@@ -57,7 +60,7 @@ class TestResource(base.DietTestCase):
             self.assertEqual(-1, res.default)
 
 
-class TestTrackedResource(testlib_api.SqlTestCaseLight):
+class TestTrackedResource(testlib_api.SqlTestCase):
 
     def _add_data(self, tenant_id=None):
         session = db_api.get_writer_session()
@@ -88,30 +91,24 @@ class TestTrackedResource(testlib_api.SqlTestCaseLight):
                 session.add(item)
 
     def setUp(self):
-        base.BaseTestCase.config_parse()
-        cfg.CONF.register_opts(meh_quota_opts, 'QUOTAS')
-        self.addCleanup(cfg.CONF.reset)
+        super(TestTrackedResource, self).setUp()
+        self.setup_coreplugin(DB_PLUGIN_KLASS)
         self.resource = 'meh'
         self.other_resource = 'othermeh'
         self.tenant_id = 'meh'
         self.context = context.Context(
             user_id='', tenant_id=self.tenant_id, is_admin=False)
-        super(TestTrackedResource, self).setUp()
-
-    def _register_events(self, res):
-        res.register_events()
-        self.addCleanup(res.unregister_events)
 
     def _create_resource(self):
         res = resource.TrackedResource(
             self.resource, test_quota.MehModel, meh_quota_flag)
-        self._register_events(res)
+        res.register_events()
         return res
 
     def _create_other_resource(self):
         res = resource.TrackedResource(
             self.other_resource, test_quota.OtherMehModel, meh_quota_flag)
-        self._register_events(res)
+        res.register_events()
         return res
 
     def test_bulk_delete_protection(self):

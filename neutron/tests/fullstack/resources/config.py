@@ -25,6 +25,8 @@ from neutron.tests.common import config_fixtures
 from neutron.tests.common.exclusive_resources import port
 from neutron.tests.common import helpers as c_helpers
 
+PHYSICAL_NETWORK_NAME = "physnet1"
+
 
 class ConfigFixture(fixtures.Fixture):
     """A fixture that holds an actual Neutron configuration.
@@ -59,17 +61,13 @@ class NeutronConfigFixture(ConfigFixture):
         super(NeutronConfigFixture, self).__init__(
             env_desc, host_desc, temp_dir, base_filename='neutron.conf')
 
-        service_plugins = ['router', 'trunk']
-        if env_desc.qos:
-            service_plugins.append('qos')
-
         self.config.update({
             'DEFAULT': {
                 'host': self._generate_host(),
                 'state_path': self._generate_state_path(self.temp_dir),
                 'api_paste_config': self._generate_api_paste(),
                 'core_plugin': 'ml2',
-                'service_plugins': ','.join(service_plugins),
+                'service_plugins': env_desc.service_plugins,
                 'auth_strategy': 'noauth',
                 'debug': 'True',
                 'agent_down_time': env_desc.agent_down_time,
@@ -129,7 +127,7 @@ class ML2ConfigFixture(ConfigFixture):
                 'mechanism_drivers': mechanism_drivers,
             },
             'ml2_type_vlan': {
-                'network_vlan_ranges': 'physnet1:1000:2999',
+                'network_vlan_ranges': PHYSICAL_NETWORK_NAME + ':1000:2999',
             },
             'ml2_type_gre': {
                 'tunnel_id_ranges': '1:1000',
@@ -192,7 +190,8 @@ class OVSConfigFixture(ConfigFixture):
         super(OVSConfigFixture, self)._setUp()
 
     def _generate_bridge_mappings(self):
-        return 'physnet1:%s' % utils.get_rand_device_name(prefix='br-eth')
+        return '%s:%s' % (PHYSICAL_NETWORK_NAME,
+                          utils.get_rand_device_name(prefix='br-eth'))
 
     def _generate_integration_bridge(self):
         return utils.get_rand_device_name(prefix='br-int')
@@ -259,7 +258,7 @@ class LinuxBridgeConfigFixture(ConfigFixture):
             })
 
     def _generate_bridge_mappings(self, device_name):
-        return 'physnet1:%s' % device_name
+        return '%s:%s' % (PHYSICAL_NETWORK_NAME, device_name)
 
 
 class L3ConfigFixture(ConfigFixture):
