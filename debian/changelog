@@ -13,6 +13,7 @@ neutron (2:11.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
 
   [ James Page ]
   * New upstream milestone for OpenStack Pike.
+  * Align (Build-)Depends with upstream milestone.
 
  -- James Page <james.page@ubuntu.com>  Thu, 20 Apr 2017 15:44:00 +0100
 
