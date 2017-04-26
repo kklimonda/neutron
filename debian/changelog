@@ -1,4 +1,4 @@
-neutron (2:11.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:11.0.0~b1-0ubuntu1) artful; urgency=medium
 
   [ Chuck Short ]
   * d/pydist-overrides: Dropped no longer needed.
@@ -15,7 +15,7 @@ neutron (2:11.0.0~b1-0ubuntu1) UNRELEASED; urgency=medium
   * New upstream milestone for OpenStack Pike.
   * Align (Build-)Depends with upstream milestone.
 
- -- James Page <james.page@ubuntu.com>  Thu, 20 Apr 2017 15:44:00 +0100
+ -- James Page <james.page@ubuntu.com>  Wed, 26 Apr 2017 15:10:44 +0100
 
 neutron (2:10.0.0-0ubuntu5) zesty; urgency=medium
 
