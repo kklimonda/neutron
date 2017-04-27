@@ -1,3 +1,13 @@
+neutron (2:11.0.0~b1-0ubuntu2) UNRELEASED; urgency=medium
+
+  * Update default configuration management to use crudini:
+    - d/control: Add BD on crudini.
+    - d/rules: Set distro defaults in neutron.conf using crudini.
+    - d/p/fix-neutron-configuration.patch: Dropped, no longer
+      required.
+
+ -- James Page <james.page@ubuntu.com>  Thu, 27 Apr 2017 14:53:55 +0100
+
 neutron (2:11.0.0~b1-0ubuntu1) artful; urgency=medium
 
   [ Chuck Short ]
