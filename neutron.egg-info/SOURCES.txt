@@ -217,6 +217,7 @@ neutron/agent/linux/tc_lib.py
 neutron/agent/linux/utils.py
 neutron/agent/linux/openvswitch_firewall/__init__.py
 neutron/agent/linux/openvswitch_firewall/constants.py
+neutron/agent/linux/openvswitch_firewall/exceptions.py
 neutron/agent/linux/openvswitch_firewall/firewall.py
 neutron/agent/linux/openvswitch_firewall/rules.py
 neutron/agent/metadata/__init__.py
@@ -978,6 +979,8 @@ neutron/tests/functional/agent/linux/test_tc_lib.py
 neutron/tests/functional/agent/linux/test_utils.py
 neutron/tests/functional/agent/linux/bin/__init__.py
 neutron/tests/functional/agent/linux/bin/ipt_binname.py
+neutron/tests/functional/agent/linux/openvswitch_firewall/__init__.py
+neutron/tests/functional/agent/linux/openvswitch_firewall/test_firewall.py
 neutron/tests/functional/agent/ovsdb/__init__.py
 neutron/tests/functional/agent/ovsdb/test_impl_idl.py
 neutron/tests/functional/agent/windows/__init__.py
@@ -1072,6 +1075,7 @@ neutron/tests/tempest/api/test_networks.py
 neutron/tests/tempest/api/test_networks_negative.py
 neutron/tests/tempest/api/test_ports.py
 neutron/tests/tempest/api/test_qos.py
+neutron/tests/tempest/api/test_qos_negative.py
 neutron/tests/tempest/api/test_revisions.py
 neutron/tests/tempest/api/test_routers.py
 neutron/tests/tempest/api/test_routers_negative.py

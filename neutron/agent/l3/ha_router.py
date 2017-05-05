@@ -35,6 +35,11 @@ HA_DEV_PREFIX = 'ha-'
 IP_MONITOR_PROCESS_SERVICE = 'ip_monitor'
 SIGTERM_TIMEOUT = 10
 
+# The multiplier is used to compensate execution time of function sending
+# SIGHUP to keepalived process. The constant multiplies ha_vrrp_advert_int
+# config option and the result is the throttle delay.
+THROTTLER_MULTIPLIER = 1.5
+
 
 class HaRouterNamespace(namespaces.RouterNamespace):
     """Namespace for HA router.
@@ -116,7 +121,9 @@ class HaRouter(router.RouterInfo):
             keepalived.KeepalivedConf(),
             process_monitor,
             conf_path=self.agent_conf.ha_confs_path,
-            namespace=self.ha_namespace)
+            namespace=self.ha_namespace,
+            throttle_restart_value=(
+                self.agent_conf.ha_vrrp_advert_int * THROTTLER_MULTIPLIER))
 
         config = self.keepalived_manager.config
 
@@ -275,9 +282,7 @@ class HaRouter(router.RouterInfo):
 
     def remove_floating_ip(self, device, ip_cidr):
         self._remove_vip(ip_cidr)
-        if self.ha_state == 'master' and device.addr.list(to=ip_cidr):
-            # Delete the floatingip address from external port only after
-            # the ip address has been configured to the device
+        if device.addr.list(to=ip_cidr):
             super(HaRouter, self).remove_floating_ip(device, ip_cidr)
 
     def internal_network_updated(self, interface_name, ip_cidrs):

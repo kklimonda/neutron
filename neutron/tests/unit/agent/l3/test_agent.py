@@ -1925,6 +1925,41 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             namespace=ri.ns_name,
             prefix=l3_agent.EXTERNAL_DEV_PREFIX)
 
+    def test_process_dvr_router_delete_stale_external_devices(self):
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        stale_devlist = [l3_test_common.FakeDev('qg-a1b2c3d4-e5')]
+        stale_devnames = [dev.name for dev in stale_devlist]
+
+        router = l3_test_common.prepare_router_data(enable_snat=True,
+                                                    num_internal_ports=1)
+        ri = dvr_router.DvrEdgeRouter(agent,
+                                      HOSTNAME,
+                                      router['id'],
+                                      router,
+                                      **self.ri_kwargs)
+        self.mock_ip.get_devices.return_value = stale_devlist
+
+        ri.process(agent)
+
+        self.mock_driver.unplug.assert_called_with(
+            stale_devnames[0],
+            bridge=agent.conf.external_network_bridge,
+            namespace=ri.snat_namespace.name,
+            prefix=namespaces.EXTERNAL_DEV_PREFIX)
+
+    def test_process_dvr_router_delete_stale_external_devices_no_snat_ns(self):
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        router = l3_test_common.prepare_router_data(enable_gw=False,
+                                                    num_internal_ports=1)
+        ri = dvr_router.DvrEdgeRouter(agent,
+                                      HOSTNAME,
+                                      router['id'],
+                                      router,
+                                      **self.ri_kwargs)
+        self.mock_ip.netns.exists.return_value = False
+        ri._delete_stale_external_devices(agent.pd, 'qg-a1b2c3d4-e5')
+        self.assertFalse(self.mock_ip.get_devices.called)
+
     def test_router_deleted(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         agent._queue = mock.Mock()
@@ -2535,6 +2570,8 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         router = l3_test_common.prepare_router_data()
         ri = l3router.RouterInfo(router['id'], router, **self.ri_kwargs)
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        ri.iptables_manager.ipv6['mangle'] = mock.MagicMock()
+        ri._process_pd_iptables_rules = mock.MagicMock()
         agent.external_gateway_added = mock.Mock()
         ri.process(agent)
         agent._router_added(router['id'], router)
@@ -2662,9 +2699,11 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         prefixes = {}
         expected_pd_update = {}
         expected_calls = []
+        last_prefix = ''
         for ifno, intf in enumerate(existing_intfs + new_intfs):
             requestor_id = self._pd_get_requestor_id(intf, router, ri)
             prefixes[requestor_id] = "2001:cafe:cafe:%d::/64" % ifno
+            last_prefix = prefixes[requestor_id]
             if intf in new_intfs:
                 subnet_id = (intf['subnets'][0]['id'] if intf['subnets']
                              else None)
@@ -2702,6 +2741,8 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
              self.external_process.mock_calls[-len(expected_calls):])
         self.assertEqual(expected_pd_update, self.pd_update)
 
+        return last_prefix
+
     def _pd_add_gw_interface(self, agent, router, ri):
         gw_ifname = ri.get_external_device_name(router['gw_port']['id'])
         agent.pd.add_gw_interface(router['id'], gw_ifname)
@@ -2723,6 +2764,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
 
         # Create one pd-enabled subnet and add router interface
         intfs = l3_test_common.router_append_pd_enabled_subnet(router)
+        subnet_id = intfs[0]['subnets'][0]['id']
         ri.process(agent)
 
         # No client should be started since there is no gateway port
@@ -2733,7 +2775,8 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         self._pd_add_gw_interface(agent, router, ri)
 
         # Get one prefix
-        self._pd_get_prefixes(agent, router, ri, [], intfs, mock_get_prefix)
+        prefix = self._pd_get_prefixes(agent, router, ri, [],
+                                       intfs, mock_get_prefix)
 
         # Update the router with the new prefix
         ri.process(agent)
@@ -2742,8 +2785,14 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         # with the new prefix
         self._pd_assert_radvd_calls(ri)
 
+        # Check that _process_pd_iptables_rules() is called correctly
+        self.assertEqual({subnet_id: prefix}, ri.pd_subnets)
+        ri._process_pd_iptables_rules.assert_called_once_with(prefix,
+                                                              subnet_id)
+
         # Now remove the interface
         self._pd_remove_interfaces(intfs, agent, router, ri)
+        self.assertEqual({}, ri.pd_subnets)
 
     @mock.patch.object(dibbler.PDDibbler, 'get_prefix', autospec=True)
     @mock.patch.object(dibbler.os, 'getpid', return_value=1234)

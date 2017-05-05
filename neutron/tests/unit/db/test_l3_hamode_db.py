@@ -53,11 +53,10 @@ class L3HATestFramework(testlib_api.SqlTestCase):
     def setUp(self):
         super(L3HATestFramework, self).setUp()
 
-        self.admin_ctx = context.get_admin_context()
         self.setup_coreplugin('ml2')
         self.core_plugin = manager.NeutronManager.get_plugin()
         notif_p = mock.patch.object(l3_hamode_db.L3_HA_NAT_db_mixin,
-                                    '_notify_ha_interfaces_updated')
+                                    '_notify_router_updated')
         self.notif_m = notif_p.start()
         cfg.CONF.set_override('allow_overlapping_ips', True)
 
@@ -66,6 +65,12 @@ class L3HATestFramework(testlib_api.SqlTestCase):
         self.agent1 = helpers.register_l3_agent()
         self.agent2 = helpers.register_l3_agent(
             'host_2', constants.L3_AGENT_MODE_DVR_SNAT)
+
+    @property
+    def admin_ctx(self):
+        # Property generates a new session on each reference so different
+        # API calls don't share a session with possible stale objects
+        return context.get_admin_context()
 
     def _create_router(self, ha=True, tenant_id='tenant1', distributed=None,
                        ctx=None, admin_state_up=True):
@@ -159,21 +164,6 @@ class L3HATestCase(L3HATestFramework):
         agent_ids = [(agent[0]['id'], agent[1]) for agent in bindings]
         self.assertIn((self.agent1['id'], 'active'), agent_ids)
         self.assertIn((self.agent2['id'], 'standby'), agent_ids)
-
-    def test_get_l3_bindings_hosting_router_with_ha_states_agent_none(self):
-        with mock.patch.object(self.plugin, 'schedule_router'):
-            # Do not bind router to leave agents as None
-            router = self._create_router()
-
-        res = self.admin_ctx.session.query(
-            l3_hamode_db.L3HARouterAgentPortBinding).filter(
-            l3_hamode_db.L3HARouterAgentPortBinding.router_id == router['id']
-        ).all()
-        # Check that agents are None
-        self.assertEqual([None, None], [r.agent for r in res])
-        bindings = self.plugin.get_l3_bindings_hosting_router_with_ha_states(
-            self.admin_ctx, router['id'])
-        self.assertEqual([], bindings)
 
     def test_get_l3_bindings_hosting_router_with_ha_states_not_scheduled(self):
         router = self._create_router(ha=False)
@@ -282,16 +272,16 @@ class L3HATestCase(L3HATestFramework):
                          router['status'])
 
     def test_router_created_allocating_state_during_interface_create(self):
-        _orig = self.plugin._create_ha_interfaces
+        _orig = self.plugin._ensure_vr_id
 
-        def check_state(context, router_db, ha_network):
+        def check_state(context, router, ha_network):
             self.assertEqual(n_const.ROUTER_STATUS_ALLOCATING,
-                             router_db.status)
-            return _orig(context, router_db, ha_network)
-        with mock.patch.object(self.plugin, '_create_ha_interfaces',
-                               side_effect=check_state) as ha_mock:
+                             router.status)
+            return _orig(context, router, ha_network)
+        with mock.patch.object(self.plugin, '_ensure_vr_id',
+                               side_effect=check_state) as vr_id_mock:
             router = self._create_router()
-            self.assertTrue(ha_mock.called)
+            self.assertTrue(vr_id_mock.called)
         self.assertEqual(n_const.ROUTER_STATUS_ACTIVE, router['status'])
 
     def test_ha_router_create(self):
@@ -299,6 +289,8 @@ class L3HATestCase(L3HATestFramework):
         self.assertTrue(router['ha'])
 
     def test_ha_router_create_with_distributed(self):
+        helpers.register_l3_agent(
+            'host_3', constants.L3_AGENT_MODE_DVR_SNAT)
         router = self._create_router(ha=True, distributed=True)
         self.assertTrue(router['ha'])
         self.assertTrue(router['distributed'])
@@ -545,12 +537,9 @@ class L3HATestCase(L3HATestFramework):
         network = self.plugin.get_ha_network(self.admin_ctx,
                                              router['tenant_id'])
 
-        with mock.patch.object(self.plugin, '_get_allocated_vr_id',
-                               return_value=set()) as alloc:
-            self.assertRaises(l3_ext_ha_mode.MaxVRIDAllocationTriesReached,
-                              self.plugin._allocate_vr_id, self.admin_ctx,
-                              network.network_id, router['id'])
-            self.assertEqual(2, len(alloc.mock_calls))
+        router_db = self.plugin._get_router(self.admin_ctx, router['id'])
+        self.assertIsNone(self.plugin._ensure_vr_id(self.admin_ctx,
+                                                    router_db, network))
 
     def test_vr_id_allocation_delete_router(self):
         router = self._create_router()
@@ -597,7 +586,7 @@ class L3HATestCase(L3HATestFramework):
                                              router['tenant_id'])
         network2 = self.plugin.get_ha_network(self.admin_ctx,
                                               router2['tenant_id'])
-        self.assertEqual(network, network2)
+        self.assertEqual(network.network_id, network2.network_id)
 
         self._migrate_router(router['id'], False)
         self.assertIsNotNone(
@@ -615,9 +604,10 @@ class L3HATestCase(L3HATestFramework):
         self.assertNotEqual(ha0, ha1)
 
     def test_add_ha_port_subtransactions_blocked(self):
-        with self.admin_ctx.session.begin():
+        ctx = self.admin_ctx
+        with ctx.session.begin():
             self.assertRaises(RuntimeError, self.plugin.add_ha_port,
-                              self.admin_ctx, 'id', 'id', 'id')
+                              ctx, 'id', 'id', 'id')
 
     def test_add_ha_port_binding_failure_rolls_back_port(self):
         router = self._create_router()
@@ -661,15 +651,15 @@ class L3HATestCase(L3HATestFramework):
         networks_after = self.core_plugin.get_networks(self.admin_ctx)
         self.assertEqual(networks_before, networks_after)
 
-    def test_create_ha_interfaces_and_ensure_network_net_exists(self):
+    def test_ensure_vr_id_and_network_net_exists(self):
         router = self._create_router()
         router_db = self.plugin._get_router(self.admin_ctx, router['id'])
         with mock.patch.object(self.plugin, '_create_ha_network') as create:
-            self.plugin._create_ha_interfaces_and_ensure_network(
+            self.plugin._ensure_vr_id_and_network(
                 self.admin_ctx, router_db)
             self.assertFalse(create.called)
 
-    def test_create_ha_interfaces_and_ensure_network_concurrent_create(self):
+    def test_ensure_vr_id_and_network_concurrent_create(self):
         # create a non-ha router so we can manually invoke the create ha
         # interfaces call down below
         router = self._create_router(ha=False)
@@ -684,56 +674,56 @@ class L3HATestCase(L3HATestFramework):
             raise db_exc.DBDuplicateEntry(columns=['tenant_id'])
         with mock.patch.object(self.plugin, '_create_ha_network',
                                new=_create_ha_network):
-            net = self.plugin._create_ha_interfaces_and_ensure_network(
-                self.admin_ctx, router_db)[1]
+            net = self.plugin._ensure_vr_id_and_network(
+                self.admin_ctx, router_db)
         # ensure that it used the concurrently created network
         self.assertEqual([net], created_nets)
 
-    def _test_ensure_with_patched_int_create(self, _create_ha_interfaces):
+    def _test_ensure_with_patched_ensure_vr_id(self, _ensure_vr_id):
         # create a non-ha router so we can manually invoke the create ha
         # interfaces call down below
         router = self._create_router(ha=False)
         router_db = self.plugin._get_router(self.admin_ctx, router['id'])
-        with mock.patch.object(self.plugin, '_create_ha_interfaces',
-                               new=_create_ha_interfaces):
-            self.plugin._create_ha_interfaces_and_ensure_network(
+        with mock.patch.object(self.plugin, '_ensure_vr_id',
+                               new=_ensure_vr_id):
+            self.plugin._ensure_vr_id_and_network(
                 self.admin_ctx, router_db)
-            self.assertTrue(_create_ha_interfaces.called)
+            self.assertTrue(_ensure_vr_id.called)
 
-    def test_create_ha_interfaces_and_ensure_network_interface_failure(self):
+    def test_ensure_vr_id_and_network_interface_failure(self):
 
-        def _create_ha_interfaces(ctx, rdb, ha_net):
+        def _ensure_vr_id(ctx, rdb, ha_net):
             raise ValueError('broken')
         with testtools.ExpectedException(ValueError):
-            self._test_ensure_with_patched_int_create(_create_ha_interfaces)
+            self._test_ensure_with_patched_ensure_vr_id(_ensure_vr_id)
         self.assertEqual([], self.core_plugin.get_networks(self.admin_ctx))
 
-    def test_create_ha_interfaces_and_ensure_network_concurrent_delete(self):
-        orig_create = self.plugin._create_ha_interfaces
+    def test_ensure_vr_id_and_network_concurrent_delete(self):
+        orig_create = self.plugin._ensure_vr_id
 
-        def _create_ha_interfaces(ctx, rdb, ha_net):
+        def _ensure_vr_id(ctx, rdb, ha_net):
             # concurrent delete on the first attempt
-            if not getattr(_create_ha_interfaces, 'called', False):
-                setattr(_create_ha_interfaces, 'called', True)
+            if not getattr(_ensure_vr_id, 'called', False):
+                setattr(_ensure_vr_id, 'called', True)
                 self.core_plugin.delete_network(self.admin_ctx,
                                                 ha_net['network_id'])
             return orig_create(ctx, rdb, ha_net)
-        self._test_ensure_with_patched_int_create(_create_ha_interfaces)
+        self._test_ensure_with_patched_ensure_vr_id(_ensure_vr_id)
 
-    def test_create_ha_interfaces_and_ensure_network_concurrent_swap(self):
-        orig_create = self.plugin._create_ha_interfaces
+    def test_ensure_vr_id_and_network_concurrent_swap(self):
+        orig_create = self.plugin._ensure_vr_id
 
-        def _create_ha_interfaces(ctx, rdb, ha_net):
+        def _ensure_vr_id(ctx, rdb, ha_net):
             # concurrent delete on the first attempt
-            if not getattr(_create_ha_interfaces, 'called', False):
-                setattr(_create_ha_interfaces, 'called', True)
+            if not getattr(_ensure_vr_id, 'called', False):
+                setattr(_ensure_vr_id, 'called', True)
                 self.core_plugin.delete_network(self.admin_ctx,
                                                 ha_net['network_id'])
                 self.plugin._create_ha_network(self.admin_ctx,
                                                rdb.tenant_id)
             return orig_create(ctx, rdb, ha_net)
 
-        self._test_ensure_with_patched_int_create(_create_ha_interfaces)
+        self._test_ensure_with_patched_ensure_vr_id(_ensure_vr_id)
 
     def test_create_ha_network_tenant_binding_raises_duplicate(self):
         router = self._create_router()
@@ -745,30 +735,11 @@ class L3HATestCase(L3HATestFramework):
             self.plugin._create_ha_network_tenant_binding(
                 self.admin_ctx, 't1', network['network_id'])
 
-    def test_create_ha_interfaces_binding_failure_rolls_back_ports(self):
-        router = self._create_router()
-        network = self.plugin.get_ha_network(self.admin_ctx,
-                                             router['tenant_id'])
-        device_filter = {'device_id': [router['id']]}
-        ports_before = self.core_plugin.get_ports(
-            self.admin_ctx, filters=device_filter)
-
-        router_db = self.plugin._get_router(self.admin_ctx, router['id'])
-        with mock.patch.object(l3_hamode_db, 'L3HARouterAgentPortBinding',
-                               side_effect=ValueError):
-            self.assertRaises(ValueError, self.plugin._create_ha_interfaces,
-                              self.admin_ctx, router_db, network)
-
-        ports_after = self.core_plugin.get_ports(
-            self.admin_ctx, filters=device_filter)
-        self.assertEqual(ports_before, ports_after)
-
     def test_create_router_db_ha_attribute_failure_rolls_back_router(self):
         routers_before = self.plugin.get_routers(self.admin_ctx)
 
-        for method in ('_set_vr_id',
-                       '_create_ha_interfaces',
-                       '_notify_ha_interfaces_updated'):
+        for method in ('_ensure_vr_id',
+                       '_notify_router_updated'):
             with mock.patch.object(self.plugin, method,
                                    side_effect=ValueError):
                 self.assertRaises(ValueError, self._create_router)
@@ -810,12 +781,13 @@ class L3HATestCase(L3HATestFramework):
                              router[n_const.HA_ROUTER_STATE_KEY])
 
     def test_sync_ha_router_info_ha_interface_port_concurrently_deleted(self):
+        ctx = self.admin_ctx
         router1 = self._create_router()
         router2 = self._create_router()
 
         # retrieve all router ha port bindings
         bindings = self.plugin.get_ha_router_port_bindings(
-            self.admin_ctx, [router1['id'], router2['id']])
+            ctx, [router1['id'], router2['id']])
         self.assertEqual(4, len(bindings))
 
         routers = self.plugin.get_ha_sync_data_for_host(
@@ -823,7 +795,7 @@ class L3HATestCase(L3HATestFramework):
         self.assertEqual(2, len(routers))
 
         bindings = self.plugin.get_ha_router_port_bindings(
-            self.admin_ctx, [router1['id'], router2['id']],
+            ctx, [router1['id'], router2['id']],
             self.agent1['host'])
         self.assertEqual(2, len(bindings))
 
@@ -834,7 +806,7 @@ class L3HATestCase(L3HATestFramework):
                 self.plugin, "get_ha_router_port_bindings",
                 return_value=[bindings[0], fake_binding]):
             routers = self.plugin.get_ha_sync_data_for_host(
-                self.admin_ctx, self.agent1['host'], self.agent1)
+                ctx, self.agent1['host'], self.agent1)
             self.assertEqual(1, len(routers))
             self.assertIsNotNone(routers[0].get(constants.HA_INTERFACE_KEY))
 
@@ -865,12 +837,13 @@ class L3HATestCase(L3HATestFramework):
     def test_set_router_states_handles_concurrently_deleted_router(self):
         router1 = self._create_router()
         router2 = self._create_router()
+        ctx = self.admin_ctx
         bindings = self.plugin.get_ha_router_port_bindings(
-            self.admin_ctx, [router1['id'], router2['id']])
+            ctx, [router1['id'], router2['id']])
         self.plugin.delete_router(self.admin_ctx, router1['id'])
         self.plugin._set_router_states(
-            self.admin_ctx, bindings, {router1['id']: 'active',
-                                       router2['id']: 'active'})
+            ctx, bindings, {router1['id']: 'active',
+                            router2['id']: 'active'})
         routers = self.plugin.get_ha_sync_data_for_host(
             self.admin_ctx, self.agent1['host'], self.agent1)
         self.assertEqual('active', routers[0][n_const.HA_ROUTER_STATE_KEY])
@@ -1124,10 +1097,11 @@ class L3HAModeDbTestCase(L3HATestFramework):
         self.plugin.add_router_interface(self.admin_ctx,
                                          router['id'],
                                          interface_info)
+        ctx = self.admin_ctx
         bindings = self.plugin.get_ha_router_port_bindings(
-            self.admin_ctx, router_ids=[router['id']],
+            ctx, router_ids=[router['id']],
             host=self.agent2['host'])
-        self.plugin._set_router_states(self.admin_ctx, bindings,
+        self.plugin._set_router_states(ctx, bindings,
                                        {router['id']: 'active'})
         callback = l3_rpc.L3RpcCallback()
         callback._l3plugin = self.plugin

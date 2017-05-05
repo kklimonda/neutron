@@ -89,7 +89,7 @@ class PortContext(MechanismDriverContext, api.PortContext):
         self._port = port
         self._original_port = original_port
         self._network_context = NetworkContext(plugin, plugin_context,
-                                               network)
+                                               network) if network else None
         self._binding = binding
         self._binding_levels = binding_levels
         self._segments_to_bind = None
@@ -151,6 +151,11 @@ class PortContext(MechanismDriverContext, api.PortContext):
 
     @property
     def network(self):
+        if not self._network_context:
+            network = self._plugin.get_network(
+                self._plugin_context, self.current['network_id'])
+            self._network_context = NetworkContext(
+                self._plugin, self._plugin_context, network)
         return self._network_context
 
     @property
@@ -192,6 +197,12 @@ class PortContext(MechanismDriverContext, api.PortContext):
                 self._original_binding_levels[-1].segment_id)
 
     def _expand_segment(self, segment_id):
+        for s in self.network.network_segments:
+            if s['id'] == segment_id:
+                return s
+        # TODO(kevinbenton): eliminate the query below. The above should
+        # always return since the port is bound to a network segment. Leaving
+        # in for now for minimally invasive change for back-port.
         segment = segments_db.get_segment_by_id(self._plugin_context.session,
                                                 segment_id)
         if not segment:

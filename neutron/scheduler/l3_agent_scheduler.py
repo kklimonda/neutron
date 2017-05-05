@@ -248,7 +248,9 @@ class L3Scheduler(object):
             return
         elif sync_router.get('ha', False):
             chosen_agents = self._bind_ha_router(plugin, context,
-                                                 router_id, candidates)
+                                                 router_id,
+                                                 sync_router.get('tenant_id'),
+                                                 candidates)
             if not chosen_agents:
                 return
             chosen_agent = chosen_agents[-1]
@@ -279,17 +281,19 @@ class L3Scheduler(object):
             return False
         return True
 
-    def _add_port_from_net(self, plugin, ctxt, router_id, tenant_id, ha_net):
-        """small wrapper function to unpack network id from ha_network"""
-        return plugin.add_ha_port(ctxt, router_id, ha_net.network.id,
+    def _add_port_from_net_and_ensure_vr_id(self, plugin, ctxt, router_db,
+                                            tenant_id, ha_net):
+        plugin._ensure_vr_id(ctxt, router_db, ha_net)
+        return plugin.add_ha_port(ctxt, router_db.id, ha_net.network.id,
                                   tenant_id)
 
     def create_ha_port_and_bind(self, plugin, context, router_id,
                                 tenant_id, agent, is_manual_scheduling=False):
         """Creates and binds a new HA port for this agent."""
         ctxt = context.elevated()
-        creator = functools.partial(self._add_port_from_net,
-                                    plugin, ctxt, router_id, tenant_id)
+        router_db = plugin._get_router(ctxt, router_id)
+        creator = functools.partial(self._add_port_from_net_and_ensure_vr_id,
+                                    plugin, ctxt, router_db, tenant_id)
         dep_getter = functools.partial(plugin.get_ha_network, ctxt, tenant_id)
         dep_creator = functools.partial(plugin._create_ha_network,
                                         ctxt, tenant_id)
@@ -354,30 +358,8 @@ class L3Scheduler(object):
                                              router['tenant_id'],
                                              agent)
 
-    def _bind_ha_router_to_agents(self, plugin, context, router_id,
-                                 chosen_agents):
-        port_bindings = plugin.get_ha_router_port_bindings(context,
-                                                           [router_id])
-        binding_indices = range(l3_agentschedulers_db.LOWEST_BINDING_INDEX,
-                                len(port_bindings) + 1)
-        for port_binding, agent, binding_index in zip(
-            port_bindings, chosen_agents, binding_indices):
-
-            if not self.bind_router(context, router_id, agent, binding_index):
-                continue
-            try:
-                with db_api.autonested_transaction(context.session):
-                    port_binding.l3_agent_id = agent.id
-            except db_exc.DBDuplicateEntry:
-                LOG.debug("Router %(router)s already scheduled for agent "
-                          "%(agent)s", {'router': router_id,
-                                        'agent': agent.id})
-            else:
-                LOG.debug('HA Router %(router_id)s is scheduled to L3 agent '
-                          '%(agent_id)s)',
-                          {'router_id': router_id, 'agent_id': agent.id})
-
-    def _bind_ha_router(self, plugin, context, router_id, candidates):
+    def _bind_ha_router(self, plugin, context, router_id,
+                        tenant_id, candidates):
         """Bind a HA router to agents based on a specific policy."""
 
         if not self._enough_candidates_for_ha(candidates):
@@ -386,8 +368,9 @@ class L3Scheduler(object):
         chosen_agents = self._choose_router_agents_for_ha(
             plugin, context, candidates)
 
-        self._bind_ha_router_to_agents(plugin, context, router_id,
-                                       chosen_agents)
+        for agent in chosen_agents:
+            self.create_ha_port_and_bind(plugin, context, router_id,
+                                         tenant_id, agent)
 
         return chosen_agents
 

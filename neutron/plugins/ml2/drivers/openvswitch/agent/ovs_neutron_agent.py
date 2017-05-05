@@ -46,6 +46,7 @@ from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import dvr_rpc
 from neutron.callbacks import events as callback_events
 from neutron.callbacks import registry
+from neutron.callbacks import resources as callback_resources
 from neutron.common import config
 from neutron.common import constants as c_const
 from neutron.common import topics
@@ -822,17 +823,26 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         port_info = self.int_br.get_ports_attributes(
             "Port", columns=["name", "tag", "other_config"],
             ports=port_names, if_exists=True)
-        info_by_port = {x['name']: [x['tag'], x['other_config']]
-                        for x in port_info}
+        info_by_port = {
+            x['name']: {
+                'tag': x['tag'],
+                'other_config': x['other_config'] or {}
+            }
+            for x in port_info
+        }
         for port_detail in need_binding_ports:
             try:
                 lvm = self.vlan_manager.get(port_detail['network_id'])
             except vlanmanager.MappingNotFound:
                 continue
             port = port_detail['vif_port']
-            cur_info = info_by_port.get(port.port_name)
-            if cur_info is not None and cur_info[0] != lvm.vlan:
-                other_config = cur_info[1] or {}
+            try:
+                cur_info = info_by_port[port.port_name]
+            except KeyError:
+                continue
+            other_config = cur_info['other_config']
+            if (cur_info['tag'] != lvm.vlan or
+                    other_config.get('tag') != lvm.vlan):
                 other_config['tag'] = str(lvm.vlan)
                 self.int_br.set_db_attribute(
                     "Port", port.port_name, "other_config", other_config)
@@ -1491,7 +1501,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
     def treat_devices_added_or_updated(self, devices, ovs_restarted):
         skipped_devices = []
         need_binding_devices = []
-        security_disabled_devices = []
         devices_details_list = (
             self.plugin_rpc.get_devices_details_list_and_failed_devices(
                 self.context,
@@ -1529,11 +1538,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                                    ovs_restarted)
                 if need_binding:
                     need_binding_devices.append(details)
-
-                port_security = details['port_security_enabled']
-                has_sgs = 'security_groups' in details
-                if not port_security or not has_sgs:
-                    security_disabled_devices.append(device)
                 self._update_port_network(details['port_id'],
                                           details['network_id'])
                 self.ext_manager.handle_port(self.context, details)
@@ -1544,7 +1548,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 if (port and port.ofport != -1):
                     self.port_dead(port)
         return (skipped_devices, need_binding_devices,
-                security_disabled_devices, failed_devices)
+                failed_devices)
 
     def _update_port_network(self, port_id, network_id):
         self._clean_network_ports(port_id)
@@ -1624,11 +1628,10 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         devices_added_updated = (port_info.get('added', set()) |
                                  port_info.get('updated', set()))
         need_binding_devices = []
-        security_disabled_ports = []
         if devices_added_updated:
             start = time.time()
             (skipped_devices, need_binding_devices,
-            security_disabled_ports, failed_devices['added']) = (
+            failed_devices['added']) = (
                 self.treat_devices_added_or_updated(
                     devices_added_updated, ovs_restarted))
             LOG.debug("process_network_ports - iteration:%(iter_num)d - "
@@ -1649,8 +1652,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         # unnecessarily, (eg: when there are no IP address changes)
         added_ports = port_info.get('added', set())
         self._add_port_tag_info(need_binding_devices)
-        if security_disabled_ports:
-            added_ports -= set(security_disabled_ports)
         self.sg_agent.setup_port_filters(added_ports,
                                          port_info.get('updated', set()))
         failed_devices['added'] |= self._bind_devices(need_binding_devices)
@@ -1978,6 +1979,11 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                                  self.patch_tun_ofport)
                     self.dvr_agent.reset_dvr_parameters()
                     self.dvr_agent.setup_dvr_flows()
+                # notify that OVS has restarted
+                registry.notify(
+                    callback_resources.AGENT,
+                    callback_events.OVS_RESTARTED,
+                    self)
                 # restart the polling manager so that it will signal as added
                 # all the current ports
                 # REVISIT (rossella_s) Define a method "reset" in
@@ -2098,6 +2104,9 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
     def _handle_sigterm(self, signum, frame):
         self.catch_sigterm = True
         if self.quitting_rpc_timeout:
+            LOG.info(
+                _LI('SIGTERM received, capping RPC timeout by %d seconds.'),
+                self.quitting_rpc_timeout)
             self.set_rpc_timeout(self.quitting_rpc_timeout)
 
     def _handle_sighup(self, signum, frame):
@@ -2120,7 +2129,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
     def set_rpc_timeout(self, timeout):
         for rpc_api in (self.plugin_rpc, self.sg_plugin_rpc,
                         self.dvr_plugin_rpc, self.state_rpc):
-            rpc_api.client.timeout = timeout
+            rpc_api.client.set_max_timeout(timeout)
 
     def _check_agent_configurations(self):
         if (self.enable_distributed_routing and self.enable_tunneling

@@ -1,6 +1,66 @@
 CHANGES
 =======
 
+9.3.1
+-----
+
+* Revert "Fix DetachedInstanceError on subnet delete"
+* Add work-around for older oslo.db
+* Fix link in QoS devref
+* Fixed validation of create_and_list_trunk_subports rally scenario
+* Always add unique sort keys when sorting
+* Throttle SIGHUPs to keepalived
+* Fix Quota error while running tests
+
+9.3.0
+-----
+
+* Fix DetachedInstanceError on subnet delete
+* Switch to 'subquery' for 1-M relationships
+* Protect against non-determinstic sort
+* test_l3: Enable native pagination and sort
+* Reconcile quitting_rpc_timeout with backoff RPC client
+* ovsfw: Refresh OFPort when necessary
+* ovsfw: Raise exception if tag cannot be found in other_config
+* Fixes DBDeadlock race condition during driver initialization
+* Fetch trunk port MTU only on trunk validation
+* Fix iptables rules for Prefix Delegated subnets
+* Get rid of ml2 port model hook join
+* Get rid of _network_model_hook for external_net
+* Get rid of additional fixed_ip filter join
+* Addressing L3 HA keepalived failures in functional tests
+* functional: Stop compiling OVS from source
+* l3scheduler: create ha_vr_id more robustly
+* Don't create HA resources until needed
+* Fix port update for service subnets
+* Remove floatingip address ignores ha_state
+* openvswitch agent: add OVS_RESTARTED event
+* Use bytes for python3 friendly os.write
+* Disable process monitor for keepalived test
+* L3: Only send notifications if l3 plugin exists
+* Allow the other nic to allocate VMs post PCI-PT VM creation
+* gate_hook: accept dsvm-scenario-[ovs|linuxbridge] venv name
+* LB Trunk: Stop matching MAC of subport to port model
+* Allow no network to be passed into PortContext
+* Avoid segment DB lookup in _expand_segment on port
+* Convert gate_hook to devstack-tools
+* Switch to use test_utils.call_until_true
+* Bulk creation of SecurityGroups
+* gate-hook: Accomodate devstack-gate local.conf changes
+* Skip native DHCP notifications on status change
+* Do not try and remove non-existent iptables chains
+* Invert device_owner to avoid filtering too much
+* DVR: delete stale devices after router update
+* DVR: Add static routes to FIP namespace
+* Imported Translations from Zanata
+* Kill the metadata proxy process unconditionally
+* Revert "Setup firewall filters only for required ports"
+* Display deprecation warning in test only once
+* tempest: Fix qos extension check
+* Manually add pk for alembic_version table
+* DVR: Fix IPtables driver for metering with DVR routers
+* Disallow specifying too long name and description for qos
+
 9.2.0
 -----
 
@@ -9,6 +69,8 @@ CHANGES
 * Add check for ha state
 * Fix netns_cleanup interrupted on rwd I/O
 * DHCP: enhance DHCPAgent startup procedure
+* Change the order of installing flows for br-int
+* Raise AssertionError instead of eventlet.timeout.Timeout when failing
 * Add filter check for quering
 * Fix a bug in process_spawn binding on ports
 * Check for unbound ports in L3 RPC handler
@@ -21,6 +83,7 @@ CHANGES
 * Add fullstack test with OVS arp_responder
 * Add missing revises_on_change attribute
 * Unplug external device when delete snat namespace
+* Tempest tests uses only supported QoS rule types
 * Kill neutron-keepalived-state-change gracefully
 * Kill processes when cleaning up namespaces
 * Remove iptables nat and mangle rules for security group

@@ -608,22 +608,17 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
     # registration of hooks in portbindings_db.py used by other
     # plugins.
 
-    def _ml2_port_model_hook(self, context, original_model, query):
-        query = query.outerjoin(models.PortBinding,
-                                (original_model.id ==
-                                 models.PortBinding.port_id))
-        return query
-
     def _ml2_port_result_filter_hook(self, query, filters):
         values = filters and filters.get(portbindings.HOST_ID, [])
         if not values:
             return query
-        return query.filter(models.PortBinding.host.in_(values))
+        bind_criteria = models.PortBinding.host.in_(values)
+        return query.filter(models_v2.Port.port_binding.has(bind_criteria))
 
     db_base_plugin_v2.NeutronDbPluginV2.register_model_query_hook(
         models_v2.Port,
         "ml2_port_bindings",
-        '_ml2_port_model_hook',
+        None,
         None,
         '_ml2_port_result_filter_hook')
 
@@ -1732,8 +1727,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 # listening for db events can modify the port if necessary
                 context.session.flush()
                 updated_port = self._make_port_dict(port)
-                network = network or self.get_network(
-                    context, original_port['network_id'])
                 levels = db.get_binding_levels(session, port.id,
                                                port.port_binding.host)
                 mech_context = driver_context.PortContext(

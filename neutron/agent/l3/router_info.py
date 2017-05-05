@@ -17,6 +17,8 @@ import netaddr
 from neutron_lib import constants as lib_constants
 from oslo_log import log as logging
 
+import six
+
 from neutron._i18n import _, _LE, _LW
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
@@ -52,6 +54,7 @@ class RouterInfo(object):
         self._snat_enabled = None
         self.fip_map = {}
         self.internal_ports = []
+        self.pd_subnets = {}
         self.floating_ips = set()
         # Invoke the setter for establishing initial SNAT action
         self.router = router
@@ -211,6 +214,19 @@ class RouterInfo(object):
                                                            tag='floating_ip')
 
         self.iptables_manager.apply()
+
+    def _process_pd_iptables_rules(self, prefix, subnet_id):
+        """Configure iptables rules for prefix delegated subnets"""
+        ext_scope = self._get_external_address_scope()
+        ext_scope_mark = self.get_address_scope_mark_mask(ext_scope)
+        ex_gw_device = self.get_external_device_name(
+            self.get_ex_gw_port()['id'])
+        scope_rule = self.address_scope_mangle_rule(ex_gw_device,
+                                                    ext_scope_mark)
+        self.iptables_manager.ipv6['mangle'].add_rule(
+            'scope',
+            '-d %s ' % prefix + scope_rule,
+            tag=('prefix_delegation_%s' % subnet_id))
 
     def process_floating_ip_address_scope_rules(self):
         """Configure address scope related iptables rules for the router's
@@ -527,6 +543,7 @@ class RouterInfo(object):
             for subnet in p['subnets']:
                 if ipv6_utils.is_ipv6_pd_enabled(subnet):
                     pd.disable_subnet(self.router_id, subnet['id'])
+                    del self.pd_subnets[subnet['id']]
 
         updated_cidrs = []
         if updated_ports:
@@ -554,6 +571,7 @@ class RouterInfo(object):
                                                            subnet['cidr'],
                                                            old_prefix,
                                                            updated_cidrs)
+                            self.pd_subnets[subnet['id']] = subnet['cidr']
                             enable_ra = True
 
         # Enable RA
@@ -706,6 +724,19 @@ class RouterInfo(object):
     def _gateway_ports_equal(port1, port2):
         return port1 == port2
 
+    def _delete_stale_external_devices(self, interface_name, pd):
+        existing_devices = self._get_existing_devices()
+        stale_devs = [dev for dev in existing_devices
+                      if dev.startswith(EXTERNAL_DEV_PREFIX)
+                      and dev != interface_name]
+        for stale_dev in stale_devs:
+            LOG.debug('Deleting stale external router device: %s', stale_dev)
+            pd.remove_gw_interface(self.router['id'])
+            self.driver.unplug(stale_dev,
+                               bridge=self.agent_conf.external_network_bridge,
+                               namespace=self.ns_name,
+                               prefix=EXTERNAL_DEV_PREFIX)
+
     def _process_external_gateway(self, ex_gw_port, pd):
         # TODO(Carl) Refactor to clarify roles of ex_gw_port vs self.ex_gw_port
         ex_gw_port_id = (ex_gw_port and ex_gw_port['id'] or
@@ -728,17 +759,7 @@ class RouterInfo(object):
                 interface_name = self.get_internal_device_name(p['id'])
                 self.gateway_redirect_cleanup(interface_name)
 
-        existing_devices = self._get_existing_devices()
-        stale_devs = [dev for dev in existing_devices
-                      if dev.startswith(EXTERNAL_DEV_PREFIX)
-                      and dev != interface_name]
-        for stale_dev in stale_devs:
-            LOG.debug('Deleting stale external router device: %s', stale_dev)
-            pd.remove_gw_interface(self.router['id'])
-            self.driver.unplug(stale_dev,
-                               bridge=self.agent_conf.external_network_bridge,
-                               namespace=self.ns_name,
-                               prefix=EXTERNAL_DEV_PREFIX)
+        self._delete_stale_external_devices(interface_name, pd)
 
         # Process SNAT rules for external gateway
         gw_port = self._router.get('gw_port')
@@ -983,6 +1004,9 @@ class RouterInfo(object):
                 iptables['filter'].add_rule(
                     'scope',
                     self.address_scope_filter_rule(device_name, mark))
+        for subnet_id, prefix in six.iteritems(self.pd_subnets):
+            if prefix != n_const.PROVISIONAL_IPV6_PD_PREFIX:
+                self._process_pd_iptables_rules(prefix, subnet_id)
 
     def process_ports_address_scope_iptables(self):
         ports_scopemark = self._get_address_scope_mark()
