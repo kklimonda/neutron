@@ -21,14 +21,13 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import fileutils
-import psutil
 import six
 
 from neutron._i18n import _, _LW, _LE
+from neutron.agent.common import config as agent_cfg
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-
-from neutron.conf.agent import common as agent_cfg
+from neutron.common import utils as common_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -82,8 +81,7 @@ class ProcessManager(MonitoredProcess):
             self.service_pid_fname = 'pid'
             self.service = 'default-service'
 
-        fileutils.ensure_tree(os.path.dirname(self.get_pid_file_name()),
-                              mode=0o755)
+        common_utils.ensure_dir(os.path.dirname(self.get_pid_file_name()))
 
     def enable(self, cmd_callback=None, reload_cfg=False):
         if not self.active:
@@ -140,18 +138,16 @@ class ProcessManager(MonitoredProcess):
 
     @property
     def active(self):
-        cmdline = self.cmdline
-        return self.uuid in cmdline if cmdline else False
-
-    @property
-    def cmdline(self):
         pid = self.pid
-        if not pid:
-            return
+        if pid is None:
+            return False
+
+        cmdline = '/proc/%s/cmdline' % pid
         try:
-            return ' '.join(psutil.Process(pid).cmdline())
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return
+            with open(cmdline, "r") as f:
+                return self.uuid in f.readline()
+        except IOError:
+            return False
 
 
 ServiceId = collections.namedtuple('ServiceId', ['uuid', 'service'])

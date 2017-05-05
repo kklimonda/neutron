@@ -12,30 +12,58 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
-from neutron_lib.plugins import directory
 from sqlalchemy import func
+from sqlalchemy import sql
 
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
+from neutron.db import agents_db
 from neutron.db import l3_agentschedulers_db as l3_sch_db
-from neutron.db.models import agent as agent_model
-from neutron.db.models import l3agent as rb_model
+from neutron.db import l3_attrs_db
+from neutron.db import l3_db
+from neutron.extensions import portbindings
+from neutron import manager
+from neutron.plugins.common import constants as service_constants
 
 
 class L3_HA_scheduler_db_mixin(l3_sch_db.AZL3AgentSchedulerDbMixin):
 
+    def get_ha_routers_l3_agents_count(self, context):
+        """Return a map between HA routers and how many agents every
+        router is scheduled to.
+        """
+
+        # Postgres requires every column in the select to be present in
+        # the group by statement when using an aggregate function.
+        # One solution is to generate a subquery and join it with the desired
+        # columns.
+        binding_model = l3_sch_db.RouterL3AgentBinding
+        sub_query = (context.session.query(
+            binding_model.router_id,
+            func.count(binding_model.router_id).label('count')).
+            join(l3_attrs_db.RouterExtraAttributes,
+                 binding_model.router_id ==
+                 l3_attrs_db.RouterExtraAttributes.router_id).
+            join(l3_db.Router).
+            filter(l3_attrs_db.RouterExtraAttributes.ha == sql.true()).
+            group_by(binding_model.router_id).subquery())
+
+        query = (context.session.query(l3_db.Router, sub_query.c.count).
+                 join(sub_query))
+
+        return [(self._make_router_dict(router), agent_count)
+                for router, agent_count in query]
+
     def get_l3_agents_ordered_by_num_routers(self, context, agent_ids):
         if not agent_ids:
             return []
-        query = (context.session.query(agent_model.Agent, func.count(
-            rb_model.RouterL3AgentBinding.router_id)
-            .label('count')).
-            outerjoin(rb_model.RouterL3AgentBinding).
-            group_by(agent_model.Agent.id).
-            filter(agent_model.Agent.id.in_(agent_ids)).
+        query = (context.session.query(agents_db.Agent, func.count(
+            l3_sch_db.RouterL3AgentBinding.router_id).label('count')).
+            outerjoin(l3_sch_db.RouterL3AgentBinding).
+            group_by(agents_db.Agent.id).
+            filter(agents_db.Agent.id.in_(agent_ids)).
             order_by('count'))
 
         return [record[0] for record in query]
@@ -73,7 +101,8 @@ def _notify_l3_agent_ha_port_update(resource, event, trigger, **kwargs):
         if (new_device_owner == constants.DEVICE_OWNER_ROUTER_HA_INTF and
             new_port['status'] == constants.PORT_STATUS_ACTIVE and
             original_port['status'] != new_port['status']):
-            l3plugin = directory.get_plugin(constants.L3)
+            l3plugin = manager.NeutronManager.get_service_plugins().get(
+                service_constants.L3_ROUTER_NAT)
             l3plugin.l3_rpc_notifier.routers_updated_on_host(
                 context, [new_port['device_id']], host)
 

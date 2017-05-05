@@ -16,7 +16,6 @@
 import os
 
 import eventlet
-from oslo_utils import importutils
 
 
 def monkey_patch():
@@ -31,5 +30,3 @@ def monkey_patch():
         eventlet.monkey_patch(os=False, thread=False)
     else:
         eventlet.monkey_patch()
-        p_c_e = importutils.import_module('pyroute2.config.eventlet')
-        p_c_e.eventlet_config()

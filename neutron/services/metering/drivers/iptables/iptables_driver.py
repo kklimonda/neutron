@@ -19,14 +19,14 @@ from oslo_utils import importutils
 import six
 
 from neutron._i18n import _, _LE, _LI
+from neutron.agent.common import config
 from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
-from neutron.common import constants
+from neutron.common import constants as constants
 from neutron.common import ipv6_utils
-from neutron.conf.agent import common as config
 from neutron.services.metering.drivers import abstract_driver
 
 
@@ -88,7 +88,7 @@ class RouterWithMetering(object):
                     namespace=snat_ns_name,
                     binary_name=WRAP_NAME,
                     state_less=True,
-                    use_ipv6=ipv6_utils.is_enabled_and_bind_by_default())
+                    use_ipv6=ipv6_utils.is_enabled())
         # Check of namespace existence before we assign the iptables_manager
         # NOTE(Swami): If distributed routers, all external traffic on a
         # compute node will flow through the rfp interface in the router
@@ -99,7 +99,7 @@ class RouterWithMetering(object):
                 namespace=self.ns_name,
                 binary_name=WRAP_NAME,
                 state_less=True,
-                use_ipv6=ipv6_utils.is_enabled_and_bind_by_default())
+                use_ipv6=ipv6_utils.is_enabled())
         self.metering_labels = {}
 
 
@@ -389,7 +389,6 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
     @log_helpers.log_method_call
     def get_traffic_counters(self, context, routers):
         accs = {}
-        routers_to_reconfigure = set()
         for router in routers:
             rm = self.routers.get(router['id'])
             if not rm:
@@ -407,7 +406,6 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
                 except RuntimeError:
                     LOG.exception(_LE('Failed to get traffic counters, '
                                       'router: %s'), router)
-                    routers_to_reconfigure.add(router['id'])
                     continue
 
                 if not chain_acc:
@@ -419,8 +417,5 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
                 acc['bytes'] += chain_acc['bytes']
 
                 accs[label_id] = acc
-
-        for router_id in routers_to_reconfigure:
-            del self.routers[router_id]
 
         return accs

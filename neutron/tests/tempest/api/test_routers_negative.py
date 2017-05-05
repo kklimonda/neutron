@@ -14,7 +14,6 @@
 #    under the License.
 
 from tempest.lib.common.utils import data_utils
-from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 import testtools
@@ -40,7 +39,7 @@ class RoutersNegativeTestBase(base.BaseRouterTest):
 class RoutersNegativeTest(RoutersNegativeTestBase):
 
     @test.attr(type='negative')
-    @decorators.idempotent_id('e3e751af-15a2-49cc-b214-a7154579e94f')
+    @test.idempotent_id('e3e751af-15a2-49cc-b214-a7154579e94f')
     def test_delete_router_in_use(self):
         # This port is deleted after a test by remove_router_interface.
         port = self.client.create_port(network_id=self.network['id'])
@@ -55,7 +54,7 @@ class RoutersNegativePolicyTest(RoutersNegativeTestBase):
     credentials = ['admin', 'primary', 'alt']
 
     @test.attr(type='negative')
-    @decorators.idempotent_id('159f576d-a423-46b5-b501-622694c02f6b')
+    @test.idempotent_id('159f576d-a423-46b5-b501-622694c02f6b')
     def test_add_interface_wrong_tenant(self):
         client2 = self.alt_manager.network_client
         network = client2.create_network()['network']
@@ -80,7 +79,7 @@ class DvrRoutersNegativeTest(RoutersNegativeTestBase):
         super(DvrRoutersNegativeTest, cls).skip_checks()
 
     @test.attr(type='negative')
-    @decorators.idempotent_id('4990b055-8fc7-48ab-bba7-aa28beaad0b9')
+    @test.idempotent_id('4990b055-8fc7-48ab-bba7-aa28beaad0b9')
     def test_router_create_tenant_distributed_returns_forbidden(self):
         with testtools.ExpectedException(lib_exc.Forbidden):
             self.create_router(

@@ -13,9 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 
+from neutron.extensions import portbindings
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers.macvtap.mech_driver import mech_macvtap
 from neutron.tests.unit.plugins.ml2 import _test_mech_agent as base
@@ -70,9 +70,6 @@ class MacvtapMechanismMigrationTestCase(object):
 
     def test__is_live_migration_false(self):
         self._test__is_live_migration(False, {})
-
-    def test__is_live_migration_false_None_original(self):
-        self._test__is_live_migration(False, None)
 
     def _test__is_live_migration(self, expected, original):
         context = base.FakePortContext(self.AGENT_TYPE,

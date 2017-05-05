@@ -16,11 +16,11 @@ import functools
 import netaddr
 
 import fixtures
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 from neutronclient.common import exceptions
 
 from neutron.common import utils
+from neutron.extensions import portbindings
 
 
 def _safe_method(f):
@@ -61,22 +61,12 @@ class ClientFixture(fixtures.Fixture):
 
         return self._create_resource(resource_type, spec)
 
-    def create_network(self, tenant_id, name=None, external=False,
-                       network_type=None, segmentation_id=None,
-                       physical_network=None):
+    def create_network(self, tenant_id, name=None, external=False):
         resource_type = 'network'
 
         name = name or utils.get_rand_name(prefix=resource_type)
         spec = {'tenant_id': tenant_id, 'name': name}
         spec['router:external'] = external
-
-        if segmentation_id is not None:
-            spec['provider:segmentation_id'] = segmentation_id
-        if network_type is not None:
-            spec['provider:network_type'] = network_type
-        if physical_network is not None:
-            spec['provider:physical_network'] = physical_network
-
         return self._create_resource(resource_type, spec)
 
     def create_subnet(self, tenant_id, network_id,
@@ -98,19 +88,14 @@ class ClientFixture(fixtures.Fixture):
 
         return self._create_resource(resource_type, spec)
 
-    def create_port(self, tenant_id, network_id, hostname=None,
-                    qos_policy_id=None, security_groups=None, **kwargs):
+    def create_port(self, tenant_id, network_id, hostname, qos_policy_id=None):
         spec = {
             'network_id': network_id,
             'tenant_id': tenant_id,
+            portbindings.HOST_ID: hostname,
         }
-        spec.update(kwargs)
-        if hostname is not None:
-            spec[portbindings.HOST_ID] = hostname
         if qos_policy_id:
             spec['qos_policy_id'] = qos_policy_id
-        if security_groups:
-            spec['security_groups'] = security_groups
         return self._create_resource('port', spec)
 
     def create_floatingip(self, tenant_id, floating_network_id,
@@ -185,92 +170,3 @@ class ClientFixture(fixtures.Fixture):
                         qos_policy_id)
 
         return rule['dscp_marking_rule']
-
-    def create_trunk(self, tenant_id, port_id, name=None,
-                     admin_state_up=None, sub_ports=None):
-        """Create a trunk via API.
-
-        :param tenant_id: ID of the tenant.
-        :param port_id: Parent port of trunk.
-        :param name: Name of the trunk.
-        :param admin_state_up: Admin state of the trunk.
-        :param sub_ports: List of subport dictionaries in format
-                {'port_id': <ID of neutron port for subport>,
-                 'segmentation_type': 'vlan',
-                 'segmentation_id': <VLAN tag>}
-
-        :return: Dictionary with trunk's data returned from Neutron API.
-        """
-        spec = {
-            'port_id': port_id,
-            'tenant_id': tenant_id,
-        }
-        if name is not None:
-            spec['name'] = name
-        if sub_ports is not None:
-            spec['sub_ports'] = sub_ports
-        if admin_state_up is not None:
-            spec['admin_state_up'] = admin_state_up
-
-        trunk = self.client.create_trunk({'trunk': spec})['trunk']
-
-        if sub_ports:
-            self.addCleanup(
-                _safe_method(self.trunk_remove_subports),
-                tenant_id, trunk['id'], trunk['sub_ports'])
-        self.addCleanup(_safe_method(self.client.delete_trunk), trunk['id'])
-
-        return trunk
-
-    def trunk_add_subports(self, tenant_id, trunk_id, sub_ports):
-        """Add subports to the trunk.
-
-        :param tenant_id: ID of the tenant.
-        :param trunk_id: ID of the trunk.
-        :param sub_ports: List of subport dictionaries to be added in format
-                {'port_id': <ID of neutron port for subport>,
-                 'segmentation_type': 'vlan',
-                 'segmentation_id': <VLAN tag>}
-        """
-        spec = {
-            'tenant_id': tenant_id,
-            'sub_ports': sub_ports,
-        }
-        trunk = self.client.trunk_add_subports(trunk_id, spec)
-
-        sub_ports_to_remove = [
-            sub_port for sub_port in trunk['sub_ports']
-            if sub_port in sub_ports]
-        self.addCleanup(
-            _safe_method(self.trunk_remove_subports), tenant_id, trunk_id,
-            sub_ports_to_remove)
-
-    def trunk_remove_subports(self, tenant_id, trunk_id, sub_ports):
-        """Remove subports from the trunk.
-
-        :param trunk_id: ID of the trunk.
-        :param sub_ports: List of subport port IDs.
-        """
-        spec = {
-            'tenant_id': tenant_id,
-            'sub_ports': sub_ports,
-        }
-        return self.client.trunk_remove_subports(trunk_id, spec)
-
-    def create_security_group(self, tenant_id, name=None):
-        resource_type = 'security_group'
-
-        name = name or utils.get_rand_name(prefix=resource_type)
-        spec = {'tenant_id': tenant_id, 'name': name}
-
-        return self._create_resource(resource_type, spec)
-
-    def create_security_group_rule(self, tenant_id, security_group_id,
-                                   **kwargs):
-        resource_type = 'security_group_rule'
-
-        spec = {'tenant_id': tenant_id,
-                'security_group_id': security_group_id}
-        spec.update(kwargs)
-
-        return self._create_resource(resource_type, spec)

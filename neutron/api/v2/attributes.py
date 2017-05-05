@@ -13,18 +13,99 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from debtcollector import moves
 from neutron_lib.api import converters as lib_converters
 from neutron_lib.api import validators as lib_validators
 from neutron_lib import constants
-from neutron_lib.db import constants as db_const
 import six
 import webob.exc
 
 from neutron._i18n import _
+from neutron.common import _deprecate
 
 
 # Defining a constant to avoid repeating string literal in several modules
 SHARED = 'shared'
+
+_deprecate._moved_global('UNLIMITED', new_module=lib_validators)
+
+# TODO(HenryG): use DB field sizes (neutron-lib 0.1.1)
+NAME_MAX_LEN = 255
+TENANT_ID_MAX_LEN = 255
+DESCRIPTION_MAX_LEN = 255
+LONG_DESCRIPTION_MAX_LEN = 1024
+DEVICE_ID_MAX_LEN = 255
+DEVICE_OWNER_MAX_LEN = 255
+
+
+def _lib(old_name):
+    """Deprecate a function moved to neutron_lib.api.converters/validators."""
+    new_func = getattr(lib_validators, old_name, None)
+    if not new_func:
+        # Try non-private name (without leading underscore)
+        new_func = getattr(lib_validators, old_name[1:], None)
+    if not new_func:
+        # If it isn't a validator, maybe it's a converter
+        new_func = getattr(lib_converters, old_name, None)
+    assert new_func
+    return moves.moved_function(new_func, old_name, __name__,
+                                message='moved to neutron_lib',
+                                version='mitaka', removal_version='ocata')
+
+
+_verify_dict_keys = _lib('_verify_dict_keys')
+is_attr_set = _lib('is_attr_set')
+_validate_list_of_items = _lib('_validate_list_of_items')
+_validate_values = _lib('_validate_values')
+_validate_not_empty_string_or_none = _lib('_validate_not_empty_string_or_none')
+_validate_not_empty_string = _lib('_validate_not_empty_string')
+_validate_string_or_none = _lib('_validate_string_or_none')
+_validate_string = _lib('_validate_string')
+validate_list_of_unique_strings = _lib('validate_list_of_unique_strings')
+_validate_boolean = _lib('_validate_boolean')
+_validate_range = _lib('_validate_range')
+_validate_no_whitespace = _lib('_validate_no_whitespace')
+_validate_mac_address = _lib('_validate_mac_address')
+_validate_mac_address_or_none = _lib('_validate_mac_address_or_none')
+_validate_ip_address = _lib('_validate_ip_address')
+_validate_ip_pools = _lib('_validate_ip_pools')
+_validate_fixed_ips = _lib('_validate_fixed_ips')
+_validate_nameservers = _lib('_validate_nameservers')
+_validate_hostroutes = _lib('_validate_hostroutes')
+_validate_ip_address_or_none = _lib('_validate_ip_address_or_none')
+_validate_subnet = _lib('_validate_subnet')
+_validate_subnet_or_none = _lib('_validate_subnet_or_none')
+_validate_subnet_list = _lib('_validate_subnet_list')
+_validate_regex = _lib('_validate_regex')
+_validate_regex_or_none = _lib('_validate_regex_or_none')
+_validate_subnetpool_id = _lib('_validate_subnetpool_id')
+_validate_subnetpool_id_or_none = _lib('_validate_subnetpool_id_or_none')
+_validate_uuid = _lib('_validate_uuid')
+_validate_uuid_or_none = _lib('_validate_uuid_or_none')
+_validate_uuid_list = _lib('_validate_uuid_list')
+_validate_dict_item = _lib('_validate_dict_item')
+_validate_dict = _lib('_validate_dict')
+_validate_dict_or_none = _lib('_validate_dict_or_none')
+_validate_dict_or_empty = _lib('_validate_dict_or_empty')
+_validate_dict_or_nodata = _lib('_validate_dict_or_nodata')
+_validate_non_negative = _lib('_validate_non_negative')
+
+convert_to_boolean = _lib('convert_to_boolean')
+convert_to_boolean_if_not_none = _lib('convert_to_boolean_if_not_none')
+convert_to_int = _lib('convert_to_int')
+convert_to_int_if_not_none = _lib('convert_to_int_if_not_none')
+convert_to_positive_float_or_none = _lib('convert_to_positive_float_or_none')
+convert_kvp_str_to_list = _lib('convert_kvp_str_to_list')
+convert_kvp_list_to_dict = _lib('convert_kvp_list_to_dict')
+convert_none_to_empty_list = _lib('convert_none_to_empty_list')
+convert_none_to_empty_dict = _lib('convert_none_to_empty_dict')
+convert_to_list = _lib('convert_to_list')
+
+
+_deprecate._moved_global('MAC_PATTERN', new_module=lib_validators)
+
+_deprecate._moved_global('validators', new_module=lib_validators)
+
 
 # Define constants for base resource name
 NETWORK = 'network'
@@ -65,7 +146,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                'is_visible': True,
                'primary_key': True},
         'name': {'allow_post': True, 'allow_put': True,
-                 'validate': {'type:string': db_const.NAME_FIELD_SIZE},
+                 'validate': {'type:string': NAME_MAX_LEN},
                  'default': '', 'is_visible': True},
         'subnets': {'allow_post': False, 'allow_put': False,
                     'default': [],
@@ -77,8 +158,7 @@ RESOURCE_ATTRIBUTE_MAP = {
         'status': {'allow_post': False, 'allow_put': False,
                    'is_visible': True},
         'tenant_id': {'allow_post': True, 'allow_put': False,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': TENANT_ID_MAX_LEN},
                       'required_by_policy': True,
                       'is_visible': True},
         SHARED: {'allow_post': True,
@@ -95,7 +175,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                'is_visible': True,
                'primary_key': True},
         'name': {'allow_post': True, 'allow_put': True, 'default': '',
-                 'validate': {'type:string': db_const.NAME_FIELD_SIZE},
+                 'validate': {'type:string': NAME_MAX_LEN},
                  'is_visible': True},
         'network_id': {'allow_post': True, 'allow_put': False,
                        'required_by_policy': True,
@@ -118,18 +198,15 @@ RESOURCE_ATTRIBUTE_MAP = {
                       'enforce_policy': True,
                       'is_visible': True},
         'device_id': {'allow_post': True, 'allow_put': True,
-                      'validate': {
-                          'type:string': db_const.DEVICE_ID_FIELD_SIZE},
+                      'validate': {'type:string': DEVICE_ID_MAX_LEN},
                       'default': '',
                       'is_visible': True},
         'device_owner': {'allow_post': True, 'allow_put': True,
-                         'validate': {
-                             'type:string': db_const.DEVICE_OWNER_FIELD_SIZE},
+                         'validate': {'type:string': DEVICE_OWNER_MAX_LEN},
                          'default': '', 'enforce_policy': True,
                          'is_visible': True},
         'tenant_id': {'allow_post': True, 'allow_put': False,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': TENANT_ID_MAX_LEN},
                       'required_by_policy': True,
                       'is_visible': True},
         'status': {'allow_post': False, 'allow_put': False,
@@ -141,7 +218,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                'is_visible': True,
                'primary_key': True},
         'name': {'allow_post': True, 'allow_put': True, 'default': '',
-                 'validate': {'type:string': db_const.NAME_FIELD_SIZE},
+                 'validate': {'type:string': NAME_MAX_LEN},
                  'is_visible': True},
         'ip_version': {'allow_post': True, 'allow_put': False,
                        'convert_to': lib_converters.convert_to_int,
@@ -191,8 +268,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                         'validate': {'type:hostroutes': None},
                         'is_visible': True},
         'tenant_id': {'allow_post': True, 'allow_put': False,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': TENANT_ID_MAX_LEN},
                       'required_by_policy': True,
                       'is_visible': True},
         'enable_dhcp': {'allow_post': True, 'allow_put': True,
@@ -228,8 +304,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                  'is_visible': True},
         'tenant_id': {'allow_post': True,
                       'allow_put': False,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': TENANT_ID_MAX_LEN},
                       'required_by_policy': True,
                       'is_visible': True},
         'prefixes': {'allow_post': True,
@@ -286,8 +361,19 @@ RESOURCE_FOREIGN_KEYS = {
     NETWORKS: 'network_id'
 }
 
-# Removing PLURALS breaks subprojects, but they don't need it so they
-# need to be patched.
+# Store plural/singular mappings
+PLURALS = {NETWORKS: NETWORK,
+           PORTS: PORT,
+           SUBNETS: SUBNET,
+           SUBNETPOOLS: SUBNETPOOL,
+           'dns_nameservers': 'dns_nameserver',
+           'host_routes': 'host_route',
+           'allocation_pools': 'allocation_pool',
+           'fixed_ips': 'fixed_ip',
+           'extensions': 'extension'}
+# Store singular/plural mappings. This dictionary is populated by
+# get_resource_info
+REVERSED_PLURALS = {}
 
 
 def get_collection_info(collection):
@@ -296,6 +382,20 @@ def get_collection_info(collection):
     :param collection: Collection or plural name of the resource
     """
     return RESOURCE_ATTRIBUTE_MAP.get(collection)
+
+
+def get_resource_info(resource):
+    """Helper function to retrive attribute info
+
+    :param resource: resource name
+    """
+    plural_name = REVERSED_PLURALS.get(resource)
+    if not plural_name:
+        for (plural, singular) in PLURALS.items():
+            if singular == resource:
+                plural_name = plural
+                REVERSED_PLURALS[resource] = plural_name
+    return RESOURCE_ATTRIBUTE_MAP.get(plural_name)
 
 
 def fill_default_value(attr_info, res_dict,
@@ -399,3 +499,14 @@ def verify_attributes(res_dict, attr_info):
     if extra_keys:
         msg = _("Unrecognized attribute(s) '%s'") % ', '.join(extra_keys)
         raise webob.exc.HTTPBadRequest(msg)
+
+
+# Shim added to move the following to neutron_lib.constants:
+# ATTR_NOT_SPECIFIED
+# HEX_ELEM
+# UUID_PATTERN
+#
+# Neutron-lib migration shim. This will emit a deprecation warning on any
+# reference to constants that have been moved out of this module and into
+# the neutron_lib.constants module.
+_deprecate._MovedGlobals(constants)

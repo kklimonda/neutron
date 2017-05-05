@@ -16,12 +16,12 @@
 import os
 import re
 
-from neutron_lib.utils import helpers
 from oslo_log import log as logging
 import six
 
 from neutron._i18n import _, _LE, _LW
 from neutron.agent.linux import ip_link_support
+from neutron.common import utils
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
 from neutron.plugins.ml2.drivers.mech_sriov.agent import pci_lib
@@ -115,12 +115,14 @@ class EmbSwitch(object):
     @ivar pci_dev_wrapper: pci device wrapper
     """
 
-    def __init__(self, dev_name, exclude_devices):
+    def __init__(self, phys_net, dev_name, exclude_devices):
         """Constructor
 
+        @param phys_net: physical network
         @param dev_name: network device name
         @param exclude_devices: list of pci slots to exclude
         """
+        self.phys_net = phys_net
         self.dev_name = dev_name
         self.pci_slot_map = {}
         self.pci_dev_wrapper = pci_lib.PciDeviceIPWrapper(dev_name)
@@ -195,7 +197,7 @@ class EmbSwitch(object):
         if rate_kbps > 0 and rate_kbps < 1000:
             rate_mbps = 1
         else:
-            rate_mbps = helpers.round_val(rate_kbps / 1000.0)
+            rate_mbps = utils.round_val(rate_kbps / 1000.0)
 
         log_dict = {
             'rate_mbps': rate_mbps,
@@ -395,7 +397,7 @@ class ESwitchManager(object):
                                              exclude_devices)
 
     def _create_emb_switch(self, phys_net, dev_name, exclude_devices):
-        embedded_switch = EmbSwitch(dev_name, exclude_devices)
+        embedded_switch = EmbSwitch(phys_net, dev_name, exclude_devices)
         self.emb_switches_map.setdefault(phys_net, []).append(embedded_switch)
         for pci_slot in embedded_switch.get_pci_slot_list():
             self.pci_slot_map[pci_slot] = embedded_switch
@@ -417,26 +419,8 @@ class ESwitchManager(object):
                 embedded_switch = None
         return embedded_switch
 
-    def clear_max_rate(self, pci_slot):
-        """Clear the VF "rate" parameter
-
-        Clear the "rate" configuration from VF by setting it to 0.
-        @param pci_slot: VF PCI slot
-        """
-        self._clear_rate(pci_slot,
-            ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_RATE)
-
-    def clear_min_tx_rate(self, pci_slot):
-        """Clear the VF "min_tx_rate" parameter
-
-        Clear the "min_tx_rate" configuration from VF by setting it to 0.
-        @param pci_slot: VF PCI slot
-        """
-        self._clear_rate(pci_slot,
-            ip_link_support.IpLinkConstants.IP_LINK_CAPABILITY_MIN_TX_RATE)
-
-    def _clear_rate(self, pci_slot, rate_type):
-        """Clear the VF rate parameter specified in rate_type
+    def clear_rate(self, pci_slot, rate_type):
+        """Clear the VF rate
 
         Clear the rate configuration from VF by setting it to 0.
         @param pci_slot: VF PCI slot

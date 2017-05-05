@@ -17,8 +17,6 @@ import inspect
 import os
 import random
 
-from neutron_lib import context
-from neutron_lib.plugins import directory
 from oslo_concurrency import processutils
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -36,7 +34,9 @@ from neutron.common import config
 from neutron.common import profiler
 from neutron.common import rpc as n_rpc
 from neutron.conf import service
+from neutron import context
 from neutron.db import api as session
+from neutron import manager
 from neutron import worker as neutron_worker
 from neutron import wsgi
 
@@ -150,8 +150,9 @@ class RpcReportsWorker(RpcWorker):
 
 
 def _get_rpc_workers():
-    plugin = directory.get_plugin()
-    service_plugins = directory.get_plugins().values()
+    plugin = manager.NeutronManager.get_plugin()
+    service_plugins = (
+        manager.NeutronManager.get_service_plugins().values())
 
     if cfg.CONF.rpc_workers < 1:
         cfg.CONF.set_override('rpc_workers', 1)
@@ -184,8 +185,8 @@ def _get_rpc_workers():
 
 
 def _get_plugins_workers():
-    # NOTE(twilson) get_plugins also returns the core plugin
-    plugins = directory.get_unique_plugins()
+    # NOTE(twilson) get_service_plugins also returns the core plugin
+    plugins = manager.NeutronManager.get_unique_service_plugins()
 
     # TODO(twilson) Instead of defaulting here, come up with a good way to
     # share a common get_workers default between NeutronPluginBaseV2 and

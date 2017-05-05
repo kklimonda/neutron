@@ -10,37 +10,34 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.objects import network
-from neutron.objects import ports
 from neutron.objects.qos import policy
-from neutron.objects import securitygroup
-from neutron.objects import subnet
 from neutron.objects import trunk
 
 
-# Supported types
-TRUNK = trunk.Trunk.obj_name()
-QOS_POLICY = policy.QosPolicy.obj_name()
-SUBPORT = trunk.SubPort.obj_name()
-PORT = ports.Port.obj_name()
-NETWORK = network.Network.obj_name()
-SUBNET = subnet.Subnet.obj_name()
-SECURITYGROUP = securitygroup.SecurityGroup.obj_name()
-SECURITYGROUPRULE = securitygroup.SecurityGroupRule.obj_name()
-
+_TRUNK_CLS = trunk.Trunk
+_QOS_POLICY_CLS = policy.QosPolicy
+_SUBPORT_CLS = trunk.SubPort
 
 _VALID_CLS = (
-    policy.QosPolicy,
-    trunk.Trunk,
-    trunk.SubPort,
-    ports.Port,
-    subnet.Subnet,
-    network.Network,
-    securitygroup.SecurityGroup,
-    securitygroup.SecurityGroupRule,
+    _TRUNK_CLS,
+    _QOS_POLICY_CLS,
+    _SUBPORT_CLS,
 )
 
-_TYPE_TO_CLS_MAP = {cls.obj_name(): cls for cls in _VALID_CLS}
+_VALID_TYPES = [cls.obj_name() for cls in _VALID_CLS]
+
+
+# Supported types
+TRUNK = _TRUNK_CLS.obj_name()
+QOS_POLICY = _QOS_POLICY_CLS.obj_name()
+SUBPORT = _SUBPORT_CLS.obj_name()
+
+
+_TYPE_TO_CLS_MAP = {
+    TRUNK: _TRUNK_CLS,
+    QOS_POLICY: _QOS_POLICY_CLS,
+    SUBPORT: _SUBPORT_CLS,
+}
 
 LOCAL_RESOURCE_VERSIONS = {
     resource_type: cls.VERSION
@@ -59,7 +56,7 @@ def get_resource_type(resource_cls):
 
 
 def is_valid_resource_type(resource_type):
-    return resource_type in _TYPE_TO_CLS_MAP
+    return resource_type in _VALID_TYPES
 
 
 def get_resource_cls(resource_type):

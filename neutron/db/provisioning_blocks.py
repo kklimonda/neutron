@@ -13,25 +13,34 @@
 #    under the License.
 #
 
+from neutron_lib.db import model_base
 from oslo_log import log as logging
+import sqlalchemy as sa
 
 from neutron._i18n import _LE
 from neutron.callbacks import registry
 from neutron.callbacks import resources
 from neutron.db import api as db_api
 from neutron.db import models_v2
-from neutron.objects import provisioning_blocks as pb_obj
+from neutron.db import standard_attr
 
 LOG = logging.getLogger(__name__)
 PROVISIONING_COMPLETE = 'provisioning_complete'
 # identifiers for the various entities that participate in provisioning
 DHCP_ENTITY = 'DHCP'
 L2_AGENT_ENTITY = 'L2'
-
-# TODO(sshank): Change to object later on when complete integration of Port
-# OVO is complete. Currently 'extend_port_dict' in ext_test fails when changed
-# to OVO here.
 _RESOURCE_TO_MODEL_MAP = {resources.PORT: models_v2.Port}
+
+
+class ProvisioningBlock(model_base.BASEV2):
+    # the standard attr id of the thing we want to block
+    standard_attr_id = (
+        sa.Column(sa.BigInteger().with_variant(sa.Integer(), 'sqlite'),
+                  sa.ForeignKey(standard_attr.StandardAttribute.id,
+                                ondelete="CASCADE"),
+                  primary_key=True))
+    # the entity that wants to block the status change (e.g. L2 Agent)
+    entity = sa.Column(sa.String(255), nullable=False, primary_key=True)
 
 
 def add_model_for_resource(resource, model):
@@ -60,15 +69,18 @@ def add_provisioning_component(context, object_id, object_type, entity):
     standard_attr_id = _get_standard_attr_id(context, object_id, object_type)
     if not standard_attr_id:
         return
-    if pb_obj.ProvisioningBlock.objects_exist(
-            context, standard_attr_id=standard_attr_id, entity=entity):
+    record = context.session.query(ProvisioningBlock).filter_by(
+        standard_attr_id=standard_attr_id, entity=entity).first()
+    if record:
         # an entry could be leftover from a previous transition that hasn't
         # yet been provisioned. (e.g. multiple updates in a short period)
         LOG.debug("Ignored duplicate provisioning block setup for %(otype)s "
                   "%(oid)s by entity %(entity)s.", log_dict)
         return
-    pb_obj.ProvisioningBlock(
-        context, standard_attr_id=standard_attr_id, entity=entity).create()
+    with context.session.begin(subtransactions=True):
+        record = ProvisioningBlock(standard_attr_id=standard_attr_id,
+                                   entity=entity)
+        context.session.add(record)
     LOG.debug("Transition to ACTIVE for %(otype)s object %(oid)s "
               "will not be triggered until provisioned by entity %(entity)s.",
               log_dict)
@@ -77,7 +89,7 @@ def add_provisioning_component(context, object_id, object_type, entity):
 @db_api.retry_if_session_inactive()
 def remove_provisioning_component(context, object_id, object_type, entity,
                                   standard_attr_id=None):
-    """Remove a provisioning block for an object without triggering a callback.
+    """Removes a provisioning block for an object with triggering a callback.
 
     Removes a provisioning block without triggering a callback. A user of this
     module should call this when a block is no longer correct. If the block has
@@ -92,14 +104,16 @@ def remove_provisioning_component(context, object_id, object_type, entity,
                              the standard_attr_id.
     :return: boolean indicating whether or not a record was deleted
     """
-    standard_attr_id = standard_attr_id or _get_standard_attr_id(
-        context, object_id, object_type)
-    if not standard_attr_id:
-        return False
-    if pb_obj.ProvisioningBlock.delete_objects(
-        context, standard_attr_id=standard_attr_id, entity=entity):
-        return True
-    else:
+    with context.session.begin(subtransactions=True):
+        standard_attr_id = standard_attr_id or _get_standard_attr_id(
+            context, object_id, object_type)
+        if not standard_attr_id:
+            return False
+        record = context.session.query(ProvisioningBlock).filter_by(
+            standard_attr_id=standard_attr_id, entity=entity).first()
+        if record:
+            context.session.delete(record)
+            return True
         return False
 
 
@@ -133,10 +147,10 @@ def provisioning_complete(context, object_id, object_type, entity):
                   "%(entity)s.", log_dict)
     # now with that committed, check if any records are left. if None, emit
     # an event that provisioning is complete.
-    if not pb_obj.ProvisioningBlock.objects_exist(
-            context, standard_attr_id=standard_attr_id):
-        LOG.debug("Provisioning complete for %(otype)s %(oid)s triggered by "
-                  "entity %(entity)s.", log_dict)
+    records = context.session.query(ProvisioningBlock).filter_by(
+        standard_attr_id=standard_attr_id).count()
+    if not records:
+        LOG.debug("Provisioning complete for %(otype)s %(oid)s", log_dict)
         registry.notify(object_type, PROVISIONING_COMPLETE,
                         'neutron.db.provisioning_blocks',
                         context=context, object_id=object_id)
@@ -155,8 +169,8 @@ def is_object_blocked(context, object_id, object_type):
     if not standard_attr_id:
         # object doesn't exist so it has no blocks
         return False
-    return pb_obj.ProvisioningBlock.objects_exist(
-        context, standard_attr_id=standard_attr_id)
+    return bool(context.session.query(ProvisioningBlock).filter_by(
+                standard_attr_id=standard_attr_id).count())
 
 
 def _get_standard_attr_id(context, object_id, object_type):

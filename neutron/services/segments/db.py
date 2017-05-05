@@ -18,32 +18,52 @@
 import functools
 
 from neutron_lib import constants
+from neutron_lib.db import model_base
 from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import directory
 from oslo_db import exception as db_exc
 from oslo_log import helpers as log_helpers
 from oslo_utils import uuidutils
+import sqlalchemy as sa
+from sqlalchemy import orm
 from sqlalchemy.orm import exc
 
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
-from neutron.db.models import segment as segment_model
 from neutron.db import segments_db as db
 from neutron.extensions import segment as extension
 from neutron import manager
-from neutron.objects import network
 from neutron.services.segments import exceptions
+
+
+class SegmentHostMapping(model_base.BASEV2):
+
+    segment_id = sa.Column(sa.String(36),
+                           sa.ForeignKey('networksegments.id',
+                                         ondelete="CASCADE"),
+                           primary_key=True,
+                           index=True,
+                           nullable=False)
+    host = sa.Column(sa.String(255),
+                     primary_key=True,
+                     index=True,
+                     nullable=False)
+
+    # Add a relationship to the NetworkSegment model in order to instruct
+    # SQLAlchemy to eagerly load this association
+    network_segment = orm.relationship(
+        db.NetworkSegment, backref=orm.backref("segment_host_mapping",
+                                               lazy='joined',
+                                               cascade='delete'))
+    revises_on_change = ('network_segment', )
 
 
 class SegmentDbMixin(common_db_mixin.CommonDbMixin):
     """Mixin class to add segment."""
 
-    @staticmethod
-    def _make_segment_dict(segment_db, fields=None):
+    def _make_segment_dict(self, segment_db, fields=None):
         res = {'id': segment_db['id'],
                'network_id': segment_db['network_id'],
                'name': segment_db['name'],
@@ -54,12 +74,12 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
                'hosts': [mapping.host for mapping in
                          segment_db.segment_host_mapping],
                'segment_index': segment_db['segment_index']}
-        return db_utils.resource_fields(res, fields)
+        return self._fields(res, fields)
 
     def _get_segment(self, context, segment_id):
         try:
             return self._get_by_id(
-                context, segment_model.NetworkSegment, segment_id)
+                context, db.NetworkSegment, segment_id)
         except exc.NoResultFound:
             raise exceptions.SegmentNotFound(segment_id=segment_id)
 
@@ -77,7 +97,7 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
         return self._make_segment_dict(new_segment)
 
     def _create_segment_db(self, context, segment_id, segment):
-        with db_api.context_manager.writer.using(context):
+        with context.session.begin(subtransactions=True):
             network_id = segment['network_id']
             physical_network = segment[extension.PHYSICAL_NETWORK]
             if physical_network == constants.ATTR_NOT_SPECIFIED:
@@ -108,15 +128,14 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
                 sorts=[('segment_index', True)])
             if segments:
                 # NOTE(xiaohhui): The new index is the last index + 1, this
-                # may cause discontinuous segment_index. But segment_index
+                # may casue discontinuous segment_index. But segment_index
                 # can functionally work as the order index for segments.
                 segment_index = (segments[-1].get('segment_index') + 1)
             args['segment_index'] = segment_index
 
-            new_segment = segment_model.NetworkSegment(**args)
+            new_segment = db.NetworkSegment(**args)
             context.session.add(new_segment)
-            # Do some preliminary operations before committing the segment to
-            # db
+            # Do some preliminary operations before commiting the segment to db
             registry.notify(resources.SEGMENT, events.PRECOMMIT_CREATE, self,
                             context=context, segment=new_segment)
             return new_segment
@@ -125,7 +144,7 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
     def update_segment(self, context, uuid, segment):
         """Update an existing segment."""
         segment = segment['segment']
-        with db_api.context_manager.writer.using(context):
+        with context.session.begin(subtransactions=True):
             curr_segment = self._get_segment(context, uuid)
             curr_segment.update(segment)
         return self._make_segment_dict(curr_segment)
@@ -142,7 +161,7 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
         marker_obj = self._get_marker_obj(context, 'segment', limit, marker)
         make_segment_dict = functools.partial(self._make_segment_dict)
         return self._get_collection(context,
-                                    segment_model.NetworkSegment,
+                                    db.NetworkSegment,
                                     make_segment_dict,
                                     filters=filters,
                                     fields=fields,
@@ -154,30 +173,30 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
     @log_helpers.log_method_call
     def get_segments_count(self, context, filters=None):
         return self._get_collection_count(context,
-                                          segment_model.NetworkSegment,
+                                          db.NetworkSegment,
                                           filters=filters)
 
     @log_helpers.log_method_call
     def get_segments_by_hosts(self, context, hosts):
         if not hosts:
             return []
-        segment_host_mapping = network.SegmentHostMapping.get_objects(
-            context, host=hosts)
-        return list({mapping.segment_id for mapping in segment_host_mapping})
+        query = context.session.query(SegmentHostMapping).filter(
+            SegmentHostMapping.host.in_(hosts))
+        return list({mapping.segment_id for mapping in query})
 
     @log_helpers.log_method_call
-    def delete_segment(self, context, uuid, for_net_delete=False):
+    def delete_segment(self, context, uuid):
         """Delete an existing segment."""
         segment = self.get_segment(context, uuid)
         # Do some preliminary operations before deleting the segment
         registry.notify(resources.SEGMENT, events.BEFORE_DELETE,
                         self.delete_segment, context=context,
-                        segment=segment, for_net_delete=for_net_delete)
+                        segment=segment)
 
         # Delete segment in DB
-        with db_api.context_manager.writer.using(context):
-            query = self._model_query(context, segment_model.NetworkSegment)
-            query = query.filter(segment_model.NetworkSegment.id == uuid)
+        with context.session.begin(subtransactions=True):
+            query = self._model_query(context, db.NetworkSegment)
+            query = query.filter(db.NetworkSegment.id == uuid)
             if 0 == query.delete():
                 raise exceptions.SegmentNotFound(segment_id=uuid)
             # Do some preliminary operations before deleting segment in db
@@ -191,19 +210,19 @@ class SegmentDbMixin(common_db_mixin.CommonDbMixin):
 
 
 def update_segment_host_mapping(context, host, current_segment_ids):
-    with db_api.context_manager.writer.using(context):
-        segment_host_mapping = network.SegmentHostMapping.get_objects(
-            context, host=host)
+    with context.session.begin(subtransactions=True):
+        segments_host_query = context.session.query(
+            SegmentHostMapping).filter_by(host=host)
         previous_segment_ids = {
-            seg_host['segment_id'] for seg_host in segment_host_mapping}
+            seg_host['segment_id'] for seg_host in segments_host_query}
         for segment_id in current_segment_ids - previous_segment_ids:
-            network.SegmentHostMapping(
-                context, segment_id=segment_id, host=host).create()
+            context.session.add(SegmentHostMapping(segment_id=segment_id,
+                                                   host=host))
         stale_segment_ids = previous_segment_ids - current_segment_ids
         if stale_segment_ids:
-            for entry in segment_host_mapping:
-                if entry.segment_id in stale_segment_ids:
-                    entry.delete()
+            segments_host_query.filter(
+                SegmentHostMapping.segment_id.in_(
+                    stale_segment_ids)).delete(synchronize_session=False)
 
 
 def get_hosts_mapped_with_segments(context):
@@ -212,8 +231,8 @@ def get_hosts_mapped_with_segments(context):
     L2 providers can use this method to get an overview of SegmentHostMapping,
     and then delete the stale SegmentHostMapping.
     """
-    segment_host_mapping = network.SegmentHostMapping.get_objects(context)
-    return {row.host for row in segment_host_mapping}
+    query = context.session.query(SegmentHostMapping.host)
+    return {row.host for row in query}
 
 
 def _get_phys_nets(agent):
@@ -241,18 +260,18 @@ def get_segments_with_phys_nets(context, phys_nets):
     if not phys_nets:
         return []
 
-    with db_api.context_manager.reader.using(context):
-        segments = context.session.query(segment_model.NetworkSegment).filter(
-            segment_model.NetworkSegment.physical_network.in_(phys_nets))
+    with context.session.begin(subtransactions=True):
+        segments = context.session.query(db.NetworkSegment).filter(
+            db.NetworkSegment.physical_network.in_(phys_nets))
         return segments
 
 
 def map_segment_to_hosts(context, segment_id, hosts):
     """Map segment to a collection of hosts."""
-    with db_api.context_manager.writer.using(context):
+    with db_api.autonested_transaction(context.session):
         for host in hosts:
-            network.SegmentHostMapping(
-                context, segment_id=segment_id, host=host).create()
+            context.session.add(SegmentHostMapping(segment_id=segment_id,
+                                                   host=host))
 
 
 def _update_segment_host_mapping_for_agent(resource, event, trigger,
@@ -272,9 +291,6 @@ def _update_segment_host_mapping_for_agent(resource, event, trigger,
         segment['id'] for segment in segments
         if check_segment_for_agent(segment, agent)}
     update_segment_host_mapping(context, host, current_segment_ids)
-    registry.notify(resources.SEGMENT_HOST_MAPPING, events.AFTER_CREATE,
-                    plugin, context=context, host=host,
-                    current_segment_ids=current_segment_ids)
 
 
 def _add_segment_host_mapping_for_segment(resource, event, trigger,
@@ -287,7 +303,7 @@ def _add_segment_host_mapping_for_segment(resource, event, trigger,
 
     if not segment.physical_network:
         return
-    cp = directory.get_plugin()
+    cp = manager.NeutronManager.get_plugin()
     check_segment_for_agent = getattr(cp, 'check_segment_for_agent', None)
     if not hasattr(cp, 'get_agents') or not check_segment_for_agent:
         # not an agent-supporting plugin
@@ -309,8 +325,7 @@ def _delete_segments_for_network(resource, event, trigger,
     segments = segments_plugin.get_segments(
         admin_ctx, filters={'network_id': [network_id]})
     for segment in segments:
-        segments_plugin.delete_segment(admin_ctx, segment['id'],
-                                       for_net_delete=True)
+        segments_plugin.delete_segment(admin_ctx, segment['id'])
 
 
 def subscribe():
@@ -324,6 +339,6 @@ def subscribe():
                        resources.SEGMENT, events.PRECOMMIT_CREATE)
     registry.subscribe(_delete_segments_for_network,
                        resources.NETWORK,
-                       events.BEFORE_DELETE)
+                       events.PRECOMMIT_DELETE)
 
 subscribe()

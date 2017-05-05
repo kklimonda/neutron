@@ -35,4 +35,6 @@ class FunctionalTest(unittest2.TestCase):
             os.path.dirname(__file__),
             'config.py'
         ))
-        self.addCleanup(set_config, {}, overwrite=True)
+
+    def tearDown(self):
+        set_config({}, overwrite=True)

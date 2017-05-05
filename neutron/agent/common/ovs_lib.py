@@ -16,20 +16,19 @@
 import collections
 import itertools
 import operator
-import random
 import time
 import uuid
 
-from debtcollector import removals
 from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import excutils
+import retrying
 import six
-import tenacity
 
 from neutron._i18n import _, _LE, _LI, _LW
-from neutron.agent.common import ip_lib
 from neutron.agent.common import utils
+from neutron.agent.linux import ip_lib
 from neutron.agent.ovsdb import api as ovsdb
 from neutron.conf.agent import ovs_conf
 from neutron.plugins.common import constants as p_const
@@ -46,9 +45,6 @@ UNASSIGNED_OFPORT = []
 FAILMODE_SECURE = 'secure'
 FAILMODE_STANDALONE = 'standalone'
 
-# special values for cookies
-COOKIE_ANY = object()
-
 ovs_conf.register_ovs_agent_opts()
 
 LOG = logging.getLogger(__name__)
@@ -57,8 +53,6 @@ OVS_DEFAULT_CAPS = {
     'datapath_types': [],
     'iface_types': [],
 }
-
-_SENTINEL = object()
 
 
 def _ofport_result_pending(result):
@@ -80,12 +74,12 @@ def _ofport_retry(fn):
     @six.wraps(fn)
     def wrapped(*args, **kwargs):
         self = args[0]
-        new_fn = tenacity.retry(
-            reraise=True,
-            retry=tenacity.retry_if_result(_ofport_result_pending),
-            wait=tenacity.wait_exponential(multiplier=0.01, max=1),
-            stop=tenacity.stop_after_delay(
-                self.vsctl_timeout))(fn)
+        new_fn = retrying.retry(
+            retry_on_result=_ofport_result_pending,
+            stop_max_delay=self.vsctl_timeout * 1000,
+            wait_exponential_multiplier=10,
+            wait_exponential_max=1000,
+            retry_on_exception=lambda _: False)(fn)
         return new_fn(*args, **kwargs)
     return wrapped
 
@@ -112,21 +106,8 @@ class BaseOVS(object):
         self.vsctl_timeout = cfg.CONF.ovs_vsctl_timeout
         self.ovsdb = ovsdb.API.get(self)
 
-    def add_manager(self, connection_uri, timeout=_SENTINEL):
-        """Have ovsdb-server listen for manager connections
-
-        :param connection_uri: Manager target string
-        :param timeout: The Manager probe_interval timeout value
-                        (defaults to ovs_vsctl_timeout)
-        """
-        if timeout is _SENTINEL:
-            timeout = cfg.CONF.ovs_vsctl_timeout
-        with self.ovsdb.transaction() as txn:
-            txn.add(self.ovsdb.add_manager(connection_uri))
-            if timeout:
-                txn.add(
-                    self.ovsdb.db_set('Manager', connection_uri,
-                                      ('inactivity_probe', timeout * 1000)))
+    def add_manager(self, connection_uri):
+        self.ovsdb.add_manager(connection_uri).execute()
 
     def get_manager(self):
         return self.ovsdb.get_manager().execute()
@@ -136,9 +117,10 @@ class BaseOVS(object):
 
     def add_bridge(self, bridge_name,
                    datapath_type=constants.OVS_DATAPATH_SYSTEM):
-        br = OVSBridge(bridge_name, datapath_type=datapath_type)
-        br.create()
-        return br
+
+        self.ovsdb.add_br(bridge_name,
+                          datapath_type).execute()
+        return OVSBridge(bridge_name)
 
     def delete_bridge(self, bridge_name):
         self.ovsdb.del_br(bridge_name).execute()
@@ -224,32 +206,15 @@ class OVSBridge(BaseOVS):
     def set_standalone_mode(self):
         self._set_bridge_fail_mode(FAILMODE_STANDALONE)
 
-    @removals.remove(
-        message=("Consider using add_protocols instead, or if replacing "
-                 "the whole set of supported protocols is the desired "
-                 "behavior, using set_db_attribute"),
-        version="Ocata",
-        removal_version="Queens")
     def set_protocols(self, protocols):
         self.set_db_attribute('Bridge', self.br_name, 'protocols', protocols,
                               check_error=True)
-
-    def add_protocols(self, *protocols):
-        self.ovsdb.db_add('Bridge', self.br_name,
-                          'protocols', *protocols).execute(check_error=True)
 
     def create(self, secure_mode=False):
         with self.ovsdb.transaction() as txn:
             txn.add(
                 self.ovsdb.add_br(self.br_name,
-                                  datapath_type=self.datapath_type))
-            # the ovs-ofctl commands below in run_ofctl use OF10, so we
-            # need to ensure that this version is enabled ; we could reuse
-            # add_protocols, but doing ovsdb.db_add avoids doing two
-            # transactions
-            txn.add(
-                self.ovsdb.db_add('Bridge', self.br_name,
-                                  'protocols', constants.OPENFLOW10))
+                datapath_type=self.datapath_type))
             if secure_mode:
                 txn.add(self.ovsdb.set_fail_mode(self.br_name,
                                                  FAILMODE_SECURE))
@@ -319,51 +284,22 @@ class OVSBridge(BaseOVS):
         ofport = INVALID_OFPORT
         try:
             ofport = self._get_port_ofport(port_name)
-        except tenacity.RetryError:
+        except retrying.RetryError:
             LOG.exception(_LE("Timed out retrieving ofport on port %s."),
                           port_name)
         return ofport
-
-    def get_port_mac(self, port_name):
-        """Get the port's mac address.
-
-        This is especially useful when the port is not a neutron port.
-        E.g. networking-sfc needs the MAC address of "patch-tun
-        """
-        return self.db_get_val("Interface", port_name, "mac_in_use")
 
     def get_datapath_id(self):
         return self.db_get_val('Bridge',
                                self.br_name, 'datapath_id')
 
     def do_action_flows(self, action, kwargs_list):
-        for kw in kwargs_list:
-            if action is 'del':
-                if kw.get('cookie') == COOKIE_ANY:
-                    # special value COOKIE_ANY was provided, unset
-                    # cookie to match flows whatever their cookie is
-                    kw.pop('cookie')
-                    if kw.get('cookie_mask'):  # non-zero cookie mask
-                        raise Exception("cookie=COOKIE_ANY but cookie_mask "
-                                        "set to %s" % kw.get('cookie_mask'))
-                elif 'cookie' in kw:
-                    # a cookie was specified, use it
-                    kw['cookie'] = check_cookie_mask(kw['cookie'])
-                else:
-                    # nothing was specified about cookies, use default
-                    kw['cookie'] = "%d/-1" % self._default_cookie
-            else:
+        if action != 'del':
+            for kw in kwargs_list:
                 if 'cookie' not in kw:
                     kw['cookie'] = self._default_cookie
-
-        if action == 'del' and {} in kwargs_list:
-            # the 'del' case simplifies itself if kwargs_list has at least
-            # one item that matches everything
-            self.run_ofctl('%s-flows' % action, [])
-        else:
-            flow_strs = [_build_flow_expr_str(kw, action)
-                         for kw in kwargs_list]
-            self.run_ofctl('%s-flows' % action, ['-'], '\n'.join(flow_strs))
+        flow_strs = [_build_flow_expr_str(kw, action) for kw in kwargs_list]
+        self.run_ofctl('%s-flows' % action, ['-'], '\n'.join(flow_strs))
 
     def add_flow(self, **kwargs):
         self.do_action_flows('add', [kwargs])
@@ -438,6 +374,17 @@ class OVSBridge(BaseOVS):
     def get_port_stats(self, port_name):
         return self.db_get_val("Interface", port_name, "statistics")
 
+    def get_xapi_iface_id(self, xs_vif_uuid):
+        args = ["xe", "vif-param-get", "param-name=other-config",
+                "param-key=nicira-iface-id", "uuid=%s" % xs_vif_uuid]
+        try:
+            return utils.execute(args, run_as_root=True).strip()
+        except Exception as e:
+            with excutils.save_and_reraise_exception():
+                LOG.error(_LE("Unable to execute %(cmd)s. "
+                              "Exception: %(exception)s"),
+                          {'cmd': args, 'exception': e})
+
     def get_ports_attributes(self, table, columns=None, ports=None,
                              check_error=True, log_errors=True,
                              if_exists=False):
@@ -462,6 +409,14 @@ class OVSBridge(BaseOVS):
                 continue
             if "iface-id" in external_ids and "attached-mac" in external_ids:
                 p = VifPort(name, ofport, external_ids["iface-id"],
+                            external_ids["attached-mac"], self)
+                edge_ports.append(p)
+            elif ("xs-vif-uuid" in external_ids and
+                  "attached-mac" in external_ids):
+                # if this is a xenserver and iface-id is not automatically
+                # synced to OVS from XAPI, we grab it from XAPI directly
+                iface_id = self.get_xapi_iface_id(external_ids["xs-vif-uuid"])
+                p = VifPort(name, ofport, iface_id,
                             external_ids["attached-mac"], self)
                 edge_ports.append(p)
 
@@ -503,6 +458,10 @@ class OVSBridge(BaseOVS):
     def portid_from_external_ids(self, external_ids):
         if 'iface-id' in external_ids:
             return external_ids['iface-id']
+        if 'xs-vif-uuid' in external_ids:
+            iface_id = self.get_xapi_iface_id(
+                external_ids['xs-vif-uuid'])
+            return iface_id
 
     def get_port_tag_dict(self):
         """Get a dict of port names and associated vlan tags.
@@ -744,12 +703,10 @@ def _build_flow_expr_str(flow_dict, cmd):
 
 
 def generate_random_cookie():
-    # The OpenFlow spec forbids use of -1
-    return random.randrange(UINT64_BITMASK)
+    return uuid.uuid4().int & UINT64_BITMASK
 
 
 def check_cookie_mask(cookie):
-    cookie = str(cookie)
     if '/' not in cookie:
         return cookie + '/-1'
     else:

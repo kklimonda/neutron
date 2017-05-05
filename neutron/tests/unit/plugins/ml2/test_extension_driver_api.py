@@ -10,11 +10,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import mock
-from neutron_lib import context
-from neutron_lib.plugins import directory
-from oslo_utils import uuidutils
+import uuid
 
+import mock
+
+from neutron import context
+from neutron import manager
 from neutron.plugins.ml2 import config
 from neutron.tests.unit.plugins.ml2.drivers import ext_test
 from neutron.tests.unit.plugins.ml2 import test_plugin
@@ -29,11 +30,11 @@ class ExtensionDriverTestCase(test_plugin.Ml2PluginV2TestCase):
                                      self._extension_drivers,
                                      group='ml2')
         super(ExtensionDriverTestCase, self).setUp()
-        self._plugin = directory.get_plugin()
+        self._plugin = manager.NeutronManager.get_plugin()
         self._ctxt = context.get_admin_context()
 
     def _verify_network_create(self, code, exc_reason):
-        tenant_id = uuidutils.generate_uuid()
+        tenant_id = str(uuid.uuid4())
         data = {'network': {'name': 'net1',
                             'tenant_id': tenant_id}}
         req = self.new_create_request('networks', data)
@@ -182,7 +183,7 @@ class DBExtensionDriverTestCase(test_plugin.Ml2PluginV2TestCase):
                                      self._extension_drivers,
                                      group='ml2')
         super(DBExtensionDriverTestCase, self).setUp()
-        self._plugin = directory.get_plugin()
+        self._plugin = manager.NeutronManager.get_plugin()
         self._ctxt = context.get_admin_context()
 
     def test_network_attr(self):

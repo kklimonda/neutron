@@ -18,16 +18,12 @@ import os
 
 import eventlet
 from neutron_lib import constants
-from neutron_lib import context
 from neutron_lib import exceptions
-from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import loopingcall
-from oslo_utils import fileutils
 from oslo_utils import importutils
-import six
 
 from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.linux import dhcp
@@ -38,34 +34,10 @@ from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
+from neutron import context
 from neutron import manager
 
 LOG = logging.getLogger(__name__)
-_SYNC_STATE_LOCK = lockutils.ReaderWriterLock()
-
-
-def _sync_lock(f):
-    """Decorator to block all operations for a global sync call."""
-    @six.wraps(f)
-    def wrapped(*args, **kwargs):
-        with _SYNC_STATE_LOCK.write_lock():
-            return f(*args, **kwargs)
-    return wrapped
-
-
-def _wait_if_syncing(f):
-    """Decorator to wait if any sync operations are in progress."""
-    @six.wraps(f)
-    def wrapped(*args, **kwargs):
-        with _SYNC_STATE_LOCK.read_lock():
-            return f(*args, **kwargs)
-    return wrapped
-
-
-def _net_lock(network_id):
-    """Returns a context manager lock based on network_id."""
-    lock_name = 'dhcp-agent-network-lock-%s' % network_id
-    return lockutils.lock(lock_name, utils.SYNCHRONIZED_PREFIX)
 
 
 class DhcpAgent(manager.Manager):
@@ -89,7 +61,7 @@ class DhcpAgent(manager.Manager):
         self.plugin_rpc = DhcpPluginApi(topics.PLUGIN, self.conf.host)
         # create dhcp dir to store dhcp info
         dhcp_dir = os.path.dirname("/%s/dhcp/" % self.conf.state_path)
-        fileutils.ensure_tree(dhcp_dir, mode=0o755)
+        utils.ensure_dir(dhcp_dir)
         self.dhcp_version = self.dhcp_driver_cls.check_version()
         self._populate_networks_cache()
         # keep track of mappings between networks and routers for
@@ -172,7 +144,7 @@ class DhcpAgent(manager.Manager):
         """
         self.needs_resync_reasons[network_id].append(reason)
 
-    @_sync_lock
+    @utils.synchronized('dhcp-agent')
     def sync_state(self, networks=None):
         """Sync the local DHCP state with Neutron. If no networks are passed,
         or 'None' is one of the networks, sync all of the networks.
@@ -355,64 +327,52 @@ class DhcpAgent(manager.Manager):
         # Update the metadata proxy after the dhcp driver has been updated
         self.update_isolated_metadata_proxy(network)
 
-    @_wait_if_syncing
+    @utils.synchronized('dhcp-agent')
     def network_create_end(self, context, payload):
         """Handle the network.create.end notification event."""
         network_id = payload['network']['id']
-        with _net_lock(network_id):
-            self.enable_dhcp_helper(network_id)
+        self.enable_dhcp_helper(network_id)
 
-    @_wait_if_syncing
+    @utils.synchronized('dhcp-agent')
     def network_update_end(self, context, payload):
         """Handle the network.update.end notification event."""
         network_id = payload['network']['id']
-        with _net_lock(network_id):
-            if payload['network']['admin_state_up']:
-                self.enable_dhcp_helper(network_id)
-            else:
-                self.disable_dhcp_helper(network_id)
-
-    @_wait_if_syncing
-    def network_delete_end(self, context, payload):
-        """Handle the network.delete.end notification event."""
-        network_id = payload['network_id']
-        with _net_lock(network_id):
+        if payload['network']['admin_state_up']:
+            self.enable_dhcp_helper(network_id)
+        else:
             self.disable_dhcp_helper(network_id)
 
-    @_wait_if_syncing
+    @utils.synchronized('dhcp-agent')
+    def network_delete_end(self, context, payload):
+        """Handle the network.delete.end notification event."""
+        self.disable_dhcp_helper(payload['network_id'])
+
+    @utils.synchronized('dhcp-agent')
     def subnet_update_end(self, context, payload):
         """Handle the subnet.update.end notification event."""
         network_id = payload['subnet']['network_id']
-        with _net_lock(network_id):
-            self.refresh_dhcp_helper(network_id)
+        self.refresh_dhcp_helper(network_id)
 
     # Use the update handler for the subnet create event.
     subnet_create_end = subnet_update_end
 
-    @_wait_if_syncing
+    @utils.synchronized('dhcp-agent')
     def subnet_delete_end(self, context, payload):
         """Handle the subnet.delete.end notification event."""
         subnet_id = payload['subnet_id']
         network = self.cache.get_network_by_subnet_id(subnet_id)
-        if not network:
-            return
-        with _net_lock(network.id):
-            network = self.cache.get_network_by_subnet_id(subnet_id)
-            if not network:
-                return
+        if network:
             self.refresh_dhcp_helper(network.id)
 
-    @_wait_if_syncing
+    @utils.synchronized('dhcp-agent')
     def port_update_end(self, context, payload):
         """Handle the port.update.end notification event."""
         updated_port = dhcp.DictModel(payload['port'])
-        with _net_lock(updated_port.network_id):
-            if self.cache.is_port_message_stale(payload['port']):
-                LOG.debug("Discarding stale port update: %s", updated_port)
-                return
-            network = self.cache.get_network_by_id(updated_port.network_id)
-            if not network:
-                return
+        if self.cache.is_port_message_stale(payload['port']):
+            LOG.debug("Discarding stale port update: %s", updated_port)
+            return
+        network = self.cache.get_network_by_id(updated_port.network_id)
+        if network:
             LOG.info(_LI("Trigger reload_allocations for port %s"),
                      updated_port)
             driver_action = 'reload_allocations'
@@ -449,17 +409,12 @@ class DhcpAgent(manager.Manager):
     # Use the update handler for the port create event.
     port_create_end = port_update_end
 
-    @_wait_if_syncing
+    @utils.synchronized('dhcp-agent')
     def port_delete_end(self, context, payload):
         """Handle the port.delete.end notification event."""
         port = self.cache.get_port_by_id(payload['port_id'])
         self.cache.deleted_ports.add(payload['port_id'])
-        if not port:
-            return
-        with _net_lock(port.network_id):
-            port = self.cache.get_port_by_id(payload['port_id'])
-            if not port:
-                return
+        if port:
             network = self.cache.get_network_by_id(port.network_id)
             self.cache.remove_port(port)
             if self._is_port_on_this_agent(port):

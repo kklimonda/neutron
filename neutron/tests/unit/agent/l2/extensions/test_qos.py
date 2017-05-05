@@ -14,15 +14,15 @@
 #    under the License.
 
 import mock
-from neutron_lib import context
+from neutron_lib import exceptions
 from oslo_utils import uuidutils
 
 from neutron.agent.l2.extensions import qos
-from neutron.agent.l2.extensions import qos_linux
 from neutron.api.rpc.callbacks.consumer import registry
 from neutron.api.rpc.callbacks import events
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import resources_rpc
+from neutron import context
 from neutron.objects.qos import policy
 from neutron.objects.qos import rule
 from neutron.plugins.ml2.drivers.openvswitch.agent import (
@@ -55,7 +55,7 @@ FAKE_RULE_ID = uuidutils.generate_uuid()
 REALLY_FAKE_RULE_ID = uuidutils.generate_uuid()
 
 
-class FakeDriver(qos_linux.QosLinuxAgentDriver):
+class FakeDriver(qos.QosAgentDriver):
 
     SUPPORTED_RULES = {qos_consts.RULE_TYPE_BANDWIDTH_LIMIT}
 
@@ -152,7 +152,7 @@ class QosExtensionBaseTestCase(base.BaseTestCase):
         # Don't rely on used driver
         mock.patch(
             'neutron.manager.NeutronManager.load_class_for_provider',
-            return_value=lambda: mock.Mock(spec=qos_linux.QosLinuxAgentDriver)
+            return_value=lambda: mock.Mock(spec=qos.QosAgentDriver)
         ).start()
 
 
@@ -222,7 +222,7 @@ class QosExtensionRpcTestCase(QosExtensionBaseTestCase):
     def test_delete_unknown_port(self):
         port = self._create_test_port_dict()
         self.qos_ext.delete_port(self.context, port)
-        self.assertTrue(self.qos_ext.qos_driver.delete.called)
+        self.assertFalse(self.qos_ext.qos_driver.delete.called)
         self.assertIsNone(self.qos_ext.policy_map.get_port_policy(port))
 
     def test__handle_notification_ignores_all_event_types_except_updated(self):
@@ -230,8 +230,7 @@ class QosExtensionRpcTestCase(QosExtensionBaseTestCase):
             self.qos_ext, '_process_update_policy') as update_mock:
 
             for event_type in set(events.VALID) - {events.UPDATED}:
-                self.qos_ext._handle_notification(mock.Mock(), 'QOS',
-                                                  object(), event_type)
+                self.qos_ext._handle_notification(object(), event_type)
                 self.assertFalse(update_mock.called)
 
     def test__handle_notification_passes_update_events(self):
@@ -239,8 +238,7 @@ class QosExtensionRpcTestCase(QosExtensionBaseTestCase):
             self.qos_ext, '_process_update_policy') as update_mock:
 
             policy_obj = mock.Mock()
-            self.qos_ext._handle_notification(mock.Mock(), 'QOS',
-                                              [policy_obj], events.UPDATED)
+            self.qos_ext._handle_notification([policy_obj], events.UPDATED)
             update_mock.assert_called_with(policy_obj)
 
     def test__process_update_policy(self):
@@ -300,7 +298,7 @@ class QosExtensionRpcTestCase(QosExtensionBaseTestCase):
 
 class QosExtensionInitializeTestCase(QosExtensionBaseTestCase):
 
-    @mock.patch.object(registry, 'register')
+    @mock.patch.object(registry, 'subscribe')
     @mock.patch.object(resources_rpc, 'ResourcesPushRpcCallback')
     def test_initialize_subscribed_to_rpc(self, rpc_mock, subscribe_mock):
         self.qos_ext.initialize(
@@ -414,11 +412,9 @@ class PortPolicyMapTestCase(base.BaseTestCase):
         self.assertNotIn(TEST_PORT['port_id'], self.policy_map.port_policies)
         self.assertIn(TEST_POLICY2.id, self.policy_map.known_policies)
 
-    def test_clean_by_port_for_unknown_port(self):
-        self.policy_map._clean_policy_info = mock.Mock()
-        self.policy_map.clean_by_port(TEST_PORT)
-
-        self.policy_map._clean_policy_info.assert_not_called()
+    def test_clean_by_port_raises_exception_for_unknown_port(self):
+        self.assertRaises(exceptions.PortNotFound,
+                          self.policy_map.clean_by_port, TEST_PORT)
 
     def test_has_policy_changed(self):
         self._set_ports()

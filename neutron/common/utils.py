@@ -18,31 +18,32 @@
 
 """Utilities and helper functions."""
 
+import collections
+import decimal
+import errno
 import functools
 import importlib
+import multiprocessing
 import os
 import os.path
 import random
 import signal
+import socket
 import sys
+import tempfile
 import threading
 import time
 import uuid
-import weakref
 
-from debtcollector import removals
 import eventlet
 from eventlet.green import subprocess
 import netaddr
 from neutron_lib import constants as n_const
-from neutron_lib.utils import helpers
-from neutron_lib.utils import net
 from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from oslo_utils import excutils
-from oslo_utils import fileutils
 from oslo_utils import importutils
 import six
 from stevedore import driver
@@ -58,10 +59,6 @@ SYNCHRONIZED_PREFIX = 'neutron-'
 DEFAULT_THROTTLER_VALUE = 2
 
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
-
-
-class WaitTimeout(Exception):
-    """Default exception coming from wait_until_true() function."""
 
 
 class LockWithTimer(object):
@@ -109,11 +106,14 @@ def throttler(threshold=DEFAULT_THROTTLER_VALUE):
     return decorator
 
 
-@removals.remove(
-    message="Use ensure_tree(path, 0o755) from oslo_utils.fileutils")
 def ensure_dir(dir_path):
     """Ensure a directory with 755 permissions mode."""
-    fileutils.ensure_tree(dir_path, mode=0o755)
+    try:
+        os.makedirs(dir_path, 0o755)
+    except OSError as e:
+        # If the directory already existed, don't raise the error.
+        if e.errno != errno.EEXIST:
+            raise
 
 
 def _subprocess_setup():
@@ -130,8 +130,98 @@ def subprocess_popen(args, stdin=None, stdout=None, stderr=None, shell=False,
                             close_fds=close_fds, env=env)
 
 
+def parse_mappings(mapping_list, unique_values=True, unique_keys=True):
+    """Parse a list of mapping strings into a dictionary.
+
+    :param mapping_list: a list of strings of the form '<key>:<value>'
+    :param unique_values: values must be unique if True
+    :param unique_keys: keys must be unique if True, else implies that keys
+    and values are not unique
+    :returns: a dict mapping keys to values or to list of values
+    """
+    mappings = {}
+    for mapping in mapping_list:
+        mapping = mapping.strip()
+        if not mapping:
+            continue
+        split_result = mapping.split(':')
+        if len(split_result) != 2:
+            raise ValueError(_("Invalid mapping: '%s'") % mapping)
+        key = split_result[0].strip()
+        if not key:
+            raise ValueError(_("Missing key in mapping: '%s'") % mapping)
+        value = split_result[1].strip()
+        if not value:
+            raise ValueError(_("Missing value in mapping: '%s'") % mapping)
+        if unique_keys:
+            if key in mappings:
+                raise ValueError(_("Key %(key)s in mapping: '%(mapping)s' not "
+                                   "unique") % {'key': key,
+                                                'mapping': mapping})
+            if unique_values and value in mappings.values():
+                raise ValueError(_("Value %(value)s in mapping: '%(mapping)s' "
+                                   "not unique") % {'value': value,
+                                                    'mapping': mapping})
+            mappings[key] = value
+        else:
+            mappings.setdefault(key, [])
+            if value not in mappings[key]:
+                mappings[key].append(value)
+    return mappings
+
+
+def get_hostname():
+    return socket.gethostname()
+
+
 def get_first_host_ip(net, ip_version):
     return str(netaddr.IPAddress(net.first + 1, ip_version))
+
+
+def compare_elements(a, b):
+    """Compare elements if a and b have same elements.
+
+    This method doesn't consider ordering
+    """
+    if a is None:
+        a = []
+    if b is None:
+        b = []
+    return set(a) == set(b)
+
+
+def safe_sort_key(value):
+    """Return value hash or build one for dictionaries."""
+    if isinstance(value, collections.Mapping):
+        return sorted(value.items())
+    return value
+
+
+def dict2str(dic):
+    return ','.join("%s=%s" % (key, val)
+                    for key, val in sorted(six.iteritems(dic)))
+
+
+def str2dict(string):
+    res_dict = {}
+    for keyvalue in string.split(','):
+        (key, value) = keyvalue.split('=', 1)
+        res_dict[key] = value
+    return res_dict
+
+
+def dict2tuple(d):
+    items = list(d.items())
+    items.sort()
+    return tuple(items)
+
+
+def diff_list_of_dict(old_list, new_list):
+    new_set = set([dict2str(l) for l in new_list])
+    old_set = set([dict2str(l) for l in old_list])
+    added = new_set - old_set
+    removed = old_set - new_set
+    return [str2dict(a) for a in added], [str2dict(r) for r in removed]
 
 
 def is_extension_supported(plugin, ext_alias):
@@ -143,13 +233,20 @@ def log_opt_values(log):
     cfg.CONF.log_opt_values(log, logging.DEBUG)
 
 
-@removals.remove(
-    message="Use get_random_mac from neutron_lib.utils.net",
-    version="Pike",
-    removal_version="Queens"
-)
 def get_random_mac(base_mac):
-    return net.get_random_mac(base_mac)
+    mac = [int(base_mac[0], 16), int(base_mac[1], 16),
+           int(base_mac[2], 16), random.randint(0x00, 0xff),
+           random.randint(0x00, 0xff), random.randint(0x00, 0xff)]
+    if base_mac[3] != '00':
+        mac[3] = int(base_mac[3], 16)
+    return ':'.join(["%02x" % x for x in mac])
+
+
+def get_random_string(length):
+    """Get a random hex string of the specified length.
+    """
+
+    return "{0:0{1}x}".format(random.getrandbits(length * 4), length)
 
 
 def get_dhcp_agent_device_id(network_id, host):
@@ -159,6 +256,13 @@ def get_dhcp_agent_device_id(network_id, host):
     local_hostname = host.split('.')[0]
     host_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, str(local_hostname))
     return 'dhcp%s-%s' % (host_uuid, network_id)
+
+
+def cpu_count():
+    try:
+        return multiprocessing.cpu_count()
+    except NotImplementedError:
+        return 1
 
 
 class exception_logger(object):
@@ -265,10 +369,6 @@ def is_cidr_host(cidr):
     return net.prefixlen == n_const.IPv6_BITS
 
 
-def get_ip_version(ip_or_cidr):
-    return netaddr.IPNetwork(ip_or_cidr).version
-
-
 def ip_version_from_int(ip_version_int):
     if ip_version_int == 4:
         return n_const.IPv4
@@ -303,12 +403,40 @@ class DelayedStringRenderer(object):
         return str(self.function(*self.args, **self.kwargs))
 
 
+def camelize(s):
+    return ''.join(s.replace('_', ' ').title().split())
+
+
+def round_val(val):
+    # we rely on decimal module since it behaves consistently across Python
+    # versions (2.x vs. 3.x)
+    return int(decimal.Decimal(val).quantize(decimal.Decimal('1'),
+                                             rounding=decimal.ROUND_HALF_UP))
+
+
+def replace_file(file_name, data, file_mode=0o644):
+    """Replaces the contents of file_name with data in a safe manner.
+
+    First write to a temp file and then rename. Since POSIX renames are
+    atomic, the file is unlikely to be corrupted by competing writes.
+
+    We create the tempfile on the same device to ensure that it can be renamed.
+    """
+
+    base_dir = os.path.dirname(os.path.abspath(file_name))
+    with tempfile.NamedTemporaryFile('w+',
+                                     dir=base_dir,
+                                     delete=False) as tmp_file:
+        tmp_file.write(data)
+    os.chmod(tmp_file.name, file_mode)
+    os.rename(tmp_file.name, file_name)
+
+
 def load_class_by_alias_or_classname(namespace, name):
     """Load class using stevedore alias or the class name
-
     :param namespace: namespace where the alias is defined
     :param name: alias or class name of the class to be loaded
-    :returns: class if calls can be loaded
+    :returns class if calls can be loaded
     :raises ImportError if class cannot be loaded
     """
 
@@ -317,8 +445,7 @@ def load_class_by_alias_or_classname(namespace, name):
         raise ImportError(_("Class not found."))
     try:
         # Try to resolve class by alias
-        mgr = driver.DriverManager(
-            namespace, name, warn_on_missing_entrypoint=False)
+        mgr = driver.DriverManager(namespace, name)
         class_to_load = mgr.driver
     except RuntimeError:
         e1_info = sys.exc_info()
@@ -332,6 +459,12 @@ def load_class_by_alias_or_classname(namespace, name):
                       exc_info=True)
             raise ImportError(_("Class not found."))
     return class_to_load
+
+
+def safe_decode_utf8(s):
+    if six.PY3 and isinstance(s, bytes):
+        return s.decode('utf-8', 'surrogateescape')
+    return s
 
 
 def _hex_format(port, mask=0):
@@ -680,18 +813,12 @@ def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
     Best practice is to instantiate predicate with functools.partial()
     :param timeout: Timeout in seconds how long should function wait.
     :param sleep: Polling interval for results in seconds.
-    :param exception: Exception instance to raise on timeout. If None is passed
-                      (default) then WaitTimeout exception is raised.
+    :param exception: Exception class for eventlet.Timeout.
+    (see doc for eventlet.Timeout for more information)
     """
-    try:
-        with eventlet.timeout.Timeout(timeout):
-            while not predicate():
-                eventlet.sleep(sleep)
-    except eventlet.TimeoutError:
-        if exception is not None:
-            #pylint: disable=raising-bad-type
-            raise exception
-        raise WaitTimeout("Timed out after %d seconds" % timeout)
+    with eventlet.timeout.Timeout(timeout, exception):
+        while not predicate():
+            eventlet.sleep(sleep)
 
 
 class _AuthenticBase(object):
@@ -812,28 +939,13 @@ def get_related_rand_names(prefixes, max_length=None):
     if max_length:
         length = max_length - max(len(p) for p in prefixes)
         if length <= 0:
-            raise ValueError(
-                _("'max_length' must be longer than all prefixes"))
+            raise ValueError("'max_length' must be longer than all prefixes")
     else:
         length = 8
-    rndchrs = helpers.get_random_string(length)
+    rndchrs = get_random_string(length)
     return [p + rndchrs for p in prefixes]
 
 
 def get_related_rand_device_names(prefixes):
     return get_related_rand_names(prefixes,
                                   max_length=n_const.DEVICE_NAME_MAX_LEN)
-
-
-try:
-    # PY3
-    weak_method = weakref.WeakMethod
-except AttributeError:
-    # PY2
-    import weakrefmethod
-    weak_method = weakrefmethod.WeakMethod
-
-
-def make_weak_ref(f):
-    """Make a weak reference to a function accounting for bound methods."""
-    return weak_method(f) if hasattr(f, '__self__') else weakref.ref(f)

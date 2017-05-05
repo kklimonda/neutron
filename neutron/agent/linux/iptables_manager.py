@@ -32,11 +32,11 @@ from oslo_utils import excutils
 import six
 
 from neutron._i18n import _, _LE, _LW
+from neutron.agent.common import config
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import utils as linux_utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
-from neutron.conf.agent import common as config
 
 LOG = logging.getLogger(__name__)
 
@@ -561,17 +561,11 @@ class IptablesManager(object):
         # Sort the output chains here to make their order predictable.
         unwrapped_chains = sorted(table.unwrapped_chains)
         chains = sorted(table.chains)
-        rules = set(map(str, table.rules))
 
         # we don't want to change any rules that don't belong to us so we start
         # the new_filter with these rules
-        # there are some rules that belong to us but they don't have the wrap
-        # name. we want to add them in the right location in case our new rules
-        # changed the order
-        # (e.g. '-A FORWARD -j neutron-filter-top')
         new_filter = [line.strip() for line in current_lines
-                      if self.wrap_name not in line and
-                      line.strip() not in rules]
+                      if self.wrap_name not in line]
 
         # generate our list of chain names
         our_chains = [':%s-%s' % (self.wrap_name, name) for name in chains]
@@ -586,6 +580,12 @@ class IptablesManager(object):
         our_bottom_rules = []
         for rule in table.rules:
             rule_str = str(rule)
+            # similar to the unwrapped chains, there are some rules that belong
+            # to us but they don't have the wrap name. we want to remove them
+            # from the new_filter and then add them in the right location in
+            # case our new rules changed the order.
+            # (e.g. '-A FORWARD -j neutron-filter-top')
+            new_filter = [s for s in new_filter if rule_str not in s]
 
             if rule.top:
                 # rule.top == True means we want this rule to be at the top.
@@ -624,7 +624,7 @@ class IptablesManager(object):
             if line in seen_lines:
                 thing = 'chain' if line.startswith(':') else 'rule'
                 LOG.warning(_LW("Duplicate iptables %(thing)s detected. This "
-                                "may indicate a bug in the iptables "
+                                "may indicate a bug in the the iptables "
                                 "%(thing)s generation code. Line: %(line)s"),
                             {'thing': thing, 'line': line})
                 return False

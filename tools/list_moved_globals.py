@@ -18,6 +18,12 @@ Check for globals that are now available in neutron-lib
 
 from __future__ import print_function
 
+from neutron_lib import constants as lconst
+from neutron_lib import exceptions as lexc
+
+from neutron.common import constants as nconst
+from neutron.common import exceptions as nexc
+
 
 def check_globals(things, nmod, lmod):
     core = vars(nmod)['_mg__my_globals']
@@ -35,7 +41,8 @@ def check_globals(things, nmod, lmod):
 
 
 def main():
-    """Currently no globals are deprecated."""
+    check_globals('constants', nconst, lconst)
+    check_globals('exceptions', nexc, lexc)
 
 
 if __name__ == '__main__':

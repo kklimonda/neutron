@@ -13,9 +13,9 @@
 import copy
 
 import mock
-from neutron_lib import context
 from oslo_utils import uuidutils
 
+from neutron import context
 from neutron.objects.qos import policy
 from neutron.objects.qos import rule
 from neutron.plugins.ml2.drivers.openvswitch.agent import (
@@ -74,7 +74,7 @@ class QosOVSAgentDriverTestCase(ovs_test_base.OVSAgentConfigTestBase):
 
     def _create_qos_policy_obj(self, rules):
         policy_dict = {'id': uuidutils.generate_uuid(),
-                'project_id': uuidutils.generate_uuid(),
+                'tenant_id': uuidutils.generate_uuid(),
                 'name': 'test',
                 'description': 'test',
                 'shared': False,

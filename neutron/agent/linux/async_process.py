@@ -17,7 +17,6 @@ import signal
 import eventlet
 import eventlet.event
 import eventlet.queue
-from neutron_lib.utils import helpers
 from oslo_log import log as logging
 
 from neutron._i18n import _, _LE
@@ -104,7 +103,7 @@ class AsyncProcess(object):
         """Launch a process and monitor it asynchronously.
 
         :param block: Block until the process has started.
-        :raises utils.WaitTimeout if blocking is True and the process
+        :raises eventlet.timeout.Timeout if blocking is True and the process
                 did not start in time.
         """
         LOG.debug('Launching async process [%s].', self.cmd)
@@ -122,7 +121,7 @@ class AsyncProcess(object):
         :param block: Block until the process has stopped.
         :param kill_signal: Number of signal that will be sent to the process
                             when terminating the process
-        :raises utils.WaitTimeout if blocking is True and the process
+        :raises eventlet.timeout.Timeout if blocking is True and the process
                 did not stop in time.
         """
         if self._is_running:
@@ -222,7 +221,7 @@ class AsyncProcess(object):
     def _read(self, stream, queue):
         data = stream.readline()
         if data:
-            data = helpers.safe_decode_utf8(data.strip())
+            data = common_utils.safe_decode_utf8(data.strip())
             queue.put(data)
             return data
 

@@ -13,7 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import extensions
+from neutron.api import extensions
 
 
 L2_ADJACENCY = 'l2_adjacency'

@@ -18,7 +18,6 @@ import functools
 from neutron_lib.api import validators
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
-from neutron_lib.utils import net
 from oslo_config import cfg
 from oslo_log import log as logging
 from sqlalchemy.orm import exc
@@ -26,7 +25,7 @@ from sqlalchemy.orm import exc
 from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
 from neutron.common import exceptions
-from neutron.db import _utils as db_utils
+from neutron.common import utils
 from neutron.db import common_db_mixin
 from neutron.db import models_v2
 from neutron.objects import subnet as subnet_obj
@@ -81,7 +80,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
 
     @staticmethod
     def _generate_mac():
-        return net.get_random_mac(cfg.CONF.base_mac.split(':'))
+        return utils.get_random_mac(cfg.CONF.base_mac.split(':'))
 
     def _is_mac_in_use(self, context, network_id, mac_address):
         return bool(context.session.query(models_v2.Port).
@@ -154,7 +153,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         res['shared'] = self._is_network_shared(context, subnet.rbac_entries)
         # Call auxiliary extend functions, if any
         self._apply_dict_extend_functions(attributes.SUBNETS, res, subnet)
-        return db_utils.resource_fields(res, fields)
+        return self._fields(res, fields)
 
     def _make_subnetpool_dict(self, subnetpool, fields=None):
         default_prefixlen = str(subnetpool['default_prefixlen'])
@@ -174,7 +173,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                'address_scope_id': subnetpool['address_scope_id']}
         self._apply_dict_extend_functions(attributes.SUBNETPOOLS, res,
                                           subnetpool)
-        return db_utils.resource_fields(res, fields)
+        return self._fields(res, fields)
 
     def _make_port_dict(self, port, fields=None,
                         process_extensions=True):
@@ -194,7 +193,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         if process_extensions:
             self._apply_dict_extend_functions(
                 attributes.PORTS, res, port)
-        return db_utils.resource_fields(res, fields)
+        return self._fields(res, fields)
 
     def _get_network(self, context, id):
         try:
@@ -224,9 +223,13 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
             raise n_exc.PortNotFound(port_id=id)
         return port
 
+    def _get_dns_by_subnet(self, context, subnet_id):
+        return subnet_obj.DNSNameServer.get_objects(context,
+                                                    subnet_id=subnet_id)
+
     def _get_route_by_subnet(self, context, subnet_id):
-        return subnet_obj.Route.get_objects(context,
-                                            subnet_id=subnet_id)
+        route_qry = context.session.query(models_v2.SubnetRoute)
+        return route_qry.filter_by(subnet_id=subnet_id).all()
 
     def _get_router_gw_ports_by_network(self, context, network_id):
         port_qry = context.session.query(models_v2.Port)
@@ -275,7 +278,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         if process_extensions:
             self._apply_dict_extend_functions(
                 attributes.NETWORKS, res, network)
-        return db_utils.resource_fields(res, fields)
+        return self._fields(res, fields)
 
     def _is_network_shared(self, context, rbac_entries):
         # The shared attribute for a network now reflects if the network
@@ -312,12 +315,20 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                  'ip_address': ip["ip_address"]}
                 for ip in ips]
 
-    @staticmethod
-    def _port_filter_hook(context, original_model, conditions):
+    def _port_filter_hook(self, context, original_model, conditions):
         # Apply the port filter only in non-admin and non-advsvc context
-        if db_utils.model_query_scope_is_project(context, original_model):
-            conditions |= (models_v2.Port.network_id.in_(
-                context.session.query(models_v2.Network.id).
-                filter(context.project_id == models_v2.Network.project_id).
-                subquery()))
+        if self.model_query_scope(context, original_model):
+            conditions |= (
+                (context.tenant_id == models_v2.Network.tenant_id) &
+                (models_v2.Network.id == models_v2.Port.network_id))
         return conditions
+
+    def _port_query_hook(self, context, original_model, query):
+        # we need to outerjoin to networks if the model query scope
+        # is necessary so we can filter based on network id. without
+        # this the conditions in the filter hook cause the networks
+        # table to be added to the FROM statement so we get lots of
+        # duplicated rows that break the COUNT operation
+        if self.model_query_scope(context, original_model):
+            query = query.outerjoin(models_v2.Network)
+        return query

@@ -49,7 +49,7 @@ team.
 In fact, it became harder and harder to ensure consistency in the APIs,
 architecture, design, implementation and testing of the overarching project;
 all aspects of software development, like documentation, integration, release
-management, maintenance, and upgrades started to being neglected for some
+management, maintainance, and upgrades started to being neglected for some
 projects and that led to some unhappy experiences.
 
 The point about uniform APIs is particularly important, because the Neutron
@@ -106,7 +106,7 @@ mature OpenStack projects:
    tests to fully support Python 3+, and it is important that each Stadium
    project supports Python 3+ the same way Neutron core does. For more
    information on how to do testing, please refer to the
-   `Neutron testing documentation <http://docs.openstack.org/developer/neutron/devref/development.environment.html#testing-neutron>`_.
+   `Neutron testing documentation testing documentation <http://docs.openstack.org/developer/neutron/devref/development.environment.html#testing-neutron>`_.
 
  * Good release footprint, according to the chosen `release model <http://governance.openstack.org/reference/tags/#release-management-tags>`_.
 

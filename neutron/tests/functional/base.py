@@ -17,8 +17,8 @@ import os
 
 from oslo_config import cfg
 
+from neutron.agent.common import config
 from neutron.agent.linux import utils
-from neutron.conf.agent import common as config
 from neutron.tests import base
 from neutron.tests.common import base as common_base
 from neutron.tests.common import helpers
@@ -69,7 +69,6 @@ class BaseSudoTestCase(BaseLoggingTestCase):
         self.config(group='AGENT',
                     root_helper_daemon=os.environ.get(
                         'OS_ROOTWRAP_DAEMON_CMD'))
-        config.setup_privsep()
 
     @common_base.no_skip_on_missing_deps
     def check_command(self, cmd, error_text, skip_msg, run_as_root=False):

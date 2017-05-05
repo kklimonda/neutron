@@ -13,7 +13,6 @@
 
 import functools
 
-from neutron_lib.utils import helpers
 from oslo_cache import core as cache
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -21,14 +20,24 @@ from oslo_utils import reflection
 from six.moves.urllib import parse
 
 from neutron._i18n import _
-from neutron.conf import cache_utils as cache_utils_config
+from neutron.common import utils
 
+
+cache_opts = [
+    cfg.StrOpt('cache_url', default='',
+               deprecated_for_removal=True,
+               help=_('URL to connect to the cache back end. '
+                      'This option is deprecated in the Newton release and '
+                      'will be removed. Please add a [cache] group for '
+                      'oslo.cache in your neutron.conf and add "enable" and '
+                      '"backend" options in this section.')),
+]
 
 LOG = logging.getLogger(__name__)
 
 
 def register_oslo_configs(conf):
-    cache_utils_config.register_cache_opts(conf)
+    conf.register_opts(cache_opts)
     cache.configure(conf)
 
 
@@ -51,25 +60,15 @@ def _get_cache_region(conf):
     return region
 
 
-def _get_memory_cache_region(expiration_time=5):
-    conf = cfg.ConfigOpts()
-    register_oslo_configs(conf)
-    cache_conf_dict = {
-        'enabled': True,
-        'backend': 'oslo_cache.dict',
-        'expiration_time': expiration_time,
-    }
-    for k, v in cache_conf_dict.items():
-        conf.set_override(k, v, group='cache')
-    return _get_cache_region(conf)
-
-
 def _get_cache_region_for_legacy(url):
     parsed = parse.urlparse(url)
     backend = parsed.scheme
 
     if backend == 'memory':
         query = parsed.query
+        # NOTE(fangzhen): The following NOTE and code is from legacy
+        # oslo-incubator cache module. Previously reside in neutron at
+        # neutron/openstack/common/cache/cache.py:78
         # NOTE(flaper87): We need the following hack
         # for python versions < 2.7.5. Previous versions
         # of python parsed query params just for 'known'
@@ -78,8 +77,17 @@ def _get_cache_region_for_legacy(url):
         if not query and '?' in parsed.path:
             query = parsed.path.split('?', 1)[-1]
         parameters = parse.parse_qs(query)
-        return _get_memory_cache_region(
-            expiration_time=int(parameters.get('default_ttl', [0])[0]))
+
+        conf = cfg.ConfigOpts()
+        register_oslo_configs(conf)
+        cache_conf_dict = {
+            'enabled': True,
+            'backend': 'oslo_cache.dict',
+            'expiration_time': int(parameters.get('default_ttl', [0])[0]),
+        }
+        for k, v in cache_conf_dict.items():
+            conf.set_override(k, v, group='cache')
+        return _get_cache_region(conf)
     else:
         raise RuntimeError(_('Old style configuration can use only memory '
                              '(dict) backend'))
@@ -104,7 +112,7 @@ class cache_method_results(object):
         }
         key = (func_name,) + args
         if kwargs:
-            key += helpers.dict2tuple(kwargs)
+            key += utils.dict2tuple(kwargs)
         # oslo.cache expects a string or a buffer
         key = str(key)
         try:

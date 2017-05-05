@@ -37,11 +37,10 @@ class FakeEntry(object):
 class TestUnwatchLog(base.BaseTestCase):
 
     def test_unwatch_log(self):
-        temp_file_name = self.get_temp_file_path('unwatch_log_temp_file_name')
         stream_handler = logging.StreamHandler()
         logger = logging.Logger('fake')
         logger.addHandler(stream_handler)
-        logger.addHandler(handlers.WatchedFileHandler(temp_file_name))
+        logger.addHandler(handlers.WatchedFileHandler('/tmp/filename1'))
 
         with mock.patch('logging.getLogger', return_value=logger):
             daemon.unwatch_log()
@@ -49,7 +48,7 @@ class TestUnwatchLog(base.BaseTestCase):
             logger.handlers.remove(stream_handler)
             observed = logger.handlers[0]
             self.assertEqual(logging.FileHandler, type(observed))
-            self.assertEqual(temp_file_name, observed.baseFilename)
+            self.assertEqual('/tmp/filename1', observed.baseFilename)
 
 
 class TestPrivileges(base.BaseTestCase):

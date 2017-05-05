@@ -11,7 +11,10 @@ ping_kill: KillFilter, root, ping, -2
 
 # enable curl from namespace
 curl_filter: RegExpFilter, /usr/bin/curl, root, curl, --max-time, \d+, -D-, http://[0-9a-z:./-]+
-ncat_filter: CommandFilter, ncat, root
+nc_filter: CommandFilter, nc, root
+# netcat has different binaries depending on linux distribution
+nc_kill: KillFilter, root, nc, -9
+ncbsd_kill: KillFilter, root, nc.openbsd, -9
 ncat_kill: KillFilter, root, ncat, -9
 ss_filter: CommandFilter, ss, root
 
@@ -26,7 +29,7 @@ dhclient_kill: KillFilter, root, dhclient, -9
 # in dhcp-agent namespace. If in that namespace resolv.conf file not exist
 # dhclient will override system /etc/resolv.conf
 # Filters below are limit functions mkdir, rm and touch
-# only to create and delete file resolv.conf in the namespace
+# only to create and delete file resolv.conf in the that namespace
 mkdir_filter: RegExpFilter, /bin/mkdir, root, mkdir, -p, /etc/netns/qdhcp-[0-9a-z./-]+
 rm_filter: RegExpFilter, /bin/rm, root, rm, -r, /etc/netns/qdhcp-[0-9a-z./-]+
 touch_filter: RegExpFilter, /bin/touch, root, touch, /etc/netns/qdhcp-[0-9a-z./-]+/resolv.conf

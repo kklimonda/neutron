@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from neutron_lib.api import extensions as api_extensions
+from oslo_config import cfg
 
 from neutron.api import extensions
 
@@ -19,11 +19,11 @@ from neutron.api import extensions
 _ALIAS = 'pagination'
 
 
-class Pagination(api_extensions.ExtensionDescriptor):
+class Pagination(extensions.ExtensionDescriptor):
     """Fake extension that indicates that pagination is enabled."""
 
     extensions.register_custom_supported_check(
-        _ALIAS, lambda: True, plugin_agnostic=True
+        _ALIAS, lambda: cfg.CONF.allow_pagination, plugin_agnostic=True
     )
 
     @classmethod

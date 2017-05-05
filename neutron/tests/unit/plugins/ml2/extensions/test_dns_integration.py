@@ -13,19 +13,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from keystoneauth1 import loading
-from keystoneauth1 import session
+import uuid
+
 import mock
 import netaddr
-from neutron_lib.api.definitions import provider_net as pnet
 from neutron_lib import constants
-from neutron_lib import context
-from neutron_lib.plugins import directory
-from oslo_utils import uuidutils
 import testtools
 
+from neutron import context
+from neutron.db import dns_db
 from neutron.extensions import dns
-from neutron.objects import ports as port_obj
+from neutron.extensions import providernet as pnet
+from neutron import manager
 from neutron.plugins.ml2 import config
 from neutron.plugins.ml2.extensions import dns_integration
 from neutron.services.externaldns.drivers.designate import driver
@@ -58,7 +57,7 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         super(DNSIntegrationTestCase, self).setUp()
         dns_integration.DNS_DRIVER = None
         dns_integration.subscribe()
-        self.plugin = directory.get_plugin()
+        self.plugin = manager.NeutronManager.get_plugin()
         config.cfg.CONF.set_override('dns_domain', self._domain)
 
     def _create_port_for_test(self, provider_net=True, dns_domain=True,
@@ -96,7 +95,9 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         self.assertEqual(201, res.status_int)
         port = self.deserialize(self.fmt, res)['port']
         ctx = context.get_admin_context()
-        dns_data_db = port_obj.PortDNS.get_object(ctx, port_id=port['id'])
+        dns_data_db = ctx.session.query(
+            dns_db.PortDNS).filter_by(
+            port_id=port['id']).one_or_none()
         return network['network'], port, dns_data_db
 
     def _create_subnet_for_test(self, network_id, cidr):
@@ -136,7 +137,9 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
         self.assertEqual(200, res.status_int)
         port = self.deserialize(self.fmt, res)['port']
         ctx = context.get_admin_context()
-        dns_data_db = port_obj.PortDNS.get_object(ctx, port_id=port['id'])
+        dns_data_db = ctx.session.query(
+            dns_db.PortDNS).filter_by(
+            port_id=port['id']).one_or_none()
         return port, dns_data_db
 
     def _verify_port_dns(self, net, port, dns_data_db, dns_name=True,
@@ -180,13 +183,13 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
                                            V6UUID))
             mock_client.recordsets.create.assert_has_calls(expected,
                                                            any_order=True)
-            self.assertEqual(
-                len(mock_client.recordsets.create.call_args_list),
+            self.assertTrue(
+                len(mock_client.recordsets.create.call_args_list) ==
                 len(expected))
             mock_client.recordsets.delete.assert_has_calls(expected_delete,
                                                            any_order=True)
-            self.assertEqual(
-                len(mock_client.recordsets.delete.call_args_list),
+            self.assertTrue(
+                len(mock_client.recordsets.delete.call_args_list) ==
                 len(expected_delete))
             expected = []
             expected_delete = []
@@ -214,18 +217,18 @@ class DNSIntegrationTestCase(test_plugin.Ml2PluginV2TestCase):
                                                          in_addr_name))
             mock_admin_client.recordsets.create.assert_has_calls(
                 expected, any_order=True)
-            self.assertEqual(
-                len(mock_admin_client.recordsets.create.call_args_list),
+            self.assertTrue(
+                len(mock_admin_client.recordsets.create.call_args_list) ==
                 len(expected))
             mock_admin_client.recordsets.delete.assert_has_calls(
                 expected_delete, any_order=True)
-            self.assertEqual(
-                len(mock_admin_client.recordsets.delete.call_args_list),
+            self.assertTrue(
+                len(mock_admin_client.recordsets.delete.call_args_list) ==
                 len(expected_delete))
         else:
             if not dns_name:
                 self.assertEqual('', port[dns.DNSNAME])
-                self.assertIsNone(dns_data_db)
+                self.assertTrue(dns_data_db is None)
             self.assertFalse(mock_client.recordsets.create.call_args_list)
             self.assertFalse(
                 mock_admin_client.recordsets.create.call_args_list)
@@ -528,22 +531,22 @@ class DNSIntegrationTestCaseDefaultDomain(DNSIntegrationTestCase):
         self._verify_port_dns(net, port, dns_data_db)
 
 
-class TestDesignateClientKeystoneV2(testtools.TestCase):
+class TestDesignateClient(testtools.TestCase):
     """Test case for designate clients """
 
     TEST_URL = 'http://127.0.0.1:9001/v2'
-    TEST_ADMIN_USERNAME = uuidutils.generate_uuid(dashed=False)
-    TEST_ADMIN_PASSWORD = uuidutils.generate_uuid(dashed=False)
-    TEST_ADMIN_TENANT_NAME = uuidutils.generate_uuid(dashed=False)
-    TEST_ADMIN_TENANT_ID = uuidutils.generate_uuid(dashed=False)
+    TEST_ADMIN_USERNAME = uuid.uuid4().hex
+    TEST_ADMIN_PASSWORD = uuid.uuid4().hex
+    TEST_ADMIN_TENANT_NAME = uuid.uuid4().hex
+    TEST_ADMIN_TENANT_ID = uuid.uuid4().hex
     TEST_ADMIN_AUTH_URL = 'http://127.0.0.1:35357/v2.0'
-    TEST_CA_CERT = uuidutils.generate_uuid(dashed=False)
+    TEST_CA_CERT = uuid.uuid4().hex
 
     TEST_CONTEXT = mock.Mock()
-    TEST_CONTEXT.auth_token = uuidutils.generate_uuid(dashed=False)
+    TEST_CONTEXT.auth_token = uuid.uuid4().hex
 
     def setUp(self):
-        super(TestDesignateClientKeystoneV2, self).setUp()
+        super(TestDesignateClient, self).setUp()
         config.cfg.CONF.set_override('url',
                                      self.TEST_URL,
                                      group='designate')
@@ -566,124 +569,22 @@ class TestDesignateClientKeystoneV2(testtools.TestCase):
         # enforce session recalculation
         mock.patch.object(driver, '_SESSION', new=None).start()
         self.driver_session = (
-            mock.patch.object(session, 'Session').start())
-        self.load_auth = (
-            mock.patch.object(driver.loading,
-                'load_auth_from_conf_options').start())
-        self.password = (
-            mock.patch.object(driver.password, 'Password').start())
+            mock.patch.object(driver.session, 'Session').start()
+        )
 
     def test_insecure_client(self):
         config.cfg.CONF.set_override('insecure',
                                      True,
                                      group='designate')
         driver.get_clients(self.TEST_CONTEXT)
-        self.driver_session.assert_called_with(cert=None,
-                                               timeout=None,
-                                               verify=False)
+        self.driver_session.assert_called_with(verify=False)
 
     def test_secure_client(self):
         config.cfg.CONF.set_override('insecure',
                                      False,
                                      group='designate')
-        config.cfg.CONF.set_override('cafile',
+        config.cfg.CONF.set_override('ca_cert',
                                      self.TEST_CA_CERT,
                                      group='designate')
         driver.get_clients(self.TEST_CONTEXT)
-        self.driver_session.assert_called_with(cert=None,
-                                               timeout=None,
-                                               verify=self.TEST_CA_CERT)
-
-    def test_auth_type_not_defined(self):
-        driver.get_clients(self.TEST_CONTEXT)
-        self.load_auth.assert_not_called()
-        self.password.assert_called_with(
-            auth_url=self.TEST_ADMIN_AUTH_URL,
-            password=self.TEST_ADMIN_PASSWORD,
-            tenant_id=self.TEST_ADMIN_TENANT_ID,
-            tenant_name=self.TEST_ADMIN_TENANT_NAME,
-            username=self.TEST_ADMIN_USERNAME)
-
-
-class TestDesignateClientKeystoneV3(testtools.TestCase):
-    """Test case for designate clients """
-
-    TEST_URL = 'http://127.0.0.1:9001/v2'
-    TEST_ADMIN_USERNAME = uuidutils.generate_uuid(dashed=False)
-    TEST_ADMIN_PASSWORD = uuidutils.generate_uuid(dashed=False)
-    TEST_ADMIN_USER_DOMAIN_ID = 'Default'
-    TEST_ADMIN_PROJECT_ID = uuidutils.generate_uuid(dashed=False)
-    TEST_ADMIN_PROJECT_DOMAIN_ID = 'Default'
-    TEST_ADMIN_AUTH_URL = 'http://127.0.0.1:35357/v3'
-    TEST_CA_CERT = uuidutils.generate_uuid(dashed=False)
-
-    TEST_CONTEXT = mock.Mock()
-    TEST_CONTEXT.auth_token = uuidutils.generate_uuid(dashed=False)
-
-    def setUp(self):
-        super(TestDesignateClientKeystoneV3, self).setUp()
-        # Register the Password auth plugin options,
-        # so we can use CONF.set_override
-        password_option = loading.get_auth_plugin_conf_options('password')
-        config.cfg.CONF.register_opts(password_option, group='designate')
-        self.addCleanup(
-            config.cfg.CONF.unregister_opts,
-            password_option, group='designate')
-
-        config.cfg.CONF.set_override('url',
-                                     self.TEST_URL,
-                                     group='designate')
-        config.cfg.CONF.set_override('auth_type',
-                                     'password',
-                                     group='designate')
-        config.cfg.CONF.set_override('username',
-                                     self.TEST_ADMIN_USERNAME,
-                                     group='designate')
-        config.cfg.CONF.set_override('password',
-                                     self.TEST_ADMIN_PASSWORD,
-                                     group='designate')
-        config.cfg.CONF.set_override('user_domain_id',
-                                     self.TEST_ADMIN_USER_DOMAIN_ID,
-                                     group='designate')
-        config.cfg.CONF.set_override('project_domain_id',
-                                     self.TEST_ADMIN_PROJECT_DOMAIN_ID,
-                                     group='designate')
-        config.cfg.CONF.set_override('auth_url',
-                                     self.TEST_ADMIN_AUTH_URL,
-                                     group='designate')
-
-        # enforce session recalculation
-        mock.patch.object(driver, '_SESSION', new=None).start()
-        self.driver_session = (
-            mock.patch.object(session, 'Session').start())
-        self.load_auth = (
-            mock.patch.object(driver.loading,
-                'load_auth_from_conf_options').start())
-        self.password = (
-            mock.patch.object(driver.password, 'Password').start())
-
-    def test_insecure_client(self):
-        config.cfg.CONF.set_override('insecure',
-                                     True,
-                                     group='designate')
-        driver.get_clients(self.TEST_CONTEXT)
-        self.driver_session.assert_called_with(cert=None,
-                                               timeout=None,
-                                               verify=False)
-
-    def test_secure_client(self):
-        config.cfg.CONF.set_override('insecure',
-                                     False,
-                                     group='designate')
-        config.cfg.CONF.set_override('cafile',
-                                     self.TEST_CA_CERT,
-                                     group='designate')
-        driver.get_clients(self.TEST_CONTEXT)
-        self.driver_session.assert_called_with(cert=None,
-                                               timeout=None,
-                                               verify=self.TEST_CA_CERT)
-
-    def test_auth_type_password(self):
-        driver.get_clients(self.TEST_CONTEXT)
-        self.load_auth.assert_called_with(config.cfg.CONF, 'designate')
-        self.password.assert_not_called()
+        self.driver_session.assert_called_with(verify=self.TEST_CA_CERT)

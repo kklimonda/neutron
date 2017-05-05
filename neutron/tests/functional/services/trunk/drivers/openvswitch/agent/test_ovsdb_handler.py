@@ -16,8 +16,6 @@
 import mock
 
 from neutron_lib import constants as n_consts
-from neutron_lib.utils import helpers
-from neutron_lib.utils import net
 from oslo_utils import uuidutils
 
 from neutron.agent.common import ovs_lib
@@ -29,12 +27,12 @@ from neutron.tests.functional.agent.l2 import base
 
 
 def generate_tap_device_name():
-    return n_consts.TAP_DEVICE_PREFIX + helpers.get_random_string(
+    return n_consts.TAP_DEVICE_PREFIX + common_utils.get_random_string(
         n_consts.DEVICE_NAME_MAX_LEN - len(n_consts.TAP_DEVICE_PREFIX))
 
 
 class OVSDBHandlerTestCase(base.OVSAgentTestFramework):
-    """Test functionality of OVSDBHandler.
+    """Test funcionality of OVSDBHandler.
 
     This suite aims for interaction between events coming from OVSDB monitor,
     agent and wiring ports via trunk bridge to integration bridge.
@@ -51,7 +49,8 @@ class OVSDBHandlerTestCase(base.OVSAgentTestFramework):
         trunk_id = uuidutils.generate_uuid()
         self.trunk_dict = {
             'id': trunk_id,
-            'mac_address': net.get_random_mac('fa:16:3e:00:00:00'.split(':')),
+            'mac_address': common_utils.get_random_mac(
+                'fa:16:3e:00:00:00'.split(':')),
             'sub_ports': []}
         self.trunk_port_name = generate_tap_device_name()
         self.trunk_br = trunk_manager.TrunkBridge(trunk_id)

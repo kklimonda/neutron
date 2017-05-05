@@ -13,12 +13,12 @@
 #    under the License.
 
 import mock
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 
 from neutron.common import topics
 from neutron.extensions import external_net
-from neutron.extensions import l3
+from neutron.extensions import l3_ext_ha_mode
+from neutron.extensions import portbindings
 from neutron.tests.common import helpers
 from neutron.tests.functional.services.l3_router import \
     test_l3_dvr_router_plugin
@@ -33,77 +33,88 @@ class L3DvrHATestCase(test_l3_dvr_router_plugin.L3DvrTestCase):
             host="standby",
             agent_mode=constants.L3_AGENT_MODE_DVR_SNAT)
 
-    def _create_router(self, distributed=True, ha=True, admin_state_up=True):
+    def _create_router(self, distributed=True, ha=True):
         return (super(L3DvrHATestCase, self).
-                _create_router(distributed=distributed, ha=ha,
-                               admin_state_up=admin_state_up))
+                _create_router(distributed=distributed, ha=ha))
 
     def test_update_router_db_cvr_to_dvrha(self):
-        router = self._create_router(distributed=False, ha=False,
-                                     admin_state_up=False)
-        self.l3_plugin.update_router(
+        router = self._create_router(distributed=False, ha=False)
+        self.assertRaises(
+            l3_ext_ha_mode.UpdateToDvrHamodeNotSupported,
+            self.l3_plugin.update_router,
             self.context,
             router['id'],
-            {'router': {'distributed': True, 'ha': True}})
+            {'router': {'distributed': True, 'ha': True}}
+        )
+        router = self.l3_plugin.get_router(self.context, router['id'])
+        self.assertFalse(router['distributed'])
+        self.assertFalse(router['ha'])
+
+    def test_update_router_db_dvrha_to_cvr(self):
+        router = self._create_router(distributed=True, ha=True)
+        self.assertRaises(
+            l3_ext_ha_mode.DVRmodeUpdateOfDvrHaNotSupported,
+            self.l3_plugin.update_router,
+            self.context,
+            router['id'],
+            {'router': {'distributed': False, 'ha': False}}
+        )
         router = self.l3_plugin.get_router(self.context, router['id'])
         self.assertTrue(router['distributed'])
         self.assertTrue(router['ha'])
 
-    def test_update_router_db_dvrha_to_cvr(self):
-        router = self._create_router(distributed=True, ha=True,
-                                     admin_state_up=False)
-        self.l3_plugin.update_router(
-            self.context,
-            router['id'],
-            {'router': {'distributed': False, 'ha': False}})
-        router = self.l3_plugin.get_router(self.context, router['id'])
-        self.assertFalse(router['distributed'])
-        self.assertFalse(router['ha'])
-
     def test_update_router_db_dvrha_to_dvr(self):
-        router = self._create_router(distributed=True, ha=True,
-                                     admin_state_up=False)
+        router = self._create_router(distributed=True, ha=True)
         self.l3_plugin.update_router(
             self.context, router['id'], {'router': {'admin_state_up': False}})
-        self.l3_plugin.update_router(
+        self.assertRaises(
+            l3_ext_ha_mode.HAmodeUpdateOfDvrHaNotSupported,
+            self.l3_plugin.update_router,
             self.context,
             router['id'],
-            {'router': {'distributed': True, 'ha': False}})
+            {'router': {'distributed': True, 'ha': False}}
+        )
         router = self.l3_plugin.get_router(self.context, router['id'])
         self.assertTrue(router['distributed'])
-        self.assertFalse(router['ha'])
+        self.assertTrue(router['ha'])
 
     def test_update_router_db_dvrha_to_cvrha(self):
-        router = self._create_router(distributed=True, ha=True,
-                                     admin_state_up=False)
-        self.l3_plugin.update_router(
+        router = self._create_router(distributed=True, ha=True)
+        self.assertRaises(
+            l3_ext_ha_mode.DVRmodeUpdateOfDvrHaNotSupported,
+            self.l3_plugin.update_router,
             self.context,
             router['id'],
-            {'router': {'distributed': False, 'ha': True}})
+            {'router': {'distributed': False, 'ha': True}}
+        )
         router = self.l3_plugin.get_router(self.context, router['id'])
-        self.assertFalse(router['distributed'])
+        self.assertTrue(router['distributed'])
         self.assertTrue(router['ha'])
 
     def test_update_router_db_dvr_to_dvrha(self):
-        router = self._create_router(distributed=True, ha=False,
-                                     admin_state_up=False)
-        self.l3_plugin.update_router(
+        router = self._create_router(distributed=True, ha=False)
+        self.assertRaises(
+            l3_ext_ha_mode.HAmodeUpdateOfDvrNotSupported,
+            self.l3_plugin.update_router,
             self.context,
             router['id'],
-            {'router': {'distributed': True, 'ha': True}})
+            {'router': {'distributed': True, 'ha': True}}
+        )
         router = self.l3_plugin.get_router(self.context, router['id'])
         self.assertTrue(router['distributed'])
-        self.assertTrue(router['ha'])
+        self.assertFalse(router['ha'])
 
     def test_update_router_db_cvrha_to_dvrha(self):
-        router = self._create_router(distributed=False, ha=True,
-                                     admin_state_up=False)
-        self.l3_plugin.update_router(
+        router = self._create_router(distributed=False, ha=True)
+        self.assertRaises(
+            l3_ext_ha_mode.DVRmodeUpdateOfHaNotSupported,
+            self.l3_plugin.update_router,
             self.context,
             router['id'],
-            {'router': {'distributed': True, 'ha': True}})
+            {'router': {'distributed': True, 'ha': True}}
+        )
         router = self.l3_plugin.get_router(self.context, router['id'])
-        self.assertTrue(router['distributed'])
+        self.assertFalse(router['distributed'])
         self.assertTrue(router['ha'])
 
     def _assert_router_is_hosted_on_both_dvr_snat_agents(self, router):
@@ -232,10 +243,9 @@ class L3DvrHATestCase(test_l3_dvr_router_plugin.L3DvrTestCase):
         with self.subnet() as subnet, \
                 self.network(**kwargs) as ext_net, \
                 self.subnet(network=ext_net, cidr='20.0.0.0/24'):
-            gw_info = {'network_id': ext_net['network']['id']}
-            self.l3_plugin.update_router(
+            self.l3_plugin._update_router_gw_info(
                 self.context, router['id'],
-                {'router': {l3.EXTERNAL_GW_INFO: gw_info}})
+                {'network_id': ext_net['network']['id']})
             self.l3_plugin.add_router_interface(
                 self.context, router['id'],
                 {'subnet_id': subnet['subnet']['id']})
@@ -263,10 +273,9 @@ class L3DvrHATestCase(test_l3_dvr_router_plugin.L3DvrTestCase):
             self.core_plugin.update_port(
                 self.context, port['port']['id'],
                 {'port': {'binding:host_id': self.l3_agent['host']}})
-            gw_info = {'network_id': ext_net['network']['id']}
-            self.l3_plugin.update_router(
+            self.l3_plugin._update_router_gw_info(
                 self.context, router['id'],
-                {'router': {l3.EXTERNAL_GW_INFO: gw_info}})
+                {'network_id': ext_net['network']['id']})
             self.l3_plugin.add_router_interface(
                 self.context, router['id'],
                 {'subnet_id': subnet['subnet']['id']})
@@ -309,15 +318,13 @@ class L3DvrHATestCase(test_l3_dvr_router_plugin.L3DvrTestCase):
         return ext_net
 
     def _set_external_gateway(self, router, ext_net):
-        gw_info = {'network_id': ext_net['network']['id']}
-        self.l3_plugin.update_router(
+        self.l3_plugin._update_router_gw_info(
             self.context, router['id'],
-            {'router': {l3.EXTERNAL_GW_INFO: gw_info}})
+            {'network_id': ext_net['network']['id']})
 
     def _clear_external_gateway(self, router):
-        self.l3_plugin.update_router(
-            self.context, router['id'],
-            {'router': {l3.EXTERNAL_GW_INFO: {}}})
+        self.l3_plugin._update_router_gw_info(
+            self.context, router['id'], {})
 
     def _remove_interface_from_router(self, router, subnet):
         self.l3_plugin.remove_router_interface(

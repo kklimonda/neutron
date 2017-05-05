@@ -16,11 +16,8 @@ import itertools
 import random
 
 from neutron_lib import constants as const
-from neutron_lib.utils import net
-from oslo_serialization import jsonutils
 
 from neutron.common import constants
-from neutron.extensions import dns as dns_ext
 from neutron.objects import common_types
 from neutron.tests import base as test_base
 from neutron.tests import tools
@@ -42,22 +39,13 @@ class TestField(object):
             self.assertEqual(prim_val, self.field.to_primitive('obj', 'attr',
                                                                in_val))
 
-    def test_to_primitive_json_serializable(self):
-        for in_val, _ in self.to_primitive_values:
-            prim = self.field.to_primitive('obj', 'attr', in_val)
-            jsencoded = jsonutils.dumps(prim)
-            self.assertEqual(prim, jsonutils.loads(jsencoded))
-
     def test_from_primitive(self):
         class ObjectLikeThing(object):
             _context = 'context'
 
         for prim_val, out_val in self.from_primitive_values:
-            from_prim = self.field.from_primitive(ObjectLikeThing, 'attr',
-                                                  prim_val)
-            self.assertEqual(out_val, from_prim)
-            # ensure it's coercable for sanity
-            self.field.coerce('obj', 'attr', from_prim)
+            self.assertEqual(out_val, self.field.from_primitive(
+                ObjectLikeThing, 'attr', prim_val))
 
     @abc.abstractmethod
     def test_stringify(self):
@@ -119,12 +107,10 @@ class MACAddressFieldTest(test_base.BaseTestCase, TestField):
             'XXXX', 'ypp', 'g3:vvv',
             # the field type is strict and does not allow to pass strings, even
             # if they represent a valid MAC address
-            net.get_random_mac('fe:16:3e:00:00:00'.split(':')),
+            tools.get_random_mac(),
         ]
-        self.to_primitive_values = ((a1, str(a2))
-                                    for a1, a2 in self.coerce_good_values)
-        self.from_primitive_values = ((a2, a1)
-                                      for a1, a2 in self.to_primitive_values)
+        self.to_primitive_values = self.coerce_good_values
+        self.from_primitive_values = self.coerce_good_values
 
     def test_stringify(self):
         for in_val, out_val in self.coerce_good_values:
@@ -146,10 +132,8 @@ class IPNetworkFieldTest(test_base.BaseTestCase, TestField):
             # if they represent a valid IP network
             '10.0.0.0/24',
         ]
-        self.to_primitive_values = ((a1, str(a2))
-                                    for a1, a2 in self.coerce_good_values)
-        self.from_primitive_values = ((a2, a1)
-                                      for a1, a2 in self.to_primitive_values)
+        self.to_primitive_values = self.coerce_good_values
+        self.from_primitive_values = self.coerce_good_values
 
     def test_stringify(self):
         for in_val, out_val in self.coerce_good_values:
@@ -178,23 +162,6 @@ class FlowDirectionEnumFieldTest(test_base.BaseTestCase, TestField):
         self.coerce_good_values = [(val, val)
                                    for val in constants.VALID_DIRECTIONS]
         self.coerce_bad_values = ['test', '8', 10, []]
-        self.to_primitive_values = self.coerce_good_values
-        self.from_primitive_values = self.coerce_good_values
-
-    def test_stringify(self):
-        for in_val, out_val in self.coerce_good_values:
-            self.assertEqual("'%s'" % in_val, self.field.stringify(in_val))
-
-
-class DomainNameFieldTest(test_base.BaseTestCase, TestField):
-    def setUp(self):
-        super(DomainNameFieldTest, self).setUp()
-        self.field = common_types.DomainNameField()
-        self.coerce_good_values = [
-            (val, val)
-            for val in ('www.google.com', 'hostname', '1abc.com')
-        ]
-        self.coerce_bad_values = ['x' * (dns_ext.FQDN_MAX_LEN + 1), 10, []]
         self.to_primitive_values = self.coerce_good_values
         self.from_primitive_values = self.coerce_good_values
 
@@ -253,51 +220,3 @@ class IpProtocolEnumFieldTest(test_base.BaseTestCase, TestField):
     def test_stringify(self):
         for in_val, out_val in self.coerce_good_values:
             self.assertEqual("'%s'" % in_val, self.field.stringify(in_val))
-
-
-class UUIDFieldTest(test_base.BaseTestCase, TestField):
-    def setUp(self):
-        super(UUIDFieldTest, self).setUp()
-        self.field = common_types.UUIDField()
-        self.coerce_good_values = [
-            ('f1d9cb3f-c263-45d3-907c-d12a9ef1629e',
-                'f1d9cb3f-c263-45d3-907c-d12a9ef1629e'),
-            ('7188f6637cbd4097a3b1d1bb7897c7c0',
-                '7188f6637cbd4097a3b1d1bb7897c7c0')]
-        self.coerce_bad_values = [
-            'f1d9cb3f-c263-45d3-907c-d12a9ef16zzz',
-            '7188f6637cbd4097a3b1d1bb7897']
-        self.to_primitive_values = self.coerce_good_values
-        self.from_primitive_values = self.coerce_good_values
-
-    def test_stringify(self):
-        for in_val, out_val in self.coerce_good_values:
-            self.assertEqual('%s' % in_val, self.field.stringify(in_val))
-
-
-class DictOfMiscValuesFieldTest(test_base.BaseTestCase, TestField):
-    def setUp(self):
-        super(DictOfMiscValuesFieldTest, self).setUp()
-        self.field = common_types.DictOfMiscValues
-        test_dict_1 = {'a': True,
-                       'b': 1.23,
-                       'c': ['1', 1.23, True],
-                       'd': {'aa': 'zz'},
-                       'e': '10.0.0.1'}
-        test_dict_str = jsonutils.dumps(test_dict_1)
-        self.coerce_good_values = [
-            (test_dict_1, test_dict_1),
-            (test_dict_str, test_dict_1)
-        ]
-        self.coerce_bad_values = [str(test_dict_1), '{"a":}']
-        self.to_primitive_values = [
-            (test_dict_1, test_dict_str)
-        ]
-        self.from_primitive_values = [
-            (test_dict_str, test_dict_1)
-        ]
-
-    def test_stringify(self):
-        for in_val, out_val in self.coerce_good_values:
-            self.assertEqual(jsonutils.dumps(in_val),
-                             self.field.stringify(in_val))

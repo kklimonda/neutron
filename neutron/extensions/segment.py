@@ -16,15 +16,13 @@ import abc
 import six
 
 from neutron_lib.api import converters
-from neutron_lib.api.definitions import provider_net as providernet
-from neutron_lib.api import extensions as api_extensions
 from neutron_lib import constants
-from neutron_lib.db import constants as db_const
-from neutron_lib.plugins import directory
 
 from neutron.api import extensions
 from neutron.api.v2 import attributes
 from neutron.api.v2 import base
+from neutron.extensions import providernet
+from neutron import manager
 
 SEGMENT = 'segment'
 SEGMENTS = '%ss' % SEGMENT
@@ -33,8 +31,8 @@ SEGMENT_ID = 'segment_id'
 NETWORK_TYPE = 'network_type'
 PHYSICAL_NETWORK = 'physical_network'
 SEGMENTATION_ID = 'segmentation_id'
-NAME_LEN = db_const.NAME_FIELD_SIZE
-DESC_LEN = db_const.DESCRIPTION_FIELD_SIZE
+NAME_LEN = attributes.NAME_MAX_LEN
+DESC_LEN = attributes.DESCRIPTION_MAX_LEN
 
 # Attribute Map
 RESOURCE_ATTRIBUTE_MAP = {
@@ -47,7 +45,7 @@ RESOURCE_ATTRIBUTE_MAP = {
         'tenant_id': {'allow_post': True,
                       'allow_put': False,
                       'validate': {'type:string':
-                                   db_const.PROJECT_ID_FIELD_SIZE},
+                                   attributes.TENANT_ID_MAX_LEN},
                       'is_visible': False},
         'network_id': {'allow_post': True,
                        'allow_put': False,
@@ -90,7 +88,7 @@ RESOURCE_ATTRIBUTE_MAP = {
 }
 
 
-class Segment(api_extensions.ExtensionDescriptor):
+class Segment(extensions.ExtensionDescriptor):
     """Extension class supporting Segments."""
 
     @classmethod
@@ -112,11 +110,12 @@ class Segment(api_extensions.ExtensionDescriptor):
     @classmethod
     def get_resources(cls):
         """Returns Extended Resource for service type management."""
+        attributes.PLURALS[SEGMENTS] = SEGMENT
         resource_attributes = RESOURCE_ATTRIBUTE_MAP[SEGMENTS]
         controller = base.create_resource(
             SEGMENTS,
             SEGMENT,
-            directory.get_plugin(SEGMENTS),
+            manager.NeutronManager.get_service_plugins()[SEGMENTS],
             resource_attributes)
         return [extensions.ResourceExtension(SEGMENTS,
                                              controller,

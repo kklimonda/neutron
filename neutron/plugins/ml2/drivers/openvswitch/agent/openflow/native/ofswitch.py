@@ -24,11 +24,8 @@ import ryu.app.ofctl.api as ofctl_api
 import ryu.exception as ryu_exc
 
 from neutron._i18n import _, _LW
-from neutron.agent.common import ovs_lib
 
 LOG = logging.getLogger(__name__)
-
-COOKIE_DEFAULT = object()
 
 
 class OpenFlowSwitchMixin(object):
@@ -102,22 +99,12 @@ class OpenFlowSwitchMixin(object):
             return match
         return ofpp.OFPMatch(**match_kwargs)
 
-    def uninstall_flows(self, table_id=None, strict=False, priority=0,
-                        cookie=COOKIE_DEFAULT, cookie_mask=0,
-                        match=None, **match_kwargs):
+    def delete_flows(self, table_id=None, strict=False, priority=0,
+                     cookie=0, cookie_mask=0,
+                     match=None, **match_kwargs):
         (dp, ofp, ofpp) = self._get_dp()
         if table_id is None:
             table_id = ofp.OFPTT_ALL
-
-        if cookie == ovs_lib.COOKIE_ANY:
-            cookie = 0
-            if cookie_mask != 0:
-                raise Exception("cookie=COOKIE_ANY but cookie_mask set to %s" %
-                                cookie_mask)
-        elif cookie == COOKIE_DEFAULT:
-            cookie = self._default_cookie
-            cookie_mask = ovs_lib.UINT64_BITMASK
-
         match = self._match(ofp, ofpp, match, **match_kwargs)
         if strict:
             cmd = ofp.OFPFC_DELETE_STRICT
@@ -153,7 +140,7 @@ class OpenFlowSwitchMixin(object):
         for c in cookies:
             LOG.warning(_LW("Deleting flow with cookie 0x%(cookie)x"),
                         {'cookie': c})
-            self.uninstall_flows(cookie=c, cookie_mask=ovs_lib.UINT64_BITMASK)
+            self.delete_flows(cookie=c, cookie_mask=((1 << 64) - 1))
 
     def install_goto_next(self, table_id):
         self.install_goto(table_id=table_id, dest_table_id=table_id + 1)

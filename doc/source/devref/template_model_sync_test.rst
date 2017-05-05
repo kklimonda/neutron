@@ -34,7 +34,7 @@ What does the test do?
 
 This test compares models with the result of existing migrations. It is based on
 `ModelsMigrationsSync
-<http://docs.openstack.org/developer/oslo.db/api/oslo_db.sqlalchemy.test_migrations.html>`_
+<http://docs.openstack.org/developer/oslo.db/api/sqlalchemy/test_migrations.html#oslo_db.sqlalchemy.test_migrations.ModelsMigrationsSync>`_
 which is provided by oslo.db and was adapted for Neutron. It compares core
 Neutron models and vendor specific models with migrations from Neutron core and
 migrations from the driver/plugin repo. This test is functional - it runs against
@@ -52,15 +52,14 @@ Steps for implementing the test
 Create a module ``networking_foo/db/models/head.py`` with the following
 content: ::
 
- from neutron_lib.db import model_base
-
+ from neutron.db.migration.models import head
  from networking_foo import models  # noqa
  # Alternatively, import separate modules here if the models are not in one
  # models.py file
 
 
  def get_metadata():
-    return model_base.BASEV2.metadata
+    return head.model_base.BASEV2.metadata
 
 
 2. Implement the test module

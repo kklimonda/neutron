@@ -13,7 +13,6 @@
 
 import mock
 from neutron_lib import constants
-from neutron_lib import context
 import sqlalchemy
 import testtools
 
@@ -21,6 +20,7 @@ from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import registry
 from neutron.callbacks import resources
+from neutron import context
 from neutron.db import common_db_mixin
 from neutron.db import securitygroups_db
 from neutron.extensions import securitygroup
@@ -128,44 +128,6 @@ class SecurityGroupDbMixinTestCase(testlib_api.SqlTestCase):
                                         'tenant_id': 'fake',
                                         'security_group_id': 'fake',
                                         'direction': 'ingress'}
-            }
-            self.assertRaises(securitygroup.SecurityGroupRuleExists,
-                self.mixin._check_for_duplicate_rules_in_db,
-                context, rule_dict)
-
-    def test_check_for_duplicate_diff_rules_remote_ip_prefix_ipv4(self):
-        db_rules = {'id': 'fake', 'tenant_id': 'fake', 'ethertype': 'IPv4',
-                    'direction': 'ingress', 'security_group_id': 'fake',
-                    'remote_ip_prefix': None}
-        with mock.patch.object(self.mixin, 'get_security_group_rules',
-                               return_value=[db_rules]):
-            context = mock.Mock()
-            rule_dict = {
-                'security_group_rule': {'id': 'fake2',
-                                        'tenant_id': 'fake',
-                                        'security_group_id': 'fake',
-                                        'ethertype': 'IPv4',
-                                        'direction': 'ingress',
-                                        'remote_ip_prefix': '0.0.0.0/0'}
-            }
-            self.assertRaises(securitygroup.SecurityGroupRuleExists,
-                self.mixin._check_for_duplicate_rules_in_db,
-                context, rule_dict)
-
-    def test_check_for_duplicate_diff_rules_remote_ip_prefix_ipv6(self):
-        db_rules = {'id': 'fake', 'tenant_id': 'fake', 'ethertype': 'IPv6',
-                    'direction': 'ingress', 'security_group_id': 'fake',
-                    'remote_ip_prefix': None}
-        with mock.patch.object(self.mixin, 'get_security_group_rules',
-                               return_value=[db_rules]):
-            context = mock.Mock()
-            rule_dict = {
-                'security_group_rule': {'id': 'fake2',
-                                        'tenant_id': 'fake',
-                                        'security_group_id': 'fake',
-                                        'ethertype': 'IPv6',
-                                        'direction': 'ingress',
-                                        'remote_ip_prefix': '::/0'}
             }
             self.assertRaises(securitygroup.SecurityGroupRuleExists,
                 self.mixin._check_for_duplicate_rules_in_db,
@@ -308,7 +270,7 @@ class SecurityGroupDbMixinTestCase(testlib_api.SqlTestCase):
                 'precommit_create', mock.ANY, context=mock.ANY,
                 security_group_rule=mock.ANY)])
 
-    def test_sg_rule_before_precommit_and_after_delete_event(self):
+    def test_security_group_rule_precommit_delete_event(self):
         sg_dict = self.mixin.create_security_group(self.ctx, FAKE_SECGROUP)
         fake_rule = FAKE_SECGROUP_RULE
         fake_rule['security_group_rule']['security_group_id'] = sg_dict['id']
@@ -319,15 +281,8 @@ class SecurityGroupDbMixinTestCase(testlib_api.SqlTestCase):
             self.mixin.delete_security_group_rule(self.ctx,
                     sg_rule_dict['id'])
             mock_notify.assert_has_calls([mock.call('security_group_rule',
-                'before_delete', mock.ANY, context=mock.ANY,
-                security_group_rule_id=sg_rule_dict['id'])])
-            mock_notify.assert_has_calls([mock.call('security_group_rule',
                 'precommit_delete', mock.ANY, context=mock.ANY,
-                security_group_rule_id=sg_rule_dict['id'])])
-            mock_notify.assert_has_calls([mock.call('security_group_rule',
-                'after_delete', mock.ANY, context=mock.ANY,
-                security_group_rule_id=sg_rule_dict['id'],
-                security_group_id=sg_dict['id'])])
+                security_group_rule_id=mock.ANY)])
 
     def test_get_ip_proto_name_and_num(self):
         protocols = [constants.PROTO_NAME_UDP, str(constants.PROTO_NUM_TCP),

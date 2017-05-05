@@ -109,7 +109,6 @@ class BaseNetworkTest(test.BaseTestCase):
         cls.admin_address_scopes = []
         cls.subnetpools = []
         cls.admin_subnetpools = []
-        cls.security_groups = []
 
     @classmethod
     def resource_cleanup(cls):
@@ -167,11 +166,6 @@ class BaseNetworkTest(test.BaseTestCase):
             for network in cls.admin_networks:
                 cls._try_delete_resource(cls.admin_client.delete_network,
                                          network['id'])
-
-            # Clean up security groups
-            for secgroup in cls.security_groups:
-                cls._try_delete_resource(cls.client.delete_security_group,
-                                         secgroup['id'])
 
             for subnetpool in cls.subnetpools:
                 cls._try_delete_resource(cls.client.delete_subnetpool,
@@ -317,30 +311,20 @@ class BaseNetworkTest(test.BaseTestCase):
         return body['port']
 
     @classmethod
-    def _create_router_with_client(
-        cls, client, router_name=None, admin_state_up=False,
-        external_network_id=None, enable_snat=None, **kwargs
-    ):
+    def create_router(cls, router_name=None, admin_state_up=False,
+                      external_network_id=None, enable_snat=None,
+                      **kwargs):
         ext_gw_info = {}
         if external_network_id:
             ext_gw_info['network_id'] = external_network_id
         if enable_snat:
             ext_gw_info['enable_snat'] = enable_snat
-        body = client.create_router(
+        body = cls.client.create_router(
             router_name, external_gateway_info=ext_gw_info,
             admin_state_up=admin_state_up, **kwargs)
         router = body['router']
         cls.routers.append(router)
         return router
-
-    @classmethod
-    def create_router(cls, *args, **kwargs):
-        return cls._create_router_with_client(cls.client, *args, **kwargs)
-
-    @classmethod
-    def create_admin_router(cls, *args, **kwargs):
-        return cls._create_router_with_client(cls.admin_manager.network_client,
-                                              *args, **kwargs)
 
     @classmethod
     def create_floatingip(cls, external_network_id):
@@ -627,7 +611,7 @@ class BaseSearchCriteriaTest(BaseNetworkTest):
         }
         body = self.list_method(**pagination_args)
         resources = self._extract_resources(body)
-        self.assertGreaterEqual(len(resources), len(self.resource_names))
+        self.assertTrue(len(resources) >= len(self.resource_names))
 
     def _test_list_pagination_iteratively(self, lister):
         # first, collect all resources for later comparison
@@ -742,7 +726,7 @@ class BaseSearchCriteriaTest(BaseNetworkTest):
                 self.plural_name, uri
             )
             resources_ = self._extract_resources(body)
-            self.assertGreaterEqual(page_size, len(resources_))
+            self.assertTrue(page_size >= len(resources_))
             resources.extend(reversed(resources_))
 
         self.assertSameOrder(expected_resources, reversed(resources))

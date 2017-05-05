@@ -17,12 +17,10 @@ import os
 
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_utils import timeutils
 
 from neutron._i18n import _LE
+from neutron.agent.common import config
 from neutron.common import utils as neutron_utils
-from neutron.conf.agent import common as config
-from neutron.conf.agent.database import agents_db
 
 
 if os.name == 'nt':
@@ -33,7 +31,6 @@ else:
 
 LOG = logging.getLogger(__name__)
 config.register_root_helper(cfg.CONF)
-agents_db.register_agent_opts()
 
 INTERFACE_NAMESPACE = 'neutron.interface_drivers'
 
@@ -56,8 +53,3 @@ def load_interface_driver(conf):
         LOG.error(_LE("Error loading interface driver '%s'"),
                   conf.interface_driver)
         raise SystemExit(1)
-
-
-def is_agent_down(heart_beat_time):
-    return timeutils.is_older_than(heart_beat_time,
-                                   cfg.CONF.agent_down_time)

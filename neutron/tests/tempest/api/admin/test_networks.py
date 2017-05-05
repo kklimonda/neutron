@@ -11,7 +11,6 @@
 #    under the License.
 
 from oslo_utils import uuidutils
-from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 
@@ -20,7 +19,7 @@ from neutron.tests.tempest.api import base
 
 class NetworksTestAdmin(base.BaseAdminNetworkTest):
 
-    @decorators.idempotent_id('d3c76044-d067-4cb0-ae47-8cdd875c7f67')
+    @test.idempotent_id('d3c76044-d067-4cb0-ae47-8cdd875c7f67')
     @test.requires_ext(extension="project-id", service="network")
     def test_admin_create_network_keystone_v3(self):
         project_id = self.client.tenant_id  # non-admin
@@ -38,7 +37,7 @@ class NetworksTestAdmin(base.BaseAdminNetworkTest):
         self.assertEqual(project_id, lookup_net['project_id'])
         self.assertEqual(project_id, lookup_net['tenant_id'])
 
-    @decorators.idempotent_id('8d21aaca-4364-4eb9-8b79-44b4fff6373b')
+    @test.idempotent_id('8d21aaca-4364-4eb9-8b79-44b4fff6373b')
     @test.requires_ext(extension="project-id", service="network")
     def test_admin_create_network_keystone_v3_and_tenant(self):
         project_id = self.client.tenant_id  # non-admin
@@ -56,7 +55,7 @@ class NetworksTestAdmin(base.BaseAdminNetworkTest):
         self.assertEqual(project_id, lookup_net['project_id'])
         self.assertEqual(project_id, lookup_net['tenant_id'])
 
-    @decorators.idempotent_id('08b92179-669d-45ee-8233-ef6611190809')
+    @test.idempotent_id('08b92179-669d-45ee-8233-ef6611190809')
     @test.requires_ext(extension="project-id", service="network")
     def test_admin_create_network_keystone_v3_and_other_tenant(self):
         project_id = self.client.tenant_id  # non-admin

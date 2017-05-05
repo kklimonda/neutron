@@ -14,7 +14,6 @@
 #    under the License.
 
 from tempest.lib.common.utils import data_utils
-from tempest.lib import decorators
 from tempest import test
 
 from neutron.tests.tempest.api import base
@@ -92,7 +91,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
             self.assertEqual(expected_values['prefixes'],
                              updated_pool['prefixes'])
 
-    @decorators.idempotent_id('6e1781ec-b45b-4042-aebe-f485c022996e')
+    @test.idempotent_id('6e1781ec-b45b-4042-aebe-f485c022996e')
     def test_create_list_subnetpool(self):
         created_subnetpool = self._create_subnetpool()
         body = self.client.list_subnetpools()
@@ -104,7 +103,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
                       [sp['name'] for sp in subnetpools],
                       "Created subnetpool name should be in the list")
 
-    @decorators.idempotent_id('c72c1c0c-2193-4aca-ddd4-b1442640bbbb')
+    @test.idempotent_id('c72c1c0c-2193-4aca-ddd4-b1442640bbbb')
     @test.requires_ext(extension="standard-attr-description",
                        service="network")
     def test_create_update_subnetpool_description(self):
@@ -122,7 +121,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         body = subnet_pools[0]
         self.assertEqual('d2', body['description'])
 
-    @decorators.idempotent_id('741d08c2-1e3f-42be-99c7-0ea93c5b728c')
+    @test.idempotent_id('741d08c2-1e3f-42be-99c7-0ea93c5b728c')
     def test_get_subnetpool(self):
         created_subnetpool = self._create_subnetpool()
         prefixlen = self._subnetpool_data['min_prefixlen']
@@ -134,7 +133,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertEqual(prefixlen, subnetpool['default_prefixlen'])
         self.assertFalse(subnetpool['shared'])
 
-    @decorators.idempotent_id('5bf9f1e2-efc8-4195-acf3-d12b2bd68dd3')
+    @test.idempotent_id('5bf9f1e2-efc8-4195-acf3-d12b2bd68dd3')
     @test.requires_ext(extension="project-id", service="network")
     def test_show_subnetpool_has_project_id(self):
         subnetpool = self._create_subnetpool()
@@ -145,7 +144,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertEqual(self.client.tenant_id, show_subnetpool['project_id'])
         self.assertEqual(self.client.tenant_id, show_subnetpool['tenant_id'])
 
-    @decorators.idempotent_id('764f1b93-1c4a-4513-9e7b-6c2fc5e9270c')
+    @test.idempotent_id('764f1b93-1c4a-4513-9e7b-6c2fc5e9270c')
     def test_tenant_update_subnetpool(self):
         created_subnetpool = self._create_subnetpool()
         pool_id = created_subnetpool['id']
@@ -159,7 +158,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
                                                 subnetpool)
         self.assertFalse(subnetpool['shared'])
 
-    @decorators.idempotent_id('4b496082-c992-4319-90be-d4a7ce646290')
+    @test.idempotent_id('4b496082-c992-4319-90be-d4a7ce646290')
     def test_update_subnetpool_prefixes_append(self):
         # We can append new prefixes to subnetpool
         create_subnetpool = self._create_subnetpool()
@@ -174,7 +173,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertIn(self.new_prefix, prefixes)
         self.assertIn(old_prefixes[0], prefixes)
 
-    @decorators.idempotent_id('2cae5d6a-9d32-42d8-8067-f13970ae13bb')
+    @test.idempotent_id('2cae5d6a-9d32-42d8-8067-f13970ae13bb')
     def test_update_subnetpool_prefixes_extend(self):
         # We can extend current subnetpool prefixes
         created_subnetpool = self._create_subnetpool()
@@ -187,7 +186,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertIn(self.larger_prefix, prefixes)
         self.assertNotIn(old_prefixes[0], prefixes)
 
-    @decorators.idempotent_id('d70c6c35-913b-4f24-909f-14cd0d29b2d2')
+    @test.idempotent_id('d70c6c35-913b-4f24-909f-14cd0d29b2d2')
     def test_admin_create_shared_subnetpool(self):
         created_subnetpool = self._create_subnetpool(is_admin=True,
                                                      shared=True)
@@ -220,7 +219,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         subnet = body['subnet']
         return pool_id, subnet
 
-    @decorators.idempotent_id('1362ed7d-3089-42eb-b3a5-d6cb8398ee77')
+    @test.idempotent_id('1362ed7d-3089-42eb-b3a5-d6cb8398ee77')
     def test_create_subnet_from_pool_with_prefixlen(self):
         subnet_values = {"prefixlen": self.max_prefixlen}
         pool_id, subnet = self._create_subnet_from_pool(
@@ -229,7 +228,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertEqual(pool_id, subnet['subnetpool_id'])
         self.assertTrue(cidr.endswith(str(self.max_prefixlen)))
 
-    @decorators.idempotent_id('86b86189-9789-4582-9c3b-7e2bfe5735ee')
+    @test.idempotent_id('86b86189-9789-4582-9c3b-7e2bfe5735ee')
     def test_create_subnet_from_pool_with_subnet_cidr(self):
         subnet_values = {"cidr": self.subnet_cidr}
         pool_id, subnet = self._create_subnet_from_pool(
@@ -238,7 +237,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertEqual(pool_id, subnet['subnetpool_id'])
         self.assertEqual(cidr, self.subnet_cidr)
 
-    @decorators.idempotent_id('83f76e3a-9c40-40c2-a015-b7c5242178d8')
+    @test.idempotent_id('83f76e3a-9c40-40c2-a015-b7c5242178d8')
     def test_create_subnet_from_pool_with_default_prefixlen(self):
         # If neither cidr nor prefixlen is specified,
         # subnet will use subnetpool default_prefixlen for cidr.
@@ -248,7 +247,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         prefixlen = self._subnetpool_data['min_prefixlen']
         self.assertTrue(cidr.endswith(str(prefixlen)))
 
-    @decorators.idempotent_id('a64af292-ec52-4bde-b654-a6984acaf477')
+    @test.idempotent_id('a64af292-ec52-4bde-b654-a6984acaf477')
     def test_create_subnet_from_pool_with_quota(self):
         pool_values = {'default_quota': 4}
         subnet_values = {"prefixlen": self.max_prefixlen}
@@ -258,7 +257,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertEqual(pool_id, subnet['subnetpool_id'])
         self.assertTrue(cidr.endswith(str(self.max_prefixlen)))
 
-    @decorators.idempotent_id('49b44c64-1619-4b29-b527-ffc3c3115dc4')
+    @test.idempotent_id('49b44c64-1619-4b29-b527-ffc3c3115dc4')
     @test.requires_ext(extension='address-scope', service='network')
     def test_create_subnetpool_associate_address_scope(self):
         address_scope = self.create_address_scope(
@@ -270,7 +269,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertEqual(address_scope['id'],
                          body['subnetpool']['address_scope_id'])
 
-    @decorators.idempotent_id('910b6393-db24-4f6f-87dc-b36892ad6c8c')
+    @test.idempotent_id('910b6393-db24-4f6f-87dc-b36892ad6c8c')
     @test.requires_ext(extension='address-scope', service='network')
     def test_update_subnetpool_associate_address_scope(self):
         address_scope = self.create_address_scope(
@@ -286,7 +285,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertEqual(address_scope['id'],
                          body['subnetpool']['address_scope_id'])
 
-    @decorators.idempotent_id('18302e80-46a3-4563-82ac-ccd1dd57f652')
+    @test.idempotent_id('18302e80-46a3-4563-82ac-ccd1dd57f652')
     @test.requires_ext(extension='address-scope', service='network')
     def test_update_subnetpool_associate_another_address_scope(self):
         address_scope = self.create_address_scope(
@@ -307,7 +306,7 @@ class SubnetPoolsTest(SubnetPoolsTestBase):
         self.assertEqual(another_address_scope['id'],
                          body['subnetpool']['address_scope_id'])
 
-    @decorators.idempotent_id('f8970048-e41b-42d6-934b-a1297b07706a')
+    @test.idempotent_id('f8970048-e41b-42d6-934b-a1297b07706a')
     @test.requires_ext(extension='address-scope', service='network')
     def test_update_subnetpool_disassociate_address_scope(self):
         address_scope = self.create_address_scope(
@@ -342,7 +341,7 @@ class SubnetPoolsTestV6(SubnetPoolsTest):
         cls._subnetpool_data = {'min_prefixlen': min_prefixlen,
                                 'prefixes': prefixes}
 
-    @decorators.idempotent_id('f62d73dc-cf6f-4879-b94b-dab53982bf3b')
+    @test.idempotent_id('f62d73dc-cf6f-4879-b94b-dab53982bf3b')
     def test_create_dual_stack_subnets_from_subnetpools(self):
         pool_id_v6, subnet_v6 = self._create_subnet_from_pool()
         pool_values_v4 = {'prefixes': ['192.168.0.0/16'],
@@ -369,42 +368,42 @@ class SubnetPoolsSearchCriteriaTest(base.BaseSearchCriteriaTest,
         for name in cls.resource_names:
             cls._create_subnetpool(name=name)
 
-    @decorators.idempotent_id('6e3f842e-6bfb-49cb-82d3-0026be4e8e04')
+    @test.idempotent_id('6e3f842e-6bfb-49cb-82d3-0026be4e8e04')
     def test_list_sorts_asc(self):
         self._test_list_sorts_asc()
 
-    @decorators.idempotent_id('f336859b-b868-438c-a6fc-2c06374115f2')
+    @test.idempotent_id('f336859b-b868-438c-a6fc-2c06374115f2')
     def test_list_sorts_desc(self):
         self._test_list_sorts_desc()
 
-    @decorators.idempotent_id('1291fae7-c196-4372-ad59-ce7988518f7b')
+    @test.idempotent_id('1291fae7-c196-4372-ad59-ce7988518f7b')
     def test_list_pagination(self):
         self._test_list_pagination()
 
-    @decorators.idempotent_id('ddb20d14-1952-49b4-a17e-231cc2239a52')
+    @test.idempotent_id('ddb20d14-1952-49b4-a17e-231cc2239a52')
     def test_list_pagination_with_marker(self):
         self._test_list_pagination_with_marker()
 
-    @decorators.idempotent_id('b3bd9665-2769-4a43-b50c-31b1add12891')
+    @test.idempotent_id('b3bd9665-2769-4a43-b50c-31b1add12891')
     def test_list_pagination_with_href_links(self):
         self._test_list_pagination_with_href_links()
 
-    @decorators.idempotent_id('1ec1f325-43b0-406e-96ce-20539e38a61d')
+    @test.idempotent_id('1ec1f325-43b0-406e-96ce-20539e38a61d')
     def test_list_pagination_page_reverse_asc(self):
         self._test_list_pagination_page_reverse_asc()
 
-    @decorators.idempotent_id('f43a293e-4aaa-48f4-aeaf-de63a676357c')
+    @test.idempotent_id('f43a293e-4aaa-48f4-aeaf-de63a676357c')
     def test_list_pagination_page_reverse_desc(self):
         self._test_list_pagination_page_reverse_desc()
 
-    @decorators.idempotent_id('73511385-839c-4829-8ac1-b5ad992126c4')
+    @test.idempotent_id('73511385-839c-4829-8ac1-b5ad992126c4')
     def test_list_pagination_page_reverse_with_href_links(self):
         self._test_list_pagination_page_reverse_with_href_links()
 
-    @decorators.idempotent_id('82a13efc-c18f-4249-b8ec-cec7cf26fbd6')
+    @test.idempotent_id('82a13efc-c18f-4249-b8ec-cec7cf26fbd6')
     def test_list_no_pagination_limit_0(self):
         self._test_list_no_pagination_limit_0()
 
-    @decorators.idempotent_id('27feb3f8-40f4-4e50-8cd2-7d0096a98682')
+    @test.idempotent_id('27feb3f8-40f4-4e50-8cd2-7d0096a98682')
     def test_list_validation_filters(self):
         self._test_list_validation_filters()

@@ -45,11 +45,10 @@ class OVSBridgeTestBase(ovs_test_base.OVSRyuTestBase):
         mock.patch.object(self.br, '_get_dp', autospec=True,
                           return_value=self._get_dp()).start()
         mock__send_msg = mock.patch.object(self.br, '_send_msg').start()
-        mock_delete_flows = mock.patch.object(self.br,
-                                              'uninstall_flows').start()
+        mock_delete_flows = mock.patch.object(self.br, 'delete_flows').start()
         self.mock = mock.Mock()
         self.mock.attach_mock(mock__send_msg, '_send_msg')
-        self.mock.attach_mock(mock_delete_flows, 'uninstall_flows')
+        self.mock.attach_mock(mock_delete_flows, 'delete_flows')
 
     def _get_dp(self):
         return self.dp, self.ofp, self.ofpp
@@ -136,12 +135,12 @@ class OVSBridgeTestBase(ovs_test_base.OVSRyuTestBase):
         cfg.OVS.of_listen_address = ""
         cfg.OVS.of_listen_port = ""
 
-        m_add_protocols = mock.patch.object(self.br, 'add_protocols')
+        m_set_protocols = mock.patch.object(self.br, 'set_protocols')
         m_set_controller = mock.patch.object(self.br, 'set_controller')
         m_set_ccm = mock.patch.object(self.br,
                                       'set_controllers_connection_mode')
 
-        with m_set_ccm as set_ccm, m_set_controller, m_add_protocols:
+        with m_set_ccm as set_ccm, m_set_controller, m_set_protocols:
             self.br.setup_controllers(cfg)
             set_ccm.assert_called_once_with("out-of-band")
 
@@ -173,7 +172,7 @@ class OVSDVRProcessTestMixin(object):
                                         gateway_ip=gateway_ip)
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
-            call.uninstall_flows(table_id=self.dvr_process_table_id,
+            call.delete_flows(table_id=self.dvr_process_table_id,
                 match=ofpp.OFPMatch(
                     eth_type=self.ether_types.ETH_TYPE_ARP,
                     arp_tpa=gateway_ip,
@@ -209,7 +208,7 @@ class OVSDVRProcessTestMixin(object):
                                         gateway_mac=gateway_mac)
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
-            call.uninstall_flows(table_id=self.dvr_process_table_id,
+            call.delete_flows(table_id=self.dvr_process_table_id,
                 match=ofpp.OFPMatch(
                     eth_src=gateway_mac,
                     eth_type=self.ether_types.ETH_TYPE_IPV6,
@@ -260,11 +259,11 @@ class OVSDVRProcessTestMixin(object):
                                    vif_mac=vif_mac)
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
-            call.uninstall_flows(table_id=self.dvr_process_table_id,
+            call.delete_flows(table_id=self.dvr_process_table_id,
                 match=ofpp.OFPMatch(
                     eth_dst=vif_mac,
                     vlan_vid=vlan_tag | ofp.OFPVID_PRESENT)),
-            call.uninstall_flows(table_id=self.dvr_process_table_id,
+            call.delete_flows(table_id=self.dvr_process_table_id,
                 match=ofpp.OFPMatch(
                     eth_src=vif_mac,
                     vlan_vid=vlan_tag | ofp.OFPVID_PRESENT)),

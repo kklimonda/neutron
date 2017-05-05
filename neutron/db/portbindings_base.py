@@ -14,7 +14,7 @@
 #    under the License.
 
 from neutron.api.v2 import attributes
-from neutron.db import _resource_extend as resource_extend
+from neutron.db import db_base_plugin_v2
 
 
 class PortBindingBaseMixin(object):
@@ -36,5 +36,5 @@ def _extend_port_dict_binding(plugin, port_res, port_db):
 
 
 def register_port_dict_function():
-    resource_extend.register_funcs(
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
         attributes.PORTS, [_extend_port_dict_binding])

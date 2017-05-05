@@ -63,33 +63,25 @@ The following are the current Neutron Lieutenants.
 +------------------------+---------------------------+----------------------+
 | Area                   | Lieutenant                | IRC nick             |
 +========================+===========================+======================+
-| API                    | Akihiro Motoki            | amotoki              |
-+------------------------+---------------------------+----------------------+
-| DB                     | Ann Taraday               | ataraday             |
+| API and DB             | Akihiro Motoki            | amotoki              |
+|                        +---------------------------+----------------------+
+|                        | Henry Gessau              | HenryG               |
 +------------------------+---------------------------+----------------------+
 | Built-In Control Plane | Kevin Benton              | kevinbenton          |
 +------------------------+---------------------------+----------------------+
 | Client                 | Akihiro Motoki            | amotoki              |
++------------------------+---------------------------+----------------------+
+| Docs                   | Edgar Magana              | emagana              |
++------------------------+---------------------------+----------------------+
+| Infra                  | Armando Migliaccio        | armax                |
 |                        +---------------------------+----------------------+
-|                        | Abhishek Raut             | abhiraut             |
+|                        | Doug Wiegley              | dougwig              |
 +------------------------+---------------------------+----------------------+
-| Docs                   | John Davidge              | john-davidge         |
+| L3                     | Carl Baldwin              | carl_baldwin         |
 +------------------------+---------------------------+----------------------+
-| Infra                  | Anindita Das              | dasanind             |
-|                        +---------------------------+----------------------+
-|                        | Dariusz Smigiel           | dasm                 |
-|                        +---------------------------+----------------------+
-|                        | Ihar Hrachyshka           | ihrachys             |
-|                        +---------------------------+----------------------+
-|                        | Armando Migliaccio        | armax                |
+| Services               | Doug Wiegley              | dougwig              |
 +------------------------+---------------------------+----------------------+
-| L3                     | Brian Haley               | haleyb               |
-+                        +---------------------------+----------------------+
-|                        | Miguel Lavalle            | mlavalle             |
-+------------------------+---------------------------+----------------------+
-| Services               | Ryan Tidwell              | tidwellr             |
-+------------------------+---------------------------+----------------------+
-| Testing                | Jakub Libosvar            | jlibosva             |
+| Testing                | Assaf Muller              | amuller              |
 +------------------------+---------------------------+----------------------+
 
 Some notes on the above:
@@ -112,15 +104,17 @@ updating the core review team for the sub-project's repositories.
 +------------------------+---------------------------+----------------------+
 | Area                   | Lieutenant                | IRC nick             |
 +========================+===========================+======================+
+| dragonflow             | Eran Gampel               | gampel               |
+|                        +---------------------------+----------------------+
+|                        | Gal Sagie                 | gsagie               |
++------------------------+---------------------------+----------------------+
 | networking-bgpvpn      | Mathieu Rohon             | matrohon             |
-| networking-bagpipe     +---------------------------+----------------------+
+|                        +---------------------------+----------------------+
 |                        | Thomas Morin              | tmorin               |
 +------------------------+---------------------------+----------------------+
-| net...-dynamic-routing | Ryan Tidwell              | tidwellr             |
-|                        +---------------------------+----------------------+
-|                        | Vikram Choudhary          | vikram               |
+| networking-calico      | Neil Jerram               | neiljerram           |
 +------------------------+---------------------------+----------------------+
-| neutron-fwaas          | Sridar Kandaswamy         | SridarK              |
+| networking-l2gw        | Sukhdev Kapur             | sukhdev              |
 +------------------------+---------------------------+----------------------+
 | networking-midonet     | Ryu Ishimoto              | ryu25                |
 |                        +---------------------------+----------------------+
@@ -130,12 +124,18 @@ updating the core review team for the sub-project's repositories.
 +------------------------+---------------------------+----------------------+
 | networking-odl         | Isaku Yamahata            | yamahata             |
 +------------------------+---------------------------+----------------------+
+| networking-ofagent     | YAMAMOTO Takashi          | yamamoto             |
++------------------------+---------------------------+----------------------+
+| networking-onos        | Vikram Choudhary          | vikram               |
+|                        +---------------------------+----------------------+
+|                        | Albert Dongfeng           | albert_dongfeng      |
++------------------------+---------------------------+----------------------+
 | networking-ovn         | Russell Bryant            | russellb             |
 +------------------------+---------------------------+----------------------+
 | networking-sfc         | Cathy Zhang               | cathy                |
 +------------------------+---------------------------+----------------------+
-
-(*) To be retired after Ocata (mitaka last stable branch).
+| octavia                | German Eichberger         | xgerman              |
++------------------------+---------------------------+----------------------+
 
 Existing Core Reviewers
 -----------------------
@@ -166,7 +166,7 @@ reviewers:
 Neutron Teams
 =============
 
-Given all of the above, Neutron has a number of core reviewer teams with
+Given all of the above, Neutron has the following core reviewer teams with
 responsibility over the areas of code listed below:
 
 Neutron Core Reviewer Team
@@ -180,6 +180,34 @@ merge rights to the following git repositories:
 Please note that as we adopt to the system above with core specialty in
 particular areas, we expect this broad core team to shrink as people naturally
 evolve into an area of specialization.
+
+Neutron Dynamic Routing Core Reviewer Team
+------------------------------------------
+Neutron `Dynamic Routing core reviewers <https://review.openstack.org/#/admin/groups/1366,members>`_
+have merge rights to the following git repositories:
+
+* `openstack/neutron-dynamic-routing <https://git.openstack.org/cgit/openstack/neutron-dynamic-routing/>`_
+
+Neutron FWaaS Core Reviewer Team
+--------------------------------
+Neutron `FWaaS core reviewers <https://review.openstack.org/#/admin/groups/500,members>`_
+have merge rights to the following git repositories:
+
+* `openstack/neutron-fwaas <https://git.openstack.org/cgit/openstack/neutron-fwaas/>`_
+
+Neutron LBaaS Core Reviewer Team
+--------------------------------
+Neutron `LBaaS core reviewers <https://review.openstack.org/#/admin/groups/501,members>`_
+have merge rights to the following git repositories:
+
+* `openstack/neutron-lbaas <https://git.openstack.org/cgit/openstack/neutron-lbaas/>`_
+
+Neutron VPNaaS Core Reviewer Team
+---------------------------------
+Neutron `VPNaaS core reviewers <https://review.openstack.org/#/admin/groups/502,members>`_
+have merge rights to the following git repositories:
+
+* `openstack/neutron-vpnaas <https://git.openstack.org/cgit/openstack/neutron-vpnaas/>`_
 
 Neutron Core Reviewer Teams for Plugins and Drivers
 ---------------------------------------------------

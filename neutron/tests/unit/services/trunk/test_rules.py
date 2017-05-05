@@ -17,11 +17,10 @@ import mock
 
 import testtools
 
-from neutron_lib.api.definitions import trunk as trunk_api
 from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
 
+from neutron import manager
 from neutron.plugins.common import utils
 from neutron.plugins.ml2 import driver_api as api
 from neutron.services.trunk import constants
@@ -43,8 +42,6 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
         self.context = mock.ANY
 
         mock.patch.object(rules.SubPortsValidator, '_get_port_mtu',
-                          return_value=None).start()
-        mock.patch.object(rules.SubPortsValidator, '_prepare_subports',
                           return_value=None).start()
 
     def test_validate_subport_subport_and_trunk_shared_port_id(self):
@@ -88,7 +85,7 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
             validator.validate(self.context)
             f.assert_called_once_with(self.context, parent_port=False)
 
-    def test_validate_subport_subport_invalid_segmentation_type(self):
+    def test_validate_subport_subport_invalid_segmenation_type(self):
         validator = rules.SubPortsValidator(
             self.segmentation_types,
             [{'port_id': uuidutils.generate_uuid(),
@@ -98,7 +95,7 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
                           validator.validate,
                           self.context)
 
-    def test_validate_subport_missing_segmentation_type(self):
+    def test_validate_subport_missing_segmenation_type(self):
         validator = rules.SubPortsValidator(
             self.segmentation_types,
             [{'port_id': uuidutils.generate_uuid(),
@@ -107,7 +104,7 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
                           validator.validate,
                           self.context)
 
-    def test_validate_subport_missing_segmentation_id(self):
+    def test_validate_subport_missing_segmenation_id(self):
         validator = rules.SubPortsValidator(
             self.segmentation_types,
             [{'port_id': uuidutils.generate_uuid(),
@@ -124,26 +121,6 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
         self.assertRaises(n_exc.InvalidInput,
                           validator.validate,
                           self.context, basic_validation=True)
-
-
-class SubPortsValidatorPrepareTestCase(base.BaseTestCase):
-
-    def setUp(self):
-        super(SubPortsValidatorPrepareTestCase, self).setUp()
-        self.segmentation_types = {constants.VLAN: utils.is_valid_vlan_tag}
-        self.context = mock.ANY
-
-        mock.patch.object(rules.SubPortsValidator, '_get_port_mtu',
-                          return_value=None).start()
-
-    def test__prepare_subports_raise_no_provider_ext(self):
-        validator = rules.SubPortsValidator(
-            self.segmentation_types,
-            [{'port_id': uuidutils.generate_uuid(),
-              'segmentation_type': 'inherit'}])
-        self.assertRaises(n_exc.InvalidInput,
-                          validator._prepare_subports,
-                          self.context)
 
 
 class SubPortsValidatorMtuSanityTestCase(test_plugin.Ml2PluginV2TestCase):
@@ -175,7 +152,7 @@ class SubPortsValidatorMtuSanityTestCase(test_plugin.Ml2PluginV2TestCase):
 
     def _test_validate_subport_trunk_mtu(
             self, subport_net_mtu, trunk_net_mtu):
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         orig_get_network = plugin.get_network
 
         def get_network_adjust_mtu(*args, **kwargs):
@@ -234,8 +211,7 @@ class TrunkPortValidatorTestCase(test_plugin.Ml2PluginV2TestCase):
             trunk = {'port_id': trunk_parent['port']['id'],
                      'tenant_id': 'test_tenant',
                      'sub_ports': []}
-            self.trunk_plugin.create_trunk(
-                self.context, {trunk_api.ALIAS: trunk})
+            self.trunk_plugin.create_trunk(self.context, {'trunk': trunk})
             validator = rules.TrunkPortValidator(trunk_parent['port']['id'])
             self.assertRaises(trunk_exc.ParentPortInUse,
                               validator.validate,
@@ -249,8 +225,7 @@ class TrunkPortValidatorTestCase(test_plugin.Ml2PluginV2TestCase):
                      'sub_ports': [{'port_id': subport['port']['id'],
                                     'segmentation_type': 'vlan',
                                     'segmentation_id': 2}]}
-            self.trunk_plugin.create_trunk(
-                self.context, {trunk_api.ALIAS: trunk})
+            self.trunk_plugin.create_trunk(self.context, {'trunk': trunk})
             validator = rules.TrunkPortValidator(subport['port']['id'])
             self.assertRaises(trunk_exc.TrunkPortInUse,
                               validator.validate,
@@ -258,7 +233,7 @@ class TrunkPortValidatorTestCase(test_plugin.Ml2PluginV2TestCase):
 
     def test_validate_port_has_binding_host(self):
         with self.port() as port:
-            core_plugin = directory.get_plugin()
+            core_plugin = manager.NeutronManager.get_plugin()
             port['port']['binding:host_id'] = 'host'
             core_plugin.update_port(self.context, port['port']['id'], port)
             validator = rules.TrunkPortValidator(port['port']['id'])
@@ -283,9 +258,11 @@ class TrunkPortValidatorTestCase(test_plugin.Ml2PluginV2TestCase):
         # need to trigger a driver registration
         fakes.FakeDriverCanTrunkBoundPort.create()
         self.trunk_plugin = trunk_plugin.TrunkPlugin()
-        directory.add_plugin('trunk', self.trunk_plugin)
-        with self.port() as port:
-            core_plugin = directory.get_plugin()
+        with self.port() as port, \
+                mock.patch.object(manager.NeutronManager,
+                                  "get_service_plugins") as f:
+            f.return_value = {'trunk': self.trunk_plugin}
+            core_plugin = manager.NeutronManager.get_plugin()
             port['port']['binding:host_id'] = 'host'
             core_plugin.update_port(self.context, port['port']['id'], port)
             validator = rules.TrunkPortValidator(port['port']['id'])
@@ -296,11 +273,13 @@ class TrunkPortValidatorTestCase(test_plugin.Ml2PluginV2TestCase):
         # need to trigger a driver registration
         fakes.FakeDriverCanTrunkBoundPort.create()
         self.trunk_plugin = trunk_plugin.TrunkPlugin()
-        directory.add_plugin('trunk', self.trunk_plugin)
         with self.port() as port, \
+                mock.patch.object(manager.NeutronManager,
+                                  "get_service_plugins") as f, \
                 mock.patch.object(trunk_utils, "is_driver_compatible",
                                   return_value=True) as g:
-            core_plugin = directory.get_plugin()
+            f.return_value = {'trunk': self.trunk_plugin}
+            core_plugin = manager.NeutronManager.get_plugin()
             port['port']['binding:host_id'] = 'host'
             core_plugin.update_port(self.context, port['port']['id'], port)
             validator = rules.TrunkPortValidator(port['port']['id'])
@@ -316,12 +295,14 @@ class TrunkPortValidatorTestCase(test_plugin.Ml2PluginV2TestCase):
         d1 = fakes.FakeDriver.create()
         d2 = fakes.FakeDriverWithAgent.create()
         self.trunk_plugin = trunk_plugin.TrunkPlugin()
-        directory.add_plugin('trunk', self.trunk_plugin)
         self.trunk_plugin._drivers = [d1, d2]
         with self.port() as port, \
+                mock.patch.object(manager.NeutronManager,
+                                  "get_service_plugins") as f, \
                 mock.patch.object(trunk_utils, "is_driver_compatible",
                                   return_value=True):
-            core_plugin = directory.get_plugin()
+            f.return_value = {'trunk': self.trunk_plugin}
+            core_plugin = manager.NeutronManager.get_plugin()
             port['port']['binding:host_id'] = 'host'
             core_plugin.update_port(self.context, port['port']['id'], port)
             validator = rules.TrunkPortValidator(port['port']['id'])
@@ -337,7 +318,7 @@ class TrunkPortValidatorTestCase(test_plugin.Ml2PluginV2TestCase):
 
     def test_check_not_in_use_raises(self):
         with self.port() as port:
-            core_plugin = directory.get_plugin()
+            core_plugin = manager.NeutronManager.get_plugin()
             port['port']['device_id'] = 'foo_device_id'
             core_plugin.update_port(self.context, port['port']['id'], port)
             validator = rules.TrunkPortValidator(port['port']['id'])

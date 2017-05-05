@@ -14,18 +14,19 @@
 #    under the License.
 
 import netaddr
-from neutron_lib.utils import helpers
+from neutron_lib.db import model_base
 from oslo_config import cfg
 from oslo_log import log as logging
+import sqlalchemy as sa
+from sqlalchemy import orm
 
 from neutron._i18n import _
 from neutron.common import utils
-from neutron.db import _resource_extend as resource_extend
+from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
 from neutron.db import models_v2
 from neutron.extensions import extraroute
 from neutron.extensions import l3
-from neutron.objects import router as l3_obj
 
 
 LOG = logging.getLogger(__name__)
@@ -39,6 +40,19 @@ extra_route_opts = [
 cfg.CONF.register_opts(extra_route_opts)
 
 
+class RouterRoute(model_base.BASEV2, models_v2.Route):
+    router_id = sa.Column(sa.String(36),
+                          sa.ForeignKey('routers.id',
+                                        ondelete="CASCADE"),
+                          primary_key=True)
+
+    router = orm.relationship(l3_db.Router,
+                              backref=orm.backref("route_list",
+                                                  lazy='joined',
+                                                  cascade='delete'))
+    revises_on_change = ('router', )
+
+
 class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
     """Mixin class to support extra route configuration on router."""
 
@@ -48,7 +62,7 @@ class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
                                     router_db['route_list']
                                 ))
 
-    resource_extend.register_funcs(
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
         l3.ROUTERS, ['_extend_router_dict_extraroute'])
 
     def update_router(self, context, id, router):
@@ -109,43 +123,41 @@ class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
                               routes)
         old_routes, routes_dict = self._get_extra_routes_dict_by_router_id(
             context, router['id'])
-        added, removed = helpers.diff_list_of_dict(old_routes,
-                                                   routes)
+        added, removed = utils.diff_list_of_dict(old_routes,
+                                                 routes)
         LOG.debug('Added routes are %s', added)
         for route in added:
-            l3_obj.RouterRoute(
-                context,
+            router_routes = RouterRoute(
                 router_id=router['id'],
-                destination=utils.AuthenticIPNetwork(route['destination']),
-                nexthop=netaddr.IPAddress(route['nexthop'])).create()
+                destination=route['destination'],
+                nexthop=route['nexthop'])
+            context.session.add(router_routes)
 
         LOG.debug('Removed routes are %s', removed)
         for route in removed:
-            l3_obj.RouterRoute.get_object(
-                context,
-                router_id=router['id'],
-                destination=route['destination'],
-                nexthop=route['nexthop']).delete()
+            context.session.delete(
+                routes_dict[(route['destination'], route['nexthop'])])
 
     @staticmethod
     def _make_extra_route_list(extra_routes):
-        # NOTE(yamamoto): the extra_routes argument is either object or db row
-        return [{'destination': str(route['destination']),
-                 'nexthop': str(route['nexthop'])}
+        return [{'destination': route['destination'],
+                 'nexthop': route['nexthop']}
                 for route in extra_routes]
 
     def _get_extra_routes_by_router_id(self, context, id):
-        router_objs = l3_obj.RouterRoute.get_objects(context, router_id=id)
-        return self._make_extra_route_list(router_objs)
+        query = context.session.query(RouterRoute)
+        query = query.filter_by(router_id=id)
+        return self._make_extra_route_list(query)
 
     def _get_extra_routes_dict_by_router_id(self, context, id):
-        router_objs = l3_obj.RouterRoute.get_objects(context, router_id=id)
+        query = context.session.query(RouterRoute)
+        query = query.filter_by(router_id=id)
         routes = []
         routes_dict = {}
-        for route in router_objs:
-            routes.append({'destination': route.destination,
-                           'nexthop': route.nexthop})
-            routes_dict[(route.destination, route.nexthop)] = route
+        for route in query:
+            routes.append({'destination': route['destination'],
+                           'nexthop': route['nexthop']})
+            routes_dict[(route['destination'], route['nexthop'])] = route
         return routes, routes_dict
 
     def _confirm_router_interface_not_in_use(self, context, router_id,

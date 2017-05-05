@@ -15,60 +15,51 @@
 
 import mock
 import netaddr
-from neutron_lib import constants
-from neutron_lib import context as nctx
-from neutron_lib.plugins import directory
-from oslo_utils import uuidutils
 
-from neutron.callbacks import registry
+from neutron import context as nctx
 from neutron.db import models_v2
+from neutron import manager
 from neutron.plugins.ml2 import config
 from neutron.tests.unit.plugins.ml2 import test_plugin
 
 
 class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
 
-    l3_plugin = ('neutron.tests.unit.extensions.test_extraroute.'
-                 'TestExtraRouteL3NatServicePlugin')
-
     _extension_drivers = ['qos']
 
     def get_additional_service_plugins(self):
         p = super(TestRevisionPlugin, self).get_additional_service_plugins()
         p.update({'revision_plugin_name': 'revisions',
-                  'qos_plugin_name': 'qos',
-                  'tag_name': 'tag'})
+                  'qos_plugin_name': 'qos'})
         return p
 
     def setUp(self):
         config.cfg.CONF.set_override('extension_drivers',
                                      self._extension_drivers,
                                      group='ml2')
+        mock.patch('neutron.services.qos.notification_drivers.message_queue'
+                   '.RpcQosServiceNotificationDriver').start()
         super(TestRevisionPlugin, self).setUp()
-        self.cp = directory.get_plugin()
-        self.l3p = directory.get_plugin(constants.L3)
+        self.cp = manager.NeutronManager.get_plugin()
+        self.l3p = (manager.NeutronManager.
+                    get_service_plugins()['L3_ROUTER_NAT'])
         self.ctx = nctx.get_admin_context()
 
-    @mock.patch.object(registry, 'notify')
-    def test_handle_expired_object(self, notify_mock):
-        rp = directory.get_plugin('revision_plugin')
+    def test_handle_expired_object(self):
+        rp = manager.NeutronManager.get_service_plugins()['revision_plugin']
         with self.port():
             with self.ctx.session.begin():
                 ipal_obj = self.ctx.session.query(models_v2.IPAllocation).one()
                 # load port into our session
                 port_obj = self.ctx.session.query(models_v2.Port).one()
                 # simulate concurrent delete in another session
-                other_ctx = nctx.get_admin_context()
-                other_ctx.session.delete(
-                    other_ctx.session.query(models_v2.Port).first()
-                )
+                nctx.get_admin_context().session.query(models_v2.Port).delete()
                 # expire the port so the revision bumping code will trigger a
                 # lookup on its attributes and encounter an ObjectDeletedError
                 self.ctx.session.expire(port_obj)
                 rp._bump_related_revisions(self.ctx.session, ipal_obj)
 
-    @mock.patch.object(registry, 'notify')
-    def test_port_name_update_revises(self, notify_mock):
+    def test_port_name_update_revises(self):
         with self.port() as port:
             rev = port['port']['revision_number']
             new = {'port': {'name': 'seaweed'}}
@@ -76,8 +67,7 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
             new_rev = response['port']['revision_number']
             self.assertGreater(new_rev, rev)
 
-    @mock.patch.object(registry, 'notify')
-    def test_port_ip_update_revises(self, notify_mock):
+    def test_port_ip_update_revises(self):
         with self.port() as port:
             rev = port['port']['revision_number']
             new = {'port': {'fixed_ips': port['port']['fixed_ips']}}
@@ -131,26 +121,10 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         self.assertGreater(updated['revision_number'],
                            router['revision_number'])
         # add an intf and make sure it bumps rev
-        with self.subnet(tenant_id='some_tenant', cidr='10.0.1.0/24') as s:
+        with self.subnet(tenant_id='some_tenant') as s:
             interface_info = {'subnet_id': s['subnet']['id']}
-        with mock.patch.object(registry, 'notify'):
-            self.l3p.add_router_interface(self.ctx, router['id'],
-                                          interface_info)
+        self.l3p.add_router_interface(self.ctx, router['id'], interface_info)
         router = updated
-        updated = self.l3p.get_router(self.ctx, router['id'])
-        self.assertGreater(updated['revision_number'],
-                           router['revision_number'])
-        # Add a route and make sure it bumps revision number
-        router = updated
-        body = {'router': {'routes': [{'destination': '192.168.2.0/24',
-                                       'nexthop': '10.0.1.3'}]}}
-        self.l3p.update_router(self.ctx, router['id'], body)
-        updated = self.l3p.get_router(self.ctx, router['id'])
-        self.assertGreater(updated['revision_number'],
-                           router['revision_number'])
-        router = updated
-        body['router']['routes'] = []
-        self.l3p.update_router(self.ctx, router['id'], body)
         updated = self.l3p.get_router(self.ctx, router['id'])
         self.assertGreater(updated['revision_number'],
                            router['revision_number'])
@@ -161,13 +135,12 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         self.assertGreater(updated['revision_number'],
                            router['revision_number'])
 
-    @mock.patch.object(registry, 'notify')
-    def test_qos_policy_bump_port_revision(self, notify_mock):
+    def test_qos_policy_bump_port_revision(self):
         with self.port() as port:
             rev = port['port']['revision_number']
-            qos_plugin = directory.get_plugin('QOS')
+            qos_plugin = manager.NeutronManager.get_service_plugins()['QOS']
             qos_policy = {'policy': {'name': "policy1",
-                                     'project_id': uuidutils.generate_uuid()}}
+                                     'tenant_id': "tenant1"}}
             qos_obj = qos_plugin.create_policy(self.ctx, qos_policy)
             data = {'port': {'qos_policy_id': qos_obj['id']}}
             response = self._update('ports', port['port']['id'], data)
@@ -177,27 +150,11 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
     def test_qos_policy_bump_network_revision(self):
         with self.network() as network:
             rev = network['network']['revision_number']
-            qos_plugin = directory.get_plugin('QOS')
+            qos_plugin = manager.NeutronManager.get_service_plugins()['QOS']
             qos_policy = {'policy': {'name': "policy1",
-                                     'project_id': uuidutils.generate_uuid()}}
+                                     'tenant_id': "tenant1"}}
             qos_obj = qos_plugin.create_policy(self.ctx, qos_policy)
             data = {'network': {'qos_policy_id': qos_obj['id']}}
             response = self._update('networks', network['network']['id'], data)
             new_rev = response['network']['revision_number']
             self.assertGreater(new_rev, rev)
-
-    def test_net_tag_bumps_net_revision(self):
-        with self.network() as network:
-            rev = network['network']['revision_number']
-            tag_plugin = directory.get_plugin('TAG')
-            tag_plugin.update_tag(self.ctx, 'networks',
-                                  network['network']['id'], 'mytag')
-            updated = directory.get_plugin().get_network(
-                self.ctx, network['network']['id'])
-            self.assertGreater(updated['revision_number'], rev)
-            tag_plugin.delete_tag(self.ctx, 'networks',
-                                  network['network']['id'], 'mytag')
-            rev = updated['revision_number']
-            updated = directory.get_plugin().get_network(
-                self.ctx, network['network']['id'])
-            self.assertGreater(updated['revision_number'], rev)

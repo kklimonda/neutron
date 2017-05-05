@@ -19,14 +19,12 @@ import mock
 import netaddr
 from neutron_lib import constants
 from oslo_config import cfg
-import oslo_messaging
-from oslo_utils import fileutils
-import testtools
 
+from neutron.agent.common import config
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import external_process
 from neutron.common import constants as n_const
-from neutron.conf.agent import common as config
+from neutron.common import utils
 from neutron.conf.agent import dhcp as dhcp_config
 from neutron.conf import common as base_config
 from neutron.extensions import extra_dhcp_opt as edo_ext
@@ -899,7 +897,7 @@ class TestBase(TestConfBase):
         self.config_parse(self.conf)
         self.conf.set_override('state_path', '')
 
-        self.replace_p = mock.patch('neutron_lib.utils.file.replace_file')
+        self.replace_p = mock.patch('neutron.common.utils.replace_file')
         self.execute_p = mock.patch('neutron.agent.common.utils.execute')
         mock.patch('neutron.agent.linux.utils.execute').start()
         self.safe = self.replace_p.start()
@@ -960,11 +958,11 @@ class TestDhcpLocalProcess(TestBase):
         lp = LocalChild(self.conf, FakeV4Network())
         self.assertEqual(lp.get_conf_file_name('dev'), tpl)
 
-    @mock.patch.object(fileutils, 'ensure_tree')
+    @mock.patch.object(utils, 'ensure_dir')
     def test_ensure_dir_called(self, ensure_dir):
         LocalChild(self.conf, FakeV4Network())
         ensure_dir.assert_called_once_with(
-            '/dhcp/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', mode=0o755)
+            '/dhcp/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
 
     def test_enable_already_active(self):
         with mock.patch.object(LocalChild, 'active') as patched:
@@ -975,7 +973,7 @@ class TestDhcpLocalProcess(TestBase):
             self.assertEqual(lp.called, ['restart'])
             self.assertFalse(self.mock_mgr.return_value.setup.called)
 
-    @mock.patch.object(fileutils, 'ensure_tree')
+    @mock.patch.object(utils, 'ensure_dir')
     def test_enable(self, ensure_dir):
         attrs_to_mock = dict(
             [(a, mock.DEFAULT) for a in
@@ -995,7 +993,7 @@ class TestDhcpLocalProcess(TestBase):
             self.assertEqual(lp.called, ['spawn'])
             self.assertTrue(mocks['interface_name'].__set__.called)
             ensure_dir.assert_called_with(
-                '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc', mode=0o755)
+                '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc')
 
     def _assert_disabled(self, lp):
         self.assertTrue(lp.process_monitor.unregister.called)
@@ -1059,7 +1057,7 @@ class TestDhcpLocalProcess(TestBase):
         self.assertEqual(lp.interface_name, 'tap0')
 
     def test_set_interface_name(self):
-        with mock.patch('neutron_lib.utils.file.replace_file') as replace:
+        with mock.patch('neutron.common.utils.replace_file') as replace:
             lp = LocalChild(self.conf, FakeDualNetwork())
             with mock.patch.object(lp, 'get_conf_file_name') as conf_file:
                 conf_file.return_value = '/interface'
@@ -1127,9 +1125,10 @@ class TestDnsmasq(TestBase):
                         lease_duration, seconds)])
                 possible_leases += netaddr.IPNetwork(s.cidr).size
 
-        if hasattr(network, 'mtu'):
-            expected.append(
-                '--dhcp-option-force=option:mtu,%s' % network.mtu)
+        if cfg.CONF.advertise_mtu:
+            if hasattr(network, 'mtu'):
+                expected.append(
+                    '--dhcp-option-force=option:mtu,%s' % network.mtu)
 
         expected.append('--dhcp-lease-max=%d' % min(
             possible_leases, max_leases))
@@ -1177,11 +1176,11 @@ class TestDnsmasq(TestBase):
         self.conf.set_override('dnsmasq_config_file', '/foo')
         self._test_spawn(['--conf-file=/foo', '--domain=openstacklocal'])
 
-    def test_spawn_no_dns_domain(self):
+    def test_spawn_no_dhcp_domain(self):
         (exp_host_name, exp_host_data,
-         exp_addn_name, exp_addn_data) = self._test_no_dns_domain_alloc_data
-        self.conf.set_override('dns_domain', '')
-        network = FakeDualNetwork(domain=self.conf.dns_domain)
+         exp_addn_name, exp_addn_data) = self._test_no_dhcp_domain_alloc_data
+        self.conf.set_override('dhcp_domain', '')
+        network = FakeDualNetwork(domain=self.conf.dhcp_domain)
         self._test_spawn(['--conf-file='], network=network)
         self.safe.assert_has_calls([mock.call(exp_host_name, exp_host_data),
                                     mock.call(exp_addn_name, exp_addn_data)])
@@ -1234,7 +1233,7 @@ class TestDnsmasq(TestBase):
         self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
                          no_resolv='')
 
-    def test_spawn_cfg_with_local_resolv_overridden(self):
+    def test_spawn_cfg_with_local_resolv_overriden(self):
         self.conf.set_override('dnsmasq_local_resolv', True)
         self.conf.set_override('dnsmasq_dns_servers', ['8.8.8.8'])
 
@@ -1254,12 +1253,14 @@ class TestDnsmasq(TestBase):
                           '--dhcp-broadcast'])
 
     def test_spawn_cfg_advertise_mtu(self):
+        cfg.CONF.set_override('advertise_mtu', True)
         network = FakeV4Network()
         network.mtu = 1500
         self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
                          network)
 
     def test_spawn_cfg_advertise_mtu_plugin_doesnt_pass_mtu_value(self):
+        cfg.CONF.set_override('advertise_mtu', True)
         network = FakeV4Network()
         self._test_spawn(['--conf-file=', '--domain=openstacklocal'],
                          network)
@@ -1610,7 +1611,7 @@ class TestDnsmasq(TestBase):
         self._test_output_opts_file(expected, FakeV6Network())
 
     @property
-    def _test_no_dns_domain_alloc_data(self):
+    def _test_no_dhcp_domain_alloc_data(self):
         exp_host_name = '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc/host'
         exp_host_data = ('00:00:80:aa:bb:cc,host-192-168-0-2,'
                          '192.168.0.2\n'
@@ -2166,8 +2167,8 @@ class TestDnsmasq(TestBase):
 
     def test_should_enable_metadata_isolated_meta_disabled_returns_false(self):
         self.conf.set_override('enable_isolated_metadata', False)
-        self.assertFalse(dhcp.Dnsmasq.should_enable_metadata(
-            self.conf, FakeV4MetadataNetwork()))
+        self.assertFalse(dhcp.Dnsmasq.should_enable_metadata(self.conf,
+                                                             mock.ANY))
 
     def test_should_enable_metadata_with_metadata_network_returns_true(self):
         self.conf.set_override('enable_metadata_network', True)
@@ -2411,51 +2412,6 @@ class TestDeviceManager(TestConfBase):
             mgr.driver.init_l3.assert_called_with(
                 'ns-XXX', ['192.168.0.6/24', 'fdca:3ba5:a17a:4ba3::2/64'],
                 namespace='qdhcp-ns')
-
-    def test__setup_reserved_dhcp_port_with_fake_remote_error(self):
-        """Test scenario where a fake_network has two reserved ports, and
-        update_dhcp_port fails for the first of those with a RemoteError
-        different than DhcpPortInUse.
-        """
-        # Setup with a reserved DHCP port.
-        fake_network = FakeDualNetworkReserved2()
-        fake_network.tenant_id = 'Tenant A'
-        reserved_port_2 = fake_network.ports[-1]
-
-        mock_plugin = mock.Mock()
-        dh = dhcp.DeviceManager(cfg.CONF, mock_plugin)
-        messaging_error = oslo_messaging.RemoteError(
-            exc_type='FakeRemoteError')
-        mock_plugin.update_dhcp_port.side_effect = [messaging_error,
-                                                    reserved_port_2]
-
-        with testtools.ExpectedException(oslo_messaging.RemoteError):
-            dh.setup_dhcp_port(fake_network)
-
-    def test__setup_reserved_dhcp_port_with_known_remote_error(self):
-        """Test scenario where a fake_network has two reserved ports, and
-        update_dhcp_port fails for the first of those with a DhcpPortInUse
-        RemoteError.
-        """
-        # Setup with a reserved DHCP port.
-        fake_network = FakeDualNetworkReserved2()
-        fake_network.tenant_id = 'Tenant A'
-        reserved_port_1 = fake_network.ports[-2]
-        reserved_port_2 = fake_network.ports[-1]
-
-        mock_plugin = mock.Mock()
-        dh = dhcp.DeviceManager(cfg.CONF, mock_plugin)
-        messaging_error = oslo_messaging.RemoteError(exc_type='DhcpPortInUse')
-        mock_plugin.update_dhcp_port.side_effect = [messaging_error,
-                                                    reserved_port_2]
-
-        with mock.patch.object(dhcp.LOG, 'info') as log:
-            dh.setup_dhcp_port(fake_network)
-            self.assertEqual(1, log.call_count)
-        expected_calls = [mock.call(reserved_port_1.id, mock.ANY),
-                          mock.call(reserved_port_2.id, mock.ANY)]
-        self.assertEqual(expected_calls,
-                         mock_plugin.update_dhcp_port.call_args_list)
 
 
 class TestDictModel(base.BaseTestCase):

@@ -16,7 +16,6 @@
 import copy
 
 import netaddr
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
 from oslo_db import exception as db_exc
@@ -24,11 +23,12 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 from sqlalchemy import and_
 
-from neutron._i18n import _LE, _LW
+from neutron._i18n import _, _LE, _LW
 from neutron.common import constants as n_const
 from neutron.common import ipv6_utils
 from neutron.db import ipam_backend_mixin
 from neutron.db import models_v2
+from neutron.extensions import portbindings
 from neutron.ipam import driver
 from neutron.ipam import exceptions as ipam_exc
 
@@ -221,27 +221,18 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     ips.append([{'subnet_id': s['id']}
                                 for s in subnets])
 
-        ips.extend(self._get_auto_address_ips(v6_stateless, p))
-
+        is_router_port = (
+            p['device_owner'] in constants.ROUTER_INTERFACE_OWNERS_SNAT)
+        if not is_router_port:
+            for subnet in v6_stateless:
+                # IP addresses for IPv6 SLAAC and DHCPv6-stateless subnets
+                # are implicitly included.
+                ips.append({'subnet_id': subnet['id'],
+                            'subnet_cidr': subnet['cidr'],
+                            'eui64_address': True,
+                            'mac': p['mac_address']})
         ipam_driver = driver.Pool.get_instance(None, context)
         return self._ipam_allocate_ips(context, ipam_driver, p, ips)
-
-    def _get_auto_address_ips(self, v6_stateless_subnets, port,
-                              exclude_subnet_ids=None):
-        exclude_subnet_ids = exclude_subnet_ids or []
-        ips = []
-        is_router_port = (
-            port['device_owner'] in constants.ROUTER_INTERFACE_OWNERS_SNAT)
-        if not is_router_port:
-            for subnet in v6_stateless_subnets:
-                if subnet['id'] not in exclude_subnet_ids:
-                    # IP addresses for IPv6 SLAAC and DHCPv6-stateless subnets
-                    # are implicitly included.
-                    ips.append({'subnet_id': subnet['id'],
-                                'subnet_cidr': subnet['cidr'],
-                                'eui64_address': True,
-                                'mac': port['mac_address']})
-        return ips
 
     def _test_fixed_ips_for_port(self, context, network_id, fixed_ips,
                                  device_owner, subnets):
@@ -263,8 +254,12 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     subnet['cidr'] != n_const.PROVISIONAL_IPV6_PD_PREFIX):
                 if (is_auto_addr_subnet and device_owner not in
                         constants.ROUTER_INTERFACE_OWNERS):
-                    raise ipam_exc.AllocationOnAutoAddressSubnet(
-                        ip=fixed['ip_address'], subnet_id=subnet['id'])
+                    msg = (_("IPv6 address %(address)s can not be directly "
+                            "assigned to a port on subnet %(id)s since the "
+                            "subnet is configured for automatic addresses") %
+                           {'address': fixed['ip_address'],
+                            'id': subnet['id']})
+                    raise n_exc.InvalidInput(error_message=msg)
                 fixed_ip_list.append({'subnet_id': subnet['id'],
                                       'ip_address': fixed['ip_address']})
             else:
@@ -306,14 +301,6 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
         if changes.remove:
             removed = self._ipam_deallocate_ips(context, ipam_driver, port,
                                                 changes.remove)
-
-        v6_stateless = self._classify_subnets(
-            context, subnets)[2]
-        handled_subnet_ids = [ip['subnet_id'] for ip in
-                              to_add + changes.original + changes.remove]
-        to_add.extend(self._get_auto_address_ips(
-            v6_stateless, port, handled_subnet_ids))
-
         if to_add:
             added = self._ipam_allocate_ips(context, ipam_driver,
                                             port, to_add)
@@ -418,11 +405,6 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
 
     def add_auto_addrs_on_network_ports(self, context, subnet, ipam_subnet):
         """For an auto-address subnet, add addrs for ports on the net."""
-        # TODO(kevinbenton): remove after bug/1666493 is resolved
-        if subnet['id'] != ipam_subnet.subnet_manager.neutron_id:
-            raise RuntimeError(
-                "Subnet manager doesn't match subnet. %s != %s"
-                % (subnet['id'], ipam_subnet.subnet_manager.neutron_id))
         with context.session.begin(subtransactions=True):
             network_id = subnet['network_id']
             port_qry = context.session.query(models_v2.Port)
@@ -439,10 +421,6 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                       'eui64_address': True,
                       'mac': port['mac_address']}
                 ip_request = factory.get_request(context, port, ip)
-                # TODO(kevinbenton): remove after bug/1666493 is resolved
-                LOG.debug("Requesting with IP request: %s port: %s ip: %s "
-                          "for subnet %s and ipam_subnet %s", ip_request,
-                          port, ip, subnet, ipam_subnet)
                 ip_address = ipam_subnet.allocate(ip_request)
                 allocated = models_v2.IPAllocation(network_id=network_id,
                                                    port_id=port['id'],

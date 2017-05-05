@@ -18,7 +18,7 @@ from oslo_serialization import jsonutils
 from pecan import hooks
 
 from neutron.api.v2 import base as v2_base
-from neutron.pecan_wsgi.hooks import utils
+from neutron import manager
 
 LOG = log.getLogger(__name__)
 
@@ -51,7 +51,8 @@ class BodyValidationHook(hooks.PecanHook):
             # member action is being processed or on agent scheduler operations
             return
         # Prepare data to be passed to the plugin from request body
-        controller = utils.get_controller(state)
+        controller = manager.NeutronManager.get_controller_for_resource(
+            collection)
         data = v2_base.Controller.prepare_request_body(
             neutron_context,
             json_data,
@@ -62,7 +63,5 @@ class BodyValidationHook(hooks.PecanHook):
         if collection in data:
             state.request.context['resources'] = [item[resource] for item in
                                                   data[collection]]
-            state.request.context['is_bulk'] = True
         else:
             state.request.context['resources'] = [data[resource]]
-            state.request.context['is_bulk'] = False

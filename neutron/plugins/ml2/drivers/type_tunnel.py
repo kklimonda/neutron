@@ -17,9 +17,9 @@ import itertools
 import operator
 
 import netaddr
-from neutron_lib import context
 from neutron_lib import exceptions as exc
 from oslo_config import cfg
+from oslo_db import api as oslo_db_api
 from oslo_db import exception as db_exc
 from oslo_log import log
 import six
@@ -49,59 +49,63 @@ def chunks(iterable, chunk_size):
 
 
 @six.add_metaclass(abc.ABCMeta)
-class _TunnelTypeDriverBase(helpers.SegmentTypeDriver):
+class TunnelTypeDriver(helpers.SegmentTypeDriver):
+    """Define stable abstract interface for ML2 type drivers.
 
+    tunnel type networks rely on tunnel endpoints. This class defines abstract
+    methods to manage these endpoints.
+    """
     BULK_SIZE = 100
 
     def __init__(self, model):
-        super(_TunnelTypeDriverBase, self).__init__(model)
+        super(TunnelTypeDriver, self).__init__(model)
         self.segmentation_key = next(iter(self.primary_keys))
 
     @abc.abstractmethod
     def add_endpoint(self, ip, host):
         """Register the endpoint in the type_driver database.
 
-        :param ip: the IP address of the endpoint
-        :param host: the Host name of the endpoint
+        param ip: the IP address of the endpoint
+        param host: the Host name of the endpoint
         """
 
     @abc.abstractmethod
     def get_endpoints(self):
         """Get every endpoint managed by the type_driver
 
-        :returns: a list of dict [{ip_address:endpoint_ip, host:endpoint_host},
-         ..]
+        :returns a list of dict [{ip_address:endpoint_ip, host:endpoint_host},
+        ..]
         """
 
     @abc.abstractmethod
     def get_endpoint_by_host(self, host):
         """Get endpoint for a given host managed by the type_driver
 
-        :param host: the Host name of the endpoint
+        param host: the Host name of the endpoint
 
         if host found in type_driver database
-           :returns: db object for that particular host
+           :returns db object for that particular host
         else
-           :returns: None
+           :returns None
         """
 
     @abc.abstractmethod
     def get_endpoint_by_ip(self, ip):
         """Get endpoint for a given tunnel ip managed by the type_driver
 
-        :param ip: the IP address of the endpoint
+        param ip: the IP address of the endpoint
 
         if ip found in type_driver database
-           :returns: db object for that particular ip
+           :returns db object for that particular ip
         else
-           :returns: None
+           :returns None
         """
 
     @abc.abstractmethod
     def delete_endpoint(self, ip):
         """Delete the endpoint in the type_driver database.
 
-        :param ip: the IP address of the endpoint
+        param ip: the IP address of the endpoint
         """
 
     @abc.abstractmethod
@@ -111,8 +115,8 @@ class _TunnelTypeDriverBase(helpers.SegmentTypeDriver):
         This function will delete any endpoint matching the specified
         ip or host.
 
-        :param host: the host name of the endpoint
-        :param ip: the IP address of the endpoint
+        param host: the host name of the endpoint
+        param ip: the IP address of the endpoint
         """
 
     def _initialize(self, raw_tunnel_ranges):
@@ -135,7 +139,9 @@ class _TunnelTypeDriverBase(helpers.SegmentTypeDriver):
         LOG.info(_LI("%(type)s ID ranges: %(range)s"),
                  {'type': self.get_type(), 'range': current_range})
 
-    @db_api.retry_db_errors
+    @oslo_db_api.wrap_db_retry(
+        max_retries=db_api.MAX_RETRIES,
+        exception_checker=db_api.is_retriable)
     def sync_allocations(self):
         # determine current configured allocatable tunnel ids
         tunnel_ids = set()
@@ -144,12 +150,13 @@ class _TunnelTypeDriverBase(helpers.SegmentTypeDriver):
 
         tunnel_id_getter = operator.attrgetter(self.segmentation_key)
         tunnel_col = getattr(self.model, self.segmentation_key)
-        ctx = context.get_admin_context()
-        with db_api.context_manager.writer.using(ctx):
+        session = db_api.get_session()
+        with session.begin(subtransactions=True):
             # remove from table unallocated tunnels not currently allocatable
             # fetch results as list via all() because we'll be iterating
             # through them twice
-            allocs = ctx.session.query(self.model).all()
+            allocs = (session.query(self.model).
+                      with_lockmode("update").all())
 
             # collect those vnis that needs to be deleted from db
             unallocateds = (
@@ -158,8 +165,8 @@ class _TunnelTypeDriverBase(helpers.SegmentTypeDriver):
             # Immediately delete tunnels in chunks. This leaves no work for
             # flush at the end of transaction
             for chunk in chunks(to_remove, self.BULK_SIZE):
-                (ctx.session.query(self.model).filter(tunnel_col.in_(chunk)).
-                 filter_by(allocated=False).delete(synchronize_session=False))
+                session.query(self.model).filter(
+                    tunnel_col.in_(chunk)).delete(synchronize_session=False)
 
             # collect vnis that need to be added
             existings = {tunnel_id_getter(a) for a in allocs}
@@ -167,7 +174,7 @@ class _TunnelTypeDriverBase(helpers.SegmentTypeDriver):
             for chunk in chunks(missings, self.BULK_SIZE):
                 bulk = [{self.segmentation_key: x, 'allocated': False}
                         for x in chunk]
-                ctx.session.execute(self.model.__table__.insert(), bulk)
+                session.execute(self.model.__table__.insert(), bulk)
 
     def is_partial_segment(self, segment):
         return segment.get(api.SEGMENTATION_ID) is None
@@ -185,32 +192,6 @@ class _TunnelTypeDriverBase(helpers.SegmentTypeDriver):
                 msg = (_("%(key)s prohibited for %(tunnel)s provider network"),
                        {'key': key, 'tunnel': segment.get(api.NETWORK_TYPE)})
                 raise exc.InvalidInput(error_message=msg)
-
-    def get_mtu(self, physical_network=None):
-        seg_mtu = super(_TunnelTypeDriverBase, self).get_mtu()
-        mtu = []
-        if seg_mtu > 0:
-            mtu.append(seg_mtu)
-        if cfg.CONF.ml2.path_mtu > 0:
-            mtu.append(cfg.CONF.ml2.path_mtu)
-        version = cfg.CONF.ml2.overlay_ip_version
-        ip_header_length = p_const.IP_HEADER_LENGTH[version]
-        return min(mtu) - ip_header_length if mtu else 0
-
-
-@six.add_metaclass(abc.ABCMeta)
-class TunnelTypeDriver(_TunnelTypeDriverBase):
-    """Define stable abstract interface for ML2 type drivers.
-
-    tunnel type networks rely on tunnel endpoints. This class defines abstract
-    methods to manage these endpoints.
-
-    ML2 type driver that passes session to functions:
-    - reserve_provider_segment
-    - allocate_tenant_segment
-    - release_segment
-    - get_allocation
-    """
 
     def reserve_provider_segment(self, session, segment):
         if self.is_partial_segment(segment):
@@ -265,76 +246,19 @@ class TunnelTypeDriver(_TunnelTypeDriverBase):
                 filter_by(**{self.segmentation_key: tunnel_id}).
                 first())
 
-
-@six.add_metaclass(abc.ABCMeta)
-class ML2TunnelTypeDriver(_TunnelTypeDriverBase):
-    """Define stable abstract interface for ML2 type drivers.
-
-    tunnel type networks rely on tunnel endpoints. This class defines abstract
-    methods to manage these endpoints.
-
-    ML2 type driver that passes context as argument to functions:
-    - reserve_provider_segment
-    - allocate_tenant_segment
-    - release_segment
-    - get_allocation
-    """
-
-    def reserve_provider_segment(self, context, segment):
-        if self.is_partial_segment(segment):
-            alloc = self.allocate_partially_specified_segment(context)
-            if not alloc:
-                raise exc.NoNetworkAvailable()
-        else:
-            segmentation_id = segment.get(api.SEGMENTATION_ID)
-            alloc = self.allocate_fully_specified_segment(
-                context, **{self.segmentation_key: segmentation_id})
-            if not alloc:
-                raise exc.TunnelIdInUse(tunnel_id=segmentation_id)
-        return {api.NETWORK_TYPE: self.get_type(),
-                api.PHYSICAL_NETWORK: None,
-                api.SEGMENTATION_ID: getattr(alloc, self.segmentation_key),
-                api.MTU: self.get_mtu()}
-
-    def allocate_tenant_segment(self, context):
-        alloc = self.allocate_partially_specified_segment(context)
-        if not alloc:
-            return
-        return {api.NETWORK_TYPE: self.get_type(),
-                api.PHYSICAL_NETWORK: None,
-                api.SEGMENTATION_ID: getattr(alloc, self.segmentation_key),
-                api.MTU: self.get_mtu()}
-
-    def release_segment(self, context, segment):
-        tunnel_id = segment[api.SEGMENTATION_ID]
-
-        inside = any(lo <= tunnel_id <= hi for lo, hi in self.tunnel_ranges)
-
-        info = {'type': self.get_type(), 'id': tunnel_id}
-        with context.session.begin(subtransactions=True):
-            query = (context.session.query(self.model).
-                     filter_by(**{self.segmentation_key: tunnel_id}))
-            if inside:
-                count = query.update({"allocated": False})
-                if count:
-                    LOG.debug("Releasing %(type)s tunnel %(id)s to pool",
-                              info)
-            else:
-                count = query.delete()
-                if count:
-                    LOG.debug("Releasing %(type)s tunnel %(id)s outside pool",
-                              info)
-
-        if not count:
-            LOG.warning(_LW("%(type)s tunnel %(id)s not found"), info)
-
-    def get_allocation(self, context, tunnel_id):
-        return (context.session.query(self.model).
-                filter_by(**{self.segmentation_key: tunnel_id}).
-                first())
+    def get_mtu(self, physical_network=None):
+        seg_mtu = super(TunnelTypeDriver, self).get_mtu()
+        mtu = []
+        if seg_mtu > 0:
+            mtu.append(seg_mtu)
+        if cfg.CONF.ml2.path_mtu > 0:
+            mtu.append(cfg.CONF.ml2.path_mtu)
+        version = cfg.CONF.ml2.overlay_ip_version
+        ip_header_length = p_const.IP_HEADER_LENGTH[version]
+        return min(mtu) - ip_header_length if mtu else 0
 
 
-class EndpointTunnelTypeDriver(ML2TunnelTypeDriver):
+class EndpointTunnelTypeDriver(TunnelTypeDriver):
 
     def __init__(self, segment_model, endpoint_model):
         super(EndpointTunnelTypeDriver, self).__init__(segment_model)
@@ -343,37 +267,40 @@ class EndpointTunnelTypeDriver(ML2TunnelTypeDriver):
 
     def get_endpoint_by_host(self, host):
         LOG.debug("get_endpoint_by_host() called for host %s", host)
-        session = db_api.get_reader_session()
+        session = db_api.get_session()
         return (session.query(self.endpoint_model).
                 filter_by(host=host).first())
 
     def get_endpoint_by_ip(self, ip):
         LOG.debug("get_endpoint_by_ip() called for ip %s", ip)
-        session = db_api.get_reader_session()
+        session = db_api.get_session()
         return (session.query(self.endpoint_model).
                 filter_by(ip_address=ip).first())
 
     def delete_endpoint(self, ip):
         LOG.debug("delete_endpoint() called for ip %s", ip)
-        session = db_api.get_writer_session()
-        session.query(self.endpoint_model).filter_by(ip_address=ip).delete()
+        session = db_api.get_session()
+        with session.begin(subtransactions=True):
+            (session.query(self.endpoint_model).
+             filter_by(ip_address=ip).delete())
 
     def delete_endpoint_by_host_or_ip(self, host, ip):
         LOG.debug("delete_endpoint_by_host_or_ip() called for "
                   "host %(host)s or %(ip)s", {'host': host, 'ip': ip})
-        session = db_api.get_writer_session()
-        session.query(self.endpoint_model).filter(
-            or_(self.endpoint_model.host == host,
-                self.endpoint_model.ip_address == ip)).delete()
+        session = db_api.get_session()
+        with session.begin(subtransactions=True):
+            session.query(self.endpoint_model).filter(
+                    or_(self.endpoint_model.host == host,
+                        self.endpoint_model.ip_address == ip)).delete()
 
     def _get_endpoints(self):
         LOG.debug("_get_endpoints() called")
-        session = db_api.get_reader_session()
+        session = db_api.get_session()
         return session.query(self.endpoint_model)
 
     def _add_endpoint(self, ip, host, **kwargs):
         LOG.debug("_add_endpoint() called for ip %s", ip)
-        session = db_api.get_writer_session()
+        session = db_api.get_session()
         try:
             endpoint = self.endpoint_model(ip_address=ip, host=host, **kwargs)
             endpoint.save(session)

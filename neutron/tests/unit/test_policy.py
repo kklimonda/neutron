@@ -17,10 +17,7 @@
 
 import mock
 from neutron_lib import constants
-from neutron_lib import context
 from neutron_lib import exceptions
-from neutron_lib.plugins import directory
-from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_policy import fixture as op_fixture
 from oslo_policy import policy as oslo_policy
@@ -30,6 +27,8 @@ from oslo_utils import importutils
 import neutron
 from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
+from neutron import context
+from neutron import manager
 from neutron import policy
 from neutron.tests import base
 
@@ -200,11 +199,12 @@ FAKE_RESOURCES = {"%ss" % FAKE_RESOURCE_NAME:
 class NeutronPolicyTestCase(base.BaseTestCase):
 
     def fakepolicyinit(self, **kwargs):
-        policy._ENFORCER = oslo_policy.Enforcer(cfg.CONF)
-        policy._ENFORCER.set_rules(oslo_policy.Rules(self.rules))
+        enf = policy._ENFORCER
+        enf.set_rules(oslo_policy.Rules(self.rules))
 
     def setUp(self):
         super(NeutronPolicyTestCase, self).setUp()
+        policy.refresh()
         # Add Fake resources to RESOURCE_ATTRIBUTE_MAP
         attributes.RESOURCE_ATTRIBUTE_MAP.update(FAKE_RESOURCES)
         self._set_rules()
@@ -216,13 +216,14 @@ class NeutronPolicyTestCase(base.BaseTestCase):
                                          'init',
                                          new=self.fakepolicyinit)
         self.patcher.start()
-        policy.refresh()
         self.addCleanup(remove_fake_resource)
-        self.addCleanup(policy.refresh)
         self.context = context.Context('fake', 'fake', roles=['user'])
         plugin_klass = importutils.import_class(
             "neutron.db.db_base_plugin_v2.NeutronDbPluginV2")
-        directory.add_plugin(constants.CORE, plugin_klass())
+        self.manager_patcher = mock.patch('neutron.manager.NeutronManager')
+        fake_manager = self.manager_patcher.start()
+        fake_manager_instance = fake_manager.return_value
+        fake_manager_instance.plugin = plugin_klass()
 
     def _set_rules(self, **kwargs):
         rules_dict = {
@@ -371,6 +372,37 @@ class NeutronPolicyTestCase(base.BaseTestCase):
     def test_nonadmin_read_on_shared_succeeds(self):
         self._test_nonadmin_action_on_attr('get', 'shared', True)
 
+    def test_check_is_admin_with_admin_context_succeeds(self):
+        admin_context = context.get_admin_context()
+        # explicitly set roles as this test verifies user credentials
+        # with the policy engine
+        admin_context.roles = ['admin']
+        self.assertTrue(policy.check_is_admin(admin_context))
+
+    def test_check_is_admin_with_user_context_fails(self):
+        self.assertFalse(policy.check_is_admin(self.context))
+
+    def test_check_is_admin_with_no_admin_policy_fails(self):
+        del self.rules[policy.ADMIN_CTX_POLICY]
+        admin_context = context.get_admin_context()
+        self.assertFalse(policy.check_is_admin(admin_context))
+
+    def test_check_is_advsvc_with_admin_context_fails(self):
+        admin_context = context.get_admin_context()
+        self.assertFalse(policy.check_is_advsvc(admin_context))
+
+    def test_check_is_advsvc_with_svc_context_succeeds(self):
+        svc_context = context.Context('', 'svc', roles=['advsvc'])
+        self.assertTrue(policy.check_is_advsvc(svc_context))
+
+    def test_check_is_advsvc_with_no_advsvc_policy_fails(self):
+        del self.rules[policy.ADVSVC_CTX_POLICY]
+        svc_context = context.Context('', 'svc', roles=['advsvc'])
+        self.assertFalse(policy.check_is_advsvc(svc_context))
+
+    def test_check_is_advsvc_with_user_context_fails(self):
+        self.assertFalse(policy.check_is_advsvc(self.context))
+
     def _test_enforce_adminonly_attribute(self, action, **kwargs):
         admin_context = context.get_admin_context()
         target = {'shared': True}
@@ -483,7 +515,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
             return {'tenant_id': 'fake'}
 
         action = "create_port:mac"
-        with mock.patch.object(directory.get_plugin(),
+        with mock.patch.object(manager.NeutronManager.get_instance().plugin,
                                'get_network', new=fakegetnetwork):
             target = {'network_id': 'whatever'}
             result = policy.enforce(self.context, action, target)
@@ -498,7 +530,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
         # so long that we verify that, if *f* blows up, the behavior of the
         # policy engine to propagate the exception is preserved
         action = "create_port:mac"
-        with mock.patch.object(directory.get_plugin(),
+        with mock.patch.object(manager.NeutronManager.get_instance().plugin,
                                'get_network', new=fakegetnetwork):
             target = {'network_id': 'whatever'}
             self.assertRaises(NotImplementedError,
@@ -510,7 +542,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
     def test_retryrequest_on_notfound(self):
         failure = exceptions.NetworkNotFound(net_id='whatever')
         action = "create_port:mac"
-        with mock.patch.object(directory.get_plugin(),
+        with mock.patch.object(manager.NeutronManager.get_instance().plugin,
                                'get_network', side_effect=failure):
             target = {'network_id': 'whatever'}
             try:
@@ -528,7 +560,7 @@ class NeutronPolicyTestCase(base.BaseTestCase):
             admin_or_network_owner="role:admin or "
                                    "tenant_id:%(network_tenant_id)s")
         action = "create_port:mac"
-        with mock.patch.object(directory.get_plugin(),
+        with mock.patch.object(manager.NeutronManager.get_instance().plugin,
                                'get_network', new=fakegetnetwork):
             target = {'network_id': 'whatever'}
             result = policy.enforce(self.context, action, target)
@@ -540,17 +572,6 @@ class NeutronPolicyTestCase(base.BaseTestCase):
             exceptions.PolicyInitError,
             oslo_policy.Rules.from_dict,
             {'test_policy': 'tenant_id:(wrong_stuff)'})
-
-    def test_tenant_id_check_caches_extracted_fields(self):
-
-        plugin = directory.get_plugin()
-        with mock.patch.object(plugin, 'get_network',
-                               return_value={'tenant_id': 'fake'}) as getter:
-            action = "create_port:mac"
-            for i in range(2):
-                target = {'network_id': 'whatever'}
-                policy.enforce(self.context, action, target)
-        self.assertEqual(1, getter.call_count)
 
     def _test_enforce_tenant_id_raises(self, bad_rule):
         self._set_rules(admin_or_owner=bad_rule)

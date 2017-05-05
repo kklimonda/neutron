@@ -74,7 +74,6 @@ Neutron Internals
    dns_order
    external_dns_integration
    upgrade
-   objects_usage
    i18n
    address_scopes
    openvswitch_firewall
@@ -92,7 +91,6 @@ Testing
    fullstack_testing
    testing_coverage
    template_model_sync_test
-   db_transient_failure_injection
 
 Module Reference
 ----------------

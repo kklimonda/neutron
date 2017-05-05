@@ -17,7 +17,6 @@ import hmac
 
 import httplib2
 from neutron_lib import constants
-from neutron_lib import context
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -29,12 +28,13 @@ import webob
 
 from neutron._i18n import _, _LE, _LW
 from neutron.agent.linux import utils as agent_utils
+from neutron.agent.metadata import config
 from neutron.agent import rpc as agent_rpc
 from neutron.common import cache_utils as cache
 from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
-from neutron.conf.agent.metadata import config
+from neutron import context
 
 LOG = logging.getLogger(__name__)
 
@@ -172,11 +172,11 @@ class MetadataProxyHandler(object):
             'X-Instance-ID-Signature': self._sign_instance_id(instance_id)
         }
 
-        nova_host_port = '%s:%s' % (self.conf.nova_metadata_host,
-                                    self.conf.nova_metadata_port)
+        nova_ip_port = '%s:%s' % (self.conf.nova_metadata_ip,
+                                  self.conf.nova_metadata_port)
         url = urlparse.urlunsplit((
             self.conf.nova_metadata_protocol,
-            nova_host_port,
+            nova_ip_port,
             req.path_info,
             req.query_string,
             ''))
@@ -188,14 +188,14 @@ class MetadataProxyHandler(object):
         if self.conf.nova_client_cert and self.conf.nova_client_priv_key:
             h.add_certificate(self.conf.nova_client_priv_key,
                               self.conf.nova_client_cert,
-                              nova_host_port)
+                              nova_ip_port)
         resp, content = h.request(url, method=req.method, headers=headers,
                                   body=req.body)
 
         if resp.status == 200:
+            LOG.debug(str(resp))
             req.response.content_type = resp['content-type']
             req.response.body = content
-            LOG.debug(str(resp))
             return req.response
         elif resp.status == 403:
             LOG.warning(_LW(
@@ -242,7 +242,7 @@ class UnixDomainMetadataProxy(object):
             'topic': 'N/A',
             'configurations': {
                 'metadata_proxy_socket': cfg.CONF.metadata_proxy_socket,
-                'nova_metadata_host': cfg.CONF.nova_metadata_host,
+                'nova_metadata_ip': cfg.CONF.nova_metadata_ip,
                 'nova_metadata_port': cfg.CONF.nova_metadata_port,
                 'log_agent_heartbeats': cfg.CONF.AGENT.log_agent_heartbeats,
             },

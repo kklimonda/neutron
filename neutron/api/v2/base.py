@@ -75,14 +75,6 @@ class Controller(object):
     def member_actions(self):
         return self._member_actions
 
-    @property
-    def allow_pagination(self):
-        return self._allow_pagination
-
-    @property
-    def allow_sorting(self):
-        return self._allow_sorting
-
     def _init_policy_attrs(self):
         """Create the list of attributes required by policy.
 
@@ -210,9 +202,9 @@ class Controller(object):
         """
         fields_to_strip = ((fields_to_strip or []) +
                            self._exclude_attributes_by_policy(context, data))
-        return self._filter_attributes(data, fields_to_strip)
+        return self._filter_attributes(context, data, fields_to_strip)
 
-    def _filter_attributes(self, data, fields_to_strip=None):
+    def _filter_attributes(self, context, data, fields_to_strip=None):
         if not fields_to_strip:
             return data
         return dict(item for item in six.iteritems(data)
@@ -329,7 +321,8 @@ class Controller(object):
             fields_to_strip += self._exclude_attributes_by_policy(
                 request.context, obj_list[0])
         collection = {self._collection:
-                      [self._filter_attributes(obj,
+                      [self._filter_attributes(
+                          request.context, obj,
                           fields_to_strip=fields_to_strip)
                        for obj in obj_list]}
         pagination_links = pagination_helper.get_links(obj_list)
@@ -403,6 +396,7 @@ class Controller(object):
                 fields_to_strip = self._exclude_attributes_by_policy(
                     request.context, item)
                 objs.append(self._filter_attributes(
+                    request.context,
                     obj_creator(request.context, **kwargs),
                     fields_to_strip=fields_to_strip))
             return objs
@@ -480,13 +474,13 @@ class Controller(object):
                     self._plugin)
                 reservations.append(reservation)
         except n_exc.QuotaResourceUnknown as e:
-            # We don't want to quota this resource
-            LOG.debug(e)
+                # We don't want to quota this resource
+                LOG.debug(e)
 
         def notify(create_result):
             # Ensure usage trackers for all resources affected by this API
             # operation are marked as dirty
-            with db_api.context_manager.writer.using(request.context):
+            with request.context.session.begin():
                 # Commit the reservation(s)
                 for reservation in reservations:
                     quota.QUOTAS.commit_reservation(
@@ -538,7 +532,7 @@ class Controller(object):
             fields_to_strip = self._exclude_attributes_by_policy(
                 request.context, objs[0])
             return notify({self._collection: [self._filter_attributes(
-                obj, fields_to_strip=fields_to_strip)
+                request.context, obj, fields_to_strip=fields_to_strip)
                 for obj in objs]})
         else:
             if self._collection in body:

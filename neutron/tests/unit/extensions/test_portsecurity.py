@@ -14,16 +14,15 @@
 # limitations under the License.
 
 from neutron_lib.api import validators
-from neutron_lib import context
-from neutron_lib.plugins import directory
 from webob import exc
 
-from neutron.db import _utils as db_utils
+from neutron import context
 from neutron.db import db_base_plugin_v2
 from neutron.db import portsecurity_db
 from neutron.db import securitygroups_db
 from neutron.extensions import portsecurity as psec
 from neutron.extensions import securitygroup as ext_sg
+from neutron import manager
 from neutron.tests.unit.db import test_db_base_plugin_v2
 from neutron.tests.unit.extensions import test_securitygroup
 
@@ -41,9 +40,13 @@ class PortSecurityTestCase(
         super(PortSecurityTestCase, self).setUp(plugin=plugin, ext_mgr=ext_mgr)
 
         # Check if a plugin supports security groups
-        plugin_obj = directory.get_plugin()
+        plugin_obj = manager.NeutronManager.get_plugin()
         self._skip_security_group = ('security-group' not in
                                      plugin_obj.supported_extension_aliases)
+
+    def tearDown(self):
+        super(PortSecurityTestCase, self).tearDown()
+        self._skip_security_group = None
 
 
 class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
@@ -80,7 +83,7 @@ class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
         with context.session.begin(subtransactions=True):
             net = super(PortSecurityTestPlugin, self).get_network(
                 context, id)
-        return db_utils.resource_fields(net, fields)
+        return self._fields(net, fields)
 
     def create_port(self, context, port):
         p = port['port']

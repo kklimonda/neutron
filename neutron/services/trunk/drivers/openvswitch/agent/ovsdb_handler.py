@@ -16,7 +16,6 @@
 import functools
 
 import eventlet
-from neutron_lib import context as n_context
 from oslo_concurrency import lockutils
 from oslo_context import context as o_context
 from oslo_log import log as logging
@@ -29,6 +28,7 @@ from neutron.api.rpc.handlers import resources_rpc
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.common import utils as common_utils
+from neutron import context as n_context
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants as ovs_agent_constants
 from neutron.services.trunk import constants
@@ -108,7 +108,6 @@ def bridge_has_service_port(bridge):
     return bridge_has_port(bridge, is_trunk_service_port)
 
 
-@registry.has_registry_receivers
 class OVSDBHandler(object):
     """It listens to OVSDB events to create the physical resources associated
     to a logical trunk in response to OVSDB events (such as VM boot and/or
@@ -121,12 +120,15 @@ class OVSDBHandler(object):
         self.trunk_manager = trunk_manager
         self.trunk_rpc = agent.TrunkStub()
 
+        registry.subscribe(self.process_trunk_port_events,
+                           ovs_agent_constants.OVSDB_RESOURCE,
+                           events.AFTER_READ)
+
     @property
     def context(self):
         self._context.request_id = o_context.generate_request_id()
         return self._context
 
-    @registry.receives(ovs_agent_constants.OVSDB_RESOURCE, [events.AFTER_READ])
     def process_trunk_port_events(
             self, resource, event, trigger, ovsdb_events):
         """Process added and removed port events coming from OVSDB monitor."""
@@ -471,7 +473,7 @@ class OVSDBHandler(object):
                 bridge_has_port_predicate,
                 timeout=self.timeout)
             return True
-        except common_utils.WaitTimeout:
+        except eventlet.TimeoutError:
             LOG.error(
                 _LE('No port present on trunk bridge %(br_name)s '
                     'in %(timeout)d seconds.'),

@@ -32,7 +32,6 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ip_link_support
 from neutron.agent.linux import keepalived
 from neutron.agent.linux import utils as agent_utils
-from neutron.cmd import runtime_checks
 from neutron.common import constants
 from neutron.common import utils as common_utils
 from neutron.plugins.common import constants as const
@@ -218,20 +217,24 @@ def dnsmasq_version_supported():
 
 
 def dhcp_release6_supported():
-    return runtime_checks.dhcp_release6_supported()
+    try:
+        cmd = ['dhcp_release6', '--help']
+        env = {'LC_ALL': 'C'}
+        agent_utils.execute(cmd, addl_env=env)
+    except (OSError, RuntimeError, IndexError, ValueError) as e:
+        LOG.debug("Exception while checking dhcp_release6. "
+                  "Exception: %s", e)
+        return False
+    return True
 
 
 def bridge_firewalling_enabled():
+    cmd = ['sysctl', '-N', 'net.bridge']
+    entries = agent_utils.execute(cmd, run_as_root=True)
     for proto in ('arp', 'ip', 'ip6'):
         knob = 'net.bridge.bridge-nf-call-%stables' % proto
-        cmd = ['sysctl', '-b', knob]
-        try:
-            out = agent_utils.execute(cmd)
-        except (OSError, RuntimeError, IndexError, ValueError) as e:
-            LOG.debug("Exception while extracting %(knob)s. "
-                      "Exception: %(e)s", {'knob': knob, 'e': e})
-            return False
-        if out == '0':
+        if knob not in entries:
+            LOG.debug("sysctl value %s not present on this system.", knob)
             return False
     return True
 
@@ -375,7 +378,7 @@ def ovs_conntrack_supported():
 
     with ovs_lib.OVSBridge(br_name) as br:
         try:
-            br.add_protocols(*["OpenFlow%d" % i for i in range(10, 15)])
+            br.set_protocols(["OpenFlow%d" % i for i in range(10, 15)])
         except RuntimeError as e:
             LOG.debug("Exception while checking ovs conntrack support: %s", e)
             return False
@@ -415,17 +418,6 @@ def ip6tables_supported():
         return False
 
 
-def conntrack_supported():
-    try:
-        cmd = ['conntrack', '--version']
-        agent_utils.execute(cmd)
-        return True
-    except (OSError, RuntimeError, IndexError, ValueError) as e:
-        LOG.debug("Exception while checking for installed conntrack. "
-                  "Exception: %s", e)
-        return False
-
-
 def get_minimal_dibbler_version_supported():
     return MINIMUM_DIBBLER_VERSION
 
@@ -440,36 +432,3 @@ def dibbler_version_supported():
         LOG.debug("Exception while checking minimal dibbler version. "
                   "Exception: %s", e)
         return False
-
-
-def _fix_ip_nonlocal_bind_root_value(original_value):
-    current_value = ip_lib.get_ip_nonlocal_bind(namespace=None)
-    if current_value != original_value:
-        ip_lib.set_ip_nonlocal_bind(value=original_value, namespace=None)
-
-
-def ip_nonlocal_bind():
-    ipw = ip_lib.IPWrapper()
-    nsname1 = "ipnonlocalbind1-" + uuidutils.generate_uuid()
-    nsname2 = "ipnonlocalbind2-" + uuidutils.generate_uuid()
-
-    ipw.netns.add(nsname1)
-    try:
-        ipw.netns.add(nsname2)
-        try:
-            original_value = ip_lib.get_ip_nonlocal_bind(namespace=None)
-            try:
-                ip_lib.set_ip_nonlocal_bind(value=0, namespace=nsname1)
-                ip_lib.set_ip_nonlocal_bind(value=1, namespace=nsname2)
-                ns1_value = ip_lib.get_ip_nonlocal_bind(namespace=nsname1)
-            finally:
-                _fix_ip_nonlocal_bind_root_value(original_value)
-        except RuntimeError as e:
-            LOG.debug("Exception while checking ip_nonlocal_bind. "
-                      "Exception: %s", e)
-            return False
-        finally:
-            ipw.netns.delete(nsname2)
-    finally:
-        ipw.netns.delete(nsname1)
-    return ns1_value == 0

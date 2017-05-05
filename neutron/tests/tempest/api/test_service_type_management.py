@@ -10,7 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from tempest.lib import decorators
 from tempest import test
 
 from neutron.tests.tempest.api import base
@@ -23,7 +22,7 @@ class ServiceTypeManagementTest(base.BaseNetworkTest):
     def resource_setup(cls):
         super(ServiceTypeManagementTest, cls).resource_setup()
 
-    @decorators.idempotent_id('2cbbeea9-f010-40f6-8df5-4eaa0c918ea6')
+    @test.idempotent_id('2cbbeea9-f010-40f6-8df5-4eaa0c918ea6')
     def test_service_provider_list(self):
         body = self.client.list_service_providers()
         self.assertIsInstance(body['service_providers'], list)

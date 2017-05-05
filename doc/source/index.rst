@@ -55,14 +55,6 @@ Neutron Stadium
 
    stadium/index
 
-Neutron Feature Classification
-==============================
-
-.. toctree::
-   :maxdepth: 3
-
-   feature_classification/index
-
 Developer Docs
 ==============
 

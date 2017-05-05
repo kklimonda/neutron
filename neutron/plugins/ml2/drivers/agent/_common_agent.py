@@ -20,7 +20,6 @@ import sys
 import time
 
 from neutron_lib import constants
-from neutron_lib import context
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_service import loopingcall
@@ -31,15 +30,15 @@ from osprofiler import profiler
 from neutron._i18n import _LE, _LI
 from neutron.agent.l2 import l2_agent_extensions_manager as ext_manager
 from neutron.agent import rpc as agent_rpc
-from neutron.agent import securitygroups_rpc as agent_sg_rpc
+from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.api.rpc.callbacks import resources
-from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources as local_resources
 from neutron.common import config as common_config
 from neutron.common import constants as n_const
 from neutron.common import topics
+from neutron import context
 from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
 from neutron.plugins.ml2.drivers.agent import capabilities
 from neutron.plugins.ml2.drivers.agent import config as cagt_config  # noqa
@@ -151,7 +150,7 @@ class CommonAgentLoop(service.Service):
     def setup_rpc(self):
         self.plugin_rpc = agent_rpc.PluginApi(topics.PLUGIN)
         self.sg_plugin_rpc = sg_rpc.SecurityGroupServerRpcApi(topics.PLUGIN)
-        self.sg_agent = agent_sg_rpc.SecurityGroupAgentRpc(
+        self.sg_agent = sg_rpc.SecurityGroupAgentRpc(
             self.context, self.sg_plugin_rpc, defer_refresh_firewall=True)
 
         self.agent_id = self.mgr.get_agent_id()

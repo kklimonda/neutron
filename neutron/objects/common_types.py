@@ -12,21 +12,20 @@
 #    under the License.
 
 import itertools
-import uuid
 
 import netaddr
 from neutron_lib import constants as lib_constants
-from neutron_lib.db import constants as lib_db_const
-
-from oslo_serialization import jsonutils
+from neutron_lib import exceptions
 from oslo_versionedobjects import fields as obj_fields
 import six
 
 from neutron._i18n import _
 from neutron.common import constants
-from neutron.common import utils
-from neutron.objects import exceptions as o_exc
-from neutron.plugins.common import constants as plugin_constants
+
+
+class NeutronRangeConstrainedIntegerInvalidLimit(exceptions.NeutronException):
+    message = _("Incorrect range limits specified: "
+                "start = %(start)s, end = %(end)s")
 
 
 class IPV6ModeEnumField(obj_fields.AutoTypedField):
@@ -39,7 +38,7 @@ class RangeConstrainedInteger(obj_fields.Integer):
             self._start = int(start)
             self._end = int(end)
         except (TypeError, ValueError):
-            raise o_exc.NeutronRangeConstrainedIntegerInvalidLimit(
+            raise NeutronRangeConstrainedIntegerInvalidLimit(
                 start=start, end=end)
         super(RangeConstrainedInteger, self).__init__(**kwargs)
 
@@ -66,8 +65,8 @@ class IPNetworkPrefixLenField(obj_fields.AutoTypedField):
 
 
 class PortRange(RangeConstrainedInteger):
-    def __init__(self, start=constants.PORT_RANGE_MIN, **kwargs):
-        super(PortRange, self).__init__(start=start,
+    def __init__(self, **kwargs):
+        super(PortRange, self).__init__(start=constants.PORT_RANGE_MIN,
                                         end=constants.PORT_RANGE_MAX, **kwargs)
 
 
@@ -75,42 +74,8 @@ class PortRangeField(obj_fields.AutoTypedField):
     AUTO_TYPE = PortRange()
 
 
-class PortRangeWith0Field(obj_fields.AutoTypedField):
-    AUTO_TYPE = PortRange(start=0)
-
-
-class VlanIdRange(RangeConstrainedInteger):
-    def __init__(self, **kwargs):
-        super(VlanIdRange, self).__init__(start=plugin_constants.MIN_VLAN_TAG,
-                                          end=plugin_constants.MAX_VLAN_TAG,
-                                          **kwargs)
-
-
-class VlanIdRangeField(obj_fields.AutoTypedField):
-    AUTO_TYPE = VlanIdRange()
-
-
 class ListOfIPNetworksField(obj_fields.AutoTypedField):
     AUTO_TYPE = obj_fields.List(obj_fields.IPNetwork())
-
-
-class SetOfUUIDsField(obj_fields.AutoTypedField):
-    AUTO_TYPE = obj_fields.Set(obj_fields.UUID())
-
-
-class DomainName(obj_fields.String):
-    def coerce(self, obj, attr, value):
-        if not isinstance(value, six.string_types):
-            msg = _("Field value %s is not a string") % value
-            raise ValueError(msg)
-        if len(value) > lib_db_const.FQDN_FIELD_SIZE:
-            msg = _("Domain name %s is too long") % value
-            raise ValueError(msg)
-        return super(DomainName, self).coerce(obj, attr, value)
-
-
-class DomainNameField(obj_fields.AutoTypedField):
-    AUTO_TYPE = DomainName()
 
 
 class IntegerEnum(obj_fields.Integer):
@@ -164,11 +129,6 @@ class FlowDirectionEnumField(obj_fields.AutoTypedField):
     AUTO_TYPE = obj_fields.Enum(valid_values=constants.VALID_DIRECTIONS)
 
 
-class IpamAllocationStatusEnumField(obj_fields.AutoTypedField):
-    AUTO_TYPE = obj_fields.Enum(
-        valid_values=constants.VALID_IPAM_ALLOCATION_STATUSES)
-
-
 class EtherTypeEnumField(obj_fields.AutoTypedField):
     AUTO_TYPE = obj_fields.Enum(valid_values=constants.VALID_ETHERTYPES)
 
@@ -184,10 +144,6 @@ class IpProtocolEnum(obj_fields.Enum):
                 )
             ),
             **kwargs)
-
-
-class PortBindingStatusEnumField(obj_fields.AutoTypedField):
-    AUTO_TYPE = obj_fields.Enum(valid_values=constants.PORT_BINDING_STATUSES)
 
 
 class IpProtocolEnumField(obj_fields.AutoTypedField):
@@ -206,58 +162,9 @@ class MACAddress(obj_fields.FieldType):
             raise ValueError(msg)
         return super(MACAddress, self).coerce(obj, attr, value)
 
-    @staticmethod
-    def to_primitive(obj, attr, value):
-        return str(value)
-
-    @staticmethod
-    def from_primitive(obj, attr, value):
-        try:
-            return utils.AuthenticEUI(value)
-        except Exception:
-            msg = _("Field value %s is not a netaddr.EUI") % value
-            raise ValueError(msg)
-
 
 class MACAddressField(obj_fields.AutoTypedField):
     AUTO_TYPE = MACAddress()
-
-
-class DictOfMiscValues(obj_fields.FieldType):
-    """DictOfMiscValues custom field
-
-    This custom field is handling dictionary with miscellaneous value types,
-    including integer, float, boolean and list and nested dictionaries.
-    """
-    @staticmethod
-    def coerce(obj, attr, value):
-        if isinstance(value, dict):
-            return value
-        if isinstance(value, six.string_types):
-            try:
-                return jsonutils.loads(value)
-            except Exception:
-                msg = _("Field value %s is not stringified JSON") % value
-                raise ValueError(msg)
-        msg = (_("Field value %s is not type of dict or stringified JSON")
-               % value)
-        raise ValueError(msg)
-
-    @staticmethod
-    def from_primitive(obj, attr, value):
-        return DictOfMiscValues.coerce(obj, attr, value)
-
-    @staticmethod
-    def to_primitive(obj, attr, value):
-        return jsonutils.dumps(value)
-
-    @staticmethod
-    def stringify(value):
-        return jsonutils.dumps(value)
-
-
-class DictOfMiscValuesField(obj_fields.AutoTypedField):
-    AUTO_TYPE = DictOfMiscValues
 
 
 class IPNetwork(obj_fields.FieldType):
@@ -273,28 +180,6 @@ class IPNetwork(obj_fields.FieldType):
             raise ValueError(msg)
         return super(IPNetwork, self).coerce(obj, attr, value)
 
-    @staticmethod
-    def to_primitive(obj, attr, value):
-        return str(value)
-
-    @staticmethod
-    def from_primitive(obj, attr, value):
-        try:
-            return utils.AuthenticIPNetwork(value)
-        except Exception:
-            msg = _("Field value %s is not a netaddr.IPNetwork") % value
-            raise ValueError(msg)
-
 
 class IPNetworkField(obj_fields.AutoTypedField):
     AUTO_TYPE = IPNetwork()
-
-
-class UUID(obj_fields.UUID):
-    def coerce(self, obj, attr, value):
-        uuid.UUID(str(value))
-        return str(value)
-
-
-class UUIDField(obj_fields.AutoTypedField):
-    AUTO_TYPE = UUID()

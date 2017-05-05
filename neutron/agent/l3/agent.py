@@ -16,7 +16,6 @@
 import eventlet
 import netaddr
 from neutron_lib import constants as lib_const
-from neutron_lib import context as n_context
 from oslo_config import cfg
 from oslo_context import context as common_context
 from oslo_log import log as logging
@@ -39,6 +38,7 @@ from neutron.agent.l3 import l3_agent_extension_api as l3_ext_api
 from neutron.agent.l3 import l3_agent_extensions_manager as l3_ext_manager
 from neutron.agent.l3 import legacy_router
 from neutron.agent.l3 import namespace_manager
+from neutron.agent.l3 import namespaces
 from neutron.agent.l3 import router_processing_queue as queue
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
@@ -54,9 +54,14 @@ from neutron.common import ipv6_utils
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
+from neutron import context as n_context
 from neutron import manager
 
 LOG = logging.getLogger(__name__)
+# TODO(Carl) Following constants retained to increase SNR during refactoring
+NS_PREFIX = namespaces.NS_PREFIX
+INTERNAL_DEV_PREFIX = namespaces.INTERNAL_DEV_PREFIX
+EXTERNAL_DEV_PREFIX = namespaces.EXTERNAL_DEV_PREFIX
 
 # Number of routers to fetch from server at a time on resync.
 # Needed to reduce load on server side and to speed up resync on agent side.
@@ -245,7 +250,7 @@ class L3NATAgent(ha.AgentMixin,
         super(L3NATAgent, self).__init__(host=self.conf.host)
 
         self.target_ex_net_id = None
-        self.use_ipv6 = ipv6_utils.is_enabled_and_bind_by_default()
+        self.use_ipv6 = ipv6_utils.is_enabled()
 
         self.pd = pd.PrefixDelegation(self.context, self.process_monitor,
                                       self.driver,
@@ -308,7 +313,6 @@ class L3NATAgent(ha.AgentMixin,
     def _create_router(self, router_id, router):
         args = []
         kwargs = {
-            'agent': self,
             'router_id': router_id,
             'router': router,
             'use_ipv6': self.use_ipv6,
@@ -317,6 +321,7 @@ class L3NATAgent(ha.AgentMixin,
         }
 
         if router.get('distributed'):
+            kwargs['agent'] = self
             kwargs['host'] = self.host
 
         if router.get('distributed') and router.get('ha'):
@@ -343,20 +348,7 @@ class L3NATAgent(ha.AgentMixin,
 
         self.router_info[router_id] = ri
 
-        # If initialize() fails, cleanup and retrigger complete sync
-        try:
-            ri.initialize(self.process_monitor)
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                del self.router_info[router_id]
-                LOG.exception(_LE('Error while initializing router %s'),
-                              router_id)
-                self.namespaces_manager.ensure_router_cleanup(router_id)
-                try:
-                    ri.delete()
-                except Exception:
-                    LOG.exception(_LE('Error while deleting router %s'),
-                                  router_id)
+        ri.initialize(self.process_monitor)
 
     def _safe_router_removed(self, router_id):
         """Try to delete a router and return True if successful."""
@@ -381,7 +373,7 @@ class L3NATAgent(ha.AgentMixin,
         registry.notify(resources.ROUTER, events.BEFORE_DELETE,
                         self, router=ri)
 
-        ri.delete()
+        ri.delete(self)
         del self.router_info[router_id]
 
         registry.notify(resources.ROUTER, events.AFTER_DELETE, self, router=ri)
@@ -456,7 +448,7 @@ class L3NATAgent(ha.AgentMixin,
         self._router_added(router['id'], router)
         ri = self.router_info[router['id']]
         ri.router = router
-        ri.process()
+        ri.process(self)
         registry.notify(resources.ROUTER, events.AFTER_CREATE, self, router=ri)
         self.l3_ext_manager.add_router(self.context, router)
 
@@ -465,7 +457,7 @@ class L3NATAgent(ha.AgentMixin,
         ri.router = router
         registry.notify(resources.ROUTER, events.BEFORE_UPDATE,
                         self, router=ri)
-        ri.process()
+        ri.process(self)
         registry.notify(resources.ROUTER, events.AFTER_UPDATE, self, router=ri)
         self.l3_ext_manager.update_router(self.context, router)
 

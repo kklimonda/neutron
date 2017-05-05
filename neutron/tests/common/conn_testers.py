@@ -15,11 +15,11 @@
 import functools
 
 import fixtures
-import netaddr
 from neutron_lib import constants
 from oslo_utils import uuidutils
 
 from neutron.agent import firewall
+from neutron.agent.linux import ip_lib
 from neutron.common import constants as n_consts
 from neutron.common import utils as common_utils
 from neutron.tests.common import machine_fixtures
@@ -173,7 +173,7 @@ class ConnectionTester(fixtures.Fixture):
 
     def _test_icmp_connectivity(self, direction, protocol, src_port, dst_port):
         src_namespace, ip_address = self._get_namespace_and_address(direction)
-        ip_version = common_utils.get_ip_version(ip_address)
+        ip_version = ip_lib.get_ip_version(ip_address)
         icmp_timeout = ICMP_VERSION_TIMEOUTS[ip_version]
         try:
             net_helpers.assert_ping(src_namespace, ip_address,
@@ -371,12 +371,14 @@ class OVSBaseConnectionTester(ConnectionTester):
 
     @staticmethod
     def set_tag(port_name, bridge, tag):
-        ovsdb = bridge.ovsdb
-        with ovsdb.transaction() as txn:
-            txn.add(ovsdb.db_set('Port', port_name, ('tag', tag)))
-            txn.add(
-                ovsdb.db_add(
-                    'Port', port_name, 'other_config', {'tag': str(tag)}))
+        bridge.set_db_attribute('Port', port_name, 'tag', tag)
+        other_config = bridge.db_get_val(
+            'Port', port_name, 'other_config')
+        if 'tag' in other_config:
+            return
+        other_config['tag'] = str(tag)
+        bridge.set_db_attribute(
+            'Port', port_name, 'other_config', other_config)
 
 
 class OVSConnectionTester(OVSBaseConnectionTester):
@@ -462,11 +464,13 @@ class OVSTrunkConnectionTester(OVSBaseConnectionTester):
 
         """
 
-        network = netaddr.IPNetwork(ip_cidr)
-        net_helpers.create_vlan_interface(
-            self._vm.namespace, self._vm.port.name,
-            self.vm_mac_address, network, vlan)
-        self._ip_vlan = str(network.ip)
+        ip_wrap = ip_lib.IPWrapper(self._vm.namespace)
+        dev_name = self._vm.port.name + ".%d" % vlan
+        ip_wrap.add_vlan(dev_name, self._vm.port.name, vlan)
+        dev = ip_wrap.device(dev_name)
+        dev.addr.add(ip_cidr)
+        dev.link.set_up()
+        self._ip_vlan = ip_cidr.partition('/')[0]
         ip_cidr = net_helpers.increment_ip_cidr(ip_cidr, 1)
         self._peer2 = self.useFixture(machine_fixtures.FakeMachine(
             self.bridge, ip_cidr))
@@ -513,18 +517,9 @@ class LinuxBridgeConnectionTester(ConnectionTester):
 
     """
 
-    def __init__(self, *args, **kwargs):
-        self.bridge_name = kwargs.pop('bridge_name', None)
-        super(LinuxBridgeConnectionTester, self).__init__(*args, **kwargs)
-
     def _setUp(self):
         super(LinuxBridgeConnectionTester, self)._setUp()
-        bridge_args = {}
-        if self.bridge_name:
-            bridge_args = {'prefix': self.bridge_name,
-                           'prefix_is_full_name': True}
-        self.bridge = self.useFixture(
-            net_helpers.LinuxBridgeFixture(**bridge_args)).bridge
+        self.bridge = self.useFixture(net_helpers.LinuxBridgeFixture()).bridge
         machines = self.useFixture(
             machine_fixtures.PeerMachines(
                 self.bridge, self.ip_cidr)).machines

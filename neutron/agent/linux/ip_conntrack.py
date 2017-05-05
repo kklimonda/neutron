@@ -11,48 +11,22 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
 
-import re
-
 import netaddr
-from oslo_concurrency import lockutils
 from oslo_log import log as logging
 
 from neutron._i18n import _LE
 from neutron.agent.linux import utils as linux_utils
-from neutron.common import constants as n_const
-from neutron.common import exceptions as n_exc
 
 LOG = logging.getLogger(__name__)
-CONTRACK_MGRS = {}
-MAX_CONNTRACK_ZONES = 65535
-
-
-@lockutils.synchronized('conntrack')
-def get_conntrack(get_rules_for_table_func, filtered_ports, unfiltered_ports,
-                  execute=None, namespace=None, zone_per_port=False):
-    try:
-        return CONTRACK_MGRS[namespace]
-    except KeyError:
-        ipconntrack = IpConntrackManager(get_rules_for_table_func,
-                                         filtered_ports, unfiltered_ports,
-                                         execute, namespace, zone_per_port)
-        CONTRACK_MGRS[namespace] = ipconntrack
-        return CONTRACK_MGRS[namespace]
 
 
 class IpConntrackManager(object):
     """Smart wrapper for ip conntrack."""
 
-    def __init__(self, get_rules_for_table_func, filtered_ports,
-                 unfiltered_ports, execute=None, namespace=None,
-                 zone_per_port=False):
-        self.get_rules_for_table_func = get_rules_for_table_func
+    def __init__(self, zone_lookup_func, execute=None, namespace=None):
+        self.get_device_zone = zone_lookup_func
         self.execute = execute or linux_utils.execute
         self.namespace = namespace
-        self.filtered_ports = filtered_ports
-        self.unfiltered_ports = unfiltered_ports
-        self.zone_per_port = zone_per_port  # zone per port vs per network
-        self._populate_initial_zone_map()
 
     @staticmethod
     def _generate_conntrack_cmd_by_rule(rule, namespace):
@@ -75,13 +49,7 @@ class IpConntrackManager(object):
         cmd = self._generate_conntrack_cmd_by_rule(rule, self.namespace)
         ethertype = rule.get('ethertype')
         for device_info in device_info_list:
-            zone_id = self.get_device_zone(device_info, create=False)
-            if not zone_id:
-                LOG.debug("No zone for device %(dev)s. Will not try to "
-                          "clear conntrack state. Zone map: %(zm)s",
-                          {'dev': device_info['device'],
-                           'zm': self._device_zone_map})
-                continue
+            zone_id = self.get_device_zone(device_info['device'])
             ips = device_info.get('fixed_ips', [])
             for ip in ips:
                 net = netaddr.IPNetwork(ip)
@@ -124,79 +92,3 @@ class IpConntrackManager(object):
                         device_info_list, rule, remote_ip)
             else:
                 self._delete_conntrack_state(device_info_list, rule)
-
-    def _populate_initial_zone_map(self):
-        """Setup the map between devices and zones based on current rules."""
-        self._device_zone_map = {}
-        rules = self.get_rules_for_table_func('raw')
-        for rule in rules:
-            match = re.match(r'.* --physdev-in (?P<dev>[a-zA-Z0-9\-]+)'
-                             r'.* -j CT --zone (?P<zone>\d+).*', rule)
-            if match:
-                # strip off any prefix that the interface is using
-                short_port_id = (match.group('dev')
-                    [n_const.LINUX_DEV_PREFIX_LEN:])
-                self._device_zone_map[short_port_id] = int(match.group('zone'))
-        LOG.debug("Populated conntrack zone map: %s", self._device_zone_map)
-
-    def _device_key(self, port):
-        # we have to key the device_zone_map based on the fragment of the
-        # UUID that shows up in the interface name. This is because the initial
-        # map is populated strictly based on interface names that we don't know
-        # the full UUID of.
-        if self.zone_per_port:
-            identifier = port['device'][n_const.LINUX_DEV_PREFIX_LEN:]
-        else:
-            identifier = port['network_id']
-        return identifier[:(n_const.LINUX_DEV_LEN -
-                          n_const.LINUX_DEV_PREFIX_LEN)]
-
-    def get_device_zone(self, port, create=True):
-        device_key = self._device_key(port)
-        try:
-            return self._device_zone_map[device_key]
-        except KeyError:
-            if create:
-                return self._generate_device_zone(device_key)
-
-    def _free_zones_from_removed_ports(self):
-        """Clears any entries from the zone map of removed ports."""
-        existing_ports = [
-            self._device_key(port)
-            for port in (list(self.filtered_ports.values()) +
-                         list(self.unfiltered_ports.values()))
-        ]
-        removed = set(self._device_zone_map) - set(existing_ports)
-        for dev in removed:
-            self._device_zone_map.pop(dev, None)
-
-    def _generate_device_zone(self, short_device_id):
-        """Generates a unique conntrack zone for the passed in ID."""
-        try:
-            zone = self._find_open_zone()
-        except n_exc.CTZoneExhaustedError:
-            # Free some zones and try again, repeat failure will not be caught
-            self._free_zones_from_removed_ports()
-            zone = self._find_open_zone()
-
-        self._device_zone_map[short_device_id] = zone
-        LOG.debug("Assigned CT zone %(z)s to device %(dev)s.",
-                  {'z': zone, 'dev': short_device_id})
-        return self._device_zone_map[short_device_id]
-
-    def _find_open_zone(self):
-        # call set to dedup because old ports may be mapped to the same zone.
-        zones_in_use = sorted(set(self._device_zone_map.values()))
-        if not zones_in_use:
-            return 1
-        # attempt to increment onto the highest used zone first. if we hit the
-        # end, go back and look for any gaps left by removed devices.
-        last = zones_in_use[-1]
-        if last < MAX_CONNTRACK_ZONES:
-            return last + 1
-        for index, used in enumerate(zones_in_use):
-            if used - index != 1:
-                # gap found, let's use it!
-                return index + 1
-        # conntrack zones exhausted :( :(
-        raise n_exc.CTZoneExhaustedError()

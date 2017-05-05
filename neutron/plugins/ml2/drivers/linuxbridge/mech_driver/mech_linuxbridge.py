@@ -13,13 +13,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 
 from neutron.agent import securitygroups_rpc
+from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2.drivers import mech_agent
-from neutron.services.qos.drivers.linuxbridge import driver as lb_qos_driver
+from neutron.services.qos import qos_consts
 
 
 class LinuxbridgeMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
@@ -32,13 +32,14 @@ class LinuxbridgeMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
     network.
     """
 
+    supported_qos_rule_types = [qos_consts.RULE_TYPE_BANDWIDTH_LIMIT]
+
     def __init__(self):
         sg_enabled = securitygroups_rpc.is_firewall_enabled()
         super(LinuxbridgeMechanismDriver, self).__init__(
             constants.AGENT_TYPE_LINUXBRIDGE,
             portbindings.VIF_TYPE_BRIDGE,
             {portbindings.CAP_PORT_FILTER: sg_enabled})
-        lb_qos_driver.register()
 
     def get_allowed_network_types(self, agent):
         return (agent['configurations'].get('tunnel_types', []) +

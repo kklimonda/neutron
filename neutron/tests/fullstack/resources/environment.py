@@ -34,20 +34,13 @@ class EnvironmentDescription(object):
     Does the setup, as a whole, support tunneling? How about l2pop?
     """
     def __init__(self, network_type='vxlan', l2_pop=True, qos=False,
-                 mech_drivers='openvswitch,linuxbridge',
-                 service_plugins='router,trunk', arp_responder=False,
-                 agent_down_time=75):
+                 mech_drivers='openvswitch,linuxbridge', arp_responder=False):
         self.network_type = network_type
         self.l2_pop = l2_pop
         self.qos = qos
         self.network_range = None
         self.mech_drivers = mech_drivers
         self.arp_responder = arp_responder
-        self.agent_down_time = agent_down_time
-
-        self.service_plugins = service_plugins
-        if self.qos:
-            self.service_plugins += ',qos'
 
     @property
     def tunneling_enabled(self):
@@ -60,16 +53,13 @@ class HostDescription(object):
     What agents should the host spawn? What mode should each agent operate
     under?
     """
-    def __init__(self, l3_agent=False, dhcp_agent=False,
-                 of_interface='ovs-ofctl', ovsdb_interface='vsctl',
-                 l2_agent_type=constants.AGENT_TYPE_OVS,
-                 firewall_driver='noop'):
+    def __init__(self, l3_agent=False, of_interface='ovs-ofctl',
+                 ovsdb_interface='vsctl',
+                 l2_agent_type=constants.AGENT_TYPE_OVS):
         self.l2_agent_type = l2_agent_type
         self.l3_agent = l3_agent
-        self.dhcp_agent = dhcp_agent
         self.of_interface = of_interface
         self.ovsdb_interface = ovsdb_interface
-        self.firewall_driver = firewall_driver
 
 
 class Host(fixtures.Fixture):
@@ -117,15 +107,6 @@ class Host(fixtures.Fixture):
                     self.neutron_config,
                     self.l3_agent_cfg_fixture))
 
-        if self.host_desc.dhcp_agent:
-            self.dhcp_agent = self.useFixture(
-                process.DhcpAgentFixture(
-                    self.env_desc, self.host_desc,
-                    self.test_name,
-                    self.neutron_config,
-                    self.dhcp_agent_cfg_fixture,
-                    namespace=self.host_namespace))
-
     def setup_host_with_ovs_agent(self):
         agent_cfg_fixture = config.OVSConfigFixture(
             self.env_desc, self.host_desc, self.neutron_config.temp_dir,
@@ -159,13 +140,6 @@ class Host(fixtures.Fixture):
                     self.l3_agent_cfg_fixture.get_external_bridge())).bridge
             self.connect_to_external_network(br_ex)
 
-        if self.host_desc.dhcp_agent:
-            self.dhcp_agent_cfg_fixture = self.useFixture(
-                config.DhcpConfigFixture(
-                    self.env_desc, self.host_desc,
-                    self.neutron_config.temp_dir,
-                    self.ovs_agent.agent_cfg_fixture.get_br_int_name()))
-
     def setup_host_with_linuxbridge_agent(self):
         #First we need to provide connectivity for agent to prepare proper
         #bridge mappings in agent's config:
@@ -194,12 +168,6 @@ class Host(fixtures.Fixture):
         if self.host_desc.l3_agent:
             self.l3_agent_cfg_fixture = self.useFixture(
                 config.L3ConfigFixture(
-                    self.env_desc, self.host_desc,
-                    self.neutron_config.temp_dir))
-
-        if self.host_desc.dhcp_agent:
-            self.dhcp_agent_cfg_fixture = self.useFixture(
-                config.DhcpConfigFixture(
                     self.env_desc, self.host_desc,
                     self.neutron_config.temp_dir))
 
@@ -279,14 +247,6 @@ class Host(fixtures.Fixture):
         self.agents['l3'] = agent
 
     @property
-    def dhcp_agent(self):
-        return self.agents['dhcp']
-
-    @dhcp_agent.setter
-    def dhcp_agent(self, agent):
-        self.agents['dhcp'] = agent
-
-    @property
     def ovs_agent(self):
         return self.agents['ovs']
 
@@ -301,13 +261,6 @@ class Host(fixtures.Fixture):
     @linuxbridge_agent.setter
     def linuxbridge_agent(self, agent):
         self.agents['linuxbridge'] = agent
-
-    @property
-    def l2_agent(self):
-        if self.host_desc.l2_agent_type == constants.AGENT_TYPE_LINUXBRIDGE:
-            return self.linuxbridge_agent
-        elif self.host_desc.l2_agent_type == constants.AGENT_TYPE_OVS:
-            return self.ovs_agent
 
 
 class Environment(fixtures.Fixture):

@@ -17,46 +17,22 @@ from oslo_log import helpers as log_helpers
 from oslo_log import log
 
 from neutron._i18n import _LI
-from neutron.agent.l2.extensions import qos_linux as qos
-from neutron.agent.linux import iptables_manager
+from neutron.agent.l2.extensions import qos
 from neutron.agent.linux import tc_lib
-import neutron.common.constants as const
-from neutron.services.qos.drivers.linuxbridge import driver
+from neutron.plugins.ml2.drivers.linuxbridge.mech_driver import (
+    mech_linuxbridge)
 
 LOG = log.getLogger(__name__)
 
 
-class QosLinuxbridgeAgentDriver(qos.QosLinuxAgentDriver):
+class QosLinuxbridgeAgentDriver(qos.QosAgentDriver):
 
-    # TODO(ralonsoh):
-    #   - All driver calls should include the rule parameter, including
-    #     the delete function, to have the 'direction' parameter. This QoS
-    #     extension modification is going to be implemented in
-    #     https://review.openstack.org/#/c/341186/
-    SUPPORTED_RULES = driver.SUPPORTED_RULES
-
-    IPTABLES_DIRECTION = {const.INGRESS_DIRECTION: 'physdev-out',
-                          const.EGRESS_DIRECTION: 'physdev-in'}
-    IPTABLES_DIRECTION_PREFIX = {const.INGRESS_DIRECTION: "i",
-                                 const.EGRESS_DIRECTION: "o"}
+    SUPPORTED_RULES = (
+        mech_linuxbridge.LinuxbridgeMechanismDriver.supported_qos_rule_types
+    )
 
     def initialize(self):
         LOG.info(_LI("Initializing Linux bridge QoS extension"))
-        self.iptables_manager = iptables_manager.IptablesManager(use_ipv6=True)
-
-    def _dscp_chain_name(self, direction, device):
-        return iptables_manager.get_chain_name(
-            "qos-%s%s" % (self.IPTABLES_DIRECTION_PREFIX[direction],
-                          device[3:]))
-
-    def _dscp_rule(self, direction, device):
-        return ('-m physdev --%s %s --physdev-is-bridged '
-                '-j $%s') % (self.IPTABLES_DIRECTION[direction],
-                             device,
-                             self._dscp_chain_name(direction, device))
-
-    def _dscp_rule_tag(self, device):
-        return "dscp-%s" % device
 
     @log_helpers.log_method_call
     def create_bandwidth_limit(self, port, rule):
@@ -76,74 +52,6 @@ class QosLinuxbridgeAgentDriver(qos.QosLinuxAgentDriver):
     def delete_bandwidth_limit(self, port):
         tc_wrapper = self._get_tc_wrapper(port)
         tc_wrapper.delete_filters_bw_limit()
-
-    @log_helpers.log_method_call
-    def create_dscp_marking(self, port, rule):
-        with self.iptables_manager.defer_apply():
-            self._set_outgoing_qos_chain_for_port(port)
-            self._set_dscp_mark_rule(port, rule.dscp_mark)
-
-    @log_helpers.log_method_call
-    def update_dscp_marking(self, port, rule):
-        with self.iptables_manager.defer_apply():
-            self._delete_dscp_mark_rule(port)
-            self._set_outgoing_qos_chain_for_port(port)
-            self._set_dscp_mark_rule(port, rule.dscp_mark)
-
-    @log_helpers.log_method_call
-    def delete_dscp_marking(self, port):
-        with self.iptables_manager.defer_apply():
-            self._delete_dscp_mark_rule(port)
-            self._delete_outgoing_qos_chain_for_port(port)
-
-    def _set_outgoing_qos_chain_for_port(self, port):
-        chain_name = self._dscp_chain_name(
-            const.EGRESS_DIRECTION, port['device'])
-        chain_rule = self._dscp_rule(
-            const.EGRESS_DIRECTION, port['device'])
-        self.iptables_manager.ipv4['mangle'].add_chain(chain_name)
-        self.iptables_manager.ipv6['mangle'].add_chain(chain_name)
-
-        self.iptables_manager.ipv4['mangle'].add_rule('POSTROUTING',
-                                                      chain_rule)
-        self.iptables_manager.ipv6['mangle'].add_rule('POSTROUTING',
-                                                      chain_rule)
-
-    def _delete_outgoing_qos_chain_for_port(self, port):
-        chain_name = self._dscp_chain_name(
-            const.EGRESS_DIRECTION, port['device'])
-        chain_rule = self._dscp_rule(
-            const.EGRESS_DIRECTION, port['device'])
-        if self._qos_chain_is_empty(port, 4):
-            self.iptables_manager.ipv4['mangle'].remove_chain(chain_name)
-            self.iptables_manager.ipv4['mangle'].remove_rule('POSTROUTING',
-                                                             chain_rule)
-        if self._qos_chain_is_empty(port, 6):
-            self.iptables_manager.ipv6['mangle'].remove_chain(chain_name)
-            self.iptables_manager.ipv6['mangle'].remove_rule('POSTROUTING',
-                                                             chain_rule)
-
-    def _set_dscp_mark_rule(self, port, dscp_value):
-        chain_name = self._dscp_chain_name(
-            const.EGRESS_DIRECTION, port['device'])
-        rule = "-j DSCP --set-dscp %s" % dscp_value
-        self.iptables_manager.ipv4['mangle'].add_rule(
-            chain_name, rule, tag=self._dscp_rule_tag(port['device']))
-        self.iptables_manager.ipv6['mangle'].add_rule(
-            chain_name, rule, tag=self._dscp_rule_tag(port['device']))
-
-    def _delete_dscp_mark_rule(self, port):
-        self.iptables_manager.ipv4['mangle'].clear_rules_by_tag(
-            self._dscp_rule_tag(port['device']))
-        self.iptables_manager.ipv6['mangle'].clear_rules_by_tag(
-            self._dscp_rule_tag(port['device']))
-
-    def _qos_chain_is_empty(self, port, ip_version=4):
-        chain_name = self._dscp_chain_name(
-            const.EGRESS_DIRECTION, port['device'])
-        rules_in_chain = self.iptables_manager.get_chain(
-            "mangle", chain_name, ip_version=ip_version)
-        return len(rules_in_chain) == 0
 
     def _get_tc_wrapper(self, port):
         return tc_lib.TcCommand(

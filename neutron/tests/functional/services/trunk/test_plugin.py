@@ -12,8 +12,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from neutron_lib.api.definitions import portbindings as pb
-
+from neutron.extensions import portbindings as pb
 from neutron.services.trunk.drivers.openvswitch import utils
 from neutron.services.trunk import plugin as trunk_plugin
 from neutron.tests.common import helpers

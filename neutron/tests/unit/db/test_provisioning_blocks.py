@@ -13,24 +13,20 @@
 #    under the License.
 
 import mock
-from neutron_lib import context as n_ctx
 import testtools
 
 from neutron.callbacks import registry
 from neutron.callbacks import resources
-from neutron.db import api as db_api
+from neutron import context as n_ctx
 from neutron.db import models_v2
 from neutron.db import provisioning_blocks as pb
 from neutron.tests.unit import testlib_api
-
-CORE_PLUGIN = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
 
 
 class TestStatusBarriers(testlib_api.SqlTestCase):
 
     def setUp(self):
         super(TestStatusBarriers, self).setUp()
-        self.setup_coreplugin(CORE_PLUGIN)
         self.ctx = n_ctx.get_admin_context()
         self.provisioned = mock.Mock()
         self.port = self._make_port()
@@ -38,7 +34,7 @@ class TestStatusBarriers(testlib_api.SqlTestCase):
                            pb.PROVISIONING_COMPLETE)
 
     def _make_net(self):
-        with db_api.context_manager.writer.using(self.ctx):
+        with self.ctx.session.begin():
             net = models_v2.Network(name='net_net', status='ACTIVE',
                                     tenant_id='1', admin_state_up=True)
             self.ctx.session.add(net)
@@ -46,11 +42,10 @@ class TestStatusBarriers(testlib_api.SqlTestCase):
 
     def _make_port(self):
         net = self._make_net()
-        with db_api.context_manager.writer.using(self.ctx):
-            port = models_v2.Port(network_id=net.id, mac_address='1',
-                                  tenant_id='1', admin_state_up=True,
-                                  status='DOWN', device_id='2',
-                                  device_owner='3')
+        with self.ctx.session.begin():
+            port = models_v2.Port(networks=net, mac_address='1', tenant_id='1',
+                                  admin_state_up=True, status='DOWN',
+                                  device_id='2', device_owner='3')
             self.ctx.session.add(port)
         return port
 

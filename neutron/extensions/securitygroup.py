@@ -16,21 +16,20 @@
 import abc
 
 import netaddr
-from neutron_lib.api import converters
-from neutron_lib.api import extensions as api_extensions
 from neutron_lib.api import validators
 from neutron_lib import constants as const
-from neutron_lib.db import constants as db_const
 from neutron_lib import exceptions as nexception
-from neutron_lib.plugins import directory
 from oslo_utils import netutils
+from oslo_utils import uuidutils
 import six
 
 from neutron._i18n import _
 from neutron.api import extensions
+from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
 from neutron.common import exceptions
 from neutron.conf import quota
+from neutron import manager
 from neutron.quota import resource_registry
 
 
@@ -184,6 +183,16 @@ def convert_validate_port_value(port):
         raise SecurityGroupInvalidPortValue(port=port)
 
 
+def convert_to_uuid_list_or_none(value_list):
+    if value_list is None:
+        return
+    for sg_id in value_list:
+        if not uuidutils.is_uuid_like(sg_id):
+            msg = _("'%s' is not an integer or uuid") % sg_id
+            raise nexception.InvalidInput(error_message=msg)
+    return value_list
+
+
 def convert_ip_prefix_to_cidr(ip_prefix):
     if not ip_prefix:
         return
@@ -214,16 +223,13 @@ RESOURCE_ATTRIBUTE_MAP = {
                'primary_key': True},
         'name': {'allow_post': True, 'allow_put': True,
                  'is_visible': True, 'default': '',
-                 'validate': {
-                     'type:name_not_default': db_const.NAME_FIELD_SIZE}},
+                 'validate': {'type:name_not_default': attr.NAME_MAX_LEN}},
         'description': {'allow_post': True, 'allow_put': True,
-                        'validate': {
-                            'type:string': db_const.DESCRIPTION_FIELD_SIZE},
+                        'validate': {'type:string': attr.DESCRIPTION_MAX_LEN},
                         'is_visible': True, 'default': ''},
         'tenant_id': {'allow_post': True, 'allow_put': False,
                       'required_by_policy': True,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
         SECURITYGROUPRULES: {'allow_post': False, 'allow_put': False,
                              'is_visible': True},
@@ -258,8 +264,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                              'convert_to': convert_ip_prefix_to_cidr},
         'tenant_id': {'allow_post': True, 'allow_put': False,
                       'required_by_policy': True,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
     }
 }
@@ -269,16 +274,14 @@ EXTENDED_ATTRIBUTES_2_0 = {
     'ports': {SECURITYGROUPS: {'allow_post': True,
                                'allow_put': True,
                                'is_visible': True,
-                               'convert_to':
-                                   converters.convert_none_to_empty_list,
-                               'validate': {'type:uuid_list': None},
+                               'convert_to': convert_to_uuid_list_or_none,
                                'default': const.ATTR_NOT_SPECIFIED}}}
 
 # Register the configuration options
 quota.register_quota_opts(quota.security_group_quota_opts)
 
 
-class Securitygroup(api_extensions.ExtensionDescriptor):
+class Securitygroup(extensions.ExtensionDescriptor):
     """Security group extension."""
 
     @classmethod
@@ -300,8 +303,10 @@ class Securitygroup(api_extensions.ExtensionDescriptor):
     @classmethod
     def get_resources(cls):
         """Returns Ext Resources."""
+        my_plurals = [(key, key[:-1]) for key in RESOURCE_ATTRIBUTE_MAP.keys()]
+        attr.PLURALS.update(dict(my_plurals))
         exts = []
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         for resource_name in ['security_group', 'security_group_rule']:
             collection_name = resource_name.replace('_', '-') + "s"
             params = RESOURCE_ATTRIBUTE_MAP.get(resource_name + "s", dict())

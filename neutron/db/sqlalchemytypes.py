@@ -70,7 +70,7 @@ class MACAddress(types.TypeDecorator):
 class TruncatedDateTime(types.TypeDecorator):
     """Truncates microseconds.
 
-    Use this for datetime fields so we don't have to worry about DB-specific
+    Use this for datetime fields so we don't have to worry about DB-specifc
     behavior when it comes to rounding/truncating microseconds off of
     timestamps.
     """

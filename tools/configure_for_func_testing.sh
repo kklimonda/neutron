@@ -26,9 +26,9 @@ if [[ "$IS_GATE" != "True" ]] && [[ "$#" -lt 1 ]]; then
     >&2 echo "Usage: $0 /path/to/devstack [-i]
 Configure a host to run Neutron's functional test suite.
 
--i  Install Neutron's package dependencies.  By default, it is assumed
-    that devstack has already been used to deploy neutron to the
-    target host and that package dependencies need not be installed.
+-i   Install Neutron's package dependencies.  By default, it is assumed
+     that devstack has already been used to deploy neutron to the
+     target host and that package dependencies need not be installed.
 
 Warning: This script relies on devstack to perform extensive
 modification to the underlying host.  It is recommended that it be
@@ -60,8 +60,8 @@ INSTALL_BASE_DEPENDENCIES=${INSTALL_BASE_DEPENDENCIES:-$IS_GATE}
 
 
 if [ ! -f "$DEVSTACK_PATH/stack.sh" ]; then
-    >&2 echo "Unable to find devstack at '$DEVSTACK_PATH'.  Please verify that the specified path points to a valid devstack repo."
-    exit 1
+  >&2 echo "Unable to find devstack at '$DEVSTACK_PATH'.  Please verify that the specified path points to a valid devstack repo."
+  exit 1
 fi
 
 
@@ -171,10 +171,9 @@ EOF
 function _install_agent_deps {
     echo_summary "Installing agent dependencies"
 
+    source $DEVSTACK_PATH/lib/neutron-legacy
+
     ENABLED_SERVICES=q-agt,q-dhcp,q-l3
-
-    source $DEVSTACK_PATH/lib/neutron
-
     install_neutron_agent_packages
 }
 
@@ -201,7 +200,7 @@ function _install_rootwrap_sudoers {
 #
 # 1: https://bugs.launchpad.net/oslo.rootwrap/+bug/1417331
 #
-Defaults:$STACK_USER  secure_path="$PROJECT_VENV/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults:$STACK_USER  secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PROJECT_VENV/bin"
 $STACK_USER ALL=(root) NOPASSWD: $ROOTWRAP_SUDOER_CMD
 $STACK_USER ALL=(root) NOPASSWD: $ROOTWRAP_DAEMON_SUDOER_CMD
 EOF
@@ -223,12 +222,11 @@ function _install_post_devstack {
 
     if is_ubuntu; then
         install_package isc-dhcp-client
-        install_package nmap
+        install_package netcat-openbsd
     elif is_fedora; then
         install_package dhclient
-        install_package nmap-ncat
     else
-        exit_distro_not_supported "installing dhclient and ncat packages"
+        exit_distro_not_supported "installing dhclient package"
     fi
 
     # Installing python-openvswitch from packages is a stop-gap while

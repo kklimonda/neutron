@@ -15,14 +15,14 @@
 
 import mock
 from neutron_lib import constants
-from neutron_lib import context
-from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
 import testtools
 from webob import exc
 
+from neutron import context
 from neutron.db import models_v2
 from neutron.extensions import external_net as external_net
+from neutron import manager
 from neutron.tests.unit.api.v2 import test_base
 from neutron.tests.unit.db import test_db_base_plugin_v2
 
@@ -96,7 +96,7 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                     query_params='router:external=False')
 
     def test_get_network_succeeds_without_filter(self):
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         ctx = context.Context(None, None, is_admin=True)
         result = plugin.get_networks(ctx, filters=None)
         self.assertEqual([], result)
@@ -126,19 +126,19 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             res = req.get_response(self.api)
             self.assertEqual(exc.HTTPOk.code, res.status_int)
             ctx = context.Context(None, None, is_admin=True)
-            plugin = directory.get_plugin()
+            plugin = manager.NeutronManager.get_plugin()
             result = plugin.get_networks(ctx)
             self.assertFalse(result[0]['shared'])
 
     def test_network_filter_hook_admin_context(self):
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         ctx = context.Context(None, None, is_admin=True)
         model = models_v2.Network
         conditions = plugin._network_filter_hook(ctx, model, [])
         self.assertEqual([], conditions)
 
     def test_network_filter_hook_nonadmin_context(self):
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         ctx = context.Context('edinson', 'cavani')
         model = models_v2.Network
         txt = ("networkrbacs.action = :action_1 AND "
@@ -184,11 +184,13 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             self.assertTrue(ext_net['network'][external_net.EXTERNAL])
 
     def test_delete_network_check_disassociated_floatingips(self):
-        l3_mock = mock.Mock()
-        directory.add_plugin(constants.L3, l3_mock)
-        with self.network() as net:
-            req = self.new_delete_request('networks', net['network']['id'])
-            res = req.get_response(self.api)
-            self.assertEqual(exc.HTTPNoContent.code, res.status_int)
-            (l3_mock.delete_disassociated_floatingips
-             .assert_called_once_with(mock.ANY, net['network']['id']))
+        with mock.patch.object(manager.NeutronManager,
+                               'get_service_plugins') as srv_plugins:
+            l3_mock = mock.Mock()
+            srv_plugins.return_value = {'L3_ROUTER_NAT': l3_mock}
+            with self.network() as net:
+                req = self.new_delete_request('networks', net['network']['id'])
+                res = req.get_response(self.api)
+                self.assertEqual(exc.HTTPNoContent.code, res.status_int)
+                (l3_mock.delete_disassociated_floatingips
+                 .assert_called_once_with(mock.ANY, net['network']['id']))

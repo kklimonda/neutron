@@ -18,8 +18,6 @@ import contextlib
 import mock
 from neutron_lib.api import validators
 from neutron_lib import constants as const
-from neutron_lib import context
-from neutron_lib.plugins import directory
 from oslo_config import cfg
 import oslo_db.exception as exc
 import six
@@ -28,10 +26,12 @@ import webob.exc
 
 from neutron.api.v2 import attributes as attr
 from neutron.common import exceptions as n_exc
+from neutron import context
 from neutron.db import db_base_plugin_v2
 from neutron.db import securitygroups_db
 from neutron.extensions import securitygroup as ext_sg
 from neutron.extensions import standardattrdescription
+from neutron import manager
 from neutron.tests import base
 from neutron.tests.unit.db import test_db_base_plugin_v2
 
@@ -307,7 +307,7 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
         def side_effect(context, security_group, default_sg):
             # can't always raise, or create_security_group will hang
             self.assertTrue(default_sg)
-            self.assertLess(num_called[0], 2)
+            self.assertTrue(num_called[0] < 2)
             num_called[0] += 1
             ret = original_func(context, security_group, default_sg)
             if num_called[0] == 1:
@@ -605,7 +605,7 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                     self.assertEqual(sg_rule[0][k], v)
 
     def test_get_security_group_on_port_from_wrong_tenant(self):
-        plugin = directory.get_plugin()
+        plugin = manager.NeutronManager.get_plugin()
         if not hasattr(plugin, '_get_security_groups_on_port'):
             self.skipTest("plugin doesn't use the mixin with this method")
         neutron_context = context.get_admin_context()
@@ -1380,25 +1380,6 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                                      res['port'].get(ext_sg.SECURITYGROUPS))
                     self._delete('ports', port['port']['id'])
 
-    def test_update_port_with_invalid_type_in_security_groups_param(self):
-        with self.network() as n:
-            with self.subnet(n):
-                with self.security_group() as sg:
-                    res = self._create_port(self.fmt, n['network']['id'],
-                                            security_groups=(
-                                                [sg['security_group']['id']]))
-                    port = self.deserialize(self.fmt, res)
-
-                    data = {'port': {'fixed_ips': port['port']['fixed_ips'],
-                                     'name': port['port']['name'],
-                                     'security_groups': True}}
-
-                    req = self.new_update_request('ports', data,
-                                                  port['port']['id'])
-                    res = req.get_response(self.api)
-                    self.assertEqual(webob.exc.HTTPBadRequest.code,
-                                     res.status_int)
-
     def test_create_port_with_bad_security_group(self):
         with self.network() as n:
             with self.subnet(n):
@@ -1406,14 +1387,6 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                                         security_groups=['bad_id'])
 
                 self.deserialize(self.fmt, res)
-                self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
-
-    def test_create_port_with_invalid_type_in_security_groups_param(self):
-        with self.network() as n:
-            with self.subnet(n):
-                res = self._create_port(self.fmt, n['network']['id'],
-                                        security_groups=True)
-
                 self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
 
     def test_create_delete_security_group_port_in_use(self):

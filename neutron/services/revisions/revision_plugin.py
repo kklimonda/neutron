@@ -11,16 +11,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.services import base as service_base
 from oslo_log import log as logging
-import sqlalchemy
+from sqlalchemy import event
 from sqlalchemy.orm import exc
 from sqlalchemy.orm import session as se
 
 from neutron._i18n import _, _LW
-from neutron.db import _resource_extend as resource_extend
-from neutron.db import api as db_api
+from neutron.db import db_base_plugin_v2
 from neutron.db import standard_attr
+from neutron.services import service_base
 
 LOG = logging.getLogger(__name__)
 
@@ -33,9 +32,9 @@ class RevisionPlugin(service_base.ServicePluginBase):
     def __init__(self):
         super(RevisionPlugin, self).__init__()
         for resource in standard_attr.get_standard_attr_resource_model_map():
-            resource_extend.register_funcs(
+            db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
                 resource, [self.extend_resource_dict_revision])
-        db_api.sqla_listen(se.Session, 'before_flush', self.bump_revisions)
+        event.listen(se.Session, 'before_flush', self.bump_revisions)
 
     def bump_revisions(self, session, context, instances):
         # bump revision number for any updated objects in the session
@@ -80,20 +79,33 @@ class RevisionPlugin(service_base.ServicePluginBase):
         resource_res['revision_number'] = resource_db.revision_number
 
     def _find_related_obj(self, session, obj, relationship_col):
-        """Gets a related object off of a relationship.
+        """Find a related object for an object based on relationship column.
 
-        Raises a runtime error if the relationship isn't configured correctly
-        for revision bumping.
+        Given a relationship column, find the object that corresponds to it
+        either in the current session or by looking it up if it's not present.
         """
         # first check to see if it's directly attached to the object already
         related_obj = getattr(obj, relationship_col)
         if related_obj:
             return related_obj
-        for rel in sqlalchemy.inspect(obj).mapper.relationships:
-            if rel.key != relationship_col:
+        rel = getattr(obj.__class__, relationship_col)  # get relationship
+        local_rel_col = list(rel.property.local_columns)[0]
+        if len(rel.property.local_columns) > 1:
+            raise RuntimeError(_("Bumping revisions with composite foreign "
+                                 "keys not supported"))
+        related_model = rel.property.mapper.class_
+        pk = rel.property.mapper.primary_key[0]
+        rel_id = getattr(obj, local_rel_col.name)
+        if not rel_id:
+            return None
+        for session_obj in session:
+            if not isinstance(session_obj, related_model):
                 continue
-            if not rel.load_on_pending:
-                raise RuntimeError(_("revises_on_change relationships must "
-                                     "have load_on_pending set to True to "
-                                     "bump parent revisions on create: %s"),
-                                   relationship_col)
+            if getattr(session_obj, pk.name) == rel_id:
+                return session_obj
+        # object isn't in session so we have to query for it
+        related_obj = (
+            session.query(related_model).filter(pk == rel_id).
+            first()
+        )
+        return related_obj

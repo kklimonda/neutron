@@ -88,6 +88,3 @@ class SanityTestCaseRoot(functional_base.BaseSudoTestCase):
 
     def test_bridge_firewalling_enabled(self):
         checks.bridge_firewalling_enabled()
-
-    def test_ip_nonlocal_bind(self):
-        checks.ip_nonlocal_bind()

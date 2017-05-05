@@ -15,11 +15,11 @@ import copy
 import pprint
 import time
 
-from neutron_lib.plugins import directory
 from oslo_log import log as logging
 from oslo_utils import importutils
 
 from neutron.api.rpc.callbacks import exceptions
+from neutron import manager
 
 LOG = logging.getLogger(__name__)
 
@@ -81,7 +81,6 @@ class ResourceConsumerTracker(object):
         self._versions = self._get_local_resource_versions()
         self._versions_by_consumer = collections.defaultdict(dict)
         self._needs_recalculation = False
-        self.last_report = None
 
     def _get_local_resource_versions(self):
         resources = _import_resources()
@@ -163,15 +162,15 @@ class ResourceConsumerTracker(object):
 
     def report(self):
         """Output debug information about the consumer versions."""
+        #TODO(mangelajo): report only when pushed_versions differ from
+        #                 previous reports.
         format = lambda versions: pprint.pformat(dict(versions), indent=4)
         debug_dict = {'pushed_versions': format(self._versions),
                       'consumer_versions': format(self._versions_by_consumer)}
-        if self.last_report != debug_dict:
-            self.last_report = debug_dict
-            LOG.debug('Tracked resource versions report:\n'
-                      'pushed versions:\n%(pushed_versions)s\n\n'
-                      'consumer versions:\n%(consumer_versions)s\n',
-                      debug_dict)
+
+        LOG.debug('Tracked resource versions report:\n'
+                  'pushed versions:\n%(pushed_versions)s\n\n'
+                  'consumer versions:\n%(consumer_versions)s\n', debug_dict)
 
     # TODO(mangelajo): Add locking if we ever move out of greenthreads.
     def _recalculate_versions(self):
@@ -197,7 +196,7 @@ class CachedResourceConsumerTracker(object):
 
     def _update_consumer_versions(self):
         new_tracker = ResourceConsumerTracker()
-        neutron_plugin = directory.get_plugin()
+        neutron_plugin = manager.NeutronManager.get_plugin()
         agents_db = _import_agents_db()
         # If you use RPC callbacks, your plugin needs to implement
         # AgentsDbMixin so that we know which resource versions your
@@ -208,8 +207,6 @@ class CachedResourceConsumerTracker(object):
         else:
             raise exceptions.NoAgentDbMixinImplemented()
 
-        # preserve last report state so we don't duplicate logs on refresh
-        new_tracker.last_report = self._versions.last_report
         self._versions = new_tracker
         self._versions.report()
 

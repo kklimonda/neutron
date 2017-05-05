@@ -14,16 +14,18 @@
 
 from neutron_lib import constants
 from oslo_utils import uuidutils
+from sqlalchemy.orm import exc
 
 from neutron._i18n import _
 from neutron.api.v2 import attributes as attr
-from neutron.db import _resource_extend as resource_extend
-from neutron.db import _utils as db_utils
-from neutron.db import api as db_api
+from neutron.common import _deprecate
+from neutron.db import db_base_plugin_v2
+from neutron.db.models import address_scope as address_scope_model
 from neutron.extensions import address_scope as ext_address_scope
-from neutron.objects import address_scope as obj_addr_scope
-from neutron.objects import base as base_obj
 from neutron.objects import subnetpool as subnetpool_obj
+
+
+_deprecate._moved_global('AddressScope', new_module=address_scope_model)
 
 
 class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
@@ -31,20 +33,20 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
 
     __native_bulk_support = True
 
-    @staticmethod
-    def _make_address_scope_dict(address_scope, fields=None):
+    def _make_address_scope_dict(self, address_scope, fields=None):
         res = {'id': address_scope['id'],
                'name': address_scope['name'],
                'tenant_id': address_scope['tenant_id'],
                'shared': address_scope['shared'],
                'ip_version': address_scope['ip_version']}
-        return db_utils.resource_fields(res, fields)
+        return self._fields(res, fields)
 
     def _get_address_scope(self, context, id):
-        obj = obj_addr_scope.AddressScope.get_object(context, id=id)
-        if obj is None:
+        try:
+            return self._get_by_id(context, address_scope_model.AddressScope,
+                                   id)
+        except exc.NoResultFound:
             raise ext_address_scope.AddressScopeNotFound(address_scope_id=id)
-        return obj
 
     def is_address_scope_owned_by_tenant(self, context, id):
         """Check if address scope id is owned by the tenant or not.
@@ -69,25 +71,27 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
         """Create an address scope."""
         a_s = address_scope['address_scope']
         address_scope_id = a_s.get('id') or uuidutils.generate_uuid()
-        pool_args = {'project_id': a_s['tenant_id'],
-                     'id': address_scope_id,
-                     'name': a_s['name'],
-                     'shared': a_s['shared'],
-                     'ip_version': a_s['ip_version']}
-        address_scope = obj_addr_scope.AddressScope(context, **pool_args)
-        address_scope.create()
+        with context.session.begin(subtransactions=True):
+            pool_args = {'tenant_id': a_s['tenant_id'],
+                         'id': address_scope_id,
+                         'name': a_s['name'],
+                         'shared': a_s['shared'],
+                         'ip_version': a_s['ip_version']}
+            address_scope = address_scope_model.AddressScope(**pool_args)
+            context.session.add(address_scope)
+
         return self._make_address_scope_dict(address_scope)
 
     def update_address_scope(self, context, id, address_scope):
         a_s = address_scope['address_scope']
-        address_scope = self._get_address_scope(context, id)
-        if address_scope.shared and not a_s.get('shared', True):
-            reason = _("Shared address scope can't be unshared")
-            raise ext_address_scope.AddressScopeUpdateError(
-                address_scope_id=id, reason=reason)
+        with context.session.begin(subtransactions=True):
+            address_scope = self._get_address_scope(context, id)
+            if address_scope.shared and not a_s.get('shared', True):
+                reason = _("Shared address scope can't be unshared")
+                raise ext_address_scope.AddressScopeUpdateError(
+                    address_scope_id=id, reason=reason)
+            address_scope.update(a_s)
 
-        address_scope.update_fields(a_s)
-        address_scope.update()
         return self._make_address_scope_dict(address_scope)
 
     def get_address_scope(self, context, id, fields=None):
@@ -97,25 +101,29 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
     def get_address_scopes(self, context, filters=None, fields=None,
                            sorts=None, limit=None, marker=None,
                            page_reverse=False):
-        pager = base_obj.Pager(sorts, limit, page_reverse, marker)
-        address_scopes = obj_addr_scope.AddressScope.get_objects(
-            context, _pager=pager, **filters)
-
-        return [
-            self._make_address_scope_dict(addr_scope, fields)
-            for addr_scope in address_scopes
-        ]
+        marker_obj = self._get_marker_obj(context, 'addrscope', limit, marker)
+        collection = self._get_collection(context,
+                                          address_scope_model.AddressScope,
+                                          self._make_address_scope_dict,
+                                          filters=filters, fields=fields,
+                                          sorts=sorts,
+                                          limit=limit,
+                                          marker_obj=marker_obj,
+                                          page_reverse=page_reverse)
+        return collection
 
     def get_address_scopes_count(self, context, filters=None):
-        return obj_addr_scope.AddressScope.count(context, **filters)
+        return self._get_collection_count(context,
+                                          address_scope_model.AddressScope,
+                                          filters=filters)
 
     def delete_address_scope(self, context, id):
-        with db_api.context_manager.writer.using(context):
+        with context.session.begin(subtransactions=True):
             if subnetpool_obj.SubnetPool.get_objects(context,
                                                      address_scope_id=id):
                 raise ext_address_scope.AddressScopeInUse(address_scope_id=id)
             address_scope = self._get_address_scope(context, id)
-            address_scope.delete()
+            context.session.delete(address_scope)
 
     def _extend_network_dict_address_scope(self, network_res, network_db):
         network_res[ext_address_scope.IPV4_ADDRESS_SCOPE] = None
@@ -133,5 +141,8 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
                 network_res[ext_address_scope.IPV6_ADDRESS_SCOPE] = as_id
         return network_res
 
-    resource_extend.register_funcs(
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
         attr.NETWORKS, ['_extend_network_dict_address_scope'])
+
+
+_deprecate._MovedGlobals()

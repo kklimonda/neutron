@@ -36,6 +36,9 @@ def setup_conf():
     cfg.CONF.import_group('VXLAN', 'neutron.plugins.ml2.drivers.linuxbridge.'
                           'agent.common.config')
     cfg.CONF.import_group('ml2', 'neutron.plugins.ml2.config')
+    cfg.CONF.import_group('ml2_sriov',
+                          'neutron.plugins.ml2.drivers.mech_sriov.mech_driver.'
+                          'mech_driver')
     cfg.CONF.import_group('SECURITYGROUP', 'neutron.agent.securitygroups_rpc')
     dhcp_agent.register_options(cfg.CONF)
     cfg.CONF.register_opts(l3_hamode_db.L3_HA_OPTS)
@@ -236,14 +239,6 @@ def check_ip6tables():
     return result
 
 
-def check_conntrack():
-    result = checks.conntrack_supported()
-    if not result:
-        LOG.error(_LE('Cannot run conntrack. Please ensure that it '
-                      'is installed.'))
-    return result
-
-
 def check_dhcp_release6():
     result = checks.dhcp_release6_supported()
     if not result:
@@ -268,15 +263,6 @@ def check_bridge_firewalling_enabled():
                       'that bridge and/or br_netfilter kernel modules are not '
                       'loaded. Alternatively, corresponding sysctl settings '
                       'may be overridden to disable it by default.'))
-    return result
-
-
-def check_ip_nonlocal_bind():
-    result = checks.ip_nonlocal_bind()
-    if not result:
-        LOG.error(_LE('This kernel does not isolate ip_nonlocal_bind kernel '
-                      'option in namespaces. Please update to kernel '
-                      'version > 3.19.'))
     return result
 
 
@@ -320,17 +306,12 @@ OPTS = [
                     help=_('Check ipset installation')),
     BoolOptCallback('ip6tables_installed', check_ip6tables,
                     help=_('Check ip6tables installation')),
-    BoolOptCallback('conntrack_installed', check_conntrack,
-                    help=_('Check conntrack installation')),
     BoolOptCallback('dhcp_release6', check_dhcp_release6,
                     help=_('Check dhcp_release6 installation')),
     BoolOptCallback('bridge_firewalling', check_bridge_firewalling_enabled,
                     help=_('Check bridge firewalling'),
                     default=False),
-    BoolOptCallback('ip_nonlocal_bind', check_ip_nonlocal_bind,
-                    help=_('Check ip_nonlocal_bind kernel option works with '
-                           'network namespaces.'),
-                    default=False),
+
 ]
 
 
@@ -368,7 +349,6 @@ def enable_tests_from_config():
         cfg.CONF.set_default('ovsdb_native', True)
     if cfg.CONF.l3_ha:
         cfg.CONF.set_default('keepalived_ipv6_support', True)
-        cfg.CONF.set_default('ip_nonlocal_bind', True)
     if cfg.CONF.SECURITYGROUP.enable_ipset:
         cfg.CONF.set_default('ipset_installed', True)
     if cfg.CONF.SECURITYGROUP.enable_security_group:

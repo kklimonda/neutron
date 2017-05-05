@@ -14,7 +14,6 @@
 #    under the License.
 
 from tempest.lib.common.utils import data_utils
-from tempest.lib import decorators
 from tempest import test
 
 from neutron.tests.tempest.api import base
@@ -42,7 +41,7 @@ class FloatingIPTestJSON(base.BaseNetworkTest):
         for i in range(2):
             cls.create_port(cls.network)
 
-    @decorators.idempotent_id('f6a0fb6c-cb64-4b81-b0d5-f41d8f69d22d')
+    @test.idempotent_id('f6a0fb6c-cb64-4b81-b0d5-f41d8f69d22d')
     def test_blank_update_clears_association(self):
         # originally the floating IP had no attributes other than its
         # association, so an update with an empty body was a signal to
@@ -52,12 +51,11 @@ class FloatingIPTestJSON(base.BaseNetworkTest):
             port_id=self.ports[0]['id'],
             description='d1'
         )['floatingip']
-        self.floating_ips.append(body)
         self.assertEqual(self.ports[0]['id'], body['port_id'])
         body = self.client.update_floatingip(body['id'])['floatingip']
         self.assertFalse(body['port_id'])
 
-    @decorators.idempotent_id('c72c1c0c-2193-4aca-eeee-b1442641ffff')
+    @test.idempotent_id('c72c1c0c-2193-4aca-eeee-b1442641ffff')
     @test.requires_ext(extension="standard-attr-description",
                        service="network")
     def test_create_update_floatingip_description(self):
@@ -66,7 +64,6 @@ class FloatingIPTestJSON(base.BaseNetworkTest):
             port_id=self.ports[0]['id'],
             description='d1'
         )['floatingip']
-        self.floating_ips.append(body)
         self.assertEqual('d1', body['description'])
         body = self.client.show_floatingip(body['id'])['floatingip']
         self.assertEqual('d1', body['description'])
@@ -79,7 +76,7 @@ class FloatingIPTestJSON(base.BaseNetworkTest):
                                              port_id=None)
         self.assertEqual('d2', body['floatingip']['description'])
 
-    @decorators.idempotent_id('fd7161e1-2167-4686-a6ff-0f3df08001bb')
+    @test.idempotent_id('fd7161e1-2167-4686-a6ff-0f3df08001bb')
     @test.requires_ext(extension="standard-attr-description",
                        service="network")
     def test_floatingip_update_extra_attributes_port_id_not_changed(self):
@@ -89,7 +86,6 @@ class FloatingIPTestJSON(base.BaseNetworkTest):
             port_id=port_id,
             description='d1'
         )['floatingip']
-        self.floating_ips.append(body)
         self.assertEqual('d1', body['description'])
         body = self.client.show_floatingip(body['id'])['floatingip']
         self.assertEqual(port_id, body['port_id'])
@@ -104,4 +100,4 @@ class FloatingIPTestJSON(base.BaseNetworkTest):
         # disassociate
         body = self.client.update_floatingip(body['floatingip']['id'],
                                              port_id=None)
-        self.assertIsNone(body['floatingip']['port_id'])
+        self.assertEqual(None, body['floatingip']['port_id'])

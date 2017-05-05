@@ -54,7 +54,7 @@ class TestMeteringOperations(base.BaseTestCase):
 
         self.noop_driver = ('neutron.services.metering.drivers.noop.'
                             'noop_driver.NoopMeteringDriver')
-        cfg.CONF.set_override('driver', 'noop')
+        cfg.CONF.set_override('driver', self.noop_driver)
         cfg.CONF.set_override('measure_interval', 0)
         cfg.CONF.set_override('report_interval', 0)
 
@@ -130,6 +130,7 @@ class TestMeteringOperations(base.BaseTestCase):
 
         now = timeutils.utcnow()
         time_fixture = self.useFixture(utils_fixture.TimeFixture(now))
+        self.addCleanup(timeutils.clear_time_override)
 
         self.agent.routers_updated(None, ROUTERS)
 
@@ -159,11 +160,11 @@ class TestMeteringOperations(base.BaseTestCase):
         payload = n['payload']
         self.assertEqual(TENANT_ID, payload['tenant_id'])
         self.assertEqual(LABEL_ID, payload['label_id'])
-        self.assertLess((payload['time'] - report_interval),
-                        measure_interval, payload)
+        self.assertTrue((payload['time'] - report_interval)
+                        < measure_interval, payload)
         interval = (payload['last_update'] - payload['first_update']) \
             - report_interval
-        self.assertLess(interval, measure_interval, payload)
+        self.assertTrue(interval < measure_interval, payload)
 
     def test_router_deleted(self):
         label_id = _uuid()
@@ -230,7 +231,9 @@ class TestMeteringDriver(base.BaseTestCase):
         super(TestMeteringDriver, self).setUp()
         metering_agent_config.register_metering_agent_opts()
 
-        cfg.CONF.set_override('driver', 'noop')
+        self.noop_driver = ('neutron.services.metering.drivers.noop.'
+                            'noop_driver.NoopMeteringDriver')
+        cfg.CONF.set_override('driver', self.noop_driver)
 
         self.agent = metering_agent.MeteringAgent('my agent', cfg.CONF)
         self.driver = mock.Mock()
@@ -242,7 +245,7 @@ class TestMeteringDriver(base.BaseTestCase):
         with mock.patch.object(metering_agent, 'LOG') as log:
             self.agent.add_metering_label(None, ROUTERS)
             log.exception.assert_called_with(mock.ANY,
-                                             {'driver': 'noop',
+                                             {'driver': self.noop_driver,
                                               'func': 'add_metering_label'})
 
     def test_add_metering_label_runtime_error(self):
@@ -251,7 +254,7 @@ class TestMeteringDriver(base.BaseTestCase):
         with mock.patch.object(metering_agent, 'LOG') as log:
             self.agent.add_metering_label(None, ROUTERS)
             log.exception.assert_called_with(mock.ANY,
-                                             {'driver': 'noop',
+                                             {'driver': self.noop_driver,
                                               'func':
                                               'add_metering_label'})
 

@@ -13,8 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-from neutron_lib import exceptions
-
+import neutron.common.exceptions as exceptions
 import neutron.db.db_base_plugin_v2 as db_base_plugin_v2
 import neutron.db.network_ip_availability_db as ip_availability_db
 

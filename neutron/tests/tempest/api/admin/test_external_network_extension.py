@@ -12,7 +12,6 @@
 
 from oslo_config import cfg
 from tempest.lib.common.utils import data_utils
-from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 import testtools
@@ -39,7 +38,7 @@ class ExternalNetworksRBACTestJSON(base.BaseAdminNetworkTest):
         self.addCleanup(self.admin_client.delete_network, network['id'])
         return network
 
-    @decorators.idempotent_id('afd8f1b7-a81e-4629-bca8-a367b3a144bb')
+    @test.idempotent_id('afd8f1b7-a81e-4629-bca8-a367b3a144bb')
     def test_regular_client_shares_with_another(self):
         net = self.create_network()
         self.client.create_rbac_policy(
@@ -54,7 +53,7 @@ class ExternalNetworksRBACTestJSON(base.BaseAdminNetworkTest):
             external_gateway_info={'network_id': net['id']})['router']
         self.addCleanup(self.admin_client.delete_router, r['id'])
 
-    @decorators.idempotent_id('eff9443a-2d04-48ee-840e-d955ac564bcd')
+    @test.idempotent_id('eff9443a-2d04-48ee-840e-d955ac564bcd')
     def test_regular_client_blocked_from_creating_external_wild_policies(self):
         net = self.create_network()
         with testtools.ExpectedException(lib_exc.Forbidden):
@@ -63,7 +62,7 @@ class ExternalNetworksRBACTestJSON(base.BaseAdminNetworkTest):
                 action='access_as_external',
                 target_tenant='*')
 
-    @decorators.idempotent_id('a2e19f06-48a9-4e4c-b717-08cb2008707d')
+    @test.idempotent_id('a2e19f06-48a9-4e4c-b717-08cb2008707d')
     def test_wildcard_policy_created_from_external_network_api(self):
         # create external makes wildcard
         net_id = self._create_network(external=True)['id']
@@ -86,7 +85,7 @@ class ExternalNetworksRBACTestJSON(base.BaseAdminNetworkTest):
             object_id=net_id, action='access_as_external',
             target_tenant='*')['rbac_policies']))
 
-    @decorators.idempotent_id('a5539002-5bdb-48b5-b124-abcd12347865')
+    @test.idempotent_id('a5539002-5bdb-48b5-b124-abcd12347865')
     def test_external_update_policy_from_wildcard_to_specific_tenant(self):
         net_id = self._create_network(external=True)['id']
         rbac_pol = self.admin_client.list_rbac_policies(
@@ -101,7 +100,7 @@ class ExternalNetworksRBACTestJSON(base.BaseAdminNetworkTest):
         self.admin_client.update_rbac_policy(
             rbac_pol['id'], target_tenant=self.client2.tenant_id)
 
-    @decorators.idempotent_id('a5539002-5bdb-48b5-b124-e9eedd5975e6')
+    @test.idempotent_id('a5539002-5bdb-48b5-b124-e9eedd5975e6')
     def test_external_conversion_on_policy_create(self):
         net_id = self._create_network(external=False)['id']
         self.admin_client.create_rbac_policy(
@@ -111,7 +110,7 @@ class ExternalNetworksRBACTestJSON(base.BaseAdminNetworkTest):
         body = self.admin_client.show_network(net_id)['network']
         self.assertTrue(body['router:external'])
 
-    @decorators.idempotent_id('01364c50-bfb6-46c4-b44c-edc4564d61cf')
+    @test.idempotent_id('01364c50-bfb6-46c4-b44c-edc4564d61cf')
     def test_policy_allows_tenant_to_allocate_floatingip(self):
         net = self._create_network(external=False)
         # share to the admin client so it gets converted to external but
@@ -131,7 +130,7 @@ class ExternalNetworksRBACTestJSON(base.BaseAdminNetworkTest):
         self.client2.create_floatingip(
             floating_network_id=net['id'])
 
-    @decorators.idempotent_id('476be1e0-f72e-47dc-9a14-4435926bbe82')
+    @test.idempotent_id('476be1e0-f72e-47dc-9a14-4435926bbe82')
     def test_policy_allows_tenant_to_attach_ext_gw(self):
         net = self._create_network(external=False)
         self.create_subnet(net, client=self.admin_client, enable_dhcp=False)
@@ -144,7 +143,7 @@ class ExternalNetworksRBACTestJSON(base.BaseAdminNetworkTest):
             external_gateway_info={'network_id': net['id']})['router']
         self.addCleanup(self.admin_client.delete_router, r['id'])
 
-    @decorators.idempotent_id('d54decee-4203-4ced-91a2-ea42ca63e154')
+    @test.idempotent_id('d54decee-4203-4ced-91a2-ea42ca63e154')
     def test_delete_policies_while_tenant_attached_to_net(self):
         net = self._create_network(external=False)
         self.create_subnet(net, client=self.admin_client, enable_dhcp=False)
@@ -185,7 +184,7 @@ class ExternalNetworksRBACTestJSON(base.BaseAdminNetworkTest):
                 data_utils.rand_name('router-'),
                 external_gateway_info={'network_id': net['id']})
 
-    @decorators.idempotent_id('7041cec7-d8fe-4c78-9b04-b51b2fd49dc9')
+    @test.idempotent_id('7041cec7-d8fe-4c78-9b04-b51b2fd49dc9')
     def test_wildcard_policy_delete_blocked_on_default_ext(self):
         public_net_id = cfg.CONF.network.public_network_id
         # ensure it is default before so we don't wipe out the policy

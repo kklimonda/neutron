@@ -13,16 +13,15 @@
 #    under the License.
 
 from neutron_lib.api import converters
-from neutron_lib.api import extensions as api_extensions
 from neutron_lib.api import validators
-from neutron_lib.db import constants as db_const
 from neutron_lib import exceptions as nexception
-from neutron_lib.plugins import directory
 
 from neutron._i18n import _
 from neutron.api import extensions
+from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
 from neutron.api.v2 import resource_helper
+from neutron import manager
 from neutron.plugins.common import constants
 
 
@@ -75,7 +74,8 @@ class InvalidFlavorServiceType(nexception.InvalidInput):
 
 def _validate_flavor_service_type(validate_type, valid_values=None):
     """Ensure requested flavor service type plugin is loaded."""
-    if not directory.get_plugin(validate_type):
+    plugins = manager.NeutronManager.get_service_plugins()
+    if validate_type not in plugins:
         raise InvalidFlavorServiceType(service_type=validate_type)
 
 validators.add_validator('validate_flavor_service_type',
@@ -92,11 +92,11 @@ RESOURCE_ATTRIBUTE_MAP = {
                'is_visible': True,
                'primary_key': True},
         'name': {'allow_post': True, 'allow_put': True,
-                 'validate': {'type:string': db_const.NAME_FIELD_SIZE},
+                 'validate': {'type:string': attr.NAME_MAX_LEN},
                  'is_visible': True, 'default': ''},
         'description': {'allow_post': True, 'allow_put': True,
                         'validate': {'type:string_or_none':
-                                     db_const.LONG_DESCRIPTION_FIELD_SIZE},
+                                     attr.LONG_DESCRIPTION_MAX_LEN},
                         'is_visible': True, 'default': ''},
         'service_type': {'allow_post': True, 'allow_put': False,
                          'validate':
@@ -104,8 +104,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                          'is_visible': True},
         'tenant_id': {'allow_post': True, 'allow_put': False,
                       'required_by_policy': True,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
         'service_profiles': {'allow_post': True, 'allow_put': True,
                              'validate': {'type:uuid_list': None},
@@ -122,11 +121,11 @@ RESOURCE_ATTRIBUTE_MAP = {
                'primary_key': True},
         'description': {'allow_post': True, 'allow_put': True,
                         'validate': {'type:string_or_none':
-                                     db_const.LONG_DESCRIPTION_FIELD_SIZE},
+                                     attr.LONG_DESCRIPTION_MAX_LEN},
                         'is_visible': True, 'default': ''},
         'driver': {'allow_post': True, 'allow_put': True,
                    'validate': {'type:string':
-                                db_const.LONG_DESCRIPTION_FIELD_SIZE},
+                                attr.LONG_DESCRIPTION_MAX_LEN},
                    'is_visible': True,
                    'default': ''},
         'metainfo': {'allow_post': True, 'allow_put': True,
@@ -134,8 +133,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                      'default': ''},
         'tenant_id': {'allow_post': True, 'allow_put': False,
                       'required_by_policy': True,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
         'enabled': {'allow_post': True, 'allow_put': True,
                     'convert_to': converters.convert_to_boolean_if_not_none,
@@ -159,9 +157,8 @@ SUB_RESOURCE_ATTRIBUTE_MAP = {
                                     'is_visible': True},
                        'tenant_id': {'allow_post': True, 'allow_put': False,
                                      'required_by_policy': True,
-                                     'validate': {
-                                         'type:string':
-                                             db_const.PROJECT_ID_FIELD_SIZE},
+                                     'validate': {'type:string':
+                                                  attr.TENANT_ID_MAX_LEN},
                                      'is_visible': True}}
     },
     'service_profiles': {
@@ -172,15 +169,14 @@ SUB_RESOURCE_ATTRIBUTE_MAP = {
                               'is_visible': True},
                        'tenant_id': {'allow_post': True, 'allow_put': False,
                                      'required_by_policy': True,
-                                     'validate': {
-                                         'type:string':
-                                             db_const.PROJECT_ID_FIELD_SIZE},
+                                     'validate': {'type:string':
+                                                  attr.TENANT_ID_MAX_LEN},
                                      'is_visible': True}}
     }
 }
 
 
-class Flavors(api_extensions.ExtensionDescriptor):
+class Flavors(extensions.ExtensionDescriptor):
 
     @classmethod
     def get_name(cls):
@@ -203,11 +199,13 @@ class Flavors(api_extensions.ExtensionDescriptor):
         """Returns Ext Resources."""
         plural_mappings = resource_helper.build_plural_mappings(
             {}, RESOURCE_ATTRIBUTE_MAP)
+        attr.PLURALS.update(plural_mappings)
         resources = resource_helper.build_resource_info(
             plural_mappings,
             RESOURCE_ATTRIBUTE_MAP,
             constants.FLAVORS)
-        plugin = directory.get_plugin(constants.FLAVORS)
+        plugin = manager.NeutronManager.get_service_plugins()[
+            constants.FLAVORS]
         for collection_name in SUB_RESOURCE_ATTRIBUTE_MAP:
             # Special handling needed for sub-resources with 'y' ending
             # (e.g. proxies -> proxy)

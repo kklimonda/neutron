@@ -108,5 +108,4 @@ def Resource(controller, faults=None, deserializers=None, serializers=None,
     # for an extension so it can reuse the code instead of forcing every
     # extension to rewrite the code for use with pecan.
     setattr(resource, 'controller', controller)
-    setattr(resource, 'action_status', action_status)
     return resource

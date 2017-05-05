@@ -19,7 +19,8 @@ from neutron_lib import constants as n_const
 from oslo_utils import encodeutils
 
 from neutron.cmd.eventlet.plugins.ovs_neutron_agent import main as _main
-from neutron.plugins.ml2.drivers.openvswitch.agent import ovs_neutron_agent
+from neutron.plugins.ml2.drivers.openvswitch.agent.ovs_neutron_agent \
+    import OVSNeutronAgent
 
 
 def get_tunnel_name_full(cls, network_type, local_ip, remote_ip):
@@ -40,7 +41,7 @@ def get_tunnel_name_full(cls, network_type, local_ip, remote_ip):
 
     return '%s-%s-%s' % (network_type, source_ip_hash, remote_ip_hash)
 
-ovs_neutron_agent.OVSNeutronAgent.get_tunnel_name = get_tunnel_name_full
+OVSNeutronAgent.get_tunnel_name = get_tunnel_name_full
 
 
 def main():

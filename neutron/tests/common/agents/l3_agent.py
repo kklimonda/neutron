@@ -22,7 +22,7 @@ from neutron._i18n import _
 from neutron.agent.l3 import agent
 from neutron.agent.l3 import namespaces
 from neutron.agent import l3_agent
-from neutron.common import constants
+from neutron.agent.linux import iptables_firewall
 
 
 class L3NATAgentForTest(agent.L3NATAgentWithStateReport):
@@ -87,13 +87,13 @@ def _append_suffix(dev_name):
 def get_internal_device_name(ri, port_id):
     return _append_suffix(
         (namespaces.INTERNAL_DEV_PREFIX + port_id)
-        [:constants.LINUX_DEV_LEN])
+        [:iptables_firewall.LINUX_DEV_LEN])
 
 
 def get_external_device_name(ri, port_id):
     return _append_suffix(
         (namespaces.EXTERNAL_DEV_PREFIX + port_id)
-        [:constants.LINUX_DEV_LEN])
+        [:iptables_firewall.LINUX_DEV_LEN])
 
 
 OPTS = [

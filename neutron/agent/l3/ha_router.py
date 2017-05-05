@@ -16,18 +16,19 @@ import os
 import shutil
 import signal
 
+import eventlet
 import netaddr
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as n_consts
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LE
+from neutron._i18n import _LE
 from neutron.agent.l3 import namespaces
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
 from neutron.common import utils as common_utils
+from neutron.extensions import portbindings
 
 LOG = logging.getLogger(__name__)
 HA_DEV_PREFIX = 'ha-'
@@ -100,23 +101,13 @@ class HaRouter(router.RouterInfo):
     def ha_namespace(self):
         return self.ns_name
 
-    def is_router_master(self):
-        """this method is normally called before the ha_router object is fully
-        initialized
-        """
-        if self.router.get('_ha_state') == 'active':
-            return True
-        else:
-            return False
-
     def initialize(self, process_monitor):
+        super(HaRouter, self).initialize(process_monitor)
         ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
         if not ha_port:
-            msg = _("Unable to process HA router %s without "
-                    "HA port") % self.router_id
-            LOG.exception(msg)
-            raise Exception(msg)
-        super(HaRouter, self).initialize(process_monitor)
+            LOG.error(_LE('Unable to process HA router %s without HA port'),
+                      self.router_id)
+            return
 
         self.ha_port = ha_port
         self._init_keepalived_manager(process_monitor)
@@ -146,10 +137,7 @@ class HaRouter(router.RouterInfo):
             ha_port_cidrs,
             nopreempt=True,
             advert_int=self.agent_conf.ha_vrrp_advert_int,
-            priority=self.ha_priority,
-            vrrp_health_check_interval=(
-                self.agent_conf.ha_vrrp_health_check_interval),
-            ha_conf_dir=self.keepalived_manager.get_conf_dir())
+            priority=self.ha_priority)
         instance.track_interfaces.append(interface_name)
 
         if self.agent_conf.ha_vrrp_auth_password:
@@ -368,7 +356,7 @@ class HaRouter(router.RouterInfo):
         try:
             common_utils.wait_until_true(lambda: not pm.active,
                                          timeout=SIGTERM_TIMEOUT)
-        except common_utils.WaitTimeout:
+        except eventlet.timeout.Timeout:
             pm.disable(sig=str(int(signal.SIGKILL)))
 
     def update_initial_state(self, callback):
@@ -396,13 +384,8 @@ class HaRouter(router.RouterInfo):
         self._plug_external_gateway(ex_gw_port, interface_name, self.ns_name)
         self._add_gateway_vip(ex_gw_port, interface_name)
         self._disable_ipv6_addressing_on_interface(interface_name)
-
-        # Enable RA and IPv6 forwarding only for master instances. This will
-        # prevent backup routers from sending packets to the upstream switch
-        # and disrupt connections.
-        enable = self.ha_state == 'master'
-        self._configure_ipv6_params_on_gw(ex_gw_port, self.ns_name,
-                                          interface_name, enable)
+        if self.ha_state == 'master':
+            self._enable_ra_on_gw(ex_gw_port, self.ns_name, interface_name)
 
     def external_gateway_updated(self, ex_gw_port, interface_name):
         self._plug_external_gateway(
@@ -425,14 +408,14 @@ class HaRouter(router.RouterInfo):
                                namespace=self.ns_name,
                                prefix=router.EXTERNAL_DEV_PREFIX)
 
-    def delete(self):
+    def delete(self, agent):
         self.destroy_state_change_monitor(self.process_monitor)
         self.disable_keepalived()
         self.ha_network_removed()
-        super(HaRouter, self).delete()
+        super(HaRouter, self).delete(agent)
 
-    def process(self):
-        super(HaRouter, self).process()
+    def process(self, agent):
+        super(HaRouter, self).process(agent)
 
         self.ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
         if (self.ha_port and

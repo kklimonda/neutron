@@ -33,6 +33,7 @@ from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
 
+from neutron.agent.common import config
 from neutron.agent.common import ovs_lib
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import interface
@@ -40,7 +41,6 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_firewall
 from neutron.agent.linux import utils
 from neutron.common import utils as common_utils
-from neutron.conf.agent import common as config
 from neutron.db import db_base_plugin_common
 from neutron.plugins.ml2.drivers.linuxbridge.agent import \
     linuxbridge_neutron_agent as linuxbridge_agent
@@ -128,10 +128,9 @@ def assert_async_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
 
 
 @contextlib.contextmanager
-def async_ping(namespace, ips, timeout=1, count=10):
+def async_ping(namespace, ips):
     with futures.ThreadPoolExecutor(max_workers=len(ips)) as executor:
-        fs = [executor.submit(assert_async_ping, namespace, ip, count=count,
-                              timeout=timeout)
+        fs = [executor.submit(assert_async_ping, namespace, ip, count=10)
               for ip in ips]
         yield lambda: all(f.done() for f in fs)
         futures.wait(fs)
@@ -244,27 +243,6 @@ def create_patch_ports(source, destination):
     destination.add_patch_port(destination_name, source_name)
 
 
-def create_vlan_interface(
-        namespace, port_name, mac_address, ip_address, vlan_tag):
-    """Create a VLAN interface in namespace with IP address.
-
-    :param namespace: Namespace in which VLAN interface should be created.
-    :param port_name: Name of the port to which VLAN should be added.
-    :param ip_address: IPNetwork instance containing the VLAN interface IP
-                       address.
-    :param vlan_tag: VLAN tag for VLAN interface.
-    """
-    ip_wrap = ip_lib.IPWrapper(namespace)
-    dev_name = "%s.%d" % (port_name, vlan_tag)
-    ip_wrap.add_vlan(dev_name, port_name, vlan_tag)
-    dev = ip_wrap.device(dev_name)
-    dev.addr.add(str(ip_address))
-    dev.link.set_address(mac_address)
-    dev.link.set_up()
-
-    return dev
-
-
 class RootHelperProcess(subprocess.Popen):
     def __init__(self, cmd, *args, **kwargs):
         for arg in ('stdin', 'stdout', 'stderr'):
@@ -289,11 +267,12 @@ class RootHelperProcess(subprocess.Popen):
     @staticmethod
     def _read_stream(stream, timeout):
         if timeout:
-            poll_predicate = functools.partial(
-                select.select, [stream], [], [], 1)
-            common_utils.wait_until_true(
-                lambda: poll_predicate()[0], timeout, 0.1,
-                RuntimeError('No output in %.2f seconds' % timeout))
+            poller = select.poll()
+            poller.register(stream.fileno())
+            poll_predicate = functools.partial(poller.poll, 1)
+            common_utils.wait_until_true(poll_predicate, timeout, 0.1,
+                                  RuntimeError(
+                                      'No output in %.2f seconds' % timeout))
         return stream.readline()
 
     def writeline(self, data):
@@ -379,7 +358,7 @@ class Pinger(object):
     def start(self):
         if self.proc and self.proc.is_running:
             raise RuntimeError("This pinger has already a running process")
-        ip_version = common_utils.get_ip_version(self.address)
+        ip_version = ip_lib.get_ip_version(self.address)
         ping_exec = 'ping' if ip_version == 4 else 'ping6'
         cmd = [ping_exec, self.address, '-W', str(self.timeout)]
         if self.count:
@@ -507,14 +486,8 @@ class NetcatTester(object):
 
         return message == testing_string
 
-    def test_no_connectivity(self, respawn=False):
-        try:
-            return not self.test_connectivity(respawn)
-        except RuntimeError:
-            return True
-
     def _spawn_nc_in_namespace(self, namespace, address, listen=False):
-        cmd = ['ncat', address, self.dst_port]
+        cmd = ['nc', address, self.dst_port]
         if self.protocol == self.UDP:
             cmd.append('-u')
         elif self.protocol == self.SCTP:

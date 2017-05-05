@@ -15,7 +15,6 @@
 import contextlib
 
 import eventlet
-from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron.agent.common import base_polling
@@ -52,8 +51,7 @@ class InterfacePollingMinimizer(base_polling.BasePollingManager):
 
         super(InterfacePollingMinimizer, self).__init__()
         self._monitor = ovsdb_monitor.SimpleInterfaceMonitor(
-            respawn_interval=ovsdb_monitor_respawn_interval,
-            ovsdb_connection=cfg.CONF.OVS.ovsdb_connection)
+            respawn_interval=ovsdb_monitor_respawn_interval)
 
     def start(self):
         self._monitor.start(block=True)

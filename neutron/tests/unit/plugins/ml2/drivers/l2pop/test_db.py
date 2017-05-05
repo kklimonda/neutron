@@ -12,18 +12,17 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
-from neutron_lib import context
-from neutron_lib.utils import net
 from oslo_utils import uuidutils
 
 from neutron.common import constants as n_const
-from neutron.db.models import l3 as l3_models
-from neutron.db.models import l3_attrs
-from neutron.db.models import l3ha as l3ha_model
+from neutron.common import utils
+from neutron import context
+from neutron.db import l3_attrs_db
+from neutron.db import l3_db
+from neutron.db import l3_hamode_db
 from neutron.db import models_v2
-from neutron.objects import network as network_obj
+from neutron.extensions import portbindings
 from neutron.plugins.ml2.drivers.l2pop import db as l2pop_db
 from neutron.plugins.ml2 import models
 from neutron.tests.common import helpers
@@ -36,26 +35,24 @@ HOST_3 = 'HOST_3'
 HOST_2_TUNNELING_IP = '20.0.0.2'
 HOST_3_TUNNELING_IP = '20.0.0.3'
 TEST_ROUTER_ID = 'router_id'
-TEST_NETWORK_ID = uuidutils.generate_uuid()
-TEST_HA_NETWORK_ID = uuidutils.generate_uuid()
-PLUGIN_NAME = 'ml2'
+TEST_NETWORK_ID = 'network_id'
+TEST_HA_NETWORK_ID = 'ha_network_id'
 
 
 class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
-
     def setUp(self):
         super(TestL2PopulationDBTestCase, self).setUp()
-        self.setup_coreplugin(PLUGIN_NAME)
         self.ctx = context.get_admin_context()
         self._create_network()
 
     def _create_network(self, network_id=TEST_NETWORK_ID):
-        network_obj.Network(self.ctx, id=network_id).create()
+        with self.ctx.session.begin(subtransactions=True):
+            self.ctx.session.add(models_v2.Network(id=network_id))
 
     def _create_router(self, distributed=True, ha=False):
         with self.ctx.session.begin(subtransactions=True):
-            self.ctx.session.add(l3_models.Router(id=TEST_ROUTER_ID))
-            self.ctx.session.add(l3_attrs.RouterExtraAttributes(
+            self.ctx.session.add(l3_db.Router(id=TEST_ROUTER_ID))
+            self.ctx.session.add(l3_attrs_db.RouterExtraAttributes(
                 router_id=TEST_ROUTER_ID, distributed=distributed, ha=ha))
 
     def _create_ha_router(self, distributed=False):
@@ -66,7 +63,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
         helpers.register_l3_agent(HOST_3)
         helpers.register_ovs_agent(HOST_3, tunneling_ip=HOST_3_TUNNELING_IP)
         with self.ctx.session.begin(subtransactions=True):
-            network_obj.Network(self.ctx, id=TEST_HA_NETWORK_ID).create()
+            self.ctx.session.add(models_v2.Network(id=TEST_HA_NETWORK_ID))
             self._create_router(distributed=distributed, ha=True)
             for state, host in [(n_const.HA_ROUTER_STATE_ACTIVE, HOST),
                                 (n_const.HA_ROUTER_STATE_STANDBY, HOST_2)]:
@@ -99,7 +96,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
 
     def _setup_port_binding(self, **kwargs):
         with self.ctx.session.begin(subtransactions=True):
-            mac = net.get_random_mac('fa:16:3e:00:00:00'.split(':'))
+            mac = utils.get_random_mac('fa:16:3e:00:00:00'.split(':'))
             port_id = uuidutils.generate_uuid()
             network_id = kwargs.get('network_id', TEST_NETWORK_ID)
             device_owner = kwargs.get('device_owner', '')
@@ -126,7 +123,7 @@ class TestL2PopulationDBTestCase(testlib_api.SqlTestCase):
 
             if network_id == TEST_HA_NETWORK_ID:
                 agent = self.get_l3_agent_by_host(host)
-                haport_bindings_cls = l3ha_model.L3HARouterAgentPortBinding
+                haport_bindings_cls = l3_hamode_db.L3HARouterAgentPortBinding
                 habinding_kwarg = {'port_id': port_id,
                                    'router_id': device_id,
                                    'l3_agent_id': agent['id'],

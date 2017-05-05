@@ -15,13 +15,13 @@
 
 import re
 
-from neutron_lib.api import extensions
 from neutron_lib.api import validators
 from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 import six
 
 from neutron._i18n import _
+from neutron.api import extensions
 from neutron.api.v2 import attributes as attr
 from neutron.extensions import l3
 
@@ -61,7 +61,7 @@ def _validate_dns_name(data, max_len=FQDN_MAX_LEN):
 
 
 def _validate_fip_dns_name(data, max_len=FQDN_MAX_LEN):
-    msg = validators.validate_string(data)
+    msg = attr._validate_string(data)
     if msg:
         return msg
     if not data:

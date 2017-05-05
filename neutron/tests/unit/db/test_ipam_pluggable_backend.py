@@ -112,10 +112,12 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
 
     def _get_allocate_mock(self, subnet_id, auto_ip='10.0.0.2',
                            fail_ip='127.0.0.1',
-                           exception=n_exc.InvalidInput(
-                               error_message='SomeError')):
+                           exception=None):
+        if exception is None:
+            exception = n_exc.InvalidInput(error_message='SomeError')
+
         def allocate_mock(request):
-            if isinstance(request, ipam_req.SpecificAddressRequest):
+            if type(request) == ipam_req.SpecificAddressRequest:
                 if request.address == netaddr.IPAddress(fail_ip):
                     raise exception
                 else:
@@ -125,14 +127,15 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
 
         return allocate_mock
 
-    def _get_deallocate_mock(self, fail_ip='127.0.0.1',
-                             exception=n_exc.InvalidInput(
-                                 error_message='SomeError')):
-        def deallocate_mock(ip):
-            if str(ip) == fail_ip:
-                raise exception
+    def _get_deallocate_mock(self, fail_ip='127.0.0.1', exception=None):
+            if exception is None:
+                exception = n_exc.InvalidInput(error_message='SomeError')
 
-        return deallocate_mock
+            def deallocate_mock(ip):
+                if str(ip) == fail_ip:
+                    raise exception
+
+            return deallocate_mock
 
     def _validate_allocate_calls(self, expected_calls, mocks):
         self.assertTrue(mocks['subnets'].allocate.called)
@@ -372,9 +375,6 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
     @mock.patch('neutron.ipam.driver.Pool')
     def test_create_ipv6_pd_subnet_over_ipam(self, pool_mock):
         mocks = self._prepare_mocks_with_pool_mock(pool_mock)
-        # TODO(kevinbenton): remove after bug/1666493 is resolved
-        sub = pool_mock.get_instance.return_value.get_subnet.return_value
-        sub.subnet_manager.neutron_id = mock.ANY
         cfg.CONF.set_override('ipv6_pd_enabled', True)
         cidr = n_const.PROVISIONAL_IPV6_PD_PREFIX
         allocation_pools = [netaddr.IPRange('::2', '::ffff:ffff:ffff:ffff')]
@@ -648,7 +648,7 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         fixed_ips_mock = mock.Mock(return_value=changes.add)
         mocks['ipam'] = ipam_pluggable_backend.IpamPluggableBackend()
         mocks['ipam']._get_changed_ips_for_port = changes_mock
-        mocks['ipam']._ipam_get_subnets = mock.Mock(return_value=[])
+        mocks['ipam']._ipam_get_subnets = mock.Mock()
         mocks['ipam']._test_fixed_ips_for_port = fixed_ips_mock
         mocks['ipam']._update_ips_for_pd_subnet = mock.Mock(return_value=[])
 
@@ -787,7 +787,7 @@ class TestDbBasePluginIpam(test_db_base.NeutronDbPluginV2TestCase):
         mocks['ipam']._ipam_deallocate_ips = mock.Mock(side_effect=ValueError)
         mocks['ipam']._ipam_allocate_ips = mock.Mock(side_effect=ValueError)
 
-        # Validate original exception (DBDeadlock) is not overridden by
+        # Validate original exception (DBDeadlock) is not overriden by
         # exception raised on rollback (ValueError)
         self.assertRaises(db_exc.DBDeadlock,
                           mocks['ipam'].update_port_with_ips,

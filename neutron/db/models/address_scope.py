@@ -10,9 +10,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.db import constants as db_const
 from neutron_lib.db import model_base
 import sqlalchemy as sa
+
+from neutron.api.v2 import attributes as attr
 
 
 class AddressScope(model_base.BASEV2, model_base.HasId, model_base.HasProject):
@@ -20,6 +21,6 @@ class AddressScope(model_base.BASEV2, model_base.HasId, model_base.HasProject):
 
     __tablename__ = "address_scopes"
 
-    name = sa.Column(sa.String(db_const.NAME_FIELD_SIZE), nullable=False)
+    name = sa.Column(sa.String(attr.NAME_MAX_LEN), nullable=False)
     shared = sa.Column(sa.Boolean, nullable=False)
     ip_version = sa.Column(sa.Integer(), nullable=False)

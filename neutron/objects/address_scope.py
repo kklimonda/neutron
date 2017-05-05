@@ -28,8 +28,8 @@ class AddressScope(base.NeutronDbObject):
     db_model = models.AddressScope
 
     fields = {
-        'id': common_types.UUIDField(),
-        'project_id': obj_fields.StringField(nullable=True),
+        'id': obj_fields.UUIDField(),
+        'tenant_id': obj_fields.StringField(nullable=True),
         'name': obj_fields.StringField(),
         'shared': obj_fields.BooleanField(),
         'ip_version': common_types.IPVersionEnumField(),

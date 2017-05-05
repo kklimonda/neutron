@@ -16,12 +16,14 @@
 import abc
 import collections
 
+from neutron_lib import exceptions
 from oslo_concurrency import lockutils
 from oslo_log import log as logging
 import six
 
 from neutron._i18n import _LW, _LI
 from neutron.agent.l2 import l2_agent_extension
+from neutron.agent.linux import tc_lib
 from neutron.api.rpc.callbacks.consumer import registry
 from neutron.api.rpc.callbacks import events
 from neutron.api.rpc.callbacks import resources
@@ -120,6 +122,15 @@ class QosAgentDriver(object):
                 LOG.debug("Port %(port)s excluded from QoS rule %(rule)s",
                           {'port': port, 'rule': rule.id})
 
+    def _get_egress_burst_value(self, rule):
+        """Return burst value used for egress bandwidth limitation.
+
+        Because Egress bw_limit is done on ingress qdisc by LB and ovs drivers
+        so it will return burst_value used by tc on as ingress_qdisc.
+        """
+        return tc_lib.TcCommand.get_ingress_qdisc_burst_value(
+                rule.max_kbps, rule.max_burst_kbps)
+
 
 class PortPolicyMap(object):
     def __init__(self):
@@ -167,8 +178,7 @@ class PortPolicyMap(object):
                     if not port_dict:
                         self._clean_policy_info(qos_policy_id)
                     return
-        LOG.debug("QoS extension did not have information on port %s",
-                  port_id)
+        raise exceptions.PortNotFound(port_id=port['port_id'])
 
     def _clean_policy_info(self, qos_policy_id):
         del self.qos_policy_ports[qos_policy_id]
@@ -205,13 +215,12 @@ class QosAgentExtension(l2_agent_extension.L2AgentExtension):
         for resource_type in self.SUPPORTED_RESOURCE_TYPES:
             # We assume that the neutron server always broadcasts the latest
             # version known to the agent
-            registry.register(self._handle_notification, resource_type)
+            registry.subscribe(self._handle_notification, resource_type)
             topic = resources_rpc.resource_type_versioned_topic(resource_type)
             connection.create_consumer(topic, endpoints, fanout=True)
 
     @lockutils.synchronized('qos-port')
-    def _handle_notification(self, context, resource_type,
-                             qos_policies, event_type):
+    def _handle_notification(self, qos_policies, event_type):
         # server does not allow to remove a policy that is attached to any
         # port, so we ignore DELETED events. Also, if we receive a CREATED
         # event for a policy, it means that there are no ports so far that are
@@ -274,5 +283,10 @@ class QosAgentExtension(l2_agent_extension.L2AgentExtension):
             self.policy_map.update_policy(qos_policy)
 
     def _process_reset_port(self, port):
-        self.policy_map.clean_by_port(port)
-        self.qos_driver.delete(port)
+        try:
+            self.policy_map.clean_by_port(port)
+            self.qos_driver.delete(port)
+        except exceptions.PortNotFound:
+            LOG.info(_LI("QoS extension did have no information about the "
+                         "port %s that we were trying to reset"),
+                     port['port_id'])

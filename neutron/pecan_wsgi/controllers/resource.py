@@ -69,8 +69,10 @@ class ItemController(utils.NeutronPecanController):
         updater_args.append(data)
         return {self.resource: self.plugin_updater(*updater_args)}
 
-    @utils.when_delete(index)
+    @utils.when(index, method='DELETE')
     def delete(self):
+        # TODO(kevinbenton): setting code could be in a decorator
+        pecan.response.status = 204
         neutron_context = request.context['neutron_context']
         deleter_args = [neutron_context, self.item]
         if 'parent_id' in request.context:
@@ -80,9 +82,8 @@ class ItemController(utils.NeutronPecanController):
     @utils.expose()
     def _lookup(self, collection, *remainder):
         request.context['collection'] = collection
-        collection_path = '/'.join([self.resource, collection])
         controller = manager.NeutronManager.get_controller_for_resource(
-            collection_path)
+            collection)
         if not controller:
             if collection not in self._member_actions:
                 LOG.warning(_LW("No controller found for: %s - returning"
@@ -120,8 +121,7 @@ class CollectionsController(utils.NeutronPecanController):
             # NOTE(tonytan4ever): item needs to share the same
             # parent as collection
             parent_resource=self.parent,
-            member_actions=self._member_actions,
-            plugin=self.plugin), remainder)
+            member_actions=self._member_actions), remainder)
 
     @utils.expose(generic=True)
     def index(self, *args, **kwargs):
@@ -152,22 +152,21 @@ class CollectionsController(utils.NeutronPecanController):
         return self.create(resources)
 
     def create(self, resources):
-        if request.context['is_bulk']:
+        if len(resources) > 1:
             # Bulk!
             creator = self.plugin_bulk_creator
             key = self.collection
             data = {key: [{self.resource: res} for res in resources]}
-            creator_kwargs = {self.collection: data}
         else:
             creator = self.plugin_creator
             key = self.resource
             data = {key: resources[0]}
-            creator_kwargs = {self.resource: data}
         neutron_context = request.context['neutron_context']
         creator_args = [neutron_context]
-        if 'parent_id' in request.context and self._parent_id_name:
-            creator_kwargs[self._parent_id_name] = request.context['parent_id']
-        return {key: creator(*creator_args, **creator_kwargs)}
+        if 'parent_id' in request.context:
+            creator_args.append(request.context['parent_id'])
+        creator_args.append(data)
+        return {key: creator(*creator_args)}
 
 
 class MemberActionController(ItemController):
@@ -199,9 +198,8 @@ class MemberActionController(ItemController):
         if not self._show_action:
             pecan.abort(405)
         neutron_context = request.context['neutron_context']
-        # NOTE(blogan): The legacy wsgi code did not pass fields to the plugin
-        # on GET member actions.  To maintain compatibility, we'll do the same.
-        return self.plugin_shower(neutron_context, self.item)
+        fields = request.context['query_params'].get('fields')
+        return self.plugin_shower(neutron_context, self.item, fields=fields)
 
     @utils.when(index, method='PUT')
     def put(self, *args, **kwargs):

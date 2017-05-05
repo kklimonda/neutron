@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2010 OpenStack Foundation.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,10 +15,10 @@
 # limitations under the License.
 
 #
-# Neutron documentation build configuration file, created by
+# Keystone documentation build configuration file, created by
 # sphinx-quickstart on Tue May 18 13:50:15 2010.
 #
-# This file is execfile()d with the current directory set to it's containing
+# This file is execfile()'d with the current directory set to it's containing
 # dir.
 #
 # Note that not all possible configuration values are present in this
@@ -37,7 +38,6 @@ import warnings
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 NEUTRON_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
 sys.path.insert(0, NEUTRON_DIR)
-sys.path.append(os.path.abspath("ext"))
 
 # -- General configuration ---------------------------------------------------
 
@@ -48,8 +48,7 @@ extensions = ['sphinx.ext.autodoc',
               'sphinx.ext.ifconfig',
               'sphinx.ext.graphviz',
               'sphinx.ext.todo',
-              'oslosphinx',
-              'support_matrix']
+              'oslosphinx']
 
 todo_include_todos = True
 
@@ -154,7 +153,7 @@ modindex_common_prefix = ['neutron.']
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+# html_static_path = ['_static']
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.

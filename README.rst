@@ -1,24 +1,36 @@
-========================
-Team and repository tags
-========================
-
-.. image:: http://governance.openstack.org/badges/neutron.svg
-    :target: http://governance.openstack.org/reference/tags/index.html
-
-.. Change things from this point on
-
 Welcome!
 ========
 
-To learn more about neutron:
+You have come across a cloud computing network fabric controller. It has
+identified itself as "Neutron." It aims to tame your (cloud) networking!
 
-  * Documentation: http://docs.openstack.org
-  * Features: http://specs.openstack.org/openstack/neutron-specs
-  * Defects: http://launchpad.net/neutron
+External Resources:
+===================
 
-Get in touch via `email <mailto:openstack-dev@lists.openstack.org>`_. Use
-[Neutron] in your subject.
+The homepage for Neutron is: http://launchpad.net/neutron.  Use this
+site for asking for help, and filing bugs. Code is available on
+git.openstack.org at <http://git.openstack.org/cgit/openstack/neutron>.
 
-To learn how to contribute:
+The latest and most in-depth documentation on how to use Neutron is
+available at: <http://docs.openstack.org>. This includes:
 
-  CONTRIBUTING.rst
+Neutron Administrator Guide
+   http://docs.openstack.org/admin-guide/networking.html
+
+Neutron Developer Guide
+   http://docs.openstack.org/developer/neutron/devref/
+
+Networking Guide
+   http://docs.openstack.org/networking-guide/
+
+Neutron API Reference:
+   http://developer.openstack.org/api-ref/networking/v2/
+
+Current Neutron developer documentation is available at:
+   http://wiki.openstack.org/NeutronDevelopment
+
+For help on usage and hacking of Neutron, please send mail to
+<mailto:openstack-dev@lists.openstack.org>.
+
+For information on how to contribute to Neutron, please see the
+contents of the CONTRIBUTING.rst file.

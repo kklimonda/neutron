@@ -3,7 +3,6 @@
 set -ex
 
 VENV=${1:-"dsvm-functional"}
-FLAVOR=${2:-"all"}
 
 GATE_DEST=$BASE/new
 NEUTRON_PATH=$GATE_DEST/neutron
@@ -71,39 +70,26 @@ case $VENV in
         upgrade_ovs_if_necessary
     fi
 
-    # prepare base environment for ./stack.sh
-    load_rc_hook stack_base
-
-    # enable monitoring
-    load_rc_hook dstat
-
+    load_conf_hook iptables_verify
     # Make the workspace owned by the stack user
     sudo chown -R $STACK_USER:$STACK_USER $BASE
-
-    # deploy devstack as per local.conf
-    cd $DEVSTACK_PATH && sudo -H -u $GATE_STACK_USER ./stack.sh
     ;;
 
-"api"|"api-pecan"|"full-ovsfw"|"full-pecan"|"dsvm-scenario-ovs"|"dsvm-scenario-linuxbridge")
-    load_rc_hook api_${FLAVOR}_extensions
+# TODO(ihrachys): remove dsvm-scenario from the list when it's no longer used in project-config
+"api"|"api-pecan"|"full-pecan"|"dsvm-scenario"|"dsvm-scenario-ovs"|"dsvm-scenario-linuxbridge")
+    load_rc_hook api_extensions
+    # NOTE(ihrachys): note the order of hook post-* sections is significant: [quotas] hook should
+    # go before other hooks modifying [DEFAULT]. See LP#1583214 for details.
     load_conf_hook quotas
     load_rc_hook dns
     load_rc_hook qos
     load_rc_hook trunk
-    load_conf_hook mtu
-    load_conf_hook vlan_provider
     load_conf_hook osprofiler
     if [[ "$VENV" =~ "dsvm-scenario" ]]; then
-        load_rc_hook ubuntu_image
-    fi
-    if [[ "$VENV" =~ "dsvm-scenario-linuxbridge" ]]; then
         load_conf_hook iptables_verify
     fi
     if [[ "$VENV" =~ "pecan" ]]; then
         load_conf_hook pecan
-    fi
-    if [[ "$VENV" =~ "ovs" ]]; then
-        load_conf_hook ovsfw
     fi
 
     export DEVSTACK_LOCALCONF=$(cat $LOCAL_CONF)

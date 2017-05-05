@@ -17,6 +17,8 @@
 import mock
 import time
 
+from eventlet.timeout import Timeout
+
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
@@ -321,8 +323,8 @@ class TestOVSAgent(base.OVSAgentTestFramework):
                          unplug_ports=[self.ports[1]])
         self.wait_until_ports_state([self.ports[0]], up=True)
         self.assertRaises(
-            utils.WaitTimeout, self.wait_until_ports_state, [self.ports[1]],
-            up=True, timeout=10)
+            Timeout, self.wait_until_ports_state, [self.ports[1]], up=True,
+            timeout=10)
 
     def test_ovs_restarted_event(self):
         callback = mock.Mock()

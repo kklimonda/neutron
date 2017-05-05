@@ -16,20 +16,28 @@
 import sys
 
 from neutron_lib import constants
-from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from neutron._i18n import _LE, _LW
+from neutron._i18n import _, _LE, _LW
 from neutron.agent.l2 import l2_agent_extension
 from neutron.agent.linux import bridge_lib
-from neutron.conf.agent import l2_ext_fdb_population
+from neutron.common import utils as n_utils
 from neutron.plugins.ml2.drivers.linuxbridge.agent.common import (
      constants as linux_bridge_constants)
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import (
      constants as ovs_constants)
 
-l2_ext_fdb_population.register_fdb_population_opts()
+# if shared_physical_device_mappings is not configured KeyError will be thrown
+fdb_population_opt = [
+    cfg.ListOpt('shared_physical_device_mappings', default=[],
+                help=_("Comma-separated list of "
+                       "<physical_network>:<network_device> tuples mapping "
+                       "physical network names to the agent's node-specific "
+                       "shared physical network device between "
+                       "SR-IOV and OVS or SR-IOV and linux bridge"))
+]
+cfg.CONF.register_opts(fdb_population_opt, 'FDB')
 
 LOG = logging.getLogger(__name__)
 
@@ -134,7 +142,7 @@ class FdbPopulationAgentExtension(
                           '%(driver_type)s'), {'driver_type': driver_type})
             sys.exit(1)
 
-        self.device_mappings = helpers.parse_mappings(
+        self.device_mappings = n_utils.parse_mappings(
             cfg.CONF.FDB.shared_physical_device_mappings, unique_keys=False)
         devices = self._get_devices()
         if not devices:

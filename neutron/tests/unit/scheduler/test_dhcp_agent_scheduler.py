@@ -17,11 +17,11 @@ import random
 
 import mock
 from neutron_lib import constants
-from neutron_lib import context
 from oslo_config import cfg
 from oslo_utils import importutils
 import testscenarios
 
+from neutron import context
 from neutron.db import agentschedulers_db as sched_db
 from neutron.db import common_db_mixin
 from neutron.db import models_v2
@@ -41,11 +41,9 @@ HOST_D = 'host-d'
 
 
 class TestDhcpSchedulerBaseTestCase(testlib_api.SqlTestCase):
-    CORE_PLUGIN = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
 
     def setUp(self):
         super(TestDhcpSchedulerBaseTestCase, self).setUp()
-        self.setup_coreplugin(self.CORE_PLUGIN)
         self.ctx = context.get_admin_context()
         self.network = {'id': 'foo_network_id'}
         self.network_id = 'foo_network_id'
@@ -297,7 +295,6 @@ class TestAutoScheduleNetworks(TestDhcpSchedulerBaseTestCase):
 class TestAutoScheduleSegments(test_plugin.Ml2PluginV2TestCase,
                                TestDhcpSchedulerBaseTestCase):
     """Unit test scenarios for ChanceScheduler"""
-    CORE_PLUGIN = 'neutron.plugins.ml2.plugin.Ml2Plugin'
 
     def setUp(self):
         super(TestAutoScheduleSegments, self).setUp()
@@ -485,7 +482,7 @@ class TestNetworksFailover(TestDhcpSchedulerBaseTestCase,
             self.remove_networks_from_down_agents()
 
     def test_reschedule_network_catches_exceptions_on_fetching_bindings(self):
-        with mock.patch('neutron_lib.context.get_admin_context') as get_ctx:
+        with mock.patch('neutron.context.get_admin_context') as get_ctx:
             mock_ctx = mock.Mock()
             get_ctx.return_value = mock_ctx
             mock_ctx.session.query.side_effect = Exception()
@@ -591,15 +588,6 @@ class DHCPAgentWeightSchedulerTestCase(test_plugin.Ml2PluginV2TestCase):
         self.assertEqual('host-c', agent2[0]['host'])
         self.assertEqual('host-d', agent3[0]['host'])
 
-    def _get_network_with_candidate_hosts(self, net_id, seg_id):
-        # expire the session so that the segment is fully reloaded on fetch,
-        # including its new host mapping
-        self.ctx.session.expire_all()
-        net = self.plugin.get_network(self.ctx, net_id)
-        seg = self.segments_plugin.get_segment(self.ctx, seg_id)
-        net['candidate_hosts'] = seg['hosts']
-        return net
-
     def test_schedule_segment_one_hostable_agent(self):
         net_id = self._create_network()
         seg_id = self._create_segment(net_id)
@@ -607,7 +595,9 @@ class DHCPAgentWeightSchedulerTestCase(test_plugin.Ml2PluginV2TestCase):
         helpers.register_dhcp_agent(HOST_D)
         segments_service_db.update_segment_host_mapping(
             self.ctx, HOST_C, {seg_id})
-        net = self._get_network_with_candidate_hosts(net_id, seg_id)
+        net = self.plugin.get_network(self.ctx, net_id)
+        seg = self.segments_plugin.get_segment(self.ctx, seg_id)
+        net['candidate_hosts'] = seg['hosts']
         agents = self.plugin.network_scheduler.schedule(
             self.plugin, self.ctx, net)
         self.assertEqual(1, len(agents))
@@ -622,7 +612,9 @@ class DHCPAgentWeightSchedulerTestCase(test_plugin.Ml2PluginV2TestCase):
             self.ctx, HOST_C, {seg_id})
         segments_service_db.update_segment_host_mapping(
             self.ctx, HOST_D, {seg_id})
-        net = self._get_network_with_candidate_hosts(net_id, seg_id)
+        net = self.plugin.get_network(self.ctx, net_id)
+        seg = self.segments_plugin.get_segment(self.ctx, seg_id)
+        net['candidate_hosts'] = seg['hosts']
         agents = self.plugin.network_scheduler.schedule(
             self.plugin, self.ctx, net)
         self.assertEqual(1, len(agents))
@@ -650,7 +642,9 @@ class DHCPAgentWeightSchedulerTestCase(test_plugin.Ml2PluginV2TestCase):
             self.ctx, HOST_C, {seg_id})
         segments_service_db.update_segment_host_mapping(
             self.ctx, HOST_D, {seg_id})
-        net = self._get_network_with_candidate_hosts(net_id, seg_id)
+        net = self.plugin.get_network(self.ctx, net_id)
+        seg = self.segments_plugin.get_segment(self.ctx, seg_id)
+        net['candidate_hosts'] = seg['hosts']
         agents = self.plugin.network_scheduler.schedule(
             self.plugin, self.ctx, net)
         self.assertEqual(2, len(agents))
@@ -665,7 +659,9 @@ class DHCPAgentWeightSchedulerTestCase(test_plugin.Ml2PluginV2TestCase):
         helpers.register_dhcp_agent(HOST_D)
         segments_service_db.update_segment_host_mapping(
             self.ctx, HOST_C, {seg_id})
-        net = self._get_network_with_candidate_hosts(net_id, seg_id)
+        net = self.plugin.get_network(self.ctx, net_id)
+        seg = self.segments_plugin.get_segment(self.ctx, seg_id)
+        net['candidate_hosts'] = seg['hosts']
         agents = self.plugin.network_scheduler.schedule(
             self.plugin, self.ctx, net)
         self.assertEqual(1, len(agents))

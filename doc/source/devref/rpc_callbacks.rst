@@ -211,16 +211,16 @@ The agent code processing port updates may look like::
     from neutron.api.rpc.callbacks import resources
 
 
-    def process_resource_updates(context, resource_type, resource_list, event_type):
+    def process_resource_updates(resource_type, resource_list, event_type):
 
         # send to the right handler which will update any control plane
         # details related to the updated resources...
 
 
     def subscribe_resources():
-        registry.register(process_resource_updates, resources.SEC_GROUP)
+        registry.subscribe(process_resource_updates, resources.SEC_GROUP)
 
-        registry.register(process_resource_updates, resources.QOS_POLICY)
+        registry.subscribe(process_resource_updates, resources.QOS_POLICY)
 
     def port_update(port):
 
@@ -232,18 +232,17 @@ The agent code processing port updates may look like::
 
 The relevant function is:
 
-* register(callback, resource_type): subscribes callback to a resource type.
+* subscribe(callback, resource_type): subscribes callback to a resource type.
 
 
 The callback function will receive the following arguments:
 
-* context: the neutron context that triggered the notification.
 * resource_type: the type of resource which is receiving the update.
 * resource_list: list of resources which have been pushed by server.
 * event_type: will be one of CREATED, UPDATED, or DELETED, see
   neutron.api.rpc.callbacks.events for details.
 
-With the underlying oslo_messaging support for dynamic topics on the receiver
+With the underlaying oslo_messaging support for dynamic topics on the receiver
 we cannot implement a per "resource type + resource id" topic, rabbitmq seems
 to handle 10000's of topics without suffering, but creating 100's of
 oslo_messaging receivers on different topics seems to crash.
@@ -272,7 +271,7 @@ belong to the same resource type, a single push RPC message is sent; if the list
 contains objects of different resource types, resources of each type are grouped
 and sent separately, one push RPC message per type. On the receiver side,
 resources in a list always belong to the same type. In other words, a server-side
-push of a list of heterogeneous objects will result into N messages on bus and
+push of a list of heterogenous objects will result into N messages on bus and
 N client-side callback invocations, where N is the number of unique resource
 types in the given list, e.g. L(A, A, B, C, C, C) would be fragmented into
 L1(A, A), L2(B), L3(C, C, C), and each list pushed separately.

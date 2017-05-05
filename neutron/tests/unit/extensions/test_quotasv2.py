@@ -16,7 +16,6 @@
 import sys
 
 import mock
-from neutron_lib import context
 from oslo_config import cfg
 import testtools
 from webob import exc
@@ -27,7 +26,7 @@ from neutron.api.v2 import router
 from neutron.common import config
 from neutron.common import constants
 from neutron.common import exceptions
-from neutron.conf import quota as qconf
+from neutron import context
 from neutron.db.quota import driver
 from neutron import quota
 from neutron.quota import resource_registry
@@ -71,6 +70,11 @@ class QuotaExtensionTestCase(testlib_api.WebTestCase):
         # resources are registered
         router.APIRouter()
 
+    def tearDown(self):
+        self.api = None
+        self.plugin = None
+        super(QuotaExtensionTestCase, self).tearDown()
+
     def _test_quota_default_values(self, expected_values):
         tenant_id = 'tenant_id1'
         env = {'neutron.context': context.Context('', tenant_id)}
@@ -100,10 +104,10 @@ class QuotaExtensionDbTestCase(QuotaExtensionTestCase):
 
     def test_quotas_default_values(self):
         self._test_quota_default_values(
-            {'network': qconf.DEFAULT_QUOTA_NETWORK,
-             'subnet': qconf.DEFAULT_QUOTA_SUBNET,
-             'port': qconf.DEFAULT_QUOTA_PORT,
-             'extra1': qconf.DEFAULT_QUOTA})
+            {'network': 10,
+             'subnet': 10,
+             'port': 50,
+             'extra1': -1})
 
     def test_quotas_negative_default_value(self):
         cfg.CONF.set_override(
@@ -113,10 +117,10 @@ class QuotaExtensionDbTestCase(QuotaExtensionTestCase):
         cfg.CONF.set_override(
             'quota_subnet', -50, group='QUOTAS')
         self._test_quota_default_values(
-            {'network': qconf.DEFAULT_QUOTA,
-             'subnet': qconf.DEFAULT_QUOTA,
-             'port': qconf.DEFAULT_QUOTA,
-             'extra1': qconf.DEFAULT_QUOTA})
+            {'network': -1,
+             'subnet': -1,
+             'port': -1,
+             'extra1': -1})
 
     def test_show_default_quotas_with_admin(self):
         tenant_id = 'tenant_id1'
@@ -128,12 +132,9 @@ class QuotaExtensionDbTestCase(QuotaExtensionTestCase):
                            extra_environ=env)
         self.assertEqual(200, res.status_int)
         quota = self.deserialize(res)
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_NETWORK, quota['quota']['network'])
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_SUBNET, quota['quota']['subnet'])
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_PORT, quota['quota']['port'])
+        self.assertEqual(10, quota['quota']['network'])
+        self.assertEqual(10, quota['quota']['subnet'])
+        self.assertEqual(50, quota['quota']['port'])
 
     def test_show_default_quotas_with_owner_tenant(self):
         tenant_id = 'tenant_id1'
@@ -145,12 +146,9 @@ class QuotaExtensionDbTestCase(QuotaExtensionTestCase):
                            extra_environ=env)
         self.assertEqual(200, res.status_int)
         quota = self.deserialize(res)
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_NETWORK, quota['quota']['network'])
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_SUBNET, quota['quota']['subnet'])
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_PORT, quota['quota']['port'])
+        self.assertEqual(10, quota['quota']['network'])
+        self.assertEqual(10, quota['quota']['subnet'])
+        self.assertEqual(50, quota['quota']['port'])
 
     def test_show_default_quotas_without_admin_forbidden_returns_403(self):
         tenant_id = 'tenant_id1'
@@ -170,12 +168,9 @@ class QuotaExtensionDbTestCase(QuotaExtensionTestCase):
                            extra_environ=env)
         self.assertEqual(200, res.status_int)
         quota = self.deserialize(res)
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_NETWORK, quota['quota']['network'])
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_SUBNET, quota['quota']['subnet'])
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_PORT, quota['quota']['port'])
+        self.assertEqual(10, quota['quota']['network'])
+        self.assertEqual(10, quota['quota']['subnet'])
+        self.assertEqual(50, quota['quota']['port'])
 
     def test_show_quotas_without_admin_forbidden_returns_403(self):
         tenant_id = 'tenant_id1'
@@ -193,12 +188,9 @@ class QuotaExtensionDbTestCase(QuotaExtensionTestCase):
                            extra_environ=env)
         self.assertEqual(200, res.status_int)
         quota = self.deserialize(res)
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_NETWORK, quota['quota']['network'])
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_SUBNET, quota['quota']['subnet'])
-        self.assertEqual(
-            qconf.DEFAULT_QUOTA_PORT, quota['quota']['port'])
+        self.assertEqual(10, quota['quota']['network'])
+        self.assertEqual(10, quota['quota']['subnet'])
+        self.assertEqual(50, quota['quota']['port'])
 
     def test_list_quotas_with_admin(self):
         tenant_id = 'tenant_id1'
@@ -301,8 +293,8 @@ class QuotaExtensionDbTestCase(QuotaExtensionTestCase):
                            extra_environ=env2)
         quota = self.deserialize(res)
         self.assertEqual(100, quota['quota']['network'])
-        self.assertEqual(qconf.DEFAULT_QUOTA_SUBNET, quota['quota']['subnet'])
-        self.assertEqual(qconf.DEFAULT_QUOTA_PORT, quota['quota']['port'])
+        self.assertEqual(10, quota['quota']['subnet'])
+        self.assertEqual(50, quota['quota']['port'])
 
     def test_update_attributes(self):
         tenant_id = 'tenant_id1'
@@ -429,19 +421,19 @@ class QuotaExtensionCfgTestCase(QuotaExtensionTestCase):
 
     def test_quotas_default_values(self):
         self._test_quota_default_values(
-            {'network': qconf.DEFAULT_QUOTA_NETWORK,
-             'subnet': qconf.DEFAULT_QUOTA_SUBNET,
-             'port': qconf.DEFAULT_QUOTA_PORT,
-             'extra1': qconf.DEFAULT_QUOTA})
+            {'network': 10,
+             'subnet': 10,
+             'port': 50,
+             'extra1': -1})
 
     def test_quotas_negative_default_value(self):
         cfg.CONF.set_override(
             'quota_port', -666, group='QUOTAS')
         self._test_quota_default_values(
-            {'network': qconf.DEFAULT_QUOTA_NETWORK,
-             'subnet': qconf.DEFAULT_QUOTA_SUBNET,
-             'port': qconf.DEFAULT_QUOTA,
-             'extra1': qconf.DEFAULT_QUOTA})
+            {'network': 10,
+             'subnet': 10,
+             'port': -1,
+             'extra1': -1})
 
     def test_show_quotas_with_admin(self):
         tenant_id = 'tenant_id1'

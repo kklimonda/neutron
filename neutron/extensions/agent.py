@@ -16,15 +16,14 @@
 import abc
 
 from neutron_lib.api import converters
-from neutron_lib.api import extensions as api_extensions
-from neutron_lib.db import constants as db_const
 from neutron_lib import exceptions
-from neutron_lib.plugins import directory
 import six
 
 from neutron._i18n import _
 from neutron.api import extensions
+from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import base
+from neutron import manager
 
 
 # Attribute Map
@@ -55,11 +54,10 @@ RESOURCE_ATTRIBUTE_MAP = {
                   'is_visible': True},
         'configurations': {'allow_post': False, 'allow_put': False,
                            'is_visible': True},
-        'description': {
-            'allow_post': False, 'allow_put': True,
-            'is_visible': True,
-            'validate': {
-                'type:string_or_none': db_const.DESCRIPTION_FIELD_SIZE}},
+        'description': {'allow_post': False, 'allow_put': True,
+                        'is_visible': True,
+                        'validate': {
+                            'type:string_or_none': attr.DESCRIPTION_MAX_LEN}},
     },
 }
 
@@ -78,7 +76,7 @@ class MultipleAgentFoundByTypeHost(exceptions.Conflict):
                 "host=%(host)s found")
 
 
-class Agent(api_extensions.ExtensionDescriptor):
+class Agent(extensions.ExtensionDescriptor):
     """Agent management extension."""
 
     @classmethod
@@ -100,7 +98,9 @@ class Agent(api_extensions.ExtensionDescriptor):
     @classmethod
     def get_resources(cls):
         """Returns Ext Resources."""
-        plugin = directory.get_plugin()
+        my_plurals = [(key, key[:-1]) for key in RESOURCE_ATTRIBUTE_MAP.keys()]
+        attr.PLURALS.update(dict(my_plurals))
+        plugin = manager.NeutronManager.get_plugin()
         params = RESOURCE_ATTRIBUTE_MAP.get(RESOURCE_NAME + 's')
         controller = base.create_resource(RESOURCE_NAME + 's',
                                           RESOURCE_NAME,

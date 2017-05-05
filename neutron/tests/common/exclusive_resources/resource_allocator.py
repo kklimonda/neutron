@@ -16,7 +16,6 @@ import os
 
 import fixtures
 from oslo_log import log as logging
-from oslo_utils import fileutils
 
 from neutron.common import utils
 
@@ -99,7 +98,7 @@ class ResourceAllocator(object):
                   resource, self._resource_name, allocations)
 
     def _get_allocations(self):
-        fileutils.ensure_tree(TMP_DIR, mode=0o755)
+        utils.ensure_dir(TMP_DIR)
 
         try:
             with open(self._state_file_path, 'r') as allocations_file:

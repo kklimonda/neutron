@@ -18,9 +18,8 @@ import sqlalchemy as sa
 from sqlalchemy import sql
 
 from neutron._i18n import _
-from neutron.db import _resource_extend as resource_extend
+from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
-from neutron.db.models import l3 as l3_models
 from neutron.extensions import l3
 
 
@@ -33,7 +32,7 @@ cfg.CONF.register_opts(OPTS)
 EXTERNAL_GW_INFO = l3.EXTERNAL_GW_INFO
 
 # Modify the Router Data Model adding the enable_snat attribute
-setattr(l3_models.Router, 'enable_snat',
+setattr(l3_db.Router, 'enable_snat',
         sa.Column(sa.Boolean, default=True, server_default=sql.true(),
                   nullable=False))
 
@@ -41,7 +40,8 @@ setattr(l3_models.Router, 'enable_snat',
 class L3_NAT_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
     """Mixin class to add configurable gateway modes."""
 
-    resource_extend.register_funcs(
+    # Register dict extend functions for ports and networks
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
         l3.ROUTERS, ['_extend_router_dict_gw_mode'])
 
     def _extend_router_dict_gw_mode(self, router_res, router_db):

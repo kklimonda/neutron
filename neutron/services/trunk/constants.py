@@ -79,4 +79,3 @@ TRUNK_SUBPORT_OWNER = 'trunk:subport'
 
 # String literals for segmentation types
 VLAN = 'vlan'
-INHERIT = 'inherit'

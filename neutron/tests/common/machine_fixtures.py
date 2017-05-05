@@ -22,10 +22,6 @@ from neutron.common import utils
 from neutron.tests.common import net_helpers
 
 
-class FakeMachineException(Exception):
-    pass
-
-
 class FakeMachineBase(fixtures.Fixture):
     """Create a fake machine.
 
@@ -64,20 +60,7 @@ class FakeMachineBase(fixtures.Fixture):
 
     def block_until_ping(self, dst_ip):
         predicate = functools.partial(self.ping_predicate, dst_ip)
-        utils.wait_until_true(
-            predicate,
-            exception=FakeMachineException(
-                "No ICMP reply obtained from IP address %s" % dst_ip)
-        )
-
-    def block_until_no_ping(self, dst_ip):
-        predicate = functools.partial(
-            lambda ip: not self.ping_predicate(ip), dst_ip)
-        utils.wait_until_true(
-            predicate,
-            exception=FakeMachineException(
-                "ICMP packets still pass to %s IP address." % dst_ip)
-        )
+        utils.wait_until_true(predicate)
 
     def assert_ping(self, dst_ip):
         net_helpers.assert_ping(self.namespace, dst_ip)
@@ -100,11 +83,10 @@ class FakeMachineBase(fixtures.Fixture):
 
 class FakeMachine(FakeMachineBase):
 
-    def __init__(self, bridge, ip_cidr, gateway_ip=None, ipv6_cidr=None):
+    def __init__(self, bridge, ip_cidr, gateway_ip=None):
         super(FakeMachine, self).__init__()
         self.bridge = bridge
         self._ip_cidr = ip_cidr
-        self._ipv6_cidr = ipv6_cidr
         self.gateway_ip = gateway_ip
 
     def _setUp(self):
@@ -130,21 +112,6 @@ class FakeMachine(FakeMachineBase):
         self.port.addr.add(ip_cidr)
         self.port.addr.delete(self._ip_cidr)
         self._ip_cidr = ip_cidr
-
-    @property
-    def ipv6(self):
-        return self._ipv6_cidr.partition('/')[0]
-
-    @property
-    def ipv6_cidr(self):
-        return self._ipv6_cidr
-
-    @ipv6_cidr.setter
-    def ipv6_cidr(self, ipv6_cidr):
-        if self._ipv6_cidr:
-            self.port.addr.delete(self._ipv6_cidr)
-        self.port.addr.add(ipv6_cidr)
-        self._ipv6_cidr = ipv6_cidr
 
     @FakeMachineBase.mac_address.setter
     def mac_address(self, mac_address):

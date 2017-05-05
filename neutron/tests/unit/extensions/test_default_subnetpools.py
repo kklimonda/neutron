@@ -32,8 +32,7 @@ class DefaultSubnetpoolsExtensionManager(object):
         return []
 
     def get_extended_resources(self, version):
-        extension = default_subnetpools.Default_subnetpools()
-        return extension.get_extended_resources(version)
+        return default_subnetpools.get_extended_resources(version)
 
 
 class DefaultSubnetpoolsExtensionTestPlugin(

@@ -14,7 +14,6 @@
 #    under the License.
 
 from tempest.lib.common.utils import data_utils
-from tempest.lib import decorators
 from tempest import test
 
 from neutron.tests.tempest.api import base_routers as base
@@ -40,7 +39,7 @@ class RoutersTestDVR(base.BaseRouterTest):
             raise cls.skipException(msg)
         cls.admin_client.delete_router(router['router']['id'])
 
-    @decorators.idempotent_id('08a2a0a8-f1e4-4b34-8e30-e522e836c44e')
+    @test.idempotent_id('08a2a0a8-f1e4-4b34-8e30-e522e836c44e')
     def test_distributed_router_creation(self):
         """
         Test uses administrative credentials to creates a
@@ -57,7 +56,7 @@ class RoutersTestDVR(base.BaseRouterTest):
                         router['router']['id'])
         self.assertTrue(router['router']['distributed'])
 
-    @decorators.idempotent_id('8a0a72b4-7290-4677-afeb-b4ffe37bc352')
+    @test.idempotent_id('8a0a72b4-7290-4677-afeb-b4ffe37bc352')
     def test_centralized_router_creation(self):
         """
         Test uses administrative credentials to creates a
@@ -75,7 +74,7 @@ class RoutersTestDVR(base.BaseRouterTest):
                         router['router']['id'])
         self.assertFalse(router['router']['distributed'])
 
-    @decorators.idempotent_id('acd43596-c1fb-439d-ada8-31ad48ae3c2e')
+    @test.idempotent_id('acd43596-c1fb-439d-ada8-31ad48ae3c2e')
     def test_centralized_router_update_to_dvr(self):
         """
         Test uses administrative credentials to creates a

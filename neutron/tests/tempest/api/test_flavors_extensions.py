@@ -12,7 +12,6 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 
@@ -64,7 +63,7 @@ class TestFlavorsJson(base.BaseAdminNetworkTest):
         labels = self.admin_client.list_service_profiles(id=service_profile_id)
         self.assertEqual(len(labels['service_profiles']), 0)
 
-    @decorators.idempotent_id('b12a9487-b6a2-4cff-a69a-fe2a0b64fae6')
+    @test.idempotent_id('b12a9487-b6a2-4cff-a69a-fe2a0b64fae6')
     def test_create_update_delete_service_profile(self):
         # Creates a service profile
         description = "service_profile created by tempest"
@@ -87,7 +86,7 @@ class TestFlavorsJson(base.BaseAdminNetworkTest):
                   id=service_profile['id']))
         self.assertEqual(len(labels['service_profiles']), 1)
 
-    @decorators.idempotent_id('136bcf09-00af-4da7-9b7f-174735d4aebd')
+    @test.idempotent_id('136bcf09-00af-4da7-9b7f-174735d4aebd')
     def test_create_update_delete_flavor(self):
         # Creates a flavor
         description = "flavor created by tempest"
@@ -106,7 +105,7 @@ class TestFlavorsJson(base.BaseAdminNetworkTest):
         labels = (self.admin_client.list_flavors(id=flavor['id']))
         self.assertEqual(len(labels['flavors']), 1)
 
-    @decorators.idempotent_id('30abb445-0eea-472e-bd02-8649f54a5968')
+    @test.idempotent_id('30abb445-0eea-472e-bd02-8649f54a5968')
     def test_show_service_profile(self):
         # Verifies the details of a service profile
         body = self.admin_client.show_service_profile(
@@ -119,7 +118,7 @@ class TestFlavorsJson(base.BaseAdminNetworkTest):
                          service_profile['metainfo'])
         self.assertTrue(service_profile['enabled'])
 
-    @decorators.idempotent_id('362f9658-164b-44dd-8356-151bc9b7be72')
+    @test.idempotent_id('362f9658-164b-44dd-8356-151bc9b7be72')
     def test_show_flavor(self):
         # Verifies the details of a flavor
         body = self.admin_client.show_flavor(self.flavor['id'])
@@ -129,14 +128,14 @@ class TestFlavorsJson(base.BaseAdminNetworkTest):
         self.assertEqual(self.flavor['name'], flavor['name'])
         self.assertTrue(flavor['enabled'])
 
-    @decorators.idempotent_id('eb3dd12e-6dfd-45f4-8393-46e0fa19860e')
+    @test.idempotent_id('eb3dd12e-6dfd-45f4-8393-46e0fa19860e')
     def test_list_flavors(self):
         # Verify flavor lists
         body = self.admin_client.list_flavors(id=33)
         flavors = body['flavors']
         self.assertEqual(0, len(flavors))
 
-    @decorators.idempotent_id('e2fb2f8c-45bf-429a-9f17-171c70444612')
+    @test.idempotent_id('e2fb2f8c-45bf-429a-9f17-171c70444612')
     def test_list_service_profiles(self):
         # Verify service profiles lists
         body = self.admin_client.list_service_profiles(id=33)

@@ -26,7 +26,7 @@ class LocalTypeTest(base.BaseTestCase):
     def setUp(self):
         super(LocalTypeTest, self).setUp()
         self.driver = type_local.LocalTypeDriver()
-        self.context = None
+        self.session = None
 
     def test_is_partial_segment(self):
         segment = {api.NETWORK_TYPE: p_const.TYPE_LOCAL}
@@ -52,15 +52,15 @@ class LocalTypeTest(base.BaseTestCase):
 
     def test_reserve_provider_segment(self):
         segment = {api.NETWORK_TYPE: p_const.TYPE_LOCAL}
-        observed = self.driver.reserve_provider_segment(self.context, segment)
+        observed = self.driver.reserve_provider_segment(self.session, segment)
         self.assertEqual(segment, observed)
 
     def test_release_provider_segment(self):
         segment = {api.NETWORK_TYPE: p_const.TYPE_LOCAL}
-        observed = self.driver.reserve_provider_segment(self.context, segment)
-        self.driver.release_segment(self.context, observed)
+        observed = self.driver.reserve_provider_segment(self.session, segment)
+        self.driver.release_segment(self.session, observed)
 
     def test_allocate_tenant_segment(self):
         expected = {api.NETWORK_TYPE: p_const.TYPE_LOCAL}
-        observed = self.driver.allocate_tenant_segment(self.context)
+        observed = self.driver.allocate_tenant_segment(self.session)
         self.assertEqual(expected, observed)

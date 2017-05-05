@@ -13,6 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import itertools
+
 from oslo_utils import uuidutils
 
 from neutron.objects import subnetpool
@@ -22,7 +24,7 @@ from neutron.tests.unit import testlib_api
 
 class SubnetPoolTestMixin(object):
     def _create_test_subnetpool(self):
-        obj = subnetpool.SubnetPool(
+        self._pool = subnetpool.SubnetPool(
             self.context,
             id=uuidutils.generate_uuid(),
             ip_version=4,
@@ -30,8 +32,7 @@ class SubnetPoolTestMixin(object):
             min_prefixlen=0,
             max_prefixlen=32,
             shared=False)
-        obj.create()
-        return obj
+        self._pool.create()
 
 
 class SubnetPoolIfaceObjectTestCase(obj_test_base.BaseObjectIfaceTestCase):
@@ -46,20 +47,20 @@ class SubnetPoolDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
     _test_class = subnetpool.SubnetPool
 
     def test_subnetpool_prefixes(self):
-        pool = self._create_test_subnetpool()
+        self._create_test_subnetpool()
         prefixes = obj_test_base.get_list_of_random_networks()
-        pool.prefixes = prefixes
-        pool.update()
+        self._pool.prefixes = prefixes
+        self._pool.update()
 
-        new_pool = self._test_class.get_object(self.context, id=pool.id)
-        self.assertItemsEqual(prefixes, new_pool.prefixes)
+        pool = self._test_class.get_object(self.context, id=self._pool.id)
+        self.assertItemsEqual(prefixes, pool.prefixes)
 
         prefixes.pop()
-        pool.prefixes = prefixes
-        pool.update()
+        self._pool.prefixes = prefixes
+        self._pool.update()
 
-        new_pool = self._test_class.get_object(self.context, id=pool.id)
-        self.assertItemsEqual(prefixes, new_pool.prefixes)
+        pool = self._test_class.get_object(self.context, id=self._pool.id)
+        self.assertItemsEqual(prefixes, pool.prefixes)
 
     def test_get_objects_queries_constant(self):
         # TODO(korzen) SubnetPool is using SubnetPoolPrefix object to reload
@@ -85,5 +86,6 @@ class SubnetPoolPrefixDbObjectTestCase(
 
     def setUp(self):
         super(SubnetPoolPrefixDbObjectTestCase, self).setUp()
-        self.update_obj_fields(
-            {'subnetpool_id': lambda: self._create_test_subnetpool().id})
+        self._create_test_subnetpool()
+        for obj in itertools.chain(self.db_objs, self.obj_fields, self.objs):
+            obj['subnetpool_id'] = self._pool.id

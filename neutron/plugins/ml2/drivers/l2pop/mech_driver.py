@@ -14,23 +14,22 @@
 #    under the License.
 
 from neutron_lib import constants as const
-from neutron_lib import context as n_context
 from neutron_lib import exceptions
-from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron._i18n import _, _LW
-from neutron.conf.plugins.ml2.drivers import l2pop as config
+from neutron import context as n_context
 from neutron.db import api as db_api
 from neutron.db import l3_hamode_db
+from neutron import manager
+from neutron.plugins.common import constants as service_constants
 from neutron.plugins.ml2 import driver_api as api
+from neutron.plugins.ml2.drivers.l2pop import config  # noqa
 from neutron.plugins.ml2.drivers.l2pop import db as l2pop_db
 from neutron.plugins.ml2.drivers.l2pop import rpc as l2pop_rpc
 
 LOG = logging.getLogger(__name__)
-
-config.register_l2_population_opts()
 
 
 class L2populationMechanismDriver(api.MechanismDriver):
@@ -71,11 +70,10 @@ class L2populationMechanismDriver(api.MechanismDriver):
     def delete_port_postcommit(self, context):
         port = context.current
         agent_host = context.host
-        fdb_entries = self._get_agent_fdb(
-            context, context.bottom_bound_segment, port, agent_host)
-        if fdb_entries and l3_hamode_db.is_ha_router_port(
-                context, port['device_owner'], port['device_id']):
-            session = db_api.get_reader_session()
+        fdb_entries = self._get_agent_fdb(context.bottom_bound_segment,
+                                          port, agent_host)
+        if port['device_owner'] in l2pop_db.HA_ROUTER_PORTS and fdb_entries:
+            session = db_api.get_session()
             network_id = port['network_id']
             other_fdb_ports = self._get_ha_port_agents_fdb(
                 session, network_id, port['device_id'])
@@ -112,7 +110,7 @@ class L2populationMechanismDriver(api.MechanismDriver):
         if not agent_host:
             return
 
-        agent_ip = l2pop_db.get_agent_ip_by_host(db_api.get_reader_session(),
+        agent_ip = l2pop_db.get_agent_ip_by_host(db_api.get_session(),
                                                  agent_host)
 
         orig_mac_ip = [l2pop_rpc.PortInfo(mac_address=port['mac_address'],
@@ -149,7 +147,7 @@ class L2populationMechanismDriver(api.MechanismDriver):
     def update_port_postcommit(self, context):
         port = context.current
         orig = context.original
-        if l3_hamode_db.is_ha_router_port(context, port['device_owner'],
+        if l3_hamode_db.is_ha_router_port(port['device_owner'],
                                           port['device_id']):
             return
         diff_ips = self._get_diff_ips(orig, port)
@@ -161,8 +159,7 @@ class L2populationMechanismDriver(api.MechanismDriver):
             if context.status == const.PORT_STATUS_DOWN:
                 agent_host = context.host
                 fdb_entries = self._get_agent_fdb(
-                    context, context.bottom_bound_segment, port,
-                    agent_host)
+                        context.bottom_bound_segment, port, agent_host)
                 self.L2populationAgentNotify.remove_fdb_entries(
                     self.rpc_ctx, fdb_entries)
         elif (context.host != context.original_host
@@ -171,7 +168,7 @@ class L2populationMechanismDriver(api.MechanismDriver):
             # The port has been migrated. Send notification about port
             # removal from old host.
             fdb_entries = self._get_agent_fdb(
-                context, context.original_bottom_bound_segment,
+                context.original_bottom_bound_segment,
                 orig, context.original_host)
             self.L2populationAgentNotify.remove_fdb_entries(
                 self.rpc_ctx, fdb_entries)
@@ -180,8 +177,7 @@ class L2populationMechanismDriver(api.MechanismDriver):
                 self.update_port_up(context)
             elif context.status == const.PORT_STATUS_DOWN:
                 fdb_entries = self._get_agent_fdb(
-                    context, context.bottom_bound_segment, port,
-                    context.host)
+                    context.bottom_bound_segment, port, context.host)
                 self.L2populationAgentNotify.remove_fdb_entries(
                     self.rpc_ctx, fdb_entries)
 
@@ -240,7 +236,8 @@ class L2populationMechanismDriver(api.MechanismDriver):
     def update_port_down(self, context):
         port = context.current
         agent_host = context.host
-        l3plugin = directory.get_plugin(const.L3)
+        l3plugin = manager.NeutronManager.get_service_plugins().get(
+            service_constants.L3_ROUTER_NAT)
         # when agent transitions to backup, don't remove flood flows
         if agent_host and l3plugin and getattr(
             l3plugin, "list_router_ids_on_host", None):
@@ -249,14 +246,14 @@ class L2populationMechanismDriver(api.MechanismDriver):
                 admin_context, agent_host, [port['device_id']]):
                 return
             fdb_entries = self._get_agent_fdb(
-                context, context.bottom_bound_segment, port, agent_host)
+                context.bottom_bound_segment, port, agent_host)
             self.L2populationAgentNotify.remove_fdb_entries(
                 self.rpc_ctx, fdb_entries)
 
     def update_port_up(self, context):
         port = context.current
         agent_host = context.host
-        session = db_api.get_reader_session()
+        session = db_api.get_session()
         agent = l2pop_db.get_agent_by_host(session, agent_host)
         if not agent:
             LOG.warning(_LW("Unable to retrieve active L2 agent on host %s"),
@@ -294,29 +291,24 @@ class L2populationMechanismDriver(api.MechanismDriver):
 
         # Notify other agents to add fdb rule for current port
         if (port['device_owner'] != const.DEVICE_OWNER_DVR_INTERFACE and
-            not l3_hamode_db.is_ha_router_port(
-                context, port['device_owner'], port['device_id'])):
+            not l3_hamode_db.is_ha_router_port(port['device_owner'],
+                                               port['device_id'])):
             other_fdb_ports[agent_ip] += self._get_port_fdb_entries(port)
 
         self.L2populationAgentNotify.add_fdb_entries(self.rpc_ctx,
                                                      other_fdb_entries)
 
-    def _get_agent_fdb(self, context, segment, port, agent_host):
+    def _get_agent_fdb(self, segment, port, agent_host):
         if not agent_host:
             return
 
         network_id = port['network_id']
 
-        session = db_api.get_reader_session()
+        session = db_api.get_session()
         agent_active_ports = l2pop_db.get_agent_network_active_port_count(
             session, agent_host, network_id)
 
-        agent = l2pop_db.get_agent_by_host(session,
-                                           agent_host)
-        if not agent:
-            LOG.warning(_LW("Unable to retrieve active L2 agent on host %s"),
-                        agent_host)
-            return
+        agent = l2pop_db.get_agent_by_host(db_api.get_session(), agent_host)
         if not self._validate_segment(segment, port['id'], agent):
             return
 
@@ -330,8 +322,7 @@ class L2populationMechanismDriver(api.MechanismDriver):
                 const.FLOODING_ENTRY)
         # Notify other agents to remove fdb rules for current port
         if (port['device_owner'] != const.DEVICE_OWNER_DVR_INTERFACE and
-            not l3_hamode_db.is_ha_router_port(context,
-                                               port['device_owner'],
+            not l3_hamode_db.is_ha_router_port(port['device_owner'],
                                                port['device_id'])):
             fdb_entries = self._get_port_fdb_entries(port)
             other_fdb_entries[network_id]['ports'][agent_ip] += fdb_entries

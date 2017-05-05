@@ -13,15 +13,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
-
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 from oslo_log import log
 from oslo_serialization import jsonutils
 
 from neutron._i18n import _LW
 from neutron.db import segments_db
+from neutron.extensions import portbindings
 from neutron.plugins.ml2 import driver_api as api
 
 LOG = log.getLogger(__name__)
@@ -45,7 +43,7 @@ class NetworkContext(MechanismDriverContext, api.NetworkContext):
         self._network = network
         self._original_network = original_network
         self._segments = segments_db.get_network_segments(
-            plugin_context, network['id'])
+            plugin_context.session, network['id'])
 
     @property
     def current(self):
@@ -68,7 +66,7 @@ class SubnetContext(MechanismDriverContext, api.SubnetContext):
         self._subnet = subnet
         self._original_subnet = original_subnet
         self._network_context = NetworkContext(plugin, plugin_context,
-                                               network) if network else None
+                                               network)
 
     @property
     def current(self):
@@ -80,11 +78,6 @@ class SubnetContext(MechanismDriverContext, api.SubnetContext):
 
     @property
     def network(self):
-        if self._network_context is None:
-            network = self._plugin.get_network(
-                self._plugin_context, self.current['network_id'])
-            self._network_context = NetworkContext(
-                self._plugin, self._plugin_context, network)
         return self._network_context
 
 
@@ -97,10 +90,8 @@ class PortContext(MechanismDriverContext, api.PortContext):
         self._original_port = original_port
         self._network_context = NetworkContext(plugin, plugin_context,
                                                network) if network else None
-        # NOTE(kevinbenton): these copys can go away once we are working with
-        # OVO objects here instead of native SQLA objects.
-        self._binding = copy.deepcopy(binding)
-        self._binding_levels = copy.deepcopy(binding_levels)
+        self._binding = binding
+        self._binding_levels = binding_levels
         self._segments_to_bind = None
         self._new_bound_segment = None
         self._next_segments_to_bind = None
@@ -212,7 +203,7 @@ class PortContext(MechanismDriverContext, api.PortContext):
         # TODO(kevinbenton): eliminate the query below. The above should
         # always return since the port is bound to a network segment. Leaving
         # in for now for minimally invasive change for back-port.
-        segment = segments_db.get_segment_by_id(self._plugin_context,
+        segment = segments_db.get_segment_by_id(self._plugin_context.session,
                                                 segment_id)
         if not segment:
             LOG.warning(_LW("Could not expand segment %s"), segment_id)
@@ -283,4 +274,4 @@ class PortContext(MechanismDriverContext, api.PortContext):
 
     def release_dynamic_segment(self, segment_id):
         return self._plugin.type_manager.release_dynamic_segment(
-                self._plugin_context, segment_id)
+                self._plugin_context.session, segment_id)

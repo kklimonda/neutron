@@ -13,12 +13,16 @@
 #    under the License.
 
 from neutron_lib import exceptions as n_exc
+from oslo_log import log
 from oslo_utils import timeutils
+from sqlalchemy import event
+from sqlalchemy import exc as sql_exc
 from sqlalchemy.orm import session as se
 
 from neutron._i18n import _LW
-from neutron.db import api as db_api
 from neutron.db import standard_attr
+
+LOG = log.getLogger(__name__)
 
 CHANGED_SINCE = 'changed_since'
 
@@ -46,7 +50,7 @@ class TimeStamp_db_mixin(object):
             raise n_exc.InvalidInput(error_message=msg)
         changed_since = (timeutils.
                          normalize_time(changed_since_string))
-        target_model_class = query.column_descriptions[0]['type']
+        target_model_class = list(query._mapper_adapter_map.keys())[0]
         query = query.join(standard_attr.StandardAttribute,
                            target_model_class.standard_attr_id ==
                            standard_attr.StandardAttribute.id).filter(
@@ -64,10 +68,22 @@ class TimeStamp_db_mixin(object):
                 obj.updated_at = timeutils.utcnow()
 
     def register_db_events(self):
-        listen = db_api.sqla_listen
-        listen(standard_attr.StandardAttribute, 'before_insert',
-               self._add_timestamp)
-        listen(se.Session, 'before_flush', self.update_timestamp)
+        event.listen(standard_attr.StandardAttribute, 'before_insert',
+                     self._add_timestamp)
+        event.listen(se.Session, 'before_flush', self.update_timestamp)
+
+    def unregister_db_events(self):
+        self._unregister_db_event(standard_attr.StandardAttribute,
+                                  'before_insert', self._add_timestamp)
+        self._unregister_db_event(se.Session, 'before_flush',
+                                  self.update_timestamp)
+
+    def _unregister_db_event(self, listen_obj, listened_event, listen_hander):
+        try:
+            event.remove(listen_obj, listened_event, listen_hander)
+        except sql_exc.InvalidRequestError:
+            LOG.warning(_LW("No sqlalchemy event for resource %s found"),
+                        listen_obj)
 
     def _format_timestamp(self, resource_db, result):
         result['created_at'] = (resource_db.created_at.

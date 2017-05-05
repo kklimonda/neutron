@@ -22,6 +22,7 @@ Tests in this module will be skipped unless:
  - sudo testing is enabled (see neutron.tests.functional.base for details)
 """
 
+import eventlet
 from oslo_config import cfg
 
 from neutron.agent.common import ovs_lib
@@ -134,7 +135,7 @@ class TestSimpleInterfaceMonitor(BaseMonitorTest):
         try:
             utils.wait_until_true(
                 lambda: self.monitor.get_events().get('added'))
-        except utils.WaitTimeout:
+        except eventlet.timeout.Timeout:
             raise AssertionError('Initial call should always be true')
 
     def test_get_events_includes_ofport(self):

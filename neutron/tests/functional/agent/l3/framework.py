@@ -25,6 +25,7 @@ from oslo_utils import uuidutils
 import testtools
 import textwrap
 
+from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
 from neutron.agent.l3 import agent as neutron_l3_agent
 from neutron.agent.l3 import namespaces
@@ -33,9 +34,7 @@ from neutron.agent import l3_agent as l3_agent_main
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
-from neutron.common import constants as n_const
 from neutron.common import utils as common_utils
-from neutron.conf.agent import common as agent_config
 from neutron.conf import common as common_config
 from neutron.tests.common import l3_test_common
 from neutron.tests.common import net_helpers
@@ -84,6 +83,8 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         get_temp_file_path = functools.partial(self.get_temp_file_path,
                                                root=temp_dir)
         conf.set_override('state_path', temp_dir.path)
+        # NOTE(cbrandily): log_file or log_dir must be set otherwise
+        # metadata_proxy_watch_log has no effect
         conf.set_override('log_file',
                           get_temp_file_path('log_file'))
         conf.set_override('metadata_proxy_socket',
@@ -137,7 +138,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
 
         clean_fips(router)
         self._add_fip(router, client_address, fixed_address=server_address)
-        router.process()
+        router.process(self.agent)
 
         router_ns = ip_lib.IPWrapper(namespace=router.ns_name)
         netcat = net_helpers.NetcatTester(
@@ -161,7 +162,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
             assert_num_of_conntrack_rules(1)
 
             clean_fips(router)
-            router.process()
+            router.process(self.agent)
             assert_num_of_conntrack_rules(0)
 
             with testtools.ExpectedException(RuntimeError):
@@ -216,23 +217,14 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
     def _assert_external_device(self, router):
         self.assertTrue(self._check_external_device(router))
 
-    def _assert_ipv6_accept_ra(self, router, enabled=True):
+    def _assert_ipv6_accept_ra(self, router):
         external_port = router.get_ex_gw_port()
         external_device_name = router.get_external_device_name(
             external_port['id'])
         ip_wrapper = ip_lib.IPWrapper(namespace=router.ns_name)
         ra_state = ip_wrapper.netns.execute(['sysctl', '-b',
             'net.ipv6.conf.%s.accept_ra' % external_device_name])
-        self.assertEqual(enabled, int(ra_state) != n_const.ACCEPT_RA_DISABLED)
-
-    def _assert_ipv6_forwarding(self, router, enabled=True):
-        external_port = router.get_ex_gw_port()
-        external_device_name = router.get_external_device_name(
-            external_port['id'])
-        ip_wrapper = ip_lib.IPWrapper(namespace=router.ns_name)
-        fwd_state = ip_wrapper.netns.execute(['sysctl', '-b',
-            'net.ipv6.conf.%s.forwarding' % external_device_name])
-        self.assertEqual(int(enabled), int(fwd_state))
+        self.assertEqual('2', ra_state)
 
     def _router_lifecycle(self, enable_ha, ip_version=4,
                           dual_stack=False, v6_ext_gw_with_sub=True,
@@ -251,7 +243,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
                                                count=2,
                                                ip_version=6,
                                                ipv6_subnet_modes=subnet_modes)
-        router.process()
+        router.process(self.agent)
 
         if enable_ha:
             port = router.get_ex_gw_port()
@@ -300,18 +292,14 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
 
         if enable_ha:
             self._assert_ha_device(router)
-            common_utils.wait_until_true(
-                lambda: router.keepalived_manager.get_process().active,
-                timeout=15)
+            self.assertTrue(router.keepalived_manager.get_process().active)
 
         self._delete_router(self.agent, router.router_id)
 
         self._assert_interfaces_deleted_from_ovs()
         self._assert_router_does_not_exist(router)
         if enable_ha:
-            common_utils.wait_until_true(
-                lambda: not router.keepalived_manager.get_process().active,
-                timeout=15)
+            self.assertFalse(router.keepalived_manager.get_process().active)
         return return_copy
 
     def manage_router(self, agent, router):
@@ -472,7 +460,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
 
     def _assert_internal_devices(self, router):
         internal_devices = router.router[constants.INTERFACE_KEY]
-        self.assertGreater(len(internal_devices), 0)
+        self.assertTrue(len(internal_devices))
         for device in internal_devices:
             self.assertTrue(self.device_exists_with_ips_and_mac(
                 device, router.get_internal_device_name, router.ns_name))
@@ -598,16 +586,6 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         device_name = router.get_ha_device_name()
         ha_device = ip_lib.IPDevice(device_name, router.ha_namespace)
         ha_device.link.set_down()
-
-    @staticmethod
-    def fail_gw_router_port(router):
-        r_br = ip_lib.IPDevice(router.driver.conf.external_network_bridge)
-        r_br.link.set_down()
-
-    @staticmethod
-    def restore_gw_router_port(router):
-        r_br = ip_lib.IPDevice(router.driver.conf.external_network_bridge)
-        r_br.link.set_up()
 
     @classmethod
     def _get_addresses_on_device(cls, namespace, interface):

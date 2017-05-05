@@ -15,14 +15,11 @@
 
 from neutron_lib import exceptions as n_exc
 from oslo_db import exception as o_db_exc
-from oslo_utils import versionutils
 from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import fields as obj_fields
 
 from neutron.db import api as db_api
 from neutron.objects import base
-from neutron.objects import common_types
-from neutron.objects import exceptions as o_exc
 from neutron.services.trunk import exceptions as t_exc
 from neutron.services.trunk import models
 
@@ -38,8 +35,8 @@ class SubPort(base.NeutronDbObject):
     foreign_keys = {'Trunk': {'trunk_id': 'id'}}
 
     fields = {
-        'port_id': common_types.UUIDField(),
-        'trunk_id': common_types.UUIDField(),
+        'port_id': obj_fields.UUIDField(),
+        'trunk_id': obj_fields.UUIDField(),
         'segmentation_type': obj_fields.StringField(),
         'segmentation_id': obj_fields.IntegerField(),
     }
@@ -75,7 +72,7 @@ class SubPort(base.NeutronDbObject):
                     raise t_exc.TrunkNotFound(trunk_id=self.trunk_id)
 
                 raise n_exc.PortNotFound(port_id=self.port_id)
-            except o_exc.NeutronDbObjectDuplicateEntry:
+            except base.NeutronDbObjectDuplicateEntry:
                 raise t_exc.DuplicateSubPort(
                     segmentation_type=self.segmentation_type,
                     segmentation_id=self.segmentation_id,
@@ -85,22 +82,21 @@ class SubPort(base.NeutronDbObject):
 @obj_base.VersionedObjectRegistry.register
 class Trunk(base.NeutronDbObject):
     # Version 1.0: Initial version
-    # Version 1.1: Changed tenant_id to project_id
-    VERSION = '1.1'
+    VERSION = '1.0'
 
     db_model = models.Trunk
 
     fields = {
         'admin_state_up': obj_fields.BooleanField(),
-        'id': common_types.UUIDField(),
-        'project_id': obj_fields.StringField(),
+        'id': obj_fields.UUIDField(),
+        'tenant_id': obj_fields.StringField(),
         'name': obj_fields.StringField(),
-        'port_id': common_types.UUIDField(),
+        'port_id': obj_fields.UUIDField(),
         'status': obj_fields.StringField(),
         'sub_ports': obj_fields.ListOfObjectsField(SubPort.__name__),
     }
 
-    fields_no_update = ['project_id', 'port_id']
+    fields_no_update = ['tenant_id', 'port_id']
 
     synthetic_fields = ['sub_ports']
 
@@ -125,9 +121,3 @@ class Trunk(base.NeutronDbObject):
     def update(self, **kwargs):
         self.update_fields(kwargs)
         super(Trunk, self).update()
-
-    def obj_make_compatible(self, primitive, target_version):
-        _target_version = versionutils.convert_version_to_tuple(target_version)
-
-        if _target_version < (1, 1):
-            primitive['tenant_id'] = primitive.pop('project_id')

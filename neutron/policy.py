@@ -17,19 +17,17 @@ import collections
 import re
 
 from neutron_lib import constants
-from neutron_lib import context
 from neutron_lib import exceptions
-from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from oslo_policy import policy
 from oslo_utils import excutils
+from oslo_utils import importutils
 import six
 
 from neutron._i18n import _, _LE, _LW
 from neutron.api.v2 import attributes
-from neutron.common import cache_utils as cache
 from neutron.common import constants as const
 
 
@@ -210,33 +208,7 @@ class OwnerCheck(policy.Check):
             raise exceptions.PolicyInitError(
                 policy="%s:%s" % (kind, match),
                 reason=err_reason)
-        self._cache = cache._get_memory_cache_region(expiration_time=5)
         super(OwnerCheck, self).__init__(kind, match)
-
-    @cache.cache_method_results
-    def _extract(self, resource_type, resource_id, field):
-        # NOTE(salv-orlando): This check currently assumes the parent
-        # resource is handled by the core plugin. It might be worth
-        # having a way to map resources to plugins so to make this
-        # check more general
-        f = getattr(directory.get_plugin(), 'get_%s' % resource_type)
-        # f *must* exist, if not found it is better to let neutron
-        # explode. Check will be performed with admin context
-        try:
-            data = f(context.get_admin_context(),
-                     resource_id,
-                     fields=[field])
-        except exceptions.NotFound as e:
-            # NOTE(kevinbenton): a NotFound exception can occur if a
-            # list operation is happening at the same time as one of
-            # the parents and its children being deleted. So we issue
-            # a RetryRequest so the API will redo the lookup and the
-            # problem items will be gone.
-            raise db_exc.RetryRequest(e)
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                LOG.exception(_LE('Policy check error while calling %s!'), f)
-        return data[field]
 
     def __call__(self, target, creds, enforcer):
         if self.target_field not in target:
@@ -275,10 +247,34 @@ class OwnerCheck(policy.Check):
                 raise exceptions.PolicyCheckError(
                     policy="%s:%s" % (self.kind, self.match),
                     reason=err_reason)
-
-            target[self.target_field] = self._extract(
-                parent_res, target[parent_foreign_key], parent_field)
-
+            # NOTE(salv-orlando): This check currently assumes the parent
+            # resource is handled by the core plugin. It might be worth
+            # having a way to map resources to plugins so to make this
+            # check more general
+            # NOTE(ihrachys): if import is put in global, circular
+            # import failure occurs
+            manager = importutils.import_module('neutron.manager')
+            f = getattr(manager.NeutronManager.get_instance().plugin,
+                        'get_%s' % parent_res)
+            # f *must* exist, if not found it is better to let neutron
+            # explode. Check will be performed with admin context
+            context = importutils.import_module('neutron.context')
+            try:
+                data = f(context.get_admin_context(),
+                         target[parent_foreign_key],
+                         fields=[parent_field])
+                target[self.target_field] = data[parent_field]
+            except exceptions.NotFound as e:
+                # NOTE(kevinbenton): a NotFound exception can occur if a
+                # list operation is happening at the same time as one of
+                # the parents and its children being deleted. So we issue
+                # a RetryRequest so the API will redo the lookup and the
+                # problem items will be gone.
+                raise db_exc.RetryRequest(e)
+            except Exception:
+                with excutils.save_and_reraise_exception():
+                    LOG.exception(_LE('Policy check error while calling %s!'),
+                                  f)
         match = self.match % target
         if self.kind in creds:
             return match == six.text_type(creds[self.kind])
@@ -325,7 +321,7 @@ def _prepare_check(context, action, target, pluralized):
     if target is None:
         target = {}
     match_rule = _build_match_rule(action, target, pluralized)
-    credentials = context.to_policy_values()
+    credentials = context.to_dict()
     return match_rule, target, credentials
 
 
@@ -408,3 +404,23 @@ def enforce(context, action, target, plugin=None, pluralized=None):
             log_rule_list(rule)
             LOG.debug("Failed policy check for '%s'", action)
     return result
+
+
+def check_is_admin(context):
+    """Verify context has admin rights according to policy settings."""
+    init()
+    # the target is user-self
+    credentials = context.to_dict()
+    if ADMIN_CTX_POLICY not in _ENFORCER.rules:
+        return False
+    return _ENFORCER.enforce(ADMIN_CTX_POLICY, credentials, credentials)
+
+
+def check_is_advsvc(context):
+    """Verify context has advsvc rights according to policy settings."""
+    init()
+    # the target is user-self
+    credentials = context.to_dict()
+    if ADVSVC_CTX_POLICY not in _ENFORCER.rules:
+        return False
+    return _ENFORCER.enforce(ADVSVC_CTX_POLICY, credentials, credentials)

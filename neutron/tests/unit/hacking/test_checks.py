@@ -36,6 +36,39 @@ class HackingTestCase(base.BaseTestCase):
     def assertLineFails(self, func, line):
         self.assertIsInstance(next(func(line)), tuple)
 
+    def test_log_translations(self):
+        expected_marks = {
+            'error': '_LE',
+            'info': '_LI',
+            'warning': '_LW',
+            'critical': '_LC',
+            'exception': '_LE',
+        }
+        logs = expected_marks.keys()
+        debug = "LOG.debug('OK')"
+        self.assertEqual(
+            0, len(list(checks.validate_log_translations(debug, debug, 'f'))))
+        for log in logs:
+            bad = 'LOG.%s(_("Bad"))' % log
+            self.assertEqual(
+                1, len(list(checks.validate_log_translations(bad, bad, 'f'))))
+            bad = 'LOG.%s("Bad")' % log
+            self.assertEqual(
+                1, len(list(checks.validate_log_translations(bad, bad, 'f'))))
+            ok = "LOG.%s('OK')    # noqa" % log
+            self.assertEqual(
+                0, len(list(checks.validate_log_translations(ok, ok, 'f'))))
+            ok = "LOG.%s(variable)" % log
+            self.assertEqual(
+                0, len(list(checks.validate_log_translations(ok, ok, 'f'))))
+
+            for mark in checks._all_hints:
+                stmt = "LOG.%s(%s('test'))" % (log, mark)
+                self.assertEqual(
+                    0 if expected_marks[log] == mark else 1,
+                    len(list(checks.validate_log_translations(stmt, stmt,
+                                                              'f'))))
+
     def test_no_translate_debug_logs(self):
         for hint in checks._all_hints:
             bad = "LOG.debug(%s('bad'))" % hint
@@ -268,6 +301,39 @@ class HackingTestCase(base.BaseTestCase):
         self.assertLineFails(f, 'from unittest.TestSuite')
         self.assertLineFails(f, 'import unittest')
 
+    def test_check_delayed_string_interpolation(self):
+        dummy_noqa = CREATE_DUMMY_MATCH_OBJECT.search('a')
+
+        # In 'logical_line', Contents of strings replaced with
+        # "xxx" of same length.
+        fail_code1 = 'LOG.error(_LE("xxxxxxxxxxxxxxx") % value)'
+        fail_code2 = "LOG.warning(msg % 'xxxxx')"
+
+        self.assertEqual(
+            1, len(list(checks.check_delayed_string_interpolation(fail_code1,
+                                        "neutron/common/rpc.py", None))))
+        self.assertEqual(
+            1, len(list(checks.check_delayed_string_interpolation(fail_code2,
+                                        "neutron/common/rpc.py", None))))
+
+        pass_code1 = 'LOG.error(_LE("xxxxxxxxxxxxxxxxxx"), value)'
+        pass_code2 = "LOG.warning(msg, 'xxxxx')"
+        self.assertEqual(
+            0, len(list(checks.check_delayed_string_interpolation(pass_code1,
+                                        "neutron/common/rpc.py", None))))
+        self.assertEqual(
+            0, len(list(checks.check_delayed_string_interpolation(pass_code2,
+                                        "neutron/common/rpc.py", None))))
+        # check a file in neutron/tests
+        self.assertEqual(
+            0, len(list(checks.check_delayed_string_interpolation(fail_code1,
+                                        "neutron/tests/test_assert.py",
+                                        None))))
+        # check code including 'noqa'
+        self.assertEqual(
+            0, len(list(checks.check_delayed_string_interpolation(fail_code1,
+                                        "neutron/common/rpc.py", dummy_noqa))))
+
     def test_check_log_warn_deprecated(self):
         bad = "LOG.warn(_LW('i am zlatan!'))"
         self.assertEqual(
@@ -293,16 +359,6 @@ class HackingTestCase(base.BaseTestCase):
         self.assertLinePasses(f, "[obj for obj in data if test(obj)]")
         self.assertLinePasses(f, "filter(function, range(0,10))")
         self.assertLinePasses(f, "lambda x, y: x+y")
-
-    def test_check_assertIsNone(self):
-        self.assertEqual(1, len(list(checks.check_assertIsNone(
-            "self.assertEqual(A, None)", "neutron/tests/test_assert.py"))))
-
-        self.assertEqual(1, len(list(checks.check_assertIsNone(
-            "self.assertEqual(None, A)", "neutron/tests/test_assert.py"))))
-
-        self.assertEqual(0, len(list(checks.check_assertIsNone(
-            "self.assertIsNone()", "neutron/tests/test_assert.py"))))
 
 
 # The following is borrowed from hacking/tests/test_doctest.py.

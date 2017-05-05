@@ -20,10 +20,7 @@ import socket
 import sys
 import time
 
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as n_constants
-from neutron_lib import context
-from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -34,12 +31,14 @@ import six
 from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.l2 import l2_agent_extensions_manager as ext_manager
 from neutron.agent import rpc as agent_rpc
-from neutron.agent import securitygroups_rpc as agent_sg_rpc
+from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.api.rpc.callbacks import resources
-from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
 from neutron.common import config as common_config
 from neutron.common import profiler as setup_profiler
 from neutron.common import topics
+from neutron.common import utils as n_utils
+from neutron import context
+from neutron.extensions import portbindings
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common import config
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
@@ -125,7 +124,7 @@ class SriovNicSwitchAgent(object):
         self.context = context.get_admin_context_without_session()
         self.plugin_rpc = agent_rpc.PluginApi(topics.PLUGIN)
         self.sg_plugin_rpc = sg_rpc.SecurityGroupServerRpcApi(topics.PLUGIN)
-        self.sg_agent = agent_sg_rpc.SecurityGroupAgentRpc(self.context,
+        self.sg_agent = sg_rpc.SecurityGroupAgentRpc(self.context,
                 self.sg_plugin_rpc)
         self._setup_rpc()
         self.ext_manager = self._create_agent_extension_manager(
@@ -418,7 +417,7 @@ class SriovNicAgentConfigParser(object):
 
         Parse and validate the consistency in both mappings
         """
-        self.device_mappings = helpers.parse_mappings(
+        self.device_mappings = n_utils.parse_mappings(
             cfg.CONF.SRIOV_NIC.physical_device_mappings, unique_keys=False)
         self.exclude_devices = config.parse_exclude_devices(
             cfg.CONF.SRIOV_NIC.exclude_devices)

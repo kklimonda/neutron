@@ -18,12 +18,11 @@ import mock
 from neutron_lib import exceptions
 from oslo_serialization import jsonutils
 from oslo_utils import uuidutils
-import tenacity
 import testtools
 
+from neutron.agent.common import config
 from neutron.agent.common import ovs_lib
 from neutron.agent.common import utils
-from neutron.conf.agent import common as config
 from neutron.plugins.common import constants
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
     import constants as p_const
@@ -59,29 +58,6 @@ class OFCTLParamListMatcher(object):
         return 'ovs-ofctl parameters: %s, "%s"' % self.expected
 
     __repr__ = __str__
-
-
-class StringSetMatcher(object):
-    """A helper object for unordered CSV strings
-
-    Will compare equal if both strings, when read as a comma-separated set
-    of values, represent the same set.
-
-    Example: "a,b,45" == "b,45,a"
-    """
-    def __init__(self, string, separator=','):
-        self.separator = separator
-        self.set = set(string.split(self.separator))
-
-    def __eq__(self, other):
-        return self.set == set(other.split(self.separator))
-
-    def __ne__(self, other):
-        return self.set != set(other.split(self.separator))
-
-    def __repr__(self):
-        sep = '' if self.separator == ',' else " on %s" % self.separator
-        return '<comma-separated string for %s%s>' % (self.set, sep)
 
 
 def vsctl_only(f):
@@ -294,14 +270,6 @@ class OVS_Lib_Test(base.BaseTestCase):
         self._test_get_port_ofport(ovs_lib.INVALID_OFPORT,
                                    ovs_lib.INVALID_OFPORT)
 
-    def test_get_port_mac(self):
-        pname = "tap99"
-        self.br.vsctl_timeout = 0  # Don't waste precious time retrying
-        self.execute.return_value = self._encode_ovs_json(
-            ['mac_in_use'], [['00:01:02:03:04:05']])
-        expected_result = '00:01:02:03:04:05'
-        self.assertEqual(self.br.get_port_mac(pname), expected_result)
-
     def test_default_datapath(self):
         # verify kernel datapath is default
         expected = p_const.OVS_DATAPATH_SYSTEM
@@ -310,9 +278,7 @@ class OVS_Lib_Test(base.BaseTestCase):
     def test_non_default_datapath(self):
         expected = p_const.OVS_DATAPATH_NETDEV
         self.br = ovs_lib.OVSBridge(self.BR_NAME, datapath_type=expected)
-        br2 = self.br.add_bridge('another-br', datapath_type=expected)
         self.assertEqual(expected, self.br.datapath_type)
-        self.assertEqual(expected, br2.datapath_type)
 
     def test_count_flows(self):
         self.execute.return_value = 'ignore\nflow-1\n'
@@ -321,56 +287,19 @@ class OVS_Lib_Test(base.BaseTestCase):
         self._verify_ofctl_mock("dump-flows", self.BR_NAME, process_input=None)
 
     def test_delete_flow(self):
-        ofport = 5
+        ofport = "5"
         lsw_id = 40
         vid = 39
         self.br.delete_flows(in_port=ofport)
         self.br.delete_flows(tun_id=lsw_id)
         self.br.delete_flows(dl_vlan=vid)
-        self.br.delete_flows()
-        cookie_spec = "cookie=%s/-1" % self.br._default_cookie
         expected_calls = [
             self._ofctl_mock("del-flows", self.BR_NAME, '-',
-                             process_input=StringSetMatcher(
-                                 "%s,in_port=%d" % (cookie_spec, ofport))),
+                             process_input="in_port=" + ofport),
             self._ofctl_mock("del-flows", self.BR_NAME, '-',
-                             process_input=StringSetMatcher(
-                                 "%s,tun_id=%s" % (cookie_spec, lsw_id))),
+                             process_input="tun_id=%s" % lsw_id),
             self._ofctl_mock("del-flows", self.BR_NAME, '-',
-                             process_input=StringSetMatcher(
-                                 "%s,dl_vlan=%s" % (cookie_spec, vid))),
-            self._ofctl_mock("del-flows", self.BR_NAME, '-',
-                             process_input="%s" % cookie_spec),
-        ]
-        self.execute.assert_has_calls(expected_calls)
-
-    def test_delete_flows_cookie_nomask(self):
-        self.br.delete_flows(cookie=42)
-        self.execute.assert_has_calls([
-            self._ofctl_mock("del-flows", self.BR_NAME, '-',
-                             process_input="cookie=42/-1"),
-        ])
-
-    def test_do_action_flows_delete_flows(self):
-        # test what the deferred bridge implementation calls, in the case of a
-        # delete_flows(cookie=ovs_lib.COOKIE_ANY) among calls to
-        # delete_flows(foo=bar)
-        self.br.do_action_flows('del', [{'in_port': 5},
-                                        {'cookie': ovs_lib.COOKIE_ANY}])
-        expected_calls = [
-            self._ofctl_mock("del-flows", self.BR_NAME,
-                             process_input=None),
-        ]
-        self.execute.assert_has_calls(expected_calls)
-
-    def test_delete_flows_any_cookie(self):
-        self.br.delete_flows(in_port=5, cookie=ovs_lib.COOKIE_ANY)
-        self.br.delete_flows(cookie=ovs_lib.COOKIE_ANY)
-        expected_calls = [
-            self._ofctl_mock("del-flows", self.BR_NAME, '-',
-                             process_input="in_port=5"),
-            self._ofctl_mock("del-flows", self.BR_NAME,
-                             process_input=None),
+                             process_input="dl_vlan=%s" % vid),
         ]
         self.execute.assert_has_calls(expected_calls)
 
@@ -533,6 +462,29 @@ class OVS_Lib_Test(base.BaseTestCase):
 
         tools.verify_mock_calls(self.execute, expected_calls_and_values)
 
+    def _test_get_vif_ports(self, is_xen=False):
+        pname = "tap99"
+        ofport = 6
+        vif_id = uuidutils.generate_uuid()
+        mac = "ca:fe:de:ad:be:ef"
+        id_field = 'xs-vif-uuid' if is_xen else 'iface-id'
+        external_ids = {"attached-mac": mac, id_field: vif_id}
+        self.br.get_ports_attributes = mock.Mock(return_value=[{
+            'name': pname, 'ofport': ofport, 'external_ids': external_ids}])
+        self.br.get_xapi_iface_id = mock.Mock(return_value=vif_id)
+
+        ports = self.br.get_vif_ports()
+        self.assertEqual(1, len(ports))
+        self.assertEqual(ports[0].port_name, pname)
+        self.assertEqual(ports[0].ofport, ofport)
+        self.assertEqual(ports[0].vif_id, vif_id)
+        self.assertEqual(ports[0].vif_mac, mac)
+        self.assertEqual(ports[0].switch.br_name, self.BR_NAME)
+        self.br.get_ports_attributes.assert_called_once_with(
+            'Interface',
+            columns=['name', 'external_ids', 'ofport'],
+            if_exists=True)
+
     def _encode_ovs_json(self, headings, data):
         # See man ovs-vsctl(8) for the encoding details.
         r = {"data": [],
@@ -552,36 +504,12 @@ class OVS_Lib_Test(base.BaseTestCase):
                                     type(cell))
         return jsonutils.dumps(r)
 
-    def test_get_vif_port_to_ofport_map(self):
-        self.execute.return_value = OVSLIST_WITH_UNSET_PORT
-        results = self.br.get_vif_port_to_ofport_map()
-        expected = {'2ab72a72-4407-4ef3-806a-b2172f3e4dc7': 2, 'patch-tun': 1}
-        self.assertEqual(expected, results)
+    def _test_get_vif_port_set(self, is_xen):
+        if is_xen:
+            id_key = 'xs-vif-uuid'
+        else:
+            id_key = 'iface-id'
 
-    def test_get_vif_ports(self):
-        pname = "tap99"
-        ofport = 6
-        vif_id = uuidutils.generate_uuid()
-        mac = "ca:fe:de:ad:be:ef"
-        id_field = 'iface-id'
-        external_ids = {"attached-mac": mac, id_field: vif_id}
-        self.br.get_ports_attributes = mock.Mock(return_value=[{
-            'name': pname, 'ofport': ofport, 'external_ids': external_ids}])
-
-        ports = self.br.get_vif_ports()
-        self.assertEqual(1, len(ports))
-        self.assertEqual(ports[0].port_name, pname)
-        self.assertEqual(ports[0].ofport, ofport)
-        self.assertEqual(ports[0].vif_id, vif_id)
-        self.assertEqual(ports[0].vif_mac, mac)
-        self.assertEqual(ports[0].switch.br_name, self.BR_NAME)
-        self.br.get_ports_attributes.assert_called_once_with(
-            'Interface',
-            columns=['name', 'external_ids', 'ofport'],
-            if_exists=True)
-
-    def test_get_vif_port_set(self):
-        id_key = 'iface-id'
         headings = ['name', 'external_ids', 'ofport']
         data = [
             # A vif port on this bridge:
@@ -606,9 +534,34 @@ class OVS_Lib_Test(base.BaseTestCase):
         ]
         tools.setup_mock_calls(self.execute, expected_calls_and_values)
 
+        if is_xen:
+            get_xapi_iface_id = mock.patch.object(self.br,
+                                                  'get_xapi_iface_id').start()
+            get_xapi_iface_id.return_value = 'tap99id'
+
         port_set = self.br.get_vif_port_set()
         self.assertEqual(set(['tap99id']), port_set)
         tools.verify_mock_calls(self.execute, expected_calls_and_values)
+        if is_xen:
+            get_xapi_iface_id.assert_called_once_with('tap99id')
+
+    def test_get_vif_port_to_ofport_map(self):
+        self.execute.return_value = OVSLIST_WITH_UNSET_PORT
+        results = self.br.get_vif_port_to_ofport_map()
+        expected = {'2ab72a72-4407-4ef3-806a-b2172f3e4dc7': 2, 'patch-tun': 1}
+        self.assertEqual(expected, results)
+
+    def test_get_vif_ports_nonxen(self):
+        self._test_get_vif_ports(is_xen=False)
+
+    def test_get_vif_ports_xen(self):
+        self._test_get_vif_ports(is_xen=True)
+
+    def test_get_vif_port_set_nonxen(self):
+        self._test_get_vif_port_set(False)
+
+    def test_get_vif_port_set_xen(self):
+        self._test_get_vif_port_set(True)
 
     def test_get_vif_ports_list_ports_error(self):
         expected_calls_and_values = [
@@ -851,22 +804,6 @@ class OVS_Lib_Test(base.BaseTestCase):
         vif_port = self._test_get_vif_port_by_id(
             'tap99id', data, extra_calls_and_values=extra_calls_and_values)
         self._assert_vif_port(vif_port, ofport=1337, mac="de:ad:be:ef:13:37")
-
-    def test_get_port_ofport_retry(self):
-        with mock.patch.object(
-                self.br, 'db_get_val',
-                side_effect=[[], [], [], [], 1]):
-            self.assertEqual(1, self.br._get_port_ofport('1'))
-
-    def test_get_port_ofport_retry_fails(self):
-        # reduce timeout for faster execution
-        self.br.vsctl_timeout = 1
-        # after 7 calls the retry will timeout and raise
-        with mock.patch.object(
-                self.br, 'db_get_val',
-                side_effect=[[] for _ in range(7)]):
-            self.assertRaises(tenacity.RetryError,
-                              self.br._get_port_ofport, '1')
 
 
 class TestDeferredOVSBridge(base.BaseTestCase):

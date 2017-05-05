@@ -16,15 +16,16 @@ from neutron_lib.api import validators
 
 from neutron.api.v2 import attributes as attrs
 from neutron.common import utils
-from neutron.db import _resource_extend as resource_extend
+from neutron.db import db_base_plugin_v2
 from neutron.db import portsecurity_db_common
 from neutron.extensions import portsecurity as psec
 
 
 class PortSecurityDbMixin(portsecurity_db_common.PortSecurityDbCommon):
-    resource_extend.register_funcs(
+    # Register dict extend functions for ports and networks
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
         attrs.NETWORKS, ['_extend_port_security_dict'])
-    resource_extend.register_funcs(
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
         attrs.PORTS, ['_extend_port_security_dict'])
 
     def _extend_port_security_dict(self, response_data, db_data):

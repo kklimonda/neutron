@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os
-import shutil
 import tempfile
 
 import fixtures
@@ -24,8 +22,6 @@ from neutron.plugins.ml2.extensions import qos as qos_ext
 from neutron.tests.common import config_fixtures
 from neutron.tests.common.exclusive_resources import port
 from neutron.tests.common import helpers as c_helpers
-
-PHYSICAL_NETWORK_NAME = "physnet1"
 
 
 class ConfigFixture(fixtures.Fixture):
@@ -50,9 +46,6 @@ class ConfigFixture(fixtures.Fixture):
         self.useFixture(cfg_fixture)
         self.filename = cfg_fixture.filename
 
-    def _generate_namespace_suffix(self):
-        return utils.get_rand_name(prefix='test')
-
 
 class NeutronConfigFixture(ConfigFixture):
 
@@ -61,16 +54,19 @@ class NeutronConfigFixture(ConfigFixture):
         super(NeutronConfigFixture, self).__init__(
             env_desc, host_desc, temp_dir, base_filename='neutron.conf')
 
+        service_plugins = ['router']
+        if env_desc.qos:
+            service_plugins.append('qos')
+
         self.config.update({
             'DEFAULT': {
                 'host': self._generate_host(),
                 'state_path': self._generate_state_path(self.temp_dir),
                 'api_paste_config': self._generate_api_paste(),
                 'core_plugin': 'ml2',
-                'service_plugins': env_desc.service_plugins,
+                'service_plugins': ','.join(service_plugins),
                 'auth_strategy': 'noauth',
                 'debug': 'True',
-                'agent_down_time': env_desc.agent_down_time,
                 'transport_url':
                     'rabbit://%(user)s:%(password)s@%(host)s:5672/%(vhost)s' %
                     {'user': rabbitmq_environment.user,
@@ -127,7 +123,7 @@ class ML2ConfigFixture(ConfigFixture):
                 'mechanism_drivers': mechanism_drivers,
             },
             'ml2_type_vlan': {
-                'network_vlan_ranges': PHYSICAL_NETWORK_NAME + ':1000:2999',
+                'network_vlan_ranges': 'physnet1:1000:2999',
             },
             'ml2_type_gre': {
                 'tunnel_id_ranges': '1:1000',
@@ -137,10 +133,9 @@ class ML2ConfigFixture(ConfigFixture):
             },
         })
 
-        extension_drivers = ['port_security']
         if env_desc.qos:
-            extension_drivers.append(qos_ext.QOS_EXT_DRIVER_ALIAS)
-        self.config['ml2']['extension_drivers'] = ','.join(extension_drivers)
+            self.config['ml2']['extension_drivers'] =\
+                    qos_ext.QOS_EXT_DRIVER_ALIAS
 
 
 class OVSConfigFixture(ConfigFixture):
@@ -159,7 +154,7 @@ class OVSConfigFixture(ConfigFixture):
                 'ovsdb_interface': host_desc.ovsdb_interface,
             },
             'securitygroup': {
-                'firewall_driver': host_desc.firewall_driver,
+                'firewall_driver': 'noop',
             },
             'agent': {
                 'l2_population': str(self.env_desc.l2_pop),
@@ -190,8 +185,7 @@ class OVSConfigFixture(ConfigFixture):
         super(OVSConfigFixture, self)._setUp()
 
     def _generate_bridge_mappings(self):
-        return '%s:%s' % (PHYSICAL_NETWORK_NAME,
-                          utils.get_rand_device_name(prefix='br-eth'))
+        return 'physnet1:%s' % utils.get_rand_device_name(prefix='br-eth')
 
     def _generate_integration_bridge(self):
         return utils.get_rand_device_name(prefix='br-int')
@@ -228,9 +222,6 @@ class LinuxBridgeConfigFixture(ConfigFixture):
                 'enable_vxlan': str(self.env_desc.tunneling_enabled),
                 'local_ip': local_ip,
                 'l2_population': str(self.env_desc.l2_pop),
-            },
-            'securitygroup': {
-                'firewall_driver': host_desc.firewall_driver,
             }
         })
         if env_desc.qos:
@@ -258,7 +249,7 @@ class LinuxBridgeConfigFixture(ConfigFixture):
             })
 
     def _generate_bridge_mappings(self, device_name):
-        return '%s:%s' % (PHYSICAL_NETWORK_NAME, device_name)
+        return 'physnet1:%s' % device_name
 
 
 class L3ConfigFixture(ConfigFixture):
@@ -299,49 +290,5 @@ class L3ConfigFixture(ConfigFixture):
     def get_external_bridge(self):
         return self.config.DEFAULT.external_network_bridge
 
-
-class DhcpConfigFixture(ConfigFixture):
-
-    def __init__(self, env_desc, host_desc, temp_dir, integration_bridge=None):
-        super(DhcpConfigFixture, self).__init__(
-            env_desc, host_desc, temp_dir, base_filename='dhcp_agent.ini')
-
-        if host_desc.l2_agent_type == constants.AGENT_TYPE_OVS:
-            self._prepare_config_with_ovs_agent(integration_bridge)
-        elif host_desc.l2_agent_type == constants.AGENT_TYPE_LINUXBRIDGE:
-            self._prepare_config_with_linuxbridge_agent()
-        self.config['DEFAULT'].update({
-            'debug': 'True',
-            'dhcp_confs': self._generate_dhcp_path(),
-            'test_namespace_suffix': self._generate_namespace_suffix()
-        })
-
-    def _setUp(self):
-        super(DhcpConfigFixture, self)._setUp()
-        self.addCleanup(self._clean_dhcp_path)
-
-    def _prepare_config_with_ovs_agent(self, integration_bridge):
-        self.config.update({
-            'DEFAULT': {
-                'interface_driver': 'openvswitch',
-                'ovs_integration_bridge': integration_bridge,
-            }
-        })
-
-    def _prepare_config_with_linuxbridge_agent(self):
-        self.config.update({
-            'DEFAULT': {
-                'interface_driver': 'linuxbridge',
-            }
-        })
-
-    def _generate_dhcp_path(self):
-        # NOTE(slaweq): dhcp_conf path needs to be directory with read
-        # permission for everyone, otherwise dnsmasq process will not be able
-        # to read his configs
-        self.dhcp_path = tempfile.mkdtemp(prefix="dhcp_configs_", dir="/tmp/")
-        os.chmod(self.dhcp_path, 0o755)
-        return self.dhcp_path
-
-    def _clean_dhcp_path(self):
-        shutil.rmtree(self.dhcp_path, ignore_errors=True)
+    def _generate_namespace_suffix(self):
+        return utils.get_rand_name(prefix='test')

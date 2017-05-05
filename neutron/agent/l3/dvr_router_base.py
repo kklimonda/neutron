@@ -20,14 +20,15 @@ LOG = logging.getLogger(__name__)
 
 
 class DvrRouterBase(router.RouterInfo):
-    def __init__(self, host, *args, **kwargs):
+    def __init__(self, agent, host, *args, **kwargs):
         super(DvrRouterBase, self).__init__(*args, **kwargs)
 
+        self.agent = agent
         self.host = host
         self.snat_ports = None
 
-    def process(self):
-        super(DvrRouterBase, self).process()
+    def process(self, agent):
+        super(DvrRouterBase, self).process(agent)
         # NOTE:  Keep a copy of the interfaces around for when they are removed
         self.snat_ports = self.get_snat_interfaces()
 
@@ -38,17 +39,16 @@ class DvrRouterBase(router.RouterInfo):
         """Return the SNAT port for the given internal interface port."""
         if snat_ports is None:
             snat_ports = self.get_snat_interfaces()
-        if not snat_ports:
-            return
-        fixed_ips = int_port['fixed_ips']
-        subnet_ids = [fixed_ip['subnet_id'] for fixed_ip in fixed_ips]
-        for p in snat_ports:
-            for ip in p['fixed_ips']:
-                if ip['subnet_id'] in subnet_ids:
-                    return p
-
-        LOG.error(_LE('DVR: SNAT port not found in the list '
-                      '%(snat_list)s for the given router '
-                      'internal port %(int_p)s'), {
-                          'snat_list': snat_ports,
-                          'int_p': int_port})
+        fixed_ip = int_port['fixed_ips'][0]
+        subnet_id = fixed_ip['subnet_id']
+        if snat_ports:
+            match_port = [p for p in snat_ports
+                          if p['fixed_ips'][0]['subnet_id'] == subnet_id]
+            if match_port:
+                return match_port[0]
+            else:
+                LOG.error(_LE('DVR: SNAT port not found in the list '
+                              '%(snat_list)s for the given router '
+                              ' internal port %(int_p)s'), {
+                                  'snat_list': snat_ports,
+                                  'int_p': int_port})

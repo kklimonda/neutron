@@ -16,15 +16,15 @@
 import abc
 
 from neutron_lib.api import converters
-from neutron_lib.api import extensions
-from neutron_lib import constants
-from neutron_lib.db import constants as db_const
 from neutron_lib import exceptions as nexception
 import six
 
 from neutron._i18n import _
+from neutron.api import extensions
+from neutron.api.v2 import attributes as attr
 from neutron.api.v2 import resource_helper
 from neutron.conf import quota
+from neutron.plugins.common import constants
 
 
 # L3 Exceptions
@@ -84,7 +84,6 @@ class RouterInterfaceAttachmentConflict(nexception.Conflict):
     message = _("Error %(reason)s while attempting the operation.")
 
 
-ROUTER = 'router'
 ROUTERS = 'routers'
 FLOATINGIP = 'floatingip'
 FLOATINGIPS = '%ss' % FLOATINGIP
@@ -97,7 +96,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                'is_visible': True,
                'primary_key': True},
         'name': {'allow_post': True, 'allow_put': True,
-                 'validate': {'type:string': db_const.NAME_FIELD_SIZE},
+                 'validate': {'type:string': attr.NAME_MAX_LEN},
                  'is_visible': True, 'default': ''},
         'admin_state_up': {'allow_post': True, 'allow_put': True,
                            'default': True,
@@ -107,8 +106,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                    'is_visible': True},
         'tenant_id': {'allow_post': True, 'allow_put': False,
                       'required_by_policy': True,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
         EXTERNAL_GW_INFO: {'allow_post': True, 'allow_put': True,
                            'is_visible': True, 'default': None,
@@ -155,8 +153,7 @@ RESOURCE_ATTRIBUTE_MAP = {
                              'is_visible': True, 'default': None},
         'tenant_id': {'allow_post': True, 'allow_put': False,
                       'required_by_policy': True,
-                      'validate': {
-                          'type:string': db_const.PROJECT_ID_FIELD_SIZE},
+                      'validate': {'type:string': attr.TENANT_ID_MAX_LEN},
                       'is_visible': True},
         'status': {'allow_post': False, 'allow_put': False,
                    'is_visible': True},
@@ -192,11 +189,13 @@ class L3(extensions.ExtensionDescriptor):
         """Returns Ext Resources."""
         plural_mappings = resource_helper.build_plural_mappings(
             {}, RESOURCE_ATTRIBUTE_MAP)
+        plural_mappings['external_fixed_ips'] = 'external_fixed_ip'
+        attr.PLURALS.update(plural_mappings)
         action_map = {'router': {'add_router_interface': 'PUT',
                                  'remove_router_interface': 'PUT'}}
         return resource_helper.build_resource_info(plural_mappings,
                                                    RESOURCE_ATTRIBUTE_MAP,
-                                                   constants.L3,
+                                                   constants.L3_ROUTER_NAT,
                                                    action_map=action_map,
                                                    register_quota=True)
 
@@ -236,7 +235,7 @@ class RouterPluginBase(object):
         pass
 
     @abc.abstractmethod
-    def add_router_interface(self, context, router_id, interface_info=None):
+    def add_router_interface(self, context, router_id, interface_info):
         pass
 
     @abc.abstractmethod

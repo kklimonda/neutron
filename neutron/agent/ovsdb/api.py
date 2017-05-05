@@ -14,7 +14,6 @@
 
 import abc
 import collections
-import contextlib
 import uuid
 
 from oslo_config import cfg
@@ -25,7 +24,7 @@ from neutron._i18n import _
 
 interface_map = {
     'vsctl': 'neutron.agent.ovsdb.impl_vsctl.OvsdbVsctl',
-    'native': 'neutron.agent.ovsdb.impl_idl.NeutronOvsdbIdl',
+    'native': 'neutron.agent.ovsdb.impl_idl.OvsdbIdl',
 }
 
 OPTS = [
@@ -35,11 +34,8 @@ OPTS = [
                help=_('The interface for interacting with the OVSDB')),
     cfg.StrOpt('ovsdb_connection',
                default='tcp:127.0.0.1:6640',
-               help=_('The connection string for the OVSDB backend. '
-                      'Will be used by ovsdb-client when monitoring and '
-                      'used for the all ovsdb commands when native '
-                      'ovsdb_interface is enabled'
-                      ))
+               help=_('The connection string for the native OVSDB backend. '
+                      'Requires the native ovsdb_interface to be enabled.'))
 ]
 cfg.CONF.register_opts(OPTS, 'OVS')
 
@@ -84,7 +80,6 @@ class Transaction(object):
 class API(object):
     def __init__(self, context):
         self.context = context
-        self._nested_txn = None
 
     @staticmethod
     def get(context, iface_name=None):
@@ -94,7 +89,7 @@ class API(object):
         return iface(context)
 
     @abc.abstractmethod
-    def create_transaction(self, check_error=False, log_errors=True, **kwargs):
+    def transaction(self, check_error=False, log_errors=True, **kwargs):
         """Create a transaction
 
         :param check_error: Allow the transaction to raise an exception?
@@ -104,28 +99,6 @@ class API(object):
         :returns: A new transaction
         :rtype: :class:`Transaction`
         """
-
-    @contextlib.contextmanager
-    def transaction(self, check_error=False, log_errors=True, **kwargs):
-        """Create a transaction context.
-
-        :param check_error: Allow the transaction to raise an exception?
-        :type check_error:  bool
-        :param log_errors:  Log an error if the transaction fails?
-        :type log_errors:   bool
-        :returns: Either a new transaction or an existing one.
-        :rtype: :class:`Transaction`
-        """
-        if self._nested_txn:
-            yield self._nested_txn
-        else:
-            with self.create_transaction(
-                    check_error, log_errors, **kwargs) as txn:
-                self._nested_txn = txn
-                try:
-                    yield txn
-                finally:
-                    self._nested_txn = None
 
     @abc.abstractmethod
     def add_manager(self, connection_uri):
@@ -265,27 +238,6 @@ class API(object):
         # TODO(twilson) Consider handling kwargs for arguments where order
         # doesn't matter. Though that would break the assert_called_once_with
         # unit tests
-
-    @abc.abstractmethod
-    def db_add(self, table, record, column, *values):
-        """Create a command to add a value to a record
-
-        Adds each value or key-value pair to column in record in table. If
-        column is a map, then each value will be a dict, otherwise a base type.
-        If key already exists in a map column, then the current value is not
-        replaced (use the set command to replace an existing value).
-
-        :param table:  The OVS table containing the record to be modified
-        :type table:   string
-        :param record: The record id (name/uuid) to modified
-        :type record:  string
-        :param column: The column name to be modified
-        :type column:  string
-        :param values: The values to be added to the column
-        :type values:  The base type of the column. If column is a map, then
-                       a dict containing the key name and the map's value type
-        :returns:     :class:`Command` with no result
-        """
 
     @abc.abstractmethod
     def db_clear(self, table, record, column):
@@ -459,5 +411,4 @@ def py_to_val(pyval):
     elif pyval == '':
         return '""'
     else:
-        # NOTE(twilson) If a Command object, return its record_id as a value
-        return getattr(pyval, "record_id", pyval)
+        return pyval

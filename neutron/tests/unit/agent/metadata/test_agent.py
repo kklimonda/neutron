@@ -19,24 +19,22 @@ import webob
 
 from oslo_config import cfg
 from oslo_config import fixture as config_fixture
-from oslo_utils import fileutils
 
 from neutron.agent.linux import utils as agent_utils
 from neutron.agent.metadata import agent
+from neutron.agent.metadata import config
 from neutron.agent import metadata_agent
 from neutron.common import cache_utils as cache
 from neutron.common import utils
-from neutron.conf.agent.metadata import config as meta_conf
 from neutron.tests import base
 
 
 class ConfFixture(config_fixture.Config):
     def setUp(self):
         super(ConfFixture, self).setUp()
-        meta_conf.register_meta_conf_opts(
-            meta_conf.METADATA_PROXY_HANDLER_OPTS, self.conf)
+        self.conf.register_opts(config.METADATA_PROXY_HANDLER_OPTS)
         self.config(auth_ca_cert=None,
-                    nova_metadata_host='9.9.9.9',
+                    nova_metadata_ip='9.9.9.9',
                     nova_metadata_port=8775,
                     metadata_proxy_shared_secret='secret',
                     nova_metadata_protocol='http',
@@ -362,7 +360,7 @@ class _TestMetadataProxyHandlerCacheMixin(object):
                     mock.call().add_certificate(
                         self.fake_conf.nova_client_priv_key,
                         self.fake_conf.nova_client_cert,
-                        "%s:%s" % (self.fake_conf.nova_metadata_host,
+                        "%s:%s" % (self.fake_conf.nova_metadata_ip,
                                    self.fake_conf.nova_metadata_port)
                     ),
                     mock.call().request(
@@ -459,12 +457,12 @@ class TestUnixDomainMetadataProxy(base.BaseTestCase):
         self.cfg.CONF.metadata_proxy_socket = '/the/path'
         self.cfg.CONF.metadata_workers = 0
         self.cfg.CONF.metadata_backlog = 128
-        self.cfg.CONF.metadata_proxy_socket_mode = meta_conf.USER_MODE
+        self.cfg.CONF.metadata_proxy_socket_mode = config.USER_MODE
 
-    @mock.patch.object(fileutils, 'ensure_tree')
+    @mock.patch.object(utils, 'ensure_dir')
     def test_init_doesnot_exists(self, ensure_dir):
         agent.UnixDomainMetadataProxy(mock.Mock())
-        ensure_dir.assert_called_once_with('/the', mode=0o755)
+        ensure_dir.assert_called_once_with('/the')
 
     def test_init_exists(self):
         with mock.patch('os.path.isdir') as isdir:
@@ -498,12 +496,12 @@ class TestUnixDomainMetadataProxy(base.BaseTestCase):
 
     @mock.patch.object(agent, 'MetadataProxyHandler')
     @mock.patch.object(agent_utils, 'UnixDomainWSGIServer')
-    @mock.patch.object(fileutils, 'ensure_tree')
+    @mock.patch.object(utils, 'ensure_dir')
     def test_run(self, ensure_dir, server, handler):
         p = agent.UnixDomainMetadataProxy(self.cfg.CONF)
         p.run()
 
-        ensure_dir.assert_called_once_with('/the', mode=0o755)
+        ensure_dir.assert_called_once_with('/the')
         server.assert_has_calls([
             mock.call('neutron-metadata-agent'),
             mock.call().start(handler.return_value,
