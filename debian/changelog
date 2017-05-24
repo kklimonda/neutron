@@ -1,6 +1,7 @@
 neutron (2:11.0.0~b1-0ubuntu3) UNRELEASED; urgency=medium
 
   * d/control: Add python-ovsdbapp to (Build-)Depends.
+  * d/python-neutron.install: Install neutron-api wsgi entry point.
 
  -- James Page <james.page@ubuntu.com>  Wed, 24 May 2017 09:45:05 +0100
 
