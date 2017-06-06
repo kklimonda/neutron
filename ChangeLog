@@ -1,13 +1,54 @@
 CHANGES
 =======
 
+9.4.0
+-----
+
+* Fixed Attribute error in fullstack l3 tests
+* Fixed docs job failure
+* Allow port security updates even without security-groups enabled
+* Get rid of custom wrap_db_retry call in sync_allocations
+* Send both gratuitous ARP REQUESTs and REPLYs
+* Avoid router ri.process if initialize() fails
+* DVR: Do not check HA state on DVR-only routers
+* Retrieve fresh network DB data before getting it in ml2
+* Add IPv6 Prefix Delegation support for DVR
+* Wait 2 seconds between gratuitous ARP updates instead of 1 second
+* Allow offloading lookups in driver contexts
+* Scan for mac through all devices
+* Move conntrack zones to IPTablesFirewall
+* Stop killing conntrack state without CT Zone
+* Clear conntrack entries without zones if CT zones are not used
+* DVR: Don't clean snat-ns of DVR HA router when fullsync
+* Fix duplicated sg rules check for remote_ip_prefix
+* Use correct retry mechanism in tags
+* IP Conntrack Manager changes for FWaaS v2
+* Simplify RootHelperProcess._read_stream()
+* Pass --concurrent flag to ebtables calls
+* Add IPAllocations to the port fixed_ips
+* fullstack: Compile openvswitch module for fullstack test
+* Lock in DHCP agent based on network_id
+* Dont try to apply iptables rules in a endless loop
+* Ensure behavior of None for device_id
+* Allow self-sharing RBAC rules to be deleted without usage check
+* Ignore gre devices when fetching devices in test_cleanup_stale_devices
+* Fix tempest router timestamp test when HA enabled
+
 9.3.1
 -----
 
+* Print useful error on rootwrap daemon failure
+* Assert contents of returned devices in test
+* Get rid of delete_subnet method in ML2
 * Revert "Fix DetachedInstanceError on subnet delete"
 * Add work-around for older oslo.db
+* Add support for Keepalived VRRP health check
 * Fix link in QoS devref
+* Set OVS inactivity_probe to vsctl_timeout when adding manager
+* Clean up ovsdb-native's use of verify()
 * Fixed validation of create_and_list_trunk_subports rally scenario
+* Remove stale floating IP addresses from rfp devices
+* Handle auto-address subnets on port update
 * Always add unique sort keys when sorting
 * Throttle SIGHUPs to keepalived
 * Fix Quota error while running tests
@@ -22,6 +63,7 @@ CHANGES
 * Reconcile quitting_rpc_timeout with backoff RPC client
 * ovsfw: Refresh OFPort when necessary
 * ovsfw: Raise exception if tag cannot be found in other_config
+* Switch RootHelperProcess from select.poll to select.select
 * Fixes DBDeadlock race condition during driver initialization
 * Fetch trunk port MTU only on trunk validation
 * Fix iptables rules for Prefix Delegated subnets

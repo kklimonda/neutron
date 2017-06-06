@@ -1254,6 +1254,7 @@ neutron/tests/unit/db/test_model_base.py
 neutron/tests/unit/db/test_portsecurity_db.py
 neutron/tests/unit/db/test_portsecurity_db_common.py
 neutron/tests/unit/db/test_provisioning_blocks.py
+neutron/tests/unit/db/test_rbac_db_mixin.py
 neutron/tests/unit/db/test_securitygroups_db.py
 neutron/tests/unit/db/test_segments_db.py
 neutron/tests/unit/db/test_sqlalchemytypes.py
@@ -1517,6 +1518,7 @@ releasenotes/notes/add-dhcp_release6-ff1b8d62fd7fe76d.yaml
 releasenotes/notes/add-get-me-a-network-56321aeef5389001.yaml
 releasenotes/notes/add-integration-with-external-dns-f56ec8a4993b1fc4.yaml
 releasenotes/notes/add-ip-protocols-in-sg-60467a073e771aee.yaml
+releasenotes/notes/add-keepalived-vrrp-healt-check-f23ed7c853151484.yaml
 releasenotes/notes/add-minimum-bandwidth-support-sriov-63664b89f4dd1c1b.yaml
 releasenotes/notes/add-osprofiler-support-7fc2de3001187075.yaml
 releasenotes/notes/add-port-ip-allocation-attr-294a580641998240.yaml

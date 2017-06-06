@@ -348,7 +348,20 @@ class L3NATAgent(ha.AgentMixin,
 
         self.router_info[router_id] = ri
 
-        ri.initialize(self.process_monitor)
+        # If initialize() fails, cleanup and retrigger complete sync
+        try:
+            ri.initialize(self.process_monitor)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                del self.router_info[router_id]
+                LOG.exception(_LE('Error while initializing router %s'),
+                              router_id)
+                self.namespaces_manager.ensure_router_cleanup(router_id)
+                try:
+                    ri.delete()
+                except Exception:
+                    LOG.exception(_LE('Error while deleting router %s'),
+                                  router_id)
 
     def _safe_router_removed(self, router_id):
         """Try to delete a router and return True if successful."""
@@ -559,6 +572,10 @@ class L3NATAgent(ha.AgentMixin,
         timestamp = timeutils.utcnow()
         router_ids = []
         chunk = []
+        is_snat_agent = (self.conf.agent_mode ==
+                         lib_const.L3_AGENT_MODE_DVR_SNAT)
+        is_dvr_only_agent = (self.conf.agent_mode ==
+                             lib_const.L3_AGENT_MODE_DVR)
         try:
             router_ids = self.plugin_rpc.get_router_ids(context)
             # fetch routers by chunks to reduce the load on server and to
@@ -574,14 +591,12 @@ class L3NATAgent(ha.AgentMixin,
                         # need to keep fip namespaces as well
                         ext_net_id = (r['external_gateway_info'] or {}).get(
                             'network_id')
-                        is_snat_agent = (self.conf.agent_mode ==
-                            lib_const.L3_AGENT_MODE_DVR_SNAT)
                         if ext_net_id:
                             ns_manager.keep_ext_net(ext_net_id)
-                        elif is_snat_agent:
+                        elif is_snat_agent and not r.get('ha'):
                             ns_manager.ensure_snat_cleanup(r['id'])
                     # For HA routers check that DB state matches actual state
-                    if r.get('ha'):
+                    if r.get('ha') and not is_dvr_only_agent:
                         self.check_ha_state_for_router(
                             r['id'], r.get(l3_constants.HA_ROUTER_STATE_KEY))
                     update = queue.RouterUpdate(
