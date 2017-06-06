@@ -37,6 +37,7 @@ from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import ha
 from neutron.agent.l3 import legacy_router
 from neutron.agent.l3 import link_local_allocator as lla
+from neutron.agent.l3 import namespace_manager
 from neutron.agent.l3 import namespaces
 from neutron.agent.l3 import router_info as l3router
 from neutron.agent.l3 import router_processing_queue
@@ -252,6 +253,23 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             check.assert_called_once_with(ha_id,
                                           n_const.HA_ROUTER_STATE_STANDBY)
 
+    def test_periodic_sync_routers_task_not_check_ha_state_for_router(self):
+        # DVR-only agent should not trigger ha state check
+        self.conf.set_override('agent_mode', lib_constants.L3_AGENT_MODE_DVR)
+        agent = l3_agent.L3NATAgentWithStateReport(HOSTNAME, self.conf)
+        ha_id = _uuid()
+        active_routers = [
+            {'id': ha_id,
+             n_const.HA_ROUTER_STATE_KEY: n_const.HA_ROUTER_STATE_STANDBY,
+             'ha': True},
+            {'id': _uuid()}]
+        self.plugin_api.get_router_ids.return_value = [r['id'] for r
+                                                       in active_routers]
+        self.plugin_api.get_routers.return_value = active_routers
+        with mock.patch.object(agent, 'check_ha_state_for_router') as check:
+            agent.periodic_sync_routers_task(agent.context)
+            self.assertFalse(check.called)
+
     def test_periodic_sync_routers_task_raise_exception(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
         self.plugin_api.get_router_ids.return_value = ['fake_id']
@@ -297,6 +315,28 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         self.plugin_api.get_routers.return_value = []
         agent.periodic_sync_routers_task(agent.context)
         self.assertFalse(agent.namespaces_manager._clean_stale)
+
+    def test_periodic_sync_routers_task_call_ensure_snat_cleanup(self):
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        agent.conf.agent_mode = 'dvr_snat'
+        dvr_ha_router = {'id': _uuid(),
+                      'external_gateway_info': {},
+                      'routes': [],
+                      'distributed': True,
+                      'ha': True}
+        dvr_router = {'id': _uuid(),
+                      'external_gateway_info': {},
+                      'routes': [],
+                      'distributed': True,
+                      'ha': False}
+        routers = [dvr_router, dvr_ha_router]
+        self.plugin_api.get_router_ids.return_value = [r['id'] for r
+                                                       in routers]
+        self.plugin_api.get_routers.return_value = routers
+        with mock.patch.object(namespace_manager.NamespaceManager,
+                               'ensure_snat_cleanup') as ensure_snat_cleanup:
+            agent.periodic_sync_routers_task(agent.context)
+            ensure_snat_cleanup.assert_called_once_with(dvr_router['id'])
 
     def test_periodic_sync_routers_task_call_clean_stale_meta_proxies(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
@@ -666,8 +706,10 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
                                       router,
                                       **self.ri_kwargs)
         # Make sure that ri.snat_namespace object is created when the
-        # router is initialized
+        # router is initialized, and that it's name matches the gw
+        # namespace name
         self.assertIsNotNone(ri.snat_namespace)
+        self.assertEqual(ri.snat_namespace.name, ri.get_gw_ns_name())
 
     def test_ext_gw_updated_calling_snat_ns_delete_if_gw_port_host_none(
         self):
@@ -1693,6 +1735,55 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             # make sure only the one that wasn't in existing cidrs was sent
             mock_update_fip_status.assert_called_once_with(
                 mock.ANY, ri.router_id, {fip2['id']: 'ACTIVE'})
+
+    @mock.patch.object(l3_agent.LOG, 'exception')
+    def _retrigger_initialize(self, log_exception, delete_fail=False):
+        self.conf.external_network_bridge = ''
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        router = {'id': _uuid(),
+                  'external_gateway_info': {'network_id': 'aaa'}}
+        self.plugin_api.get_routers.return_value = [router]
+        update = router_processing_queue.RouterUpdate(
+            router['id'],
+            router_processing_queue.PRIORITY_SYNC_ROUTERS_TASK,
+            router=router,
+            timestamp=timeutils.utcnow())
+        agent._queue.add(update)
+
+        ri = legacy_router.LegacyRouter(router['id'], router,
+                                        **self.ri_kwargs)
+        calls = [mock.call('Error while initializing router %s',
+                           router['id'])]
+        if delete_fail:
+            # if delete fails, then also retrigger initialize
+            ri.delete = mock.Mock(side_effect=RuntimeError())
+            calls.append(
+                 mock.call('Error while deleting router %s',
+                           router['id']))
+        else:
+            ri.delete = mock.Mock()
+        calls.append(
+            mock.call("Failed to process compatible router: %s" %
+                      router['id']))
+        ri.process = mock.Mock()
+        ri.initialize = mock.Mock(side_effect=RuntimeError())
+        agent._create_router = mock.Mock(return_value=ri)
+        agent._process_router_update()
+        log_exception.assert_has_calls(calls)
+
+        ri.initialize.side_effect = None
+        agent._process_router_update()
+        self.assertTrue(ri.delete.called)
+        self.assertEqual(2, ri.initialize.call_count)
+        self.assertEqual(2, agent._create_router.call_count)
+        self.assertEqual(1, ri.process.call_count)
+        self.assertIn(ri.router_id, agent.router_info)
+
+    def test_initialize_fail_retrigger_initialize(self):
+        self._retrigger_initialize()
+
+    def test_initialize_and_delete_fail_retrigger_initialize(self):
+        self._retrigger_initialize(delete_fail=True)
 
     def test_process_router_floatingip_status_update_if_processed(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
