@@ -3,3 +3,4 @@ skip-ryu-tests.patch
 skip-iptest.patch
 drop-ryu-dep.patch
 add-check-for-ha-state.patch
+avoid-router-ri.process-if-initialize-fails.patch

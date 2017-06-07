@@ -1,0 +1,148 @@
+From b72099ad8c035c201829f06e8ffcfdf45d3219d1 Mon Sep 17 00:00:00 2001
+From: venkata anil <anilvenkata@redhat.com>
+Date: Wed, 8 Feb 2017 15:49:47 +0000
+Subject: [PATCH] Avoid router ri.process if initialize() fails
+
+When router_info initialize() fails(with trace) some resources(
+like keepalived process) may not be created. While handling this
+exception, l3 agent calls _process_updated_router instead of
+again calling _process_added_router, which also fails trying to
+access resources which are not created.
+
+In this change, agent will have new router_info(i.e
+self.router_info[router_id] = ri) only when initialize() succeeds.
+When initialize() fails, as router_info is not part of agent,
+"_process_router_if_compatible" will again call initialize().
+We also cleanup router_info when initialize() fails.
+
+Closes-bug: #1662804
+Change-Id: I278ac83de57713c93d6e50846d79034d774c5d47
+(cherry picked from commit 3e1ed94e389c427f1da56cde43a458832078f073)
+(cherry picked from commit 71c0e8940661fefbe2830258509e6c4afb887783)
+(cherry picked from commit 417a5910a09569e9fdd07499120c3c7ccd24750a)
+---
+ neutron/agent/l3/agent.py                 | 15 +++++++++-
+ neutron/agent/l3/ha_router.py             | 11 +++----
+ neutron/tests/unit/agent/l3/test_agent.py | 49 +++++++++++++++++++++++++++++++
+ 3 files changed, 69 insertions(+), 6 deletions(-)
+
+diff --git a/neutron/agent/l3/agent.py b/neutron/agent/l3/agent.py
+index b67b577..6a60118 100644
+--- a/neutron/agent/l3/agent.py
++++ b/neutron/agent/l3/agent.py
+@@ -347,7 +347,20 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
+ 
+         self.router_info[router_id] = ri
+ 
+-        ri.initialize(self.process_monitor)
++        # If initialize() fails, cleanup and retrigger complete sync
++        try:
++            ri.initialize(self.process_monitor)
++        except Exception:
++            with excutils.save_and_reraise_exception():
++                del self.router_info[router_id]
++                LOG.exception(_LE('Error while initializing router %s'),
++                              router_id)
++                self.namespaces_manager.ensure_router_cleanup(router_id)
++                try:
++                    ri.delete()
++                except Exception:
++                    LOG.exception(_LE('Error while deleting router %s'),
++                                  router_id)
+ 
+         # TODO(Carl) This is a hook in to fwaas.  It should be cleaned up.
+         self.process_router_add(ri)
+diff --git a/neutron/agent/l3/ha_router.py b/neutron/agent/l3/ha_router.py
+index 7245d83..9b7f69b 100644
+--- a/neutron/agent/l3/ha_router.py
++++ b/neutron/agent/l3/ha_router.py
+@@ -20,7 +20,7 @@ import eventlet
+ import netaddr
+ from oslo_log import log as logging
+ 
+-from neutron._i18n import _LE
++from neutron._i18n import _, _LE
+ from neutron.agent.l3 import namespaces
+ from neutron.agent.l3 import router_info as router
+ from neutron.agent.linux import external_process
+@@ -98,12 +98,13 @@ class HaRouter(router.RouterInfo):
+         return self.ns_name
+ 
+     def initialize(self, process_monitor):
+-        super(HaRouter, self).initialize(process_monitor)
+         ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
+         if not ha_port:
+-            LOG.error(_LE('Unable to process HA router %s without HA port'),
+-                      self.router_id)
+-            return
++            msg = _("Unable to process HA router %s without "
++                    "HA port") % self.router_id
++            LOG.exception(msg)
++            raise Exception(msg)
++        super(HaRouter, self).initialize(process_monitor)
+ 
+         self.ha_port = ha_port
+         self._init_keepalived_manager(process_monitor)
+diff --git a/neutron/tests/unit/agent/l3/test_agent.py b/neutron/tests/unit/agent/l3/test_agent.py
+index 27264a8..13d9d1d 100644
+--- a/neutron/tests/unit/agent/l3/test_agent.py
++++ b/neutron/tests/unit/agent/l3/test_agent.py
+@@ -1692,6 +1692,55 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
+             mock_update_fip_status.assert_called_once_with(
+                 mock.ANY, ri.router_id, {fip2['id']: 'ACTIVE'})
+ 
++    @mock.patch.object(l3_agent.LOG, 'exception')
++    def _retrigger_initialize(self, log_exception, delete_fail=False):
++        self.conf.external_network_bridge = ''
++        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
++        router = {'id': _uuid(),
++                  'external_gateway_info': {'network_id': 'aaa'}}
++        self.plugin_api.get_routers.return_value = [router]
++        update = router_processing_queue.RouterUpdate(
++            router['id'],
++            router_processing_queue.PRIORITY_SYNC_ROUTERS_TASK,
++            router=router,
++            timestamp=timeutils.utcnow())
++        agent._queue.add(update)
++
++        ri = legacy_router.LegacyRouter(router['id'], router,
++                                        **self.ri_kwargs)
++        calls = [mock.call('Error while initializing router %s',
++                           router['id'])]
++        if delete_fail:
++            # if delete fails, then also retrigger initialize
++            ri.delete = mock.Mock(side_effect=RuntimeError())
++            calls.append(
++                 mock.call('Error while deleting router %s',
++                           router['id']))
++        else:
++            ri.delete = mock.Mock()
++        calls.append(
++            mock.call("Failed to process compatible router '%s'",
++                      router['id']))
++        ri.process = mock.Mock()
++        ri.initialize = mock.Mock(side_effect=RuntimeError())
++        agent._create_router = mock.Mock(return_value=ri)
++        agent._process_router_update()
++        log_exception.assert_has_calls(calls)
++
++        ri.initialize.side_effect = None
++        agent._process_router_update()
++        self.assertTrue(ri.delete.called)
++        self.assertEqual(2, ri.initialize.call_count)
++        self.assertEqual(2, agent._create_router.call_count)
++        self.assertEqual(1, ri.process.call_count)
++        self.assertIn(ri.router_id, agent.router_info)
++
++    def test_initialize_fail_retrigger_initialize(self):
++        self._retrigger_initialize()
++
++    def test_initialize_and_delete_fail_retrigger_initialize(self):
++        self._retrigger_initialize(delete_fail=True)
++
+     def test_process_router_floatingip_status_update_if_processed(self):
+         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+         router = l3_test_common.prepare_router_data(num_internal_ports=1)
+-- 
+2.7.4
+
