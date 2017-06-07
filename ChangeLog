@@ -1,6 +1,96 @@
 CHANGES
 =======
 
+10.0.2
+------
+
+* Fixed docs job failure
+* Fix security group rules created for dhcpv6
+* Allow port security updates even without security-groups enabled
+* Send both gratuitous ARP REQUESTs and REPLYs
+* Bulk up port context retrieval
+* Add some bulk lookup methods to ML2 for RPC handling
+* DVR: Do not check HA state on DVR-only routers
+* Remove minimum_bandwidth_rule from rules supported by Linuxbridge agent
+* Enforce port QoS policies for all ports
+* Retrieve fresh network DB data before getting it in ml2
+* Wait 2 seconds between gratuitous ARP updates instead of 1 second
+* Allow offloading lookups in driver contexts
+* Scan for mac through all devices
+* Clear QoS rules from ports without a qos policy
+* Updated from global requirements
+* Fix TypeError in native of_interface _get_dpid
+* Connectivity tests for OVS agent failures/restarts
+* Handle CIDR IP address in allowed address pairs
+* Allow self-sharing RBAC rules to be deleted without usage check
+* Allow no network to be passed into subnet context
+* Get rid of custom wrap_db_retry call in sync_allocations
+* Use correct retry mechanism in tags
+* Simplify RootHelperProcess._read_stream()
+* Pass --concurrent flag to ebtables calls
+* Init policy in pecan after hook as well
+* Check for None in _get_agent_fdb for agent
+* Add IPAllocations to the port fixed_ips
+* Avoid loading network and all rels for subnet query
+* Set MTU on tap devices in Linux Bridge agent
+* fullstack: Compile openvswitch module for fullstack test
+* Dont try to apply iptables rules in a endless loop
+* Ensure behavior of None for device_id
+* Imported Translations from Zanata
+* DVR: Don't clean snat-ns of DVR HA router when fullsync
+* Stop making IP-specific provider rules in SG code
+* Egress sg_rules should get 'prefix' from 'dest_ip_prefix'
+* Ignore gre devices when fetching devices in test_cleanup_stale_devices
+
+10.0.1
+------
+
+* Fix call a method of extension class
+* Move conntrack zones to IPTablesFirewall
+* Tempest: Fixing L3 agent hosting router for DVR setup
+* Print useful error on rootwrap daemon failure
+* Assert contents of returned devices in test
+* Get rid of delete_subnet method in ML2
+* Revert "Fix DetachedInstanceError on subnet delete"
+* Add work-around for older oslo.db
+* Enable keepalived debug logs when debug=True
+* Log messages for keepalived-state-change in syslog
+* Fixed validation of create_and_list_trunk_subports rally scenario
+* Remove stale floating IP addresses from rfp devices
+* Fix tempest router timestamp test when HA enabled
+* Fixes crash when starting Neutron OVS Agent on Windows
+* Handle auto-address subnets on port update
+* Avoid router ri.process if initialize() fails
+* Throttle SIGHUPs to keepalived
+* Remove a release note for reverted patch
+* Fix Quota error while running tests
+* Fix DetachedInstanceError on subnet delete
+* Reconcile quitting_rpc_timeout with backoff RPC client
+* Switch RootHelperProcess from select.poll to select.select
+* tempest: Skip QoS test until fixed
+* Turn nova notifier into a proper rate limiter
+* Add a tempest scenario for floating-ip
+* tempest: Log server console output of failed SSH
+* trunk: Add tempest test validating subport connectivity
+* Trim rally scenario sizes
+* Fetch trunk port MTU only on trunk validation
+* functional: Stop compiling OVS from source
+* Set OVS inactivity_probe to vsctl_timeout when adding manager
+* Updated from global requirements
+* Disable process monitor for keepalived test
+* Ensure ovsdb_connection enabled before calling monitor
+* gate_hook: accept dsvm-scenario-[ovs|linuxbridge] venv name
+* Stop killing conntrack state without CT Zone
+* LB Trunk: Stop matching MAC of subport to port model
+* Fix duplicated sg rules check for remote_ip_prefix
+* Allow no network to be passed into PortContext
+* Avoid segment DB lookup in _expand_segment on port
+* Make ML2 OVO push notification asynchronous
+* Convert gate_hook to devstack-tools
+* Switch to use test_utils.call_until_true
+* gate-hook: Accomodate devstack-gate local.conf changes
+* Skip native DHCP notifications on status change
+
 10.0.0
 ------
 
@@ -8,6 +98,7 @@ CHANGES
 * Invert device_owner to avoid filtering too much
 * Switch to 'subquery' for 1-M relationships
 * DVR: Look at all SNAT ports for a subnet match
+* Pecan: Fix policy checks for lists
 * Pecan: Fix tags handling for pecan
 * Update UPPER_CONSTRAINTS_FILE for stable/ocata
 * Revert "Linux Bridge: driver support for QoS egress minimum bandwidth"

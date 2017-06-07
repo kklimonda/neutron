@@ -20,7 +20,7 @@ import netaddr
 from neutron_lib import constants as n_consts
 from oslo_log import log as logging
 
-from neutron._i18n import _LE
+from neutron._i18n import _, _LE
 from neutron.agent.l3 import namespaces
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import external_process
@@ -33,6 +33,11 @@ LOG = logging.getLogger(__name__)
 HA_DEV_PREFIX = 'ha-'
 IP_MONITOR_PROCESS_SERVICE = 'ip_monitor'
 SIGTERM_TIMEOUT = 10
+
+# The multiplier is used to compensate execution time of function sending
+# SIGHUP to keepalived process. The constant multiplies ha_vrrp_advert_int
+# config option and the result is the throttle delay.
+THROTTLER_MULTIPLIER = 1.5
 
 
 class HaRouterNamespace(namespaces.RouterNamespace):
@@ -96,12 +101,13 @@ class HaRouter(router.RouterInfo):
         return self.ns_name
 
     def initialize(self, process_monitor):
-        super(HaRouter, self).initialize(process_monitor)
         ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
         if not ha_port:
-            LOG.error(_LE('Unable to process HA router %s without HA port'),
-                      self.router_id)
-            return
+            msg = _("Unable to process HA router %s without "
+                    "HA port") % self.router_id
+            LOG.exception(msg)
+            raise Exception(msg)
+        super(HaRouter, self).initialize(process_monitor)
 
         self.ha_port = ha_port
         self._init_keepalived_manager(process_monitor)
@@ -115,7 +121,9 @@ class HaRouter(router.RouterInfo):
             keepalived.KeepalivedConf(),
             process_monitor,
             conf_path=self.agent_conf.ha_confs_path,
-            namespace=self.ha_namespace)
+            namespace=self.ha_namespace,
+            throttle_restart_value=(
+                self.agent_conf.ha_vrrp_advert_int * THROTTLER_MULTIPLIER))
 
         config = self.keepalived_manager.config
 

@@ -16,7 +16,6 @@
 import abc
 from concurrent import futures
 import contextlib
-import functools
 import os
 import random
 import re
@@ -128,9 +127,10 @@ def assert_async_ping(src_namespace, dst_ip, timeout=1, count=1, interval=1):
 
 
 @contextlib.contextmanager
-def async_ping(namespace, ips):
+def async_ping(namespace, ips, timeout=1, count=10):
     with futures.ThreadPoolExecutor(max_workers=len(ips)) as executor:
-        fs = [executor.submit(assert_async_ping, namespace, ip, count=10)
+        fs = [executor.submit(assert_async_ping, namespace, ip, count=count,
+                              timeout=timeout)
               for ip in ips]
         yield lambda: all(f.done() for f in fs)
         futures.wait(fs)
@@ -288,12 +288,9 @@ class RootHelperProcess(subprocess.Popen):
     @staticmethod
     def _read_stream(stream, timeout):
         if timeout:
-            poller = select.poll()
-            poller.register(stream.fileno())
-            poll_predicate = functools.partial(poller.poll, 1)
-            common_utils.wait_until_true(poll_predicate, timeout, 0.1,
-                                  RuntimeError(
-                                      'No output in %.2f seconds' % timeout))
+            rready, _wready, _xready = select.select([stream], [], [], timeout)
+            if not rready:
+                raise RuntimeError('No output in %.2f seconds' % timeout)
         return stream.readline()
 
     def writeline(self, data):

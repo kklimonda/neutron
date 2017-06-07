@@ -1189,6 +1189,7 @@ neutron/tests/tempest/scenario/constants.py
 neutron/tests/tempest/scenario/exceptions.py
 neutron/tests/tempest/scenario/test_basic.py
 neutron/tests/tempest/scenario/test_dvr.py
+neutron/tests/tempest/scenario/test_floatingip.py
 neutron/tests/tempest/scenario/test_qos.py
 neutron/tests/tempest/scenario/test_trunk.py
 neutron/tests/tempest/services/__init__.py
@@ -1335,6 +1336,7 @@ neutron/tests/unit/db/test_migration.py
 neutron/tests/unit/db/test_portsecurity_db.py
 neutron/tests/unit/db/test_portsecurity_db_common.py
 neutron/tests/unit/db/test_provisioning_blocks.py
+neutron/tests/unit/db/test_rbac_db_mixin.py
 neutron/tests/unit/db/test_securitygroups_db.py
 neutron/tests/unit/db/test_segments_db.py
 neutron/tests/unit/db/test_sqlalchemytypes.py
@@ -1615,7 +1617,6 @@ releasenotes/notes/add-get-me-a-network-56321aeef5389001.yaml
 releasenotes/notes/add-integration-with-external-dns-f56ec8a4993b1fc4.yaml
 releasenotes/notes/add-ip-protocols-in-sg-60467a073e771aee.yaml
 releasenotes/notes/add-keepalived-vrrp-healt-check-f23ed7c853151484.yaml
-releasenotes/notes/add-minimum-bandwidth-support-linuxbridge-9dc9d4458d8affef.yaml
 releasenotes/notes/add-minimum-bandwidth-support-sriov-63664b89f4dd1c1b.yaml
 releasenotes/notes/add-osprofiler-support-7fc2de3001187075.yaml
 releasenotes/notes/add-placement-api-configuration-options-f1611d0909bf6166.yaml
