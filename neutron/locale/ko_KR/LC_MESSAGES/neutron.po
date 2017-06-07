@@ -11,21 +11,20 @@
 # Andreas Jaeger <jaegerandi@gmail.com>, 2016. #zanata
 # HYUNGBAI PARK <openstack.make@gmail.com>, 2016. #zanata
 # jtjang <jang.jitae@gmail.com>, 2016. #zanata
-# jtjang <jang.jitae@gmail.com>, 2017. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: neutron 9.2.1.dev14\n"
+"Project-Id-Version: neutron 10.0.2.dev10\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
-"POT-Creation-Date: 2017-02-03 03:19+0000\n"
+"POT-Creation-Date: 2017-04-16 05:24+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"PO-Revision-Date: 2017-02-06 07:52+0000\n"
-"Last-Translator: jtjang <jang.jitae@gmail.com>\n"
+"PO-Revision-Date: 2016-08-17 10:52+0000\n"
+"Last-Translator: HYUNGBAI PARK <openstack.make@gmail.com>\n"
 "Language: ko-KR\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 "Generated-By: Babel 2.0\n"
-"X-Generator: Zanata 3.7.3\n"
+"X-Generator: Zanata 3.9.6\n"
 "Language-Team: Korean (South Korea)\n"
 
 #, python-format
@@ -182,9 +181,6 @@ msgstr "'%s'이(가) 정수 또는 uuid가 아님"
 msgid "'%s' is not supported for filtering"
 msgstr "'%s'은(는) 필터링을 위해 지원되지 않음"
 
-msgid "'.' searches are not implemented"
-msgstr "'.' 검색이 구현되지 않음"
-
 #, python-format
 msgid "'module' object has no attribute '%s'"
 msgstr "'module' 오브젝트에 '%s' 속성이 없음"
@@ -194,9 +190,6 @@ msgstr "'port_max'가 'port_min'보다 작음"
 
 msgid "0 is not allowed as CIDR prefix length"
 msgstr "0은 CIDR 접두부 길이로 허용되지 않음"
-
-msgid "A QoS driver must be specified"
-msgstr "QoS 드라이버를 지정해야 함"
 
 msgid "A cidr must be specified in the absence of a subnet pool"
 msgstr "서브넷 풀이 없는 경우 cidr을 지정해야 함"
@@ -400,18 +393,6 @@ msgid "Backend does not support VLAN Transparency."
 msgstr "백엔드는 VLAN 투명도를 지원하지 않습니다."
 
 #, python-format
-msgid ""
-"Bad prefix or mac format for generating IPv6 address by EUI-64: %(prefix)s, "
-"%(mac)s:"
-msgstr ""
-"EUI-64에 의해 IPv6 주소를 생성하기 위한 접두부 또는 mac 형식이 잘못되었습니"
-"다. %(prefix)s, %(mac)s:"
-
-#, python-format
-msgid "Bad prefix type for generate IPv6 address by EUI-64: %s"
-msgstr "EUI-64에 의해 IPv6 주소를 생성하기 위한 접두부 유형이 잘못됨: %s"
-
-#, python-format
 msgid "Base MAC: %s"
 msgstr "기본 MAC: %s"
 
@@ -481,13 +462,6 @@ msgstr ""
 "%(fixed_ip)s을(를) 사용하여 부동 IP %(floating_ip_address)s(%(fip_id)s)을"
 "(를) 포트 %(port_id)s과(와) 연관시킬 수 없습니다. "
 
-msgid ""
-"Cannot change HA attribute of active routers. Please set router "
-"admin_state_up to False prior to upgrade."
-msgstr ""
-"활성 라우터의 HA 속성을 변경할 수 없습니다. 업그레이드 전에 라우터 "
-"admin_state_up을 False로 설정하십시오."
-
 msgid "Cannot disable enable_dhcp with ipv6 attributes set"
 msgstr "ipv6 속성이 설정된 enable_dhcp를 사용할 수 없음"
 
@@ -534,13 +508,6 @@ msgstr "JSON을 이해할 수 없음"
 msgid "Cannot update read-only attribute %s"
 msgstr "읽기 전용 속성 %s을(를) 업데이트할 수 없음"
 
-msgid ""
-"Cannot upgrade active router to distributed. Please set router "
-"admin_state_up to False prior to upgrade."
-msgstr ""
-"활성 라우터를 분산 라우터로 업그레이드할 수 없습니다. 업그레이드 전에 라우터 "
-"admin_state_up을 False로 설정하십시오. "
-
 msgid "Certificate Authority public key (CA cert) file for ssl"
 msgstr "ssl용 인증 기관 공개 키(CA cert) 파일 "
 
@@ -548,9 +515,6 @@ msgstr "ssl용 인증 기관 공개 키(CA cert) 파일 "
 msgid ""
 "Change would make usage less than 0 for the following resources: %(unders)s."
 msgstr "변경하면 다음 자원에 대한 사용량이 0보다 작아짐: %(unders)s."
-
-msgid "Check bridge firewalling"
-msgstr "브릿지 방화벽 확인"
 
 msgid "Check ebtables installation"
 msgstr "ebtables 설치 확인"
@@ -731,27 +695,6 @@ msgstr ""
 "현재 게이트웨이 ip %(ip_address)s을(를) 포트 %(port_id)s에서 이미 사용하고 있"
 "습니다.업데이트할 수 없습니다."
 
-msgid "Currently update of HA mode for a DVR/HA router is not supported."
-msgstr "DVR/HA 라우터의 HA 모드 업데이트는 현재 지원되지 않습니다."
-
-msgid "Currently update of HA mode for a distributed router is not supported."
-msgstr "분산된 라우터의 HA 모드 업데이트는 현재 지원되지 않습니다."
-
-msgid ""
-"Currently update of distributed mode for a DVR/HA router is not supported"
-msgstr "DVR/HA 라우터의 분산 모드 업데이트는 현재 지원되지 않습니다."
-
-msgid "Currently update of distributed mode for an HA router is not supported."
-msgstr "HA 라우터의 분산 모드 업데이트는 현재 지원되지 않습니다."
-
-msgid ""
-"Currently updating a router from DVR/HA to non-DVR  non-HA is not supported."
-msgstr ""
-"DVR/HA에서 비DVR 비HA로 라우터를 업데이트하는 기능은 현재 지원되지 않습니다."
-
-msgid "Currently updating a router to DVR/HA is not supported."
-msgstr "DVR/HA로 라우터를 업데이트하는 기능은 현재 지원되지 않습니다."
-
 msgid ""
 "DHCP lease duration (in seconds). Use -1 to tell dnsmasq to use infinite "
 "lease times."
@@ -881,15 +824,6 @@ msgstr "외부 DNS 서비스에서 도메인 %(dns_domain)s을(를) 찾을 수 �
 msgid "Domain to use for building the hostnames"
 msgstr "호스트 이름 빌드에 사용할 도메인"
 
-msgid ""
-"Domain to use for building the hostnames. This option is deprecated. It has "
-"been moved to neutron.conf as dns_domain. It will be removed in a future "
-"release."
-msgstr ""
-"호스트 이름 빌드에 사용할 도메인입니다. 이 옵션은 더 이상 사용되지 않습니다. "
-"이 도메인은 dns_domain으로 neutron.conf에 이동되었습니다. 향후 릴리스에서는 "
-"제거됩니다. "
-
 msgid "Downgrade no longer supported"
 msgstr "다운그레이드는 현재 지원하지 않음"
 
@@ -917,9 +851,6 @@ msgstr ""
 "ipv6 접두부 위임에 사용되는 드라이버입니다. 이는 neutron.agent.linux."
 "pd_drivers 네임스페이스에서 정의된 시작점이어야 합니다. neutron 소스와 함께 "
 "포함된 시작점은 setup.cfg를 참조하십시오. "
-
-msgid "Drivers list to use to send the update notification"
-msgstr "업데이트 알림을 전송하기 위해 사용할 드라이버 목록"
 
 #, python-format
 msgid ""
@@ -1074,9 +1005,6 @@ msgid ""
 msgstr ""
 "주소가 임시 상태를 벗어날 때까지 대기하는 동안 %s초 제한이 초과되어씃ㅂ니다."
 
-msgid "Exceeded maximum amount of fixed ips per port."
-msgstr "포트당 최대 Fixed IP 수를 초과했습니다."
-
 msgid "Existing prefixes must be a subset of the new prefixes"
 msgstr "기존 접두부는 새 접두부의 서브넷이어야 함"
 
@@ -1196,10 +1124,6 @@ msgstr ""
 #, python-format
 msgid "Failed to locate source for %s."
 msgstr "%s에 대한 소스를 찾지 못했습니다. "
-
-#, python-format
-msgid "Failed to parse request. Parameter '%s' not specified"
-msgstr "요청을 구문 분석하지 못했습니다. '%s' 매개변수가 지정되지 않았음"
 
 #, python-format
 msgid "Failed to parse request. Required attribute '%s' not specified"
@@ -1410,13 +1334,6 @@ msgstr ""
 "추가할 수 없습니다."
 
 msgid ""
-"If True, advertise network MTU values if core plugin calculates them. MTU is "
-"advertised to running instances via DHCP and RA MTU options."
-msgstr ""
-"True인 경우 핵심 플러그인이 네트워크 MTU 값을 계산하면 이 값을 광고합니다. "
-"MTU는 DHCP와 RA MTU 옵션을 통해 실행 중인 인스턴스에 광고됩니다."
-
-msgid ""
 "If True, then allow plugins that support it to create VLAN transparent "
 "networks."
 msgstr ""
@@ -1472,12 +1389,6 @@ msgstr ""
 "경로를 DHCP 요청에 강제로 추가합니다. 이 옵션이 설정되면 모든 네트워크의 메타"
 "데이터 서비스가 활성화됩니다."
 
-#, python-format
-msgid "Incorrect pci_vendor_info: \"%s\", should be pair vendor_id:product_id"
-msgstr ""
-"올바르지 않은 pci_vendor_info: \"%s\", vendor_id:product_id와 쌍을 이루어야 "
-"함"
-
 msgid ""
 "Indicates that this L3 agent should also handle routers that do not have an "
 "external network gateway configured. This option should be True only for a "
@@ -1530,14 +1441,6 @@ msgstr "2개의 측정 보고서 간의 간격"
 #, python-format
 msgid "Invalid CIDR %(input)s given as IP prefix."
 msgstr "IP 접두부로 지정된 CIDR %(input)s이(가) 올바르지 않습니다."
-
-#, python-format
-msgid ""
-"Invalid CIDR %s for IPv6 address mode. OpenStack uses the EUI-64 address "
-"format, which requires the prefix to be /64."
-msgstr ""
-"CIDR %s은(는) IPv6 주소 모드에 올바르지 않습니다. OpenStack에서는 접두부 /64"
-"를 사용하는 EUI-64 주소 형식을 사용합니다."
 
 #, python-format
 msgid "Invalid Device %(dev_name)s: %(reason)s"
@@ -1662,10 +1565,6 @@ msgid ""
 msgstr ""
 "커널 HZ 값 %(value)s이(가) 올바르지 않습니다. 이 값은 0보다 커야 합니다."
 
-#, python-format
-msgid "Key %(key)s in mapping: '%(mapping)s' not unique"
-msgstr "'%(mapping)s' 맵핑의 %(key)s 키가 고유하지 않음"
-
 msgid "L3 agent failure to setup NAT for floating IPs"
 msgstr "L3 에이전트에서 Floating IP의 NAT 설정 실패"
 
@@ -1731,9 +1630,6 @@ msgstr "keepalived/conntrackd 구성 파일을 저장할 위치"
 
 msgid "Log agent heartbeats"
 msgstr "로그 에이전트 하트비트"
-
-msgid "Loopback IP subnet is not supported if enable_dhcp is True."
-msgstr "enable_dhcp가 True인 경우 루프백 IP 서브넷이 지원되지 않습니다."
 
 msgid ""
 "MTU of the underlying physical network. Neutron uses this value to calculate "
@@ -1817,9 +1713,6 @@ msgstr ""
 "remote_ip_prefix %(remote_ip_prefix)s을(를) 가진 측정 레이블 규칙이 다른 항목"
 "과 겹침"
 
-msgid "Migration from distributed router to centralized is not supported"
-msgstr "분산 라우터에서 중앙으로 마이그레이션하는 작업은 지원되지 않음"
-
 msgid "MinRtrAdvInterval setting for radvd.conf"
 msgstr "radvd.conf의 MinRtrAdvInterval 설정"
 
@@ -1829,13 +1722,6 @@ msgstr "인터페이스 변경사항에 대한 ovsdb를 모니터링하여 폴�
 #, python-format
 msgid "Missing key in mapping: '%s'"
 msgstr "맵핑에서 키 누락: '%s'"
-
-#, python-format
-msgid "Missing value in mapping: '%s'"
-msgstr "맵핑에서 값 누락: '%s'"
-
-msgid "Multicast IP subnet is not supported if enable_dhcp is True."
-msgstr "enable_dhcp가 True인 경우 멀티캐스트 IP 서브넷이 지원되지 않습니다."
 
 msgid ""
 "Multicast group for VXLAN. When configured, will enable sending all "
@@ -2010,14 +1896,6 @@ msgstr "'dvr' 모드에서 수동으로 에이전트에 라우터를 지정할 �
 msgid "Not allowed to manually remove a router from an agent in 'dvr' mode."
 msgstr "'dvr' 모드에서 수동으로 에이전트에서 라우터를 제거할 수 없습니다."
 
-#, python-format
-msgid ""
-"Not enough l3 agents available to ensure HA. Minimum required "
-"%(min_agents)s, available %(num_agents)s."
-msgstr ""
-"HA를 확인하기 위해 사용 가능한 13개의 에이전트가 충분하지 않습니다. 최소 "
-"%(min_agents)s, 사용 가능한 %(num_agents)s이(가) 필요합니다."
-
 msgid ""
 "Number of DHCP agents scheduled to host a tenant network. If this number is "
 "greater than 1, the scheduler automatically assigns multiple DHCP agents for "
@@ -2050,13 +1928,6 @@ msgstr ""
 "네트워크 접두어로 고려될 ipv6 PTR 구역의 비트 수입니다. nyble 경계에 맞게 정"
 "렬해야 합니다. 최소값은 4이고 최대값은 124입니다. 결과적으로 값의 범위는 4, "
 "8, 12, 16,..., 124입니다."
-
-msgid ""
-"Number of concurrent threads for keepalived server connection requests.More "
-"threads create a higher CPU load on the agent node."
-msgstr ""
-"연결 유지 서버 연결 요청에 대한 동시 스레드 수입니다. 더 많은 스레드는 에이전"
-"트 노드에서 더 높은 CPU로드를 생성합니다."
 
 msgid ""
 "Number of floating IPs allowed per tenant. A negative value means unlimited."
@@ -2124,9 +1995,6 @@ msgstr ""
 "사용할 OVS 데이터 경로입니다. '시스템'은 기본값이며 커널 데이터 경로에 해당합"
 "니다. 사용자 공간 데이터 경로를 사용하려면 이 값을 'netdev'로 설정하십시오."
 
-msgid "OVS transaction timed out"
-msgstr "OVS 트랜잭션 타임아웃"
-
 msgid "OVS vhost-user socket directory."
 msgstr "OVS vhost-사용자 소켓 디렉토리."
 
@@ -2143,9 +2011,6 @@ msgstr "관리자만이 할당량을 보거나 구성할 수 있습니다. "
 
 msgid "Only admin is authorized to access quotas for another tenant"
 msgstr "관리자만 다른 테넌트의 할당량에 액세스할 수 있는 권한이 있음"
-
-msgid "Only admins can manipulate policies on networks they do not own."
-msgstr "소유하지 않은 네트워크의 정책은 관리자만 조작할 수 있습니다. "
 
 msgid "Only admins can manipulate policies on objects they do not own"
 msgstr "소유하지 않은 오브젝트의 정책은 관리자만 조작할 수 있음"
@@ -2196,9 +2061,6 @@ msgstr "패키지 %s이(가) 설치되지 않음"
 msgid "Parsing bridge_mappings failed: %s."
 msgstr "bridge_mappings 구문 분석 실패: %s."
 
-msgid "Parsing supported pci_vendor_devs failed"
-msgstr "지원되는 pci_vendor_devs 구문 분석 실패"
-
 msgid "Password for connecting to designate in admin context"
 msgstr "관리 컨텍스트에서 지정하기 위해 연결할 암호"
 
@@ -2223,10 +2085,6 @@ msgstr "단계 업그레이드 옵션이 개정 스펙을 승인하지 않음"
 msgid "Ping timeout"
 msgstr "Ping 제한시간 초과"
 
-#, python-format
-msgid "Plugin '%s' not found."
-msgstr "플러그인 '%s'를 찾을 수 없습니다"
-
 msgid "Plugin does not support updating provider attributes"
 msgstr "플러그인이 제공자 속성 업데이트를 지원하지 않음"
 
@@ -2241,10 +2099,6 @@ msgstr "%(port)s 포트가 %(bridge)s에 없습니다!"
 #, python-format
 msgid "Port %(port_id)s is already acquired by another DHCP agent"
 msgstr "다른 DHCP 에이전트에가 이미 포트 %(port_id)s을(를) 확보했습니다."
-
-#, python-format
-msgid "Port %(port_id)s is not managed by this agent. "
-msgstr "이 에이전트에서 %(port_id)s 포트를 관리하지 않습니다."
 
 #, python-format
 msgid "Port %s does not exist"
@@ -2487,9 +2341,6 @@ msgstr ""
 "사용하여 실제 루트 필터 기능을 사용합니다. 'sudo'로 변경하여 필터링을 건너뛰"
 "고 명령을 직접 실행하기만 하면 됩니다."
 
-msgid "Root helper daemon application to use when possible."
-msgstr "가능한 경우 사용할 루트 헬퍼 디먼 애플리케이션."
-
 msgid "Root permissions are required to drop privileges."
 msgstr "권한을 삭제하려면 루트 권한이 필요합니다."
 
@@ -2716,12 +2567,6 @@ msgstr "하위 프로젝트 %s이(가) 설치되지 않았습니다. "
 msgid "Subnet for router interface must have a gateway IP"
 msgstr "라우터 인터페이스에 대한 서브넷은 게이트웨이 IP를 가져야 함"
 
-msgid ""
-"Subnet has a prefix length that is incompatible with DHCP service enabled."
-msgstr ""
-"서브넷이 DHCP 서비스가 사용으로 설정된 호환 불가능한 접두부 길이를 가지고 있"
-"습니다. "
-
 #, python-format
 msgid "Subnet pool %(subnetpool_id)s could not be found."
 msgstr "서브넷 풀 %(subnetpool_id)s을(를) 찾을 수 없습니다."
@@ -2747,9 +2592,6 @@ msgid ""
 msgstr ""
 "테넌트가 작성할 수 있는 라우터 유형을 판별하는 시스템 범위 플래그입니다. 관리"
 "자만 대체할 수 있습니다."
-
-msgid "TCP Port to listen for metadata server requests."
-msgstr "메타데이터 서버 요청을 청취할 TCP 포트입니다. "
 
 msgid "TCP Port used by Neutron metadata namespace proxy."
 msgstr "Neutron 메타데이터 네임스페이스 프록시가 사용하는 TCP 포트입니다. "
@@ -2874,13 +2716,6 @@ msgstr ""
 "됩니다. 다른 옥텟은 무작위로 생성됩니다. 테넌트 포트에 대해 할당된 MAC과의 혼"
 "합을 방지하기 위해 'dvr_base_mac'은 'base_mac'과 달라야 *합니다*. 4 옥텟 예제"
 "는 dvr_base_mac = fa:16:3f:4f:00:00입니다. 기본값은 3 옥텟입니다. "
-
-msgid ""
-"The connection string for the native OVSDB backend. Requires the native "
-"ovsdb_interface to be enabled."
-msgstr ""
-"네이티브 OVSDB 백엔드용 연결 문자열. 네이티브 ovsdb_interface를 사용하도록 설"
-"정해야 합니다."
 
 msgid "The core plugin Neutron will use"
 msgstr "Neutron이 사용할 코어 플러그인"
@@ -3231,9 +3066,6 @@ msgstr "서브넷 %(subnet_id)s에서 IP 주소 %(ip_address)s을(를) 찾을 �
 msgid "Unable to find resource name in %s"
 msgstr "%s에서 자원 이름을 찾을 수 없음"
 
-msgid "Unable to generate IP address by EUI64 for IPv4 prefix"
-msgstr "IPv4 접두부에 대해 EUI64에 의해 IP 주소를 생성할 수 없습니다."
-
 #, python-format
 msgid "Unable to generate unique DVR mac for host %(host)s."
 msgstr "%(host)s 호스트에 대한 고유 DVR mac을 생성할 수 없습니다."
@@ -3425,10 +3257,6 @@ msgid "VXLAN network unsupported."
 msgstr "VXLAN 네트워크가 지원되지 않습니다."
 
 #, python-format
-msgid "Value %(value)s in mapping: '%(mapping)s' not unique"
-msgstr "'%(mapping)s' 맵핑의 %(value)s 값이 고유하지 않음"
-
-#, python-format
 msgid ""
 "Value of %(parameter)s has to be multiple of %(number)s, with maximum value "
 "of %(maximum)s and minimum value of %(minimum)s"
@@ -3554,9 +3382,6 @@ msgstr "%(reason)s(으)로 인해 %(event)s을(를) 수행할 수 없음"
 msgid "cidr and prefixlen must not be supplied together"
 msgstr "cidr 및 prefixlen을 함께 입력하지 않아야 함"
 
-msgid "cidr doesn't contain a '/'"
-msgstr "cidr은 '/'을 포함하지 않는다."
-
 #, python-format
 msgid "dhcp_agents_per_network must be >= 1. '%s' is invalid."
 msgstr ""
@@ -3603,13 +3428,6 @@ msgstr "ip_version이 4인 경우 ipv6_address_mode가 올바르지 않음"
 msgid "ipv6_ra_mode is not valid when ip_version is 4"
 msgstr "ip_version이 4인 경우 ipv6_ra_mode가 올바르지 않음"
 
-msgid ""
-"ipv6_ra_mode or ipv6_address_mode cannot be set when enable_dhcp is set to "
-"False."
-msgstr ""
-"enable_dhcp가 False로 설정된 경우 ipv6_ra_mode 또는 ipv6_address_mode를 설정"
-"할 수 없습니다."
-
 #, python-format
 msgid ""
 "ipv6_ra_mode set to '%(ra_mode)s' with ipv6_address_mode set to "
@@ -3622,15 +3440,6 @@ msgstr ""
 
 msgid "mac address update"
 msgstr "mac 주소 업데이트"
-
-#, python-format
-msgid ""
-"max_l3_agents_per_router %(max_agents)s config parameter is not valid. It "
-"has to be greater than or equal to min_l3_agents_per_router %(min_agents)s."
-msgstr ""
-"max_l3_agents_per_router %(max_agents)s 구성 매개변수가 올바르지 않습니다. "
-"min_l3_agents_per_router와 같거나 이보다 커야 합니다.%(min_agents)s과(와) 연"
-"관되어 있습니다."
 
 msgid "must provide exactly 2 arguments - cidr and MAC"
 msgstr "정확히 두 개의 인수 - cidr 및 MAC를 제공해야 함"

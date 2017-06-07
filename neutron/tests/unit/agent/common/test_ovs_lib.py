@@ -18,6 +18,7 @@ import mock
 from neutron_lib import exceptions
 from oslo_serialization import jsonutils
 from oslo_utils import uuidutils
+import tenacity
 import testtools
 
 from neutron.agent.common import config
@@ -278,7 +279,9 @@ class OVS_Lib_Test(base.BaseTestCase):
     def test_non_default_datapath(self):
         expected = p_const.OVS_DATAPATH_NETDEV
         self.br = ovs_lib.OVSBridge(self.BR_NAME, datapath_type=expected)
+        br2 = self.br.add_bridge('another-br', datapath_type=expected)
         self.assertEqual(expected, self.br.datapath_type)
+        self.assertEqual(expected, br2.datapath_type)
 
     def test_count_flows(self):
         self.execute.return_value = 'ignore\nflow-1\n'
@@ -804,6 +807,22 @@ class OVS_Lib_Test(base.BaseTestCase):
         vif_port = self._test_get_vif_port_by_id(
             'tap99id', data, extra_calls_and_values=extra_calls_and_values)
         self._assert_vif_port(vif_port, ofport=1337, mac="de:ad:be:ef:13:37")
+
+    def test_get_port_ofport_retry(self):
+        with mock.patch.object(
+                self.br, 'db_get_val',
+                side_effect=[[], [], [], [], 1]):
+            self.assertEqual(1, self.br._get_port_ofport('1'))
+
+    def test_get_port_ofport_retry_fails(self):
+        # reduce timeout for faster execution
+        self.br.vsctl_timeout = 1
+        # after 7 calls the retry will timeout and raise
+        with mock.patch.object(
+                self.br, 'db_get_val',
+                side_effect=[[] for _ in range(7)]):
+            self.assertRaises(tenacity.RetryError,
+                              self.br._get_port_ofport, '1')
 
 
 class TestDeferredOVSBridge(base.BaseTestCase):

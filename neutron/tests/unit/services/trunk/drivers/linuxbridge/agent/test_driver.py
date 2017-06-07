@@ -35,7 +35,7 @@ class LinuxBridgeTrunkDriverTestCase(base.BaseTestCase):
         self.lbd = driver.LinuxBridgeTrunkDriver(self.plumber, self.tapi)
         self.trunk = trunk.Trunk(id=uuidutils.generate_uuid(),
                                  port_id=uuidutils.generate_uuid(),
-                                 tenant_id=uuidutils.generate_uuid())
+                                 project_id=uuidutils.generate_uuid())
         self.subports = [trunk.SubPort(id=uuidutils.generate_uuid(),
                                        port_id=uuidutils.generate_uuid(),
                                        segmentation_type='vlan',
@@ -52,7 +52,8 @@ class LinuxBridgeTrunkDriverTestCase(base.BaseTestCase):
 
     def _test_handle_trunks_wire_event(self, event):
         self.plumber.trunk_on_host.return_value = True
-        self.lbd.handle_trunks([self.trunk], event)
+        self.lbd.handle_trunks(mock.Mock(), 'TRUNKS',
+                               [self.trunk], event)
         self.tapi.put_trunk.assert_called_once_with(
             self.trunk.port_id, self.trunk)
         self.tapi.bind_subports_to_host.assert_called_once_with(
@@ -60,21 +61,24 @@ class LinuxBridgeTrunkDriverTestCase(base.BaseTestCase):
         self.assertFalse(self.plumber.delete_trunk_subports.called)
 
     def test_handle_trunks_deleted(self):
-        self.lbd.handle_trunks([self.trunk], events.DELETED)
+        self.lbd.handle_trunks(mock.Mock(), 'TRUNKS',
+                               [self.trunk], events.DELETED)
         self.tapi.put_trunk.assert_called_once_with(
             self.trunk.port_id, None)
         self.plumber.delete_trunk_subports.assert_called_once_with(self.trunk)
 
     def test_handle_subports_deleted(self):
         self.tapi.get_trunk_by_id.return_value = self.trunk
-        self.lbd.handle_subports(self.trunk.sub_ports, events.DELETED)
+        self.lbd.handle_subports(mock.Mock(), 'TRUNKS',
+                                 self.trunk.sub_ports, events.DELETED)
         self.assertEqual(20, len(self.tapi.delete_trunk_subport.mock_calls))
         # should have tried to wire trunk at the end with state
         self.plumber.trunk_on_host.assert_called_once_with(self.trunk)
 
     def test_handle_subports_created(self):
         self.tapi.get_trunk_by_id.return_value = self.trunk
-        self.lbd.handle_subports(self.trunk.sub_ports, events.CREATED)
+        self.lbd.handle_subports(mock.Mock(), 'TRUNKS',
+                                 self.trunk.sub_ports, events.CREATED)
         self.assertEqual(20, len(self.tapi.put_trunk_subport.mock_calls))
         # should have tried to wire trunk at the end with state
         self.plumber.trunk_on_host.assert_called_once_with(self.trunk)
@@ -142,7 +146,7 @@ class TrunkAPITestCase(base.BaseTestCase):
         self.tapi = driver._TrunkAPI(self.stub)
         self.trunk = trunk.Trunk(id=uuidutils.generate_uuid(),
                                  port_id=uuidutils.generate_uuid(),
-                                 tenant_id=uuidutils.generate_uuid())
+                                 project_id=uuidutils.generate_uuid())
         self.subports = [trunk.SubPort(id=uuidutils.generate_uuid(),
                                        port_id=uuidutils.generate_uuid(),
                                        segmentation_type='vlan',

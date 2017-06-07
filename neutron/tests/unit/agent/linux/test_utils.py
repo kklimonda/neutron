@@ -38,6 +38,13 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
         self.process.return_value.returncode = 0
         self.mock_popen = self.process.return_value.communicate
 
+    def test_xenapi_root_helper(self):
+        token = utils.xenapi_root_helper.ROOT_HELPER_DAEMON_TOKEN
+        self.config(group='AGENT', root_helper_daemon=token)
+        cmd_client = utils.RootwrapDaemonHelper.get_client()
+        self.assertIsInstance(cmd_client,
+                              utils.xenapi_root_helper.XenAPIClient)
+
     def test_without_helper(self):
         expected = "%s\n" % self.test_file
         self.mock_popen.return_value = [expected, ""]
@@ -186,9 +193,9 @@ class AgentUtilsGetInterfaceMAC(base.BaseTestCase):
     def test_get_interface_mac(self):
         expect_val = '01:02:03:04:05:06'
         with mock.patch('fcntl.ioctl') as ioctl:
-            ioctl.return_value = ''.join(['\x00' * 18,
-                                          '\x01\x02\x03\x04\x05\x06',
-                                          '\x00' * 232])
+            ioctl.return_value = b''.join([b'\x00' * 18,
+                                           b'\x01\x02\x03\x04\x05\x06',
+                                           b'\x00' * 232])
             actual_val = utils.get_interface_mac('eth0')
         self.assertEqual(actual_val, expect_val)
 
@@ -479,8 +486,9 @@ class TestUnixDomainHttpConnection(base.BaseTestCase):
 
 class TestUnixDomainHttpProtocol(base.BaseTestCase):
     def test_init_empty_client(self):
-        u = utils.UnixDomainHttpProtocol(mock.Mock(), '', mock.Mock())
-        self.assertEqual(u.client_address, ('<local>', 0))
+        for addr in ('', b''):
+            u = utils.UnixDomainHttpProtocol(mock.Mock(), addr, mock.Mock())
+            self.assertEqual(u.client_address, ('<local>', 0))
 
     def test_init_with_client(self):
         u = utils.UnixDomainHttpProtocol(mock.Mock(), 'foo', mock.Mock())

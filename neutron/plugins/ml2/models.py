@@ -17,6 +17,7 @@ from neutron_lib.db import model_base
 import sqlalchemy as sa
 from sqlalchemy import orm
 
+from neutron.common import constants
 from neutron.db import models_v2
 from neutron.extensions import portbindings
 
@@ -38,7 +39,7 @@ class PortBinding(model_base.BASEV2):
                         sa.ForeignKey('ports.id', ondelete="CASCADE"),
                         primary_key=True)
     host = sa.Column(sa.String(255), nullable=False, default='',
-                     server_default='')
+                     server_default='', primary_key=True)
     vnic_type = sa.Column(sa.String(64), nullable=False,
                           default=portbindings.VNIC_NORMAL,
                           server_default=portbindings.VNIC_NORMAL)
@@ -47,13 +48,16 @@ class PortBinding(model_base.BASEV2):
     vif_type = sa.Column(sa.String(64), nullable=False)
     vif_details = sa.Column(sa.String(4095), nullable=False, default='',
                             server_default='')
+    status = sa.Column(sa.String(16), nullable=False,
+                       default=constants.PORT_BINDING_STATUS_ACTIVE,
+                       server_default=constants.PORT_BINDING_STATUS_ACTIVE)
 
     # Add a relationship to the Port model in order to instruct SQLAlchemy to
     # eagerly load port bindings
     port = orm.relationship(
         models_v2.Port,
         backref=orm.backref("port_binding",
-                            lazy='subquery', uselist=False,
+                            lazy='joined', uselist=False,
                             cascade='delete'))
 
 
@@ -76,6 +80,13 @@ class PortBindingLevel(model_base.BASEV2):
     segment_id = sa.Column(sa.String(36),
                            sa.ForeignKey('networksegments.id',
                                          ondelete="SET NULL"))
+
+    # Add a relationship to the Port model in order to instruct SQLAlchemy to
+    # eagerly load port bindings
+    port = orm.relationship(
+        models_v2.Port,
+        backref=orm.backref("binding_levels", lazy='subquery',
+                            cascade='delete'))
 
 
 class DistributedPortBinding(model_base.BASEV2):

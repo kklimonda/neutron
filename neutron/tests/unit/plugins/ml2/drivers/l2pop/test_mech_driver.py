@@ -16,6 +16,7 @@
 import mock
 from neutron_lib import constants
 from neutron_lib import exceptions
+from neutron_lib.plugins import directory
 from oslo_serialization import jsonutils
 import testtools
 
@@ -29,8 +30,6 @@ from neutron.db import l3_agentschedulers_db
 from neutron.db import l3_hamode_db
 from neutron.extensions import portbindings
 from neutron.extensions import providernet as pnet
-from neutron import manager
-from neutron.plugins.common import constants as service_constants
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers.l2pop import db as l2pop_db
 from neutron.plugins.ml2.drivers.l2pop import mech_driver as l2pop_mech_driver
@@ -225,7 +224,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
     def _bind_ha_network_ports(self, router_id):
         port_bindings = self.plugin.get_ha_router_port_bindings(
             self.adminContext, [router_id])
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
 
         for port_binding in port_bindings:
             filters = {'id': [port_binding.port_id]}
@@ -238,7 +237,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                                {attributes.PORT: port})
 
     def _get_first_interface(self, net_id, router_id):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         device_filter = {'device_id': [router_id],
                          'device_owner':
                          [constants.DEVICE_OWNER_HA_REPLICATED_INT]}
@@ -278,11 +277,8 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         # is added on HOST4.
         # HOST4 should get flood entries for HOST1 and HOST2
         router = self._create_ha_router()
-        service_plugins = manager.NeutronManager.get_service_plugins()
-        service_plugins[service_constants.L3_ROUTER_NAT] = self.plugin
-        with self.subnet(network=self._network, enable_dhcp=False) as snet, \
-            mock.patch('neutron.manager.NeutronManager.get_service_plugins',
-                       return_value=service_plugins):
+        directory.add_plugin(constants.L3, self.plugin)
+        with self.subnet(network=self._network, enable_dhcp=False) as snet:
             subnet = snet['subnet']
             port = self._add_router_interface(subnet, router, HOST)
 
@@ -314,11 +310,8 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         # Remove_fdb should carry flood entry of only HOST2 and not HOST
         router = self._create_ha_router()
 
-        service_plugins = manager.NeutronManager.get_service_plugins()
-        service_plugins[service_constants.L3_ROUTER_NAT] = self.plugin
-        with self.subnet(network=self._network, enable_dhcp=False) as snet, \
-            mock.patch('neutron.manager.NeutronManager.get_service_plugins',
-                       return_value=service_plugins):
+        directory.add_plugin(constants.L3, self.plugin)
+        with self.subnet(network=self._network, enable_dhcp=False) as snet:
             host_arg = {portbindings.HOST_ID: HOST, 'admin_state_up': True}
             with self.port(subnet=snet,
                            device_owner=DEVICE_OWNER_COMPUTE,
@@ -350,11 +343,8 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         # Both HA agents should be notified to other agents.
         router = self._create_ha_router()
 
-        service_plugins = manager.NeutronManager.get_service_plugins()
-        service_plugins[service_constants.L3_ROUTER_NAT] = self.plugin
-        with self.subnet(network=self._network, enable_dhcp=False) as snet, \
-            mock.patch('neutron.manager.NeutronManager.get_service_plugins',
-                       return_value=service_plugins):
+        directory.add_plugin(constants.L3, self.plugin)
+        with self.subnet(network=self._network, enable_dhcp=False) as snet:
             host_arg = {portbindings.HOST_ID: HOST_4, 'admin_state_up': True}
             with self.port(subnet=snet,
                            device_owner=DEVICE_OWNER_COMPUTE,
@@ -1007,7 +997,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 p1['status'] = 'ACTIVE'
                 self.mock_fanout.reset_mock()
 
-                plugin = manager.NeutronManager.get_plugin()
+                plugin = directory.get_plugin()
                 plugin.update_port(self.adminContext, p1['id'], port1)
 
                 self.assertFalse(self.mock_fanout.called)
@@ -1108,15 +1098,24 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
             self.assertTrue(upd_port_down.called)
 
     def test_delete_unbound_port(self):
+        self._test_delete_port_handles_agentless_host_id(None)
+
+    def test_delete_port_bound_to_agentless_host(self):
+        self._test_delete_port_handles_agentless_host_id('test')
+
+    def _test_delete_port_handles_agentless_host_id(self, host):
         l2pop_mech = l2pop_mech_driver.L2populationMechanismDriver()
         l2pop_mech.initialize()
 
         with self.port() as port:
+            port['port'][portbindings.HOST_ID] = host
+            bindings = [mock.Mock()]
             port_context = driver_context.PortContext(
                 self.driver, self.context, port['port'],
                 self.driver.get_network(
                     self.context, port['port']['network_id']),
-                None, None)
+                None, bindings)
+            mock.patch.object(port_context, '_expand_segment').start()
             # The point is to provide coverage and to assert that no exceptions
             # are raised.
             l2pop_mech.delete_port_postcommit(port_context)

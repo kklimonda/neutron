@@ -19,6 +19,7 @@ import mock
 from neutron_lib.api import converters
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_policy import policy as oslo_policy
@@ -36,7 +37,6 @@ from neutron.api.v2 import base as v2_base
 from neutron.api.v2 import router
 from neutron.callbacks import registry
 from neutron import context
-from neutron import manager
 from neutron import policy
 from neutron import quota
 from neutron.quota import resource_registry
@@ -101,9 +101,7 @@ class APIv2TestBase(base.BaseTestCase):
         # Create the default configurations
         self.config_parse()
         # Update the plugin
-        self.setup_coreplugin(plugin)
-        cfg.CONF.set_override('allow_pagination', True)
-        cfg.CONF.set_override('allow_sorting', True)
+        self.setup_coreplugin(plugin, load_plugins=False)
         self._plugin_patcher = mock.patch(plugin, autospec=True)
         self.plugin = self._plugin_patcher.start()
         instance = self.plugin.return_value
@@ -518,19 +516,6 @@ class APIv2TestCase(APIv2TestBase):
         instance = self.plugin.return_value
         instance._NeutronPluginBaseV2__native_sorting_support = False
         self.assertRaises(n_exc.Invalid, router.APIRouter)
-
-    def test_native_pagination_without_allow_sorting(self):
-        cfg.CONF.set_override('allow_sorting', False)
-        instance = self.plugin.return_value
-        instance.get_networks.return_value = []
-        api = webtest.TestApp(router.APIRouter())
-        api.get(_get_path('networks'),
-                {'sort_key': ['name', 'admin_state_up'],
-                 'sort_dir': ['desc', 'asc']})
-        kwargs = self._get_collection_kwargs(sorts=[('name', False),
-                                                    ('admin_state_up', True),
-                                                    ('id', True)])
-        instance.get_networks.assert_called_once_with(mock.ANY, **kwargs)
 
 
 # Note: since all resources use the same controller and validation
@@ -1161,7 +1146,7 @@ class SubresourceTest(base.BaseTestCase):
         self.useFixture(tools.AttributeMapMemento())
 
         self.config_parse()
-        self.setup_coreplugin(plugin)
+        self.setup_coreplugin(plugin, load_plugins=False)
 
         self._plugin_patcher = mock.patch(plugin, autospec=True)
         self.plugin = self._plugin_patcher.start()
@@ -1189,7 +1174,7 @@ class SubresourceTest(base.BaseTestCase):
         parent = SUB_RESOURCES['dummy'].get('parent')
         params = RESOURCE_ATTRIBUTE_MAP['dummies']
         member_actions = {'mactions': 'GET'}
-        _plugin = manager.NeutronManager.get_plugin()
+        _plugin = directory.get_plugin()
         controller = v2_base.create_resource(collection_name, resource_name,
                                              _plugin, params,
                                              member_actions=member_actions,
@@ -1209,9 +1194,6 @@ class SubresourceTest(base.BaseTestCase):
                          parent_resource=parent,
                          member=member_actions)
         self.api = webtest.TestApp(api)
-
-    def tearDown(self):
-        super(SubresourceTest, self).tearDown()
 
     def test_index_sub_resource(self):
         instance = self.plugin.return_value
@@ -1493,15 +1475,14 @@ class ExtensionTestCase(base.BaseTestCase):
         self.config_parse()
 
         # Update the plugin and extensions path
-        self.setup_coreplugin(plugin)
+        self.setup_coreplugin(plugin, load_plugins=False)
         cfg.CONF.set_override('api_extensions_path', EXTDIR)
 
         self._plugin_patcher = mock.patch(plugin, autospec=True)
         self.plugin = self._plugin_patcher.start()
 
         # Instantiate mock plugin and enable the V2attributes extension
-        manager.NeutronManager.get_plugin().supported_extension_aliases = (
-            ["v2attrs"])
+        self.plugin.return_value.supported_extension_aliases = ["v2attrs"]
 
         api = router.APIRouter()
         self.api = webtest.TestApp(api)
@@ -1509,11 +1490,6 @@ class ExtensionTestCase(base.BaseTestCase):
         quota.QUOTAS._driver = None
         cfg.CONF.set_override('quota_driver', 'neutron.quota.ConfDriver',
                               group='QUOTAS')
-
-    def tearDown(self):
-        super(ExtensionTestCase, self).tearDown()
-        self.api = None
-        self.plugin = None
 
     def test_extended_create(self):
         net_id = _uuid()

@@ -63,25 +63,33 @@ The following are the current Neutron Lieutenants.
 +------------------------+---------------------------+----------------------+
 | Area                   | Lieutenant                | IRC nick             |
 +========================+===========================+======================+
-| API and DB             | Akihiro Motoki            | amotoki              |
-|                        +---------------------------+----------------------+
-|                        | Henry Gessau              | HenryG               |
+| API                    | Akihiro Motoki            | amotoki              |
++------------------------+---------------------------+----------------------+
+| DB                     | Ann Taraday               | ataraday             |
 +------------------------+---------------------------+----------------------+
 | Built-In Control Plane | Kevin Benton              | kevinbenton          |
 +------------------------+---------------------------+----------------------+
 | Client                 | Akihiro Motoki            | amotoki              |
+|                        +---------------------------+----------------------+
+|                        | Abhishek Raut             | abhiraut             |
 +------------------------+---------------------------+----------------------+
-| Docs                   | Edgar Magana              | emagana              |
+| Docs                   | John Davidge              | john-davidge         |
 +------------------------+---------------------------+----------------------+
-| Infra                  | Armando Migliaccio        | armax                |
+| Infra                  | Nate Johnston             | njohnston            |
+|                        +---------------------------+----------------------+
+|                        | Armando Migliaccio        | armax                |
 |                        +---------------------------+----------------------+
 |                        | Doug Wiegley              | dougwig              |
 +------------------------+---------------------------+----------------------+
-| L3                     | Carl Baldwin              | carl_baldwin         |
+| L3                     | Brian Haley               | haleyb               |
++                        +---------------------------+----------------------+
+|                        | Miguel Lavalle            | mlavalle             |
 +------------------------+---------------------------+----------------------+
-| Services               | Doug Wiegley              | dougwig              |
+| Services               | Ryan Tidwell              | tidwellr             |
+|                        +---------------------------+----------------------+
+|                        | Nate Johnston             | njohnston            |
 +------------------------+---------------------------+----------------------+
-| Testing                | Assaf Muller              | amuller              |
+| Testing                | Jakub Libosvar            | jlibosva             |
 +------------------------+---------------------------+----------------------+
 
 Some notes on the above:
@@ -104,17 +112,17 @@ updating the core review team for the sub-project's repositories.
 +------------------------+---------------------------+----------------------+
 | Area                   | Lieutenant                | IRC nick             |
 +========================+===========================+======================+
-| dragonflow             | Eran Gampel               | gampel               |
-|                        +---------------------------+----------------------+
-|                        | Gal Sagie                 | gsagie               |
-+------------------------+---------------------------+----------------------+
 | networking-bgpvpn      | Mathieu Rohon             | matrohon             |
-|                        +---------------------------+----------------------+
+| networking-bagpipe     +---------------------------+----------------------+
 |                        | Thomas Morin              | tmorin               |
 +------------------------+---------------------------+----------------------+
-| networking-calico      | Neil Jerram               | neiljerram           |
+| net...-dynamic-routing | Ryan Tidwell              | tidwellr             |
+|                        +---------------------------+----------------------+
+|                        | Vikram Choudhary          | vikram               |
 +------------------------+---------------------------+----------------------+
-| networking-l2gw        | Sukhdev Kapur             | sukhdev              |
+| neutron-fwaas          | Nate Johnston             | njohnston            |
+|                        +---------------------------+----------------------+
+|                        | Sridar Kandaswamy         | SridarK              |
 +------------------------+---------------------------+----------------------+
 | networking-midonet     | Ryu Ishimoto              | ryu25                |
 |                        +---------------------------+----------------------+
@@ -124,18 +132,14 @@ updating the core review team for the sub-project's repositories.
 +------------------------+---------------------------+----------------------+
 | networking-odl         | Isaku Yamahata            | yamahata             |
 +------------------------+---------------------------+----------------------+
-| networking-ofagent     | YAMAMOTO Takashi          | yamamoto             |
-+------------------------+---------------------------+----------------------+
-| networking-onos        | Vikram Choudhary          | vikram               |
-|                        +---------------------------+----------------------+
-|                        | Albert Dongfeng           | albert_dongfeng      |
+| networking-ofagent (*) | YAMAMOTO Takashi          | yamamoto             |
 +------------------------+---------------------------+----------------------+
 | networking-ovn         | Russell Bryant            | russellb             |
 +------------------------+---------------------------+----------------------+
 | networking-sfc         | Cathy Zhang               | cathy                |
 +------------------------+---------------------------+----------------------+
-| octavia                | German Eichberger         | xgerman              |
-+------------------------+---------------------------+----------------------+
+
+(*) To be retired after Ocata (mitaka last stable branch).
 
 Existing Core Reviewers
 -----------------------

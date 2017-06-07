@@ -42,11 +42,8 @@ class NetworkContext(MechanismDriverContext, api.NetworkContext):
         super(NetworkContext, self).__init__(plugin, plugin_context)
         self._network = network
         self._original_network = original_network
-        if segments is None:
-            self._segments = segments_db.get_network_segments(
-                plugin_context.session, network['id'])
-        else:
-            self._segments = segments
+        self._segments = segments_db.get_network_segments(
+            plugin_context, network['id']) if segments is None else segments
 
     @property
     def current(self):
@@ -69,7 +66,7 @@ class SubnetContext(MechanismDriverContext, api.SubnetContext):
         self._subnet = subnet
         self._original_subnet = original_subnet
         self._network_context = NetworkContext(plugin, plugin_context,
-                                               network)
+                                               network) if network else None
 
     @property
     def current(self):
@@ -81,6 +78,11 @@ class SubnetContext(MechanismDriverContext, api.SubnetContext):
 
     @property
     def network(self):
+        if self._network_context is None:
+            network = self._plugin.get_network(
+                self._plugin_context, self.current['network_id'])
+            self._network_context = NetworkContext(
+                self._plugin, self._plugin_context, network)
         return self._network_context
 
 
@@ -209,7 +211,7 @@ class PortContext(MechanismDriverContext, api.PortContext):
         # TODO(kevinbenton): eliminate the query below. The above should
         # always return since the port is bound to a network segment. Leaving
         # in for now for minimally invasive change for back-port.
-        segment = segments_db.get_segment_by_id(self._plugin_context.session,
+        segment = segments_db.get_segment_by_id(self._plugin_context,
                                                 segment_id)
         if not segment:
             LOG.warning(_LW("Could not expand segment %s"), segment_id)
@@ -280,4 +282,4 @@ class PortContext(MechanismDriverContext, api.PortContext):
 
     def release_dynamic_segment(self, segment_id):
         return self._plugin.type_manager.release_dynamic_segment(
-                self._plugin_context.session, segment_id)
+                self._plugin_context, segment_id)

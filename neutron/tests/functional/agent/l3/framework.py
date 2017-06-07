@@ -138,7 +138,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
 
         clean_fips(router)
         self._add_fip(router, client_address, fixed_address=server_address)
-        router.process(self.agent)
+        router.process()
 
         router_ns = ip_lib.IPWrapper(namespace=router.ns_name)
         netcat = net_helpers.NetcatTester(
@@ -162,7 +162,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
             assert_num_of_conntrack_rules(1)
 
             clean_fips(router)
-            router.process(self.agent)
+            router.process()
             assert_num_of_conntrack_rules(0)
 
             with testtools.ExpectedException(RuntimeError):
@@ -243,7 +243,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
                                                count=2,
                                                ip_version=6,
                                                ipv6_subnet_modes=subnet_modes)
-        router.process(self.agent)
+        router.process()
 
         if enable_ha:
             port = router.get_ex_gw_port()
@@ -292,14 +292,18 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
 
         if enable_ha:
             self._assert_ha_device(router)
-            self.assertTrue(router.keepalived_manager.get_process().active)
+            common_utils.wait_until_true(
+                lambda: router.keepalived_manager.get_process().active,
+                timeout=15)
 
         self._delete_router(self.agent, router.router_id)
 
         self._assert_interfaces_deleted_from_ovs()
         self._assert_router_does_not_exist(router)
         if enable_ha:
-            self.assertFalse(router.keepalived_manager.get_process().active)
+            common_utils.wait_until_true(
+                lambda: not router.keepalived_manager.get_process().active,
+                timeout=15)
         return return_copy
 
     def manage_router(self, agent, router):

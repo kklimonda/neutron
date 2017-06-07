@@ -15,6 +15,7 @@
 
 from neutron_lib import constants as n_const
 from neutron_lib import exceptions
+from neutron_lib.plugins import directory
 from oslo_log import log
 import oslo_messaging
 from sqlalchemy.orm import exc
@@ -29,7 +30,6 @@ from neutron.db import l3_hamode_db
 from neutron.db import provisioning_blocks
 from neutron.extensions import portbindings
 from neutron.extensions import portsecurity as psec
-from neutron import manager
 from neutron.plugins.ml2 import db as ml2_db
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import type_tunnel
@@ -70,7 +70,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                   "%(agent_id)s with host %(host)s",
                   {'device': device, 'agent_id': agent_id, 'host': host})
 
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         port_id = plugin._device_to_port_id(rpc_context, device)
         port_context = plugin.get_bound_port_context(rpc_context,
                                                      port_id,
@@ -82,13 +82,22 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                       {'device': device, 'agent_id': agent_id})
             return {'device': device}
 
-        segment = port_context.bottom_bound_segment
         port = port_context.current
         # caching information about networks for future use
         if cached_networks is not None:
             if port['network_id'] not in cached_networks:
                 cached_networks[port['network_id']] = (
                     port_context.network.current)
+        return self._get_device_details(rpc_context, agent_id=agent_id,
+                                        host=host, device=device,
+                                        port_context=port_context)
+
+    def _get_device_details(self, rpc_context, agent_id, host, device,
+                            port_context):
+        segment = port_context.bottom_bound_segment
+        port = port_context.current
+        plugin = directory.get_plugin()
+        port_id = port_context.current['id']
 
         if not segment:
             LOG.warning(_LW("Device %(device)s requested by agent "
@@ -120,6 +129,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                  'network_type': segment[api.NETWORK_TYPE],
                  'segmentation_id': segment[api.SEGMENTATION_ID],
                  'physical_network': segment[api.PHYSICAL_NETWORK],
+                 'mtu': port_context.network._network.get('mtu'),
                  'fixed_ips': port['fixed_ips'],
                  'device_owner': port['device_owner'],
                  'allowed_address_pairs': port['allowed_address_pairs'],
@@ -148,17 +158,31 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                                                     **kwargs):
         devices = []
         failed_devices = []
-        cached_networks = {}
-        for device in kwargs.pop('devices', []):
+        devices_to_fetch = kwargs.pop('devices', [])
+        plugin = directory.get_plugin()
+        host = kwargs.get('host')
+        bound_contexts = plugin.get_bound_ports_contexts(rpc_context,
+                                                         devices_to_fetch,
+                                                         host)
+        for device in devices_to_fetch:
+            if not bound_contexts.get(device):
+                # unbound bound
+                LOG.debug("Device %(device)s requested by agent "
+                          "%(agent_id)s not found in database",
+                          {'device': device,
+                           'agent_id': kwargs.get('agent_id')})
+                devices.append({'device': device})
+                continue
             try:
-                devices.append(self.get_device_details(
+                devices.append(self._get_device_details(
                                rpc_context,
+                               agent_id=kwargs.get('agent_id'),
+                               host=host,
                                device=device,
-                               cached_networks=cached_networks,
-                               **kwargs))
+                               port_context=bound_contexts[device]))
             except Exception:
-                LOG.error(_LE("Failed to get details for device %s"),
-                          device)
+                LOG.exception(_LE("Failed to get details for device %s"),
+                              device)
                 failed_devices.append(device)
 
         return {'devices': devices,
@@ -173,7 +197,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
         LOG.debug("Device %(device)s no longer exists at agent "
                   "%(agent_id)s",
                   {'device': device, 'agent_id': agent_id})
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         port_id = plugin._device_to_port_id(rpc_context, device)
         port_exists = True
         if (host and not plugin.port_bound_to_host(rpc_context,
@@ -204,7 +228,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
         host = kwargs.get('host')
         LOG.debug("Device %(device)s up at agent %(agent_id)s",
                   {'device': device, 'agent_id': agent_id})
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         port_id = plugin._device_to_port_id(rpc_context, device)
         port = plugin.port_bound_to_host(rpc_context, port_id, host)
         if host and not port:
@@ -230,7 +254,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                                    n_const.PORT_STATUS_ACTIVE, host, port=port)
 
     def update_port_status_to_active(self, port, rpc_context, port_id, host):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         if port and port['device_owner'] == n_const.DEVICE_OWNER_DVR_INTERFACE:
             # NOTE(kevinbenton): we have to special case DVR ports because of
             # the special multi-binding status update logic they have that
@@ -242,7 +266,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
             # agent did not provide a full one (e.g. Linux Bridge case). We
             # need to look up the full one before calling provisioning_complete
             if not port:
-                port = ml2_db.get_port(rpc_context.session, port_id)
+                port = ml2_db.get_port(rpc_context, port_id)
             if not port:
                 # port doesn't exist, no need to add a provisioning block
                 return
@@ -252,16 +276,17 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
 
     def notify_ha_port_status(self, port_id, rpc_context,
                               status, host, port=None):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         l2pop_driver = plugin.mechanism_manager.mech_drivers.get(
                 'l2population')
         if not l2pop_driver:
             return
         if not port:
-            port = ml2_db.get_port(rpc_context.session, port_id)
+            port = ml2_db.get_port(rpc_context, port_id)
             if not port:
                 return
-        is_ha_port = l3_hamode_db.is_ha_router_port(port['device_owner'],
+        is_ha_port = l3_hamode_db.is_ha_router_port(rpc_context,
+                                                    port['device_owner'],
                                                     port['device_id'])
         if is_ha_port:
             port_context = plugin.get_bound_port_context(

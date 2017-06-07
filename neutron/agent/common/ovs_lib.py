@@ -19,16 +19,17 @@ import operator
 import time
 import uuid
 
+from debtcollector import removals
 from neutron_lib import exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
-import retrying
 import six
+import tenacity
 
 from neutron._i18n import _, _LE, _LI, _LW
+from neutron.agent.common import ip_lib
 from neutron.agent.common import utils
-from neutron.agent.linux import ip_lib
 from neutron.agent.ovsdb import api as ovsdb
 from neutron.conf.agent import ovs_conf
 from neutron.plugins.common import constants as p_const
@@ -57,17 +58,13 @@ OVS_DEFAULT_CAPS = {
 _SENTINEL = object()
 
 
-def _ofport_result_pending(result):
+def _ovsdb_result_pending(result):
     """Return True if ovs-vsctl indicates the result is still pending."""
     # ovs-vsctl can return '[]' for an ofport that has not yet been assigned
-    try:
-        int(result)
-        return False
-    except (ValueError, TypeError):
-        return True
+    return result == []
 
 
-def _ofport_retry(fn):
+def _ovsdb_retry(fn):
     """Decorator for retrying when OVS has yet to assign an ofport.
 
     The instance's vsctl_timeout is used as the max waiting time. This relies
@@ -76,12 +73,12 @@ def _ofport_retry(fn):
     @six.wraps(fn)
     def wrapped(*args, **kwargs):
         self = args[0]
-        new_fn = retrying.retry(
-            retry_on_result=_ofport_result_pending,
-            stop_max_delay=self.vsctl_timeout * 1000,
-            wait_exponential_multiplier=10,
-            wait_exponential_max=1000,
-            retry_on_exception=lambda _: False)(fn)
+        new_fn = tenacity.retry(
+            reraise=True,
+            retry=tenacity.retry_if_result(_ovsdb_result_pending),
+            wait=tenacity.wait_exponential(multiplier=0.01, max=1),
+            stop=tenacity.stop_after_delay(
+                self.vsctl_timeout))(fn)
         return new_fn(*args, **kwargs)
     return wrapped
 
@@ -132,10 +129,9 @@ class BaseOVS(object):
 
     def add_bridge(self, bridge_name,
                    datapath_type=constants.OVS_DATAPATH_SYSTEM):
-
-        self.ovsdb.add_br(bridge_name,
-                          datapath_type).execute()
-        return OVSBridge(bridge_name)
+        br = OVSBridge(bridge_name, datapath_type=datapath_type)
+        br.create()
+        return br
 
     def delete_bridge(self, bridge_name):
         self.ovsdb.del_br(bridge_name).execute()
@@ -221,15 +217,32 @@ class OVSBridge(BaseOVS):
     def set_standalone_mode(self):
         self._set_bridge_fail_mode(FAILMODE_STANDALONE)
 
+    @removals.remove(
+        message=("Consider using add_protocols instead, or if replacing "
+                 "the whole set of supported protocols is the desired "
+                 "behavior, using set_db_attribute"),
+        version="Ocata",
+        removal_version="Queens")
     def set_protocols(self, protocols):
         self.set_db_attribute('Bridge', self.br_name, 'protocols', protocols,
                               check_error=True)
+
+    def add_protocols(self, *protocols):
+        self.ovsdb.db_add('Bridge', self.br_name,
+                          'protocols', *protocols).execute(check_error=True)
 
     def create(self, secure_mode=False):
         with self.ovsdb.transaction() as txn:
             txn.add(
                 self.ovsdb.add_br(self.br_name,
-                datapath_type=self.datapath_type))
+                                  datapath_type=self.datapath_type))
+            # the ovs-ofctl commands below in run_ofctl use OF10, so we
+            # need to ensure that this version is enabled ; we could reuse
+            # add_protocols, but doing ovsdb.db_add avoids doing two
+            # transactions
+            txn.add(
+                self.ovsdb.db_add('Bridge', self.br_name,
+                                  'protocols', constants.OPENFLOW10))
             if secure_mode:
                 txn.add(self.ovsdb.set_fail_mode(self.br_name,
                                                  FAILMODE_SECURE))
@@ -290,7 +303,7 @@ class OVSBridge(BaseOVS):
     def remove_all_flows(self):
         self.run_ofctl("del-flows", [])
 
-    @_ofport_retry
+    @_ovsdb_retry
     def _get_port_ofport(self, port_name):
         return self.db_get_val("Interface", port_name, "ofport")
 
@@ -299,14 +312,24 @@ class OVSBridge(BaseOVS):
         ofport = INVALID_OFPORT
         try:
             ofport = self._get_port_ofport(port_name)
-        except retrying.RetryError:
+        except tenacity.RetryError:
             LOG.exception(_LE("Timed out retrieving ofport on port %s."),
                           port_name)
         return ofport
 
+    @_ovsdb_retry
+    def _get_datapath_id(self):
+        return self.db_get_val('Bridge', self.br_name, 'datapath_id')
+
     def get_datapath_id(self):
-        return self.db_get_val('Bridge',
-                               self.br_name, 'datapath_id')
+        try:
+            return self._get_datapath_id()
+        except tenacity.RetryError:
+            # if ovs fails to find datapath_id then something is likely to be
+            # broken here
+            LOG.exception(_LE("Timed out retrieving datapath_id on bridge "
+                              "%s."), self.br_name)
+            raise RuntimeError('No datapath_id on bridge %s' % self.br_name)
 
     def do_action_flows(self, action, kwargs_list):
         if action != 'del':

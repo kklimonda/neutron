@@ -13,13 +13,13 @@
 #    under the License.
 
 import mock
-from mock import patch
 from neutron_lib import constants
 from neutron_lib import exceptions as lib_exc
+from neutron_lib.plugins import directory
+from oslo_utils import uuidutils
 import testtools
 
 from neutron import context
-from neutron import manager
 from neutron.plugins.common import constants as p_cons
 from neutron.services.l3_router.service_providers import driver_controller
 from neutron.services import provider_configuration
@@ -27,10 +27,14 @@ from neutron.tests import base
 from neutron.tests.unit import testlib_api
 
 
+DB_PLUGIN_KLASS = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
+
+
 class TestDriverController(testlib_api.SqlTestCase):
 
     def setUp(self):
         super(TestDriverController, self).setUp()
+        self.setup_coreplugin(DB_PLUGIN_KLASS)
         self.fake_l3 = mock.Mock()
         self.dc = driver_controller.DriverController(self.fake_l3)
         self.ctx = context.get_admin_context()
@@ -45,23 +49,27 @@ class TestDriverController(testlib_api.SqlTestCase):
     def test_uses_scheduler(self):
         self._return_provider_for_flavor('dvrha')
         router_db = mock.Mock()
-        router = dict(id='router_id', flavor_id='abc123')
+        flavor_id = uuidutils.generate_uuid()
+        router_id = uuidutils.generate_uuid()
+        router = dict(id=router_id, flavor_id=flavor_id)
         self.dc._set_router_provider('router', 'PRECOMMIT_CREATE', self,
                                      self.ctx, router, router_db)
-        self.assertTrue(self.dc.uses_scheduler(self.ctx, 'router_id'))
+        self.assertTrue(self.dc.uses_scheduler(self.ctx, router_id))
         self.dc.drivers['dvrha'].use_integrated_agent_scheduler = False
-        self.assertFalse(self.dc.uses_scheduler(self.ctx, 'router_id'))
+        self.assertFalse(self.dc.uses_scheduler(self.ctx, router_id))
 
     def test__set_router_provider_flavor_specified(self):
         self._return_provider_for_flavor('dvrha')
         router_db = mock.Mock()
-        router = dict(id='router_id', flavor_id='abc123')
+        flavor_id = uuidutils.generate_uuid()
+        router_id = uuidutils.generate_uuid()
+        router = dict(id=router_id, flavor_id=flavor_id)
         self.dc._set_router_provider('router', 'PRECOMMIT_CREATE', self,
                                      self.ctx, router, router_db)
-        self.assertEqual('abc123', router_db.flavor_id)
+        self.assertEqual(flavor_id, router_db.flavor_id)
         self.assertEqual(self.dc.drivers['dvrha'],
                          self.dc._get_provider_for_router(self.ctx,
-                                                          'router_id'))
+                                                          router_id))
 
     def test__update_router_provider_invalid(self):
         test_dc = driver_controller.DriverController(self.fake_l3)
@@ -80,21 +88,30 @@ class TestDriverController(testlib_api.SqlTestCase):
 
     def test__set_router_provider_attr_lookups(self):
         # ensure correct drivers are looked up based on attrs
+        router_id1 = uuidutils.generate_uuid()
+        router_id2 = uuidutils.generate_uuid()
+        router_id3 = uuidutils.generate_uuid()
+        router_id4 = uuidutils.generate_uuid()
+        router_id5 = uuidutils.generate_uuid()
+        router_id6 = uuidutils.generate_uuid()
+        router_id7 = uuidutils.generate_uuid()
+        router_id8 = uuidutils.generate_uuid()
+        router_id9 = uuidutils.generate_uuid()
         cases = [
-            ('dvrha', dict(id='router_id1', distributed=True, ha=True)),
-            ('dvr', dict(id='router_id2', distributed=True, ha=False)),
-            ('ha', dict(id='router_id3', distributed=False, ha=True)),
-            ('single_node', dict(id='router_id4', distributed=False,
+            ('dvrha', dict(id=router_id1, distributed=True, ha=True)),
+            ('dvr', dict(id=router_id2, distributed=True, ha=False)),
+            ('ha', dict(id=router_id3, distributed=False, ha=True)),
+            ('single_node', dict(id=router_id4, distributed=False,
                                  ha=False)),
-            ('ha', dict(id='router_id5', ha=True,
+            ('ha', dict(id=router_id5, ha=True,
                         distributed=constants.ATTR_NOT_SPECIFIED)),
-            ('dvr', dict(id='router_id6', distributed=True,
+            ('dvr', dict(id=router_id6, distributed=True,
                         ha=constants.ATTR_NOT_SPECIFIED)),
-            ('single_node', dict(id='router_id7', ha=False,
+            ('single_node', dict(id=router_id7, ha=False,
                                  distributed=constants.ATTR_NOT_SPECIFIED)),
-            ('single_node', dict(id='router_id8', distributed=False,
+            ('single_node', dict(id=router_id8, distributed=False,
                                  ha=constants.ATTR_NOT_SPECIFIED)),
-            ('single_node', dict(id='router_id9',
+            ('single_node', dict(id=router_id9,
                                  distributed=constants.ATTR_NOT_SPECIFIED,
                                  ha=constants.ATTR_NOT_SPECIFIED)),
         ]
@@ -108,7 +125,8 @@ class TestDriverController(testlib_api.SqlTestCase):
 
     def test__clear_router_provider(self):
         # ensure correct drivers are looked up based on attrs
-        body = dict(id='router_id1', distributed=True, ha=True)
+        router_id1 = uuidutils.generate_uuid()
+        body = dict(id=router_id1, distributed=True, ha=True)
         self.dc._set_router_provider('router', 'PRECOMMIT_CREATE', self,
                                      self.ctx, body, mock.Mock())
         self.assertEqual(self.dc.drivers['dvrha'],
@@ -121,13 +139,11 @@ class TestDriverController(testlib_api.SqlTestCase):
             self.fake_l3.get_router.side_effect = ValueError
             self.dc._get_provider_for_router(self.ctx, body['id'])
 
-    @patch.object(manager.NeutronManager, "get_service_plugins")
-    def test__flavor_plugin(self, get_service_plugins):
-        _fake_flavor_plugin = mock.sentinel.fla_plugin
-        get_service_plugins.return_value = {p_cons.FLAVORS:
-                                            _fake_flavor_plugin}
+    def test__flavor_plugin(self):
+        directory.add_plugin(p_cons.FLAVORS, mock.Mock())
         _dc = driver_controller.DriverController(self.fake_l3)
-        self.assertEqual(_fake_flavor_plugin, _dc._flavor_plugin)
+        self.assertEqual(
+            directory.get_plugin(p_cons.FLAVORS), _dc._flavor_plugin)
 
 
 class Test_LegacyPlusProviderConfiguration(base.BaseTestCase):

@@ -10,13 +10,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api import extensions
 from neutron_lib.api import validators
 from neutron_lib import constants
 from neutron_lib import exceptions
+import six
 import webob.exc
 
 from neutron._i18n import _
-from neutron.api import extensions
 from neutron.api.v2 import attributes
 
 
@@ -27,6 +28,10 @@ valid_prefixes = []
 class InvalidSubnetServiceType(exceptions.InvalidInput):
     message = _("Subnet service type %(service_type)s does not correspond "
                 "to a valid device owner.")
+
+
+class InvalidInputSubnetServiceType(exceptions.InvalidInput):
+    message = _("Subnet service type %(service_type)s is not a string.")
 
 
 def _validate_subnet_service_types(service_types, valid_values=None):
@@ -41,7 +46,9 @@ def _validate_subnet_service_types(service_types, valid_values=None):
         prefixes += constants.DEVICE_OWNER_COMPUTE_PREFIX
 
         for service_type in service_types:
-            if not service_type.startswith(tuple(prefixes)):
+            if not isinstance(service_type, six.text_type):
+                raise InvalidInputSubnetServiceType(service_type=service_type)
+            elif not service_type.startswith(tuple(prefixes)):
                 raise InvalidSubnetServiceType(service_type=service_type)
 
 

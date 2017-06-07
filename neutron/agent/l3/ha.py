@@ -16,56 +16,18 @@
 import os
 
 import eventlet
-from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import fileutils
 import webob
 
-from neutron._i18n import _, _LI
-from neutron.agent.linux import keepalived
+from neutron._i18n import _LI
 from neutron.agent.linux import utils as agent_utils
 from neutron.common import constants
-from neutron.common import utils as common_utils
 from neutron.notifiers import batch_notifier
 
 LOG = logging.getLogger(__name__)
 
 KEEPALIVED_STATE_CHANGE_SERVER_BACKLOG = 4096
-
-OPTS = [
-    cfg.StrOpt('ha_confs_path',
-               default='$state_path/ha_confs',
-               help=_('Location to store keepalived/conntrackd '
-                      'config files')),
-    cfg.StrOpt('ha_vrrp_auth_type',
-               default='PASS',
-               choices=keepalived.VALID_AUTH_TYPES,
-               help=_('VRRP authentication type')),
-    cfg.StrOpt('ha_vrrp_auth_password',
-               help=_('VRRP authentication password'),
-               secret=True),
-    cfg.IntOpt('ha_vrrp_advert_int',
-               default=2,
-               help=_('The advertisement interval in seconds')),
-    cfg.IntOpt('ha_keepalived_state_change_server_threads',
-               default=(1 + common_utils.cpu_count()) // 2,
-               min=1,
-               help=_('Number of concurrent threads for '
-                      'keepalived server connection requests.'
-                      'More threads create a higher CPU load '
-                      'on the agent node.')),
-    cfg.IntOpt('ha_vrrp_health_check_interval',
-               default=0,
-               help=_('The VRRP health check interval in seconds. Values > 0 '
-                      'enable VRRP health checks. Setting it to 0 disables '
-                      'VRRP health checks. Recommended value is 5. '
-                      'This will cause pings to be sent to the gateway '
-                      'IP address(es) - requires ICMP_ECHO_REQUEST '
-                      'to be enabled on the gateway. '
-                      'If gateway fails, all routers will be reported '
-                      'as master, and master election will be repeated '
-                      'in round-robin fashion, until one of the router '
-                      'restore the gateway connection.')),
-]
 
 TRANSLATION_MAP = {'master': constants.HA_ROUTER_STATE_ACTIVE,
                    'backup': constants.HA_ROUTER_STATE_STANDBY,
@@ -208,4 +170,4 @@ class AgentMixin(object):
 
     def _init_ha_conf_path(self):
         ha_full_path = os.path.dirname("/%s/" % self.conf.ha_confs_path)
-        common_utils.ensure_dir(ha_full_path)
+        fileutils.ensure_tree(ha_full_path, mode=0o755)

@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from keystoneauth1 import loading
 from oslo_config import cfg
 
 from neutron._i18n import _
@@ -36,11 +37,6 @@ designate_opts = [
     cfg.StrOpt('admin_auth_url',
                help=_('Authorization URL for connecting to designate in admin '
                       'context')),
-    cfg.BoolOpt('insecure', default=False,
-                help=_('Skip cert validation for SSL based admin_auth_url')),
-    cfg.StrOpt('ca_cert',
-               help=_('CA certificate file to use to verify '
-                      'connecting clients')),
     cfg.BoolOpt('allow_reverse_dns_lookup', default=True,
                 help=_('Allow the creation of PTR records')),
     cfg.IntOpt('ipv4_ptr_zone_prefix_size', default=24,
@@ -60,5 +56,9 @@ designate_opts = [
 ]
 
 
-def register_designate_opts(cfg=cfg.CONF):
-    cfg.register_opts(designate_opts, 'designate')
+def register_designate_opts(CONF=cfg.CONF):
+    CONF.register_opts(designate_opts, 'designate')
+    loading.register_auth_conf_options(CONF, 'designate')
+    loading.register_session_conf_options(conf=CONF,
+        group='designate',
+        deprecated_opts={'cafile': [cfg.DeprecatedOpt('ca_cert')]})

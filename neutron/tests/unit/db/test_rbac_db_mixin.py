@@ -15,11 +15,11 @@
 
 
 import mock
-from neutron.common import constants
-from neutron import context
+from neutron_lib import constants
 import six
 
 from neutron.callbacks import events
+from neutron import context
 from neutron.db.db_base_plugin_v2 import NeutronDbPluginV2 as db_plugin_v2
 from neutron.extensions import rbac as ext_rbac
 from neutron.tests.unit.db import test_db_base_plugin_v2 as test_plugin

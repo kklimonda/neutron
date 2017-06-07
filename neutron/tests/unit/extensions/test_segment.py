@@ -12,10 +12,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import copy
+from keystoneauth1 import exceptions as ks_exc
+
 import mock
 import netaddr
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import directory
+from novaclient import exceptions as nova_exc
+from oslo_config import cfg
 from oslo_utils import uuidutils
 import webob.exc
 
@@ -24,6 +30,8 @@ from neutron.callbacks import events
 from neutron.callbacks import exceptions
 from neutron.callbacks import registry
 from neutron.callbacks import resources
+from neutron.common import exceptions as neutron_exc
+from neutron.conf.plugins.ml2.drivers import driver_type
 from neutron import context
 from neutron.db import agents_db
 from neutron.db import agentschedulers_db
@@ -34,10 +42,14 @@ from neutron.extensions import ip_allocation
 from neutron.extensions import l2_adjacency
 from neutron.extensions import portbindings
 from neutron.extensions import segment as ext_segment
+from neutron.objects import network
 from neutron.plugins.common import constants as p_constants
 from neutron.plugins.ml2 import config
 from neutron.services.segments import db
 from neutron.services.segments import exceptions as segment_exc
+from neutron.services.segments import placement_client
+from neutron.services.segments import plugin as seg_plugin
+from neutron.tests import base
 from neutron.tests.common import helpers
 from neutron.tests.unit.db import test_db_base_plugin_v2
 
@@ -274,8 +286,7 @@ class TestSegment(SegmentTestCase):
                               network_id=network['id'],
                               segmentation_id=200)
 
-        network_segments = segments_db.get_network_segments(cxt.session,
-                                                            network['id'])
+        network_segments = segments_db.get_network_segments(cxt, network['id'])
         self.assertEqual([], network_segments)
 
     def test_create_segments_in_certain_order(self):
@@ -288,7 +299,7 @@ class TestSegment(SegmentTestCase):
                 network_id=network['id'], segmentation_id=201)
             segment3 = self.segment(
                 network_id=network['id'], segmentation_id=202)
-            network_segments = segments_db.get_network_segments(cxt.session,
+            network_segments = segments_db.get_network_segments(cxt,
                                                                 network['id'])
             self.assertEqual(segment1['segment']['id'],
                              network_segments[0]['id'])
@@ -460,6 +471,13 @@ class HostSegmentMappingTestCase(SegmentTestCase):
         config.cfg.CONF.set_override('mechanism_drivers',
                                      self._mechanism_drivers,
                                      group='ml2')
+
+        # NOTE(dasm): ml2_type_vlan requires to be registered before used.
+        # This piece was refactored and removed from .config, so it causes
+        # a problem, when tests are executed with pdb.
+        # There is no problem when tests are running without debugger.
+        driver_type.register_ml2_drivers_vlan_opts()
+
         config.cfg.CONF.set_override('network_vlan_ranges',
                                      ['phys_net1', 'phys_net2'],
                                      group='ml2_type_vlan')
@@ -470,10 +488,10 @@ class HostSegmentMappingTestCase(SegmentTestCase):
 
     def _get_segments_for_host(self, host):
         ctx = context.get_admin_context()
-        segments_host_list = ctx.session.query(
-            db.SegmentHostMapping).filter_by(host=host)
+        segment_host_mapping = network.SegmentHostMapping.get_objects(
+            ctx, host=host)
         return {seg_host['segment_id']: seg_host
-                for seg_host in segments_host_list}
+                for seg_host in segment_host_mapping}
 
     def _register_agent(self, host, mappings=None, plugin=None,
                         start_flag=True):
@@ -750,7 +768,7 @@ class TestMl2HostSegmentMappingAgentServerSynch(HostSegmentMappingTestCase):
         physical_network = 'phys_net1'
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=False)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         self.assertEqual(1, mock_function.call_count)
         expected_call = mock.call(mock.ANY, host, set())
         mock_function.assert_has_calls([expected_call])
@@ -761,10 +779,10 @@ class TestMl2HostSegmentMappingAgentServerSynch(HostSegmentMappingTestCase):
         physical_network = 'phys_net1'
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=False)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=True)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         self.assertEqual(2, mock_function.call_count)
         expected_call = mock.call(mock.ANY, host, set())
         mock_function.assert_has_calls([expected_call, expected_call])
@@ -775,29 +793,34 @@ class TestMl2HostSegmentMappingAgentServerSynch(HostSegmentMappingTestCase):
         physical_network = 'phys_net1'
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=False)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         mock_function.reset_mock()
         self._register_agent(host, mappings={physical_network: 'br-eth-1'},
                              plugin=self.plugin, start_flag=False)
-        self.assertTrue(host in db.reported_hosts)
+        self.assertIn(host, db.reported_hosts)
         mock_function.assert_not_called()
 
 
-class TestSegmentAwareIpam(SegmentTestCase):
+class SegmentAwareIpamTestCase(SegmentTestCase):
+
     def _setup_host_mappings(self, mappings=()):
         ctx = context.get_admin_context()
-        with ctx.session.begin(subtransactions=True):
-            for segment_id, host in mappings:
-                record = db.SegmentHostMapping(
-                    segment_id=segment_id,
-                    host=host)
-                ctx.session.add(record)
+        for segment_id, host in mappings:
+            network.SegmentHostMapping(
+                ctx, segment_id=segment_id, host=host).create()
 
     def _create_test_segment_with_subnet(self,
                                          network=None,
                                          cidr='2001:db8:0:0::/64',
                                          physnet='physnet'):
         """Creates one network with one segment and one subnet"""
+        network, segment = self._create_test_network_and_segment(network,
+                                                                 physnet)
+        subnet = self._create_test_subnet_with_segment(network, segment, cidr)
+        return network, segment, subnet
+
+    def _create_test_network_and_segment(self, network=None,
+                                         physnet='physnet'):
         if not network:
             with self.network() as network:
                 pass
@@ -806,15 +829,29 @@ class TestSegmentAwareIpam(SegmentTestCase):
             network_id=network['network']['id'],
             physical_network=physnet,
             network_type=p_constants.TYPE_VLAN)
+        return network, segment
 
+    def _create_test_subnet_with_segment(self, network, segment,
+                                         cidr='2001:db8:0:0::/64',
+                                         allocation_pools=None):
         ip_version = netaddr.IPNetwork(cidr).version if cidr else None
         with self.subnet(network=network,
                          segment_id=segment['segment']['id'],
                          ip_version=ip_version,
-                         cidr=cidr) as subnet:
+                         cidr=cidr,
+                         allocation_pools=allocation_pools) as subnet:
             self._validate_l2_adjacency(network['network']['id'],
                                         is_adjacent=False)
-            return network, segment, subnet
+            return subnet
+
+    def _validate_l2_adjacency(self, network_id, is_adjacent):
+        request = self.new_show_request('networks', network_id)
+        response = self.deserialize(self.fmt, request.get_response(self.api))
+        self.assertEqual(is_adjacent,
+                         response['network'][l2_adjacency.L2_ADJACENCY])
+
+
+class TestSegmentAwareIpam(SegmentAwareIpamTestCase):
 
     def _create_test_segments_with_subnets(self, num):
         """Creates one network with num segments and num subnets"""
@@ -1090,12 +1127,6 @@ class TestSegmentAwareIpam(SegmentTestCase):
         # Since port is bound and there is a mapping to segment, it succeeds.
         self.assertEqual(webob.exc.HTTPOk.code, response.status_int)
         self._assert_one_ip_in_subnet(response, subnet['subnet']['cidr'])
-
-    def _validate_l2_adjacency(self, network_id, is_adjacent):
-        request = self.new_show_request('networks', network_id)
-        response = self.deserialize(self.fmt, request.get_response(self.api))
-        self.assertEqual(is_adjacent,
-                         response['network'][l2_adjacency.L2_ADJACENCY])
 
     def _validate_deferred_ip_allocation(self, port_id):
         request = self.new_show_request('ports', port_id)
@@ -1384,6 +1415,562 @@ class TestSegmentAwareIpamML2(TestSegmentAwareIpam):
         super(TestSegmentAwareIpamML2, self).setUp(plugin='ml2')
 
 
+class TestNovaSegmentNotifier(SegmentAwareIpamTestCase):
+    _mechanism_drivers = ['openvswitch', 'logger']
+
+    def setUp(self):
+        config.cfg.CONF.set_override('mechanism_drivers',
+                                     self._mechanism_drivers,
+                                     group='ml2')
+        config.cfg.CONF.set_override('network_vlan_ranges',
+                                     ['physnet:200:209', 'physnet0:200:209',
+                                      'physnet1:200:209', 'physnet2:200:209'],
+                                     group='ml2_type_vlan')
+        super(TestNovaSegmentNotifier, self).setUp(plugin='ml2')
+        self.segments_plugin = directory.get_plugin(ext_segment.SEGMENTS)
+
+        nova_updater = self.segments_plugin.nova_updater
+        nova_updater.p_client = mock.MagicMock()
+        self.mock_p_client = nova_updater.p_client
+        nova_updater.n_client = mock.MagicMock()
+        self.mock_n_client = nova_updater.n_client
+        self.batch_notifier = nova_updater.batch_notifier
+        self.batch_notifier._waiting_to_send = True
+
+    def _calculate_inventory_total_and_reserved(self, subnet):
+        total = 0
+        reserved = 0
+        allocation_pools = subnet.get('allocation_pools') or []
+        for pool in allocation_pools:
+            total += int(netaddr.IPAddress(pool['end']) -
+                         netaddr.IPAddress(pool['start'])) + 1
+        if total:
+            if subnet['gateway_ip']:
+                total += 1
+                reserved += 1
+            if subnet['enable_dhcp']:
+                reserved += 1
+        return total, reserved
+
+    def _assert_inventory_creation(self, segment_id, aggregate, subnet):
+        self.batch_notifier._notify()
+        self.mock_p_client.get_inventory.assert_called_with(
+            segment_id, seg_plugin.IPV4_RESOURCE_CLASS)
+        self.mock_p_client.update_inventory.assert_not_called()
+        name = seg_plugin.SEGMENT_NAME_STUB % segment_id
+        resource_provider = {'name': name, 'uuid': segment_id}
+        self.mock_p_client.create_resource_provider.assert_called_with(
+            resource_provider)
+        self.mock_n_client.aggregates.create.assert_called_with(name, None)
+        self.mock_p_client.associate_aggregates.assert_called_with(
+            segment_id, [aggregate.uuid])
+        self.mock_n_client.aggregates.add_host.assert_called_with(aggregate.id,
+            'fakehost')
+        total, reserved = self._calculate_inventory_total_and_reserved(
+            subnet['subnet'])
+        inventory, _ = self._get_inventory(total, reserved)
+        self.mock_p_client.create_inventory.assert_called_with(
+            segment_id, inventory)
+        self.assertEqual(
+            inventory['total'],
+            self.mock_p_client.create_inventory.call_args[0][1]['total'])
+        self.assertEqual(
+            inventory['reserved'],
+            self.mock_p_client.create_inventory.call_args[0][1]['reserved'])
+        self.mock_p_client.reset_mock()
+        self.mock_p_client.get_inventory.side_effect = None
+        self.mock_n_client.reset_mock()
+
+    def _test_first_subnet_association_with_segment(self, cidr='10.0.0.0/24',
+                                                    allocation_pools=None):
+        network, segment = self._create_test_network_and_segment()
+        segment_id = segment['segment']['id']
+        self._setup_host_mappings([(segment_id, 'fakehost')])
+        self.mock_p_client.get_inventory.side_effect = (
+            neutron_exc.PlacementResourceProviderNotFound(
+                resource_provider=segment_id,
+                resource_class=seg_plugin.IPV4_RESOURCE_CLASS))
+        aggregate = mock.MagicMock()
+        aggregate.uuid = uuidutils.generate_uuid()
+        aggregate.id = 1
+        self.mock_n_client.aggregates.create.return_value = aggregate
+        subnet = self._create_test_subnet_with_segment(
+            network, segment, cidr=cidr, allocation_pools=allocation_pools)
+        self._assert_inventory_creation(segment_id, aggregate, subnet)
+        return network, segment, subnet
+
+    def test_first_subnet_association_with_segment(self):
+        self._test_first_subnet_association_with_segment()
+
+    def _assert_inventory_update(self, segment_id, inventory, subnet=None,
+                                 original_subnet=None):
+        self.batch_notifier._notify()
+        self.mock_p_client.get_inventory.assert_called_with(
+            segment_id, seg_plugin.IPV4_RESOURCE_CLASS)
+        original_total = original_reserved = total = reserved = 0
+        if original_subnet:
+            original_total, original_reserved = (
+                self._calculate_inventory_total_and_reserved(original_subnet))
+        if subnet:
+            total, reserved = self._calculate_inventory_total_and_reserved(
+                subnet)
+        inventory['total'] += total - original_total
+        inventory['reserved'] += reserved - original_reserved
+        self.mock_p_client.update_inventory.assert_called_with(segment_id,
+            inventory, seg_plugin.IPV4_RESOURCE_CLASS)
+        self.assertEqual(
+            inventory['total'],
+            self.mock_p_client.update_inventory.call_args[0][1]['total'])
+        self.assertEqual(
+            inventory['reserved'],
+            self.mock_p_client.update_inventory.call_args[0][1]['reserved'])
+        self.mock_p_client.reset_mock()
+        self.mock_n_client.reset_mock()
+
+    def _get_inventory(self, total, reserved):
+        inventory = {'total': total, 'reserved': reserved, 'min_unit': 1,
+                     'max_unit': 1, 'step_size': 1, 'allocation_ratio': 1.0,
+                     'resource_class': seg_plugin.IPV4_RESOURCE_CLASS}
+        return inventory, copy.deepcopy(inventory)
+
+    def _test_second_subnet_association_with_segment(self):
+        network, segment, first_subnet = (
+            self._test_first_subnet_association_with_segment())
+        segment_id = segment['segment']['id']
+        # Associate an IPv6 subnet with the segment
+        self._create_test_subnet_with_segment(network, segment)
+        first_total, first_reserved = (
+            self._calculate_inventory_total_and_reserved(
+                first_subnet['subnet']))
+        inventory, original_inventory = self._get_inventory(first_total,
+                                                            first_reserved)
+        self.mock_p_client.get_inventory.return_value = inventory
+        second_subnet = self._create_test_subnet_with_segment(
+            network, segment, cidr='10.0.1.0/24')
+        self._assert_inventory_update(segment_id, original_inventory,
+                                      subnet=second_subnet['subnet'])
+        return segment_id, first_subnet, second_subnet
+
+    def test_second_subnet_association_with_segment(self):
+        self._test_second_subnet_association_with_segment()
+
+    def test_delete_last_ipv4_subnet(self):
+        network, segment, subnet = (
+            self._test_first_subnet_association_with_segment())
+        # Associate an IPv6 subnet with the segment
+        self._create_test_subnet_with_segment(network, segment)
+        segment_id = segment['segment']['id']
+        aggregate = mock.MagicMock()
+        aggregate.uuid = uuidutils.generate_uuid()
+        aggregate.id = 1
+        aggregate.hosts = ['fakehost1']
+        self.mock_p_client.list_aggregates.return_value = {
+            'aggregates': [aggregate.uuid]}
+        self.mock_n_client.aggregates.list.return_value = [aggregate]
+        self.mock_n_client.aggregates.get_details.return_value = aggregate
+        self._delete('subnets', subnet['subnet']['id'])
+        self.batch_notifier._notify()
+        self._assert_inventory_delete(segment_id, aggregate)
+
+    def _assert_inventory_delete(self, segment_id, aggregate):
+        self.mock_p_client.list_aggregates.assert_called_with(segment_id)
+        self.assertEqual(1, self.mock_n_client.aggregates.list.call_count)
+        self.mock_n_client.aggregates.get_details.assert_called_with(
+            aggregate.id)
+        calls = [mock.call(aggregate.id, host) for host in aggregate.hosts]
+        self.mock_n_client.aggregates.remove_host.assert_has_calls(calls)
+        self.mock_n_client.aggregates.delete.assert_called_with(aggregate.id)
+        self.mock_p_client.delete_resource_provider.assert_called_with(
+            segment_id)
+        self.mock_p_client.reset_mock()
+        self.mock_n_client.reset_mock()
+
+    def test_delete_ipv4_subnet(self):
+        segment_id, first_subnet, second_subnet = (
+            self._test_second_subnet_association_with_segment())
+        first_total, first_reserved = (
+            self._calculate_inventory_total_and_reserved(
+                first_subnet['subnet']))
+        second_total, second_reserved = (
+            self._calculate_inventory_total_and_reserved(
+                second_subnet['subnet']))
+        inventory, original_inventory = self._get_inventory(
+            first_total + second_total, first_reserved + second_reserved)
+        self.mock_p_client.get_inventory.return_value = inventory
+        self._delete('subnets', first_subnet['subnet']['id'])
+        self._assert_inventory_update(segment_id, original_inventory,
+                                      original_subnet=first_subnet['subnet'])
+
+    def _test_update_ipv4_subnet_allocation_pools(self, allocation_pools,
+                                                  new_allocation_pools):
+        network, segment, original_subnet = (
+            self._test_first_subnet_association_with_segment(
+                cidr='10.0.0.0/24', allocation_pools=allocation_pools))
+        segment_id = segment['segment']['id']
+        self.mock_p_client.reset_mock()
+        self.mock_n_client.reset_mock()
+        total, reserved = self._calculate_inventory_total_and_reserved(
+            original_subnet['subnet'])
+        inventory, original_inventory = self._get_inventory(total, reserved)
+        self.mock_p_client.get_inventory.return_value = inventory
+        subnet_data = {'subnet': {'allocation_pools': new_allocation_pools}}
+        subnet_req = self.new_update_request('subnets',
+                                             subnet_data,
+                                             original_subnet['subnet']['id'])
+        subnet = self.deserialize(self.fmt, subnet_req.get_response(self.api))
+        self._assert_inventory_update(
+            segment_id, original_inventory, subnet=subnet['subnet'],
+            original_subnet=original_subnet['subnet'])
+
+    def test_update_ipv4_subnet_expand_allocation_pool(self):
+        self._test_update_ipv4_subnet_allocation_pools(
+            [{'start': '10.0.0.2', 'end': '10.0.0.100'}],
+            [{'start': '10.0.0.2', 'end': '10.0.0.254'}])
+
+    def test_update_ipv4_subnet_add_allocation_pool(self):
+        self._test_update_ipv4_subnet_allocation_pools(
+            [{'start': '10.0.0.2', 'end': '10.0.0.100'}],
+            [{'start': '10.0.0.2', 'end': '10.0.0.100'},
+             {'start': '10.0.0.200', 'end': '10.0.0.254'}])
+
+    def test_update_ipv4_subnet_contract_allocation_pool(self):
+        self._test_update_ipv4_subnet_allocation_pools(
+            [{'start': '10.0.0.2', 'end': '10.0.0.254'}],
+            [{'start': '10.0.0.2', 'end': '10.0.0.100'}])
+
+    def test_update_ipv4_subnet_remove_allocation_pool(self):
+        self._test_update_ipv4_subnet_allocation_pools(
+            [{'start': '10.0.0.2', 'end': '10.0.0.100'},
+             {'start': '10.0.0.200', 'end': '10.0.0.254'}],
+            [{'start': '10.0.0.2', 'end': '10.0.0.100'}])
+
+    def _test_update_ipv4_subnet_delete_allocation_pools(self):
+        segment_id, first_subnet, second_subnet = (
+            self._test_second_subnet_association_with_segment())
+        first_total, first_reserved = (
+            self._calculate_inventory_total_and_reserved(
+                first_subnet['subnet']))
+        second_total, second_reserved = (
+            self._calculate_inventory_total_and_reserved(
+                second_subnet['subnet']))
+        inventory, original_inventory = self._get_inventory(
+            first_total + second_total, first_reserved + second_reserved)
+        self.mock_p_client.get_inventory.return_value = inventory
+        subnet_data = {'subnet': {'allocation_pools': []}}
+        subnet_req = self.new_update_request('subnets',
+                                             subnet_data,
+                                             first_subnet['subnet']['id'])
+        subnet_req.get_response(self.api)
+        self._assert_inventory_update(segment_id, original_inventory,
+                                      original_subnet=first_subnet['subnet'])
+        return segment_id, second_subnet
+
+    def test_update_ipv4_subnet_delete_allocation_pools(self):
+        self._test_update_ipv4_subnet_delete_allocation_pools()
+
+    def test_update_ipv4_subnet_delete_restore_last_allocation_pool(self):
+        segment_id, subnet = (
+            self._test_update_ipv4_subnet_delete_allocation_pools())
+        self.mock_p_client.reset_mock()
+        self.mock_n_client.reset_mock()
+        allocation_pools = subnet['subnet']['allocation_pools']
+        aggregate = mock.MagicMock()
+        aggregate.uuid = uuidutils.generate_uuid()
+        aggregate.id = 1
+        aggregate.hosts = ['fakehost1']
+        self.mock_p_client.list_aggregates.return_value = {
+            'aggregates': [aggregate.uuid]}
+        self.mock_n_client.aggregates.list.return_value = [aggregate]
+        self.mock_n_client.aggregates.get_details.return_value = aggregate
+        subnet_data = {'subnet': {'allocation_pools': []}}
+        self._update('subnets', subnet['subnet']['id'], subnet_data)
+        self.batch_notifier._notify()
+        self._assert_inventory_delete(segment_id, aggregate)
+        self.mock_p_client.get_inventory.side_effect = (
+            neutron_exc.PlacementResourceProviderNotFound(
+                resource_provider=segment_id,
+                resource_class=seg_plugin.IPV4_RESOURCE_CLASS))
+        aggregate.hosts = []
+        self.mock_n_client.aggregates.create.return_value = aggregate
+        subnet_data = {'subnet': {'allocation_pools': allocation_pools}}
+        subnet = self._update('subnets', subnet['subnet']['id'], subnet_data)
+        self._assert_inventory_creation(segment_id, aggregate, subnet)
+
+    def test_add_host_to_segment_aggregate(self):
+        db.subscribe()
+        network, segment, first_subnet = (
+            self._test_first_subnet_association_with_segment())
+        segment_id = segment['segment']['id']
+        aggregate = mock.MagicMock()
+        aggregate.uuid = uuidutils.generate_uuid()
+        aggregate.id = 1
+        aggregate.hosts = ['fakehost1']
+        self.mock_p_client.list_aggregates.return_value = {
+            'aggregates': [aggregate.uuid]}
+        self.mock_n_client.aggregates.list.return_value = [aggregate]
+        host = 'otherfakehost'
+        helpers.register_ovs_agent(host=host,
+                                   bridge_mappings={'physnet': 'br-eth-1'},
+                                   plugin=self.plugin, start_flag=True)
+        self.batch_notifier._notify()
+        self.mock_p_client.list_aggregates.assert_called_with(segment_id)
+        self.assertEqual(1, self.mock_n_client.aggregates.list.call_count)
+        self.mock_n_client.aggregates.add_host.assert_called_with(aggregate.id,
+                                                                  host)
+
+    def test_add_host_to_non_existent_segment_aggregate(self):
+        db.subscribe()
+        network, segment, first_subnet = (
+            self._test_first_subnet_association_with_segment())
+        with mock.patch.object(seg_plugin.LOG, 'info') as log:
+            segment_id = segment['segment']['id']
+            aggregate = mock.MagicMock()
+            aggregate.uuid = uuidutils.generate_uuid()
+            aggregate.id = 1
+            aggregate.hosts = ['fakehost1']
+            self.mock_p_client.list_aggregates.side_effect = (
+                neutron_exc.PlacementAggregateNotFound(
+                    resource_provider=segment_id))
+            self.mock_n_client.aggregates.list.return_value = [aggregate]
+            host = 'otherfakehost'
+            helpers.register_ovs_agent(host=host,
+                                       bridge_mappings={'physnet': 'br-eth-1'},
+                                       plugin=self.plugin, start_flag=True)
+            self.batch_notifier._notify()
+            self.mock_p_client.list_aggregates.assert_called_with(segment_id)
+            self.assertTrue(log.called)
+            self.mock_n_client.aggregates.add_host.assert_not_called()
+
+    def test_add_host_segment_aggregate_conflict(self):
+        db.subscribe()
+        network, segment, first_subnet = (
+            self._test_first_subnet_association_with_segment())
+        with mock.patch.object(seg_plugin.LOG, 'info') as log:
+            segment_id = segment['segment']['id']
+            aggregate = mock.MagicMock()
+            aggregate.uuid = uuidutils.generate_uuid()
+            aggregate.id = 1
+            aggregate.hosts = ['fakehost1']
+            self.mock_p_client.list_aggregates.return_value = {
+                'aggregates': [aggregate.uuid]}
+            self.mock_n_client.aggregates.add_host.side_effect = (
+                nova_exc.Conflict(nova_exc.Conflict.http_status))
+            self.mock_n_client.aggregates.list.return_value = [aggregate]
+            host = 'otherfakehost'
+            helpers.register_ovs_agent(host=host,
+                                       bridge_mappings={'physnet': 'br-eth-1'},
+                                       plugin=self.plugin, start_flag=True)
+            self.batch_notifier._notify()
+            self.mock_p_client.list_aggregates.assert_called_with(segment_id)
+            self.mock_n_client.aggregates.add_host.assert_called_with(
+                aggregate.id, host)
+            self.assertTrue(log.called)
+
+    def _assert_inventory_update_port(self, segment_id, inventory,
+                                      num_fixed_ips):
+        inventory['reserved'] += num_fixed_ips
+        self.mock_p_client.get_inventory.assert_called_with(
+            segment_id, seg_plugin.IPV4_RESOURCE_CLASS)
+        self.mock_p_client.update_inventory.assert_called_with(segment_id,
+            inventory, seg_plugin.IPV4_RESOURCE_CLASS)
+        self.assertEqual(
+            inventory['total'],
+            self.mock_p_client.update_inventory.call_args[0][1]['total'])
+        self.assertEqual(
+            inventory['reserved'],
+            self.mock_p_client.update_inventory.call_args[0][1]['reserved'])
+        self.mock_p_client.reset_mock()
+        self.mock_n_client.reset_mock()
+
+    def _create_test_port(self, network_id, tenant_id, subnet, **kwargs):
+        port = self._make_port(self.fmt, network_id, tenant_id=tenant_id,
+                               arg_list=(portbindings.HOST_ID,), **kwargs)
+        self.batch_notifier._notify()
+        return port
+
+    def _test_create_port(self, **kwargs):
+        network, segment, subnet = (
+            self._test_first_subnet_association_with_segment())
+        total, reserved = self._calculate_inventory_total_and_reserved(
+            subnet['subnet'])
+        inventory, original_inventory = self._get_inventory(total, reserved)
+        self.mock_p_client.get_inventory.return_value = inventory
+        port = self._create_test_port(network['network']['id'],
+                                      network['network']['tenant_id'], subnet,
+                                      **kwargs)
+        return segment['segment']['id'], original_inventory, port
+
+    def test_create_bound_port(self):
+        kwargs = {portbindings.HOST_ID: 'fakehost'}
+        segment_id, original_inventory, _ = self._test_create_port(**kwargs)
+        self._assert_inventory_update_port(segment_id, original_inventory, 1)
+
+    def test_create_bound_port_compute_owned(self):
+        kwargs = {portbindings.HOST_ID: 'fakehost',
+                  'device_owner': constants.DEVICE_OWNER_COMPUTE_PREFIX}
+        self._test_create_port(**kwargs)
+        self.mock_p_client.get_inventory.assert_not_called()
+        self.mock_p_client.update_inventory.assert_not_called()
+
+    def test_create_bound_port_dhcp_owned(self):
+        kwargs = {portbindings.HOST_ID: 'fakehost',
+                  'device_owner': constants.DEVICE_OWNER_DHCP}
+        self._test_create_port(**kwargs)
+        self.mock_p_client.get_inventory.assert_not_called()
+        self.mock_p_client.update_inventory.assert_not_called()
+
+    def test_create_unbound_port(self):
+        self._test_create_port()
+        self.mock_p_client.get_inventory.assert_not_called()
+        self.mock_p_client.update_inventory.assert_not_called()
+
+    def test_delete_bound_port(self):
+        kwargs = {portbindings.HOST_ID: 'fakehost'}
+        segment_id, before_create_inventory, port = self._test_create_port(
+            **kwargs)
+        self.mock_p_client.reset_mock()
+        inventory, original_inventory = self._get_inventory(
+            before_create_inventory['total'],
+            before_create_inventory['reserved'] + 1)
+        self.mock_p_client.get_inventory.return_value = inventory
+        self._delete('ports', port['port']['id'])
+        self.batch_notifier._notify()
+        self._assert_inventory_update_port(segment_id, original_inventory, -1)
+
+    def _create_port_for_update_test(self, num_fixed_ips=1, dhcp_owned=False,
+                                     compute_owned=False):
+        segment_id, first_subnet, second_subnet = (
+            self._test_second_subnet_association_with_segment())
+        first_total, first_reserved = (
+            self._calculate_inventory_total_and_reserved(
+                first_subnet['subnet']))
+        second_total, second_reserved = (
+            self._calculate_inventory_total_and_reserved(
+                second_subnet['subnet']))
+        inventory, original_inventory = self._get_inventory(
+            first_total + second_total, first_reserved + second_reserved)
+        self.mock_p_client.get_inventory.return_value = inventory
+        kwargs = {portbindings.HOST_ID: 'fakehost',
+                  'fixed_ips': [{'subnet_id': first_subnet['subnet']['id']}]}
+        created_fixed_ips = num_fixed_ips
+        if num_fixed_ips > 1:
+            kwargs['fixed_ips'].append(
+                {'subnet_id': second_subnet['subnet']['id']})
+        if dhcp_owned:
+            kwargs['device_owner'] = constants.DEVICE_OWNER_DHCP
+        if compute_owned:
+            kwargs['device_owner'] = constants.DEVICE_OWNER_COMPUTE_PREFIX
+        port = self._create_test_port(first_subnet['subnet']['network_id'],
+                                      first_subnet['subnet']['tenant_id'],
+                                      first_subnet, **kwargs)
+        if dhcp_owned or compute_owned:
+            self.mock_p_client.get_inventory.assert_not_called()
+            self.mock_p_client.update_inventory.assert_not_called()
+        else:
+            self._assert_inventory_update_port(segment_id, original_inventory,
+                                               created_fixed_ips)
+        return first_subnet, second_subnet, port
+
+    def _port_update(self, first_subnet, second_subnet, fixed_ips_subnets,
+                     port, reserved_increment_before=1,
+                     reserved_increment_after=1, dhcp_owned=False,
+                     compute_owned=False):
+        first_total, first_reserved = (
+            self._calculate_inventory_total_and_reserved(
+                first_subnet['subnet']))
+        second_total, second_reserved = (
+            self._calculate_inventory_total_and_reserved(
+                second_subnet['subnet']))
+        inventory, original_inventory = self._get_inventory(
+            first_total + second_total,
+            first_reserved + second_reserved + reserved_increment_before)
+        self.mock_p_client.get_inventory.return_value = inventory
+        port_data = {'port': {'device_owner': ''}}
+        if fixed_ips_subnets:
+            port_data['port']['fixed_ips'] = []
+            for subnet in fixed_ips_subnets:
+                port_data['port']['fixed_ips'].append(
+                    {'subnet_id': subnet['subnet']['id']})
+        if dhcp_owned:
+            port_data['port']['device_owner'] = constants.DEVICE_OWNER_DHCP
+        if compute_owned:
+            port_data['port']['device_owner'] = (
+                constants.DEVICE_OWNER_COMPUTE_PREFIX)
+        self._update('ports', port['port']['id'], port_data)
+        self.batch_notifier._notify()
+        self._assert_inventory_update_port(
+            first_subnet['subnet']['segment_id'], original_inventory,
+            reserved_increment_after)
+
+    def test_update_port_add_fixed_ip(self):
+        first_subnet, second_subnet, port = self._create_port_for_update_test()
+        self._port_update(first_subnet, second_subnet,
+                          [first_subnet, second_subnet], port)
+
+    def test_update_port_remove_fixed_ip(self):
+        first_subnet, second_subnet, port = self._create_port_for_update_test(
+            num_fixed_ips=2)
+        self._port_update(first_subnet, second_subnet,
+                          [first_subnet], port, reserved_increment_before=2,
+                          reserved_increment_after=-1)
+
+    def test_update_port_change_to_dhcp_owned(self):
+        first_subnet, second_subnet, port = self._create_port_for_update_test()
+        self._port_update(first_subnet, second_subnet, [], port,
+                          reserved_increment_after=-1, dhcp_owned=True)
+
+    def test_update_port_change_to_no_dhcp_owned(self):
+        first_subnet, second_subnet, port = self._create_port_for_update_test(
+            dhcp_owned=True)
+        self._port_update(first_subnet, second_subnet, [], port,
+                          reserved_increment_before=0,
+                          reserved_increment_after=1)
+
+    def test_update_port_change_to_compute_owned(self):
+        first_subnet, second_subnet, port = self._create_port_for_update_test()
+        self._port_update(first_subnet, second_subnet, [], port,
+                          reserved_increment_after=-1, compute_owned=True)
+
+    def test_update_port_change_to_no_compute_owned(self):
+        first_subnet, second_subnet, port = self._create_port_for_update_test(
+            compute_owned=True)
+        self._port_update(first_subnet, second_subnet, [], port,
+                          reserved_increment_before=0,
+                          reserved_increment_after=1)
+
+    def test_placement_api_inventory_update_conflict(self):
+        with mock.patch.object(seg_plugin.LOG, 'debug') as log_debug:
+            with mock.patch.object(seg_plugin.LOG, 'error') as log_error:
+                event = seg_plugin.Event(mock.ANY, mock.ANY, total=1,
+                                         reserved=0)
+                inventory, original_inventory = self._get_inventory(100, 2)
+                self.mock_p_client.get_inventory.return_value = inventory
+                self.mock_p_client.update_inventory.side_effect = (
+                    neutron_exc.PlacementInventoryUpdateConflict(
+                        resource_provider=mock.ANY,
+                        resource_class=seg_plugin.IPV4_RESOURCE_CLASS))
+                self.segments_plugin.nova_updater._update_nova_inventory(event)
+                self.assertEqual(seg_plugin.MAX_INVENTORY_UPDATE_RETRIES,
+                                 self.mock_p_client.get_inventory.call_count)
+                self.assertEqual(
+                    seg_plugin.MAX_INVENTORY_UPDATE_RETRIES,
+                    self.mock_p_client.update_inventory.call_count)
+                self.assertEqual(
+                    seg_plugin.MAX_INVENTORY_UPDATE_RETRIES,
+                    log_debug.call_count)
+                self.assertTrue(log_error.called)
+
+    def test_placement_api_not_available(self):
+        with mock.patch.object(seg_plugin.LOG, 'debug') as log:
+            event = seg_plugin.Event(
+                self.segments_plugin.nova_updater._update_nova_inventory,
+                mock.ANY, total=1, reserved=0)
+            self.mock_p_client.get_inventory.side_effect = (
+                neutron_exc.PlacementEndpointNotFound())
+            self.segments_plugin.nova_updater._send_notifications([event])
+            self.assertTrue(log.called)
+
+
 class TestDhcpAgentSegmentScheduling(HostSegmentMappingTestCase):
 
     _mechanism_drivers = ['openvswitch', 'logger']
@@ -1471,3 +2058,141 @@ class TestDhcpAgentSegmentScheduling(HostSegmentMappingTestCase):
         agent_hosts = [agent['host'] for agent in dhcp_agents]
         self.assertIn(DHCP_HOSTA, agent_hosts)
         self.assertIn(DHCP_HOSTB, agent_hosts)
+
+
+class PlacementAPIClientTestCase(base.DietTestCase):
+    """Test the Placement API client."""
+
+    def setUp(self):
+        super(PlacementAPIClientTestCase, self).setUp()
+        self.mock_load_auth_p = mock.patch(
+            'keystoneauth1.loading.load_auth_from_conf_options')
+        self.mock_load_auth = self.mock_load_auth_p.start()
+        self.mock_request_p = mock.patch(
+            'keystoneauth1.session.Session.request')
+        self.mock_request = self.mock_request_p.start()
+        self.client = placement_client.PlacementAPIClient()
+
+    @mock.patch('keystoneauth1.session.Session')
+    @mock.patch('keystoneauth1.loading.load_auth_from_conf_options')
+    def test_constructor(self, load_auth_mock, ks_sess_mock):
+        placement_client.PlacementAPIClient()
+
+        load_auth_mock.assert_called_once_with(cfg.CONF, 'placement')
+        ks_sess_mock.assert_called_once_with(auth=load_auth_mock.return_value)
+
+    def test_create_resource_provider(self):
+        expected_payload = 'fake_resource_provider'
+        self.client.create_resource_provider(expected_payload)
+        expected_url = '/resource_providers'
+        self.mock_request.assert_called_once_with(
+                expected_url, 'POST',
+                endpoint_filter={'region_name': mock.ANY,
+                                 'service_type': 'placement'},
+                json=expected_payload)
+
+    def test_delete_resource_provider(self):
+        rp_uuid = uuidutils.generate_uuid()
+        self.client.delete_resource_provider(rp_uuid)
+        expected_url = '/resource_providers/%s' % rp_uuid
+        self.mock_request.assert_called_once_with(
+                expected_url, 'DELETE',
+                endpoint_filter={'region_name': mock.ANY,
+                                 'service_type': 'placement'})
+
+    def test_create_inventory(self):
+        expected_payload = 'fake_inventory'
+        rp_uuid = uuidutils.generate_uuid()
+        self.client.create_inventory(rp_uuid, expected_payload)
+        expected_url = '/resource_providers/%s/inventories' % rp_uuid
+        self.mock_request.assert_called_once_with(
+                expected_url, 'POST',
+                endpoint_filter={'region_name': mock.ANY,
+                                 'service_type': 'placement'},
+                json=expected_payload)
+
+    def test_get_inventory(self):
+        rp_uuid = uuidutils.generate_uuid()
+        resource_class = 'fake_resource_class'
+        self.client.get_inventory(rp_uuid, resource_class)
+        expected_url = '/resource_providers/%s/inventories/%s' % (
+            rp_uuid, resource_class)
+        self.mock_request.assert_called_once_with(
+                expected_url, 'GET',
+                endpoint_filter={'region_name': mock.ANY,
+                                 'service_type': 'placement'})
+
+    def _test_get_inventory_not_found(self, details, expected_exception):
+        rp_uuid = uuidutils.generate_uuid()
+        resource_class = 'fake_resource_class'
+        self.mock_request.side_effect = ks_exc.NotFound(details=details)
+        self.assertRaises(expected_exception, self.client.get_inventory,
+                          rp_uuid, resource_class)
+
+    def test_get_inventory_not_found_no_resource_provider(self):
+        self._test_get_inventory_not_found(
+            "No resource provider with uuid",
+            neutron_exc.PlacementResourceProviderNotFound)
+
+    def test_get_inventory_not_found_no_inventory(self):
+        self._test_get_inventory_not_found(
+            "No inventory of class", neutron_exc.PlacementInventoryNotFound)
+
+    def test_get_inventory_not_found_unknown_cause(self):
+        self._test_get_inventory_not_found("Unknown cause", ks_exc.NotFound)
+
+    def test_update_inventory(self):
+        expected_payload = 'fake_inventory'
+        rp_uuid = uuidutils.generate_uuid()
+        resource_class = 'fake_resource_class'
+        self.client.update_inventory(rp_uuid, expected_payload, resource_class)
+        expected_url = '/resource_providers/%s/inventories/%s' % (
+            rp_uuid, resource_class)
+        self.mock_request.assert_called_once_with(
+                expected_url, 'PUT',
+                endpoint_filter={'region_name': mock.ANY,
+                                 'service_type': 'placement'},
+                json=expected_payload)
+
+    def test_update_inventory_conflict(self):
+        rp_uuid = uuidutils.generate_uuid()
+        expected_payload = 'fake_inventory'
+        resource_class = 'fake_resource_class'
+        self.mock_request.side_effect = ks_exc.Conflict
+        self.assertRaises(neutron_exc.PlacementInventoryUpdateConflict,
+                          self.client.update_inventory, rp_uuid,
+                          expected_payload, resource_class)
+
+    def test_associate_aggregates(self):
+        expected_payload = 'fake_aggregates'
+        rp_uuid = uuidutils.generate_uuid()
+        self.client.associate_aggregates(rp_uuid, expected_payload)
+        expected_url = '/resource_providers/%s/aggregates' % rp_uuid
+        self.mock_request.assert_called_once_with(
+                expected_url, 'PUT',
+                endpoint_filter={'region_name': mock.ANY,
+                                 'service_type': 'placement'},
+                json=expected_payload,
+                headers={'openstack-api-version': 'placement 1.1'})
+
+    def test_list_aggregates(self):
+        rp_uuid = uuidutils.generate_uuid()
+        self.client.list_aggregates(rp_uuid)
+        expected_url = '/resource_providers/%s/aggregates' % rp_uuid
+        self.mock_request.assert_called_once_with(
+                expected_url, 'GET',
+                endpoint_filter={'region_name': mock.ANY,
+                                 'service_type': 'placement'},
+                headers={'openstack-api-version': 'placement 1.1'})
+
+    def test_list_aggregates_not_found(self):
+        rp_uuid = uuidutils.generate_uuid()
+        self.mock_request.side_effect = ks_exc.NotFound
+        self.assertRaises(neutron_exc.PlacementAggregateNotFound,
+                          self.client.list_aggregates, rp_uuid)
+
+    def test_placement_api_not_found(self):
+        rp_uuid = uuidutils.generate_uuid()
+        self.mock_request.side_effect = ks_exc.EndpointNotFound
+        self.assertRaises(neutron_exc.PlacementEndpointNotFound,
+                          self.client.list_aggregates, rp_uuid)

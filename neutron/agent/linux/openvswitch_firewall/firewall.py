@@ -112,7 +112,7 @@ class OFPort(object):
     def _get_allowed_pairs(port_dict, version):
         aap_dict = port_dict.get('allowed_address_pairs', set())
         return {(aap['mac_address'], aap['ip_address']) for aap in aap_dict
-                if netaddr.IPAddress(aap['ip_address']).version == version}
+                if netaddr.IPNetwork(aap['ip_address']).version == version}
 
     @property
     def ipv4_addresses(self):
@@ -199,18 +199,12 @@ class OVSFirewallDriver(firewall.FirewallDriver):
         self._deferred = False
         self._drop_all_unmatched_flows()
 
-    def apply_port_filter(self, port):
-        """We never call this method
-
-        It exists here to override abstract method of parent abstract class.
-        """
-
     def security_group_updated(self, action_type, sec_group_ids,
                                device_ids=None):
-        """This method is obsolete
+        """The current driver doesn't make use of this method.
 
-        The current driver only supports enhanced rpc calls into security group
-        agent. This method is never called from that place.
+        It exists here to avoid NotImplementedError raised from the parent
+        class's method.
         """
 
     def _accept_flow(self, **flow):
@@ -242,7 +236,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
 
     @staticmethod
     def initialize_bridge(int_br):
-        int_br.set_protocols(OVSFirewallDriver.REQUIRED_PROTOCOLS)
+        int_br.add_protocols(*OVSFirewallDriver.REQUIRED_PROTOCOLS)
         return int_br.deferred(full_ordered=True)
 
     def _drop_all_unmatched_flows(self):

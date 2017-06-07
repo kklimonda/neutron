@@ -13,13 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-
+from neutron_lib.utils import net
 from oslo_config import cfg
 from oslo_service import wsgi
 
 from neutron._i18n import _
 from neutron.common import constants
-from neutron.common import utils
 
 
 core_opts = [
@@ -46,22 +45,8 @@ core_opts = [
                       "The first 3 octets will remain unchanged. If the 4th "
                       "octet is not 00, it will also be used. The others "
                       "will be randomly generated.")),
-    cfg.IntOpt('mac_generation_retries', default=16,
-               deprecated_for_removal=True,
-               help=_("How many times Neutron will retry MAC generation. This "
-                      "option is now obsolete and so is deprecated to be "
-                      "removed in the Ocata release.")),
     cfg.BoolOpt('allow_bulk', default=True,
                 help=_("Allow the usage of the bulk API")),
-    cfg.BoolOpt('allow_pagination', default=True,
-                deprecated_for_removal=True,
-                help=_("Allow the usage of the pagination. This option has "
-                       "been deprecated and will now be enabled "
-                       "unconditionally.")),
-    cfg.BoolOpt('allow_sorting', default=True,
-                deprecated_for_removal=True,
-                help=_("Allow the usage of the sorting. This option has been "
-                       "deprecated and will now be enabled unconditionally.")),
     cfg.StrOpt('pagination_max_limit', default="-1",
                help=_("The maximum number of items returned in a single "
                       "response, value was 'infinite' or negative integer "
@@ -111,7 +96,7 @@ core_opts = [
                        "Attention: the following parameter MUST be set to "
                        "False if Neutron is being used in conjunction with "
                        "Nova security groups.")),
-    cfg.StrOpt('host', default=utils.get_hostname(),
+    cfg.StrOpt('host', default=net.get_hostname(),
                sample_default='example.domain',
                help=_("Hostname to be used by the Neutron server, agents and "
                       "services running on this machine. All the agents and "
@@ -125,11 +110,6 @@ core_opts = [
     cfg.IntOpt('send_events_interval', default=2,
                help=_('Number of seconds between sending events to nova if '
                       'there are any events to send.')),
-    cfg.BoolOpt('advertise_mtu', default=True,
-                deprecated_for_removal=True,
-                help=_('If True, advertise network MTU values if core plugin '
-                       'calculates them. MTU is advertised to running '
-                       'instances via DHCP and RA MTU options.')),
     cfg.StrOpt('ipam_driver', default='internal',
                help=_("Neutron IPAM (IP address management) driver to use. "
                       "By default, the reference implementation of the "
@@ -184,3 +164,22 @@ nova_opts = [
 
 def register_nova_opts(cfg=cfg.CONF):
     cfg.register_opts(nova_opts, group=NOVA_CONF_SECTION)
+
+
+PLACEMENT_CONF_SECTION = 'placement'
+
+placement_opts = [
+    cfg.StrOpt('region_name',
+               help=_('Name of placement region to use. Useful if keystone '
+                      'manages more than one region.')),
+    cfg.StrOpt('endpoint_type',
+               default='public',
+               choices=['public', 'admin', 'internal'],
+               help=_('Type of the placement endpoint to use.  This endpoint '
+                      'will be looked up in the keystone catalog and should '
+                      'be one of public, internal or admin.')),
+]
+
+
+def register_placement_opts(cfg=cfg.CONF):
+    cfg.register_opts(placement_opts, group=PLACEMENT_CONF_SECTION)

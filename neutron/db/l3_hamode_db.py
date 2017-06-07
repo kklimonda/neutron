@@ -18,7 +18,6 @@ import functools
 import netaddr
 from neutron_lib.api import validators
 from neutron_lib import constants
-from neutron_lib.db import model_base
 from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_db import exception as db_exc
@@ -30,25 +29,33 @@ import sqlalchemy as sa
 from sqlalchemy import exc as sql_exc
 from sqlalchemy import orm
 
-from neutron._i18n import _, _LI
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.api.v2 import attributes
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
+from neutron.common import _deprecate
 from neutron.common import constants as n_const
 from neutron.common import utils as n_utils
-from neutron.db import agents_db
+from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
 from neutron.db.availability_zone import router as router_az_db
-from neutron.db import common_db_mixin
-from neutron.db import l3_attrs_db
-from neutron.db import l3_db
 from neutron.db import l3_dvr_db
 from neutron.db.l3_dvr_db import is_distributed_router
-from neutron.db import models_v2
+from neutron.db.models import agent as agent_model
+from neutron.db.models import l3 as l3_models
+from neutron.db.models import l3_attrs
+from neutron.db.models import l3ha as l3ha_model
 from neutron.extensions import l3
 from neutron.extensions import l3_ext_ha_mode as l3_ha
 from neutron.extensions import portbindings
 from neutron.extensions import providernet
 from neutron.plugins.common import utils as p_utils
 
+
+_deprecate._moved_global('L3HARouterAgentPortBinding', new_module=l3ha_model)
+_deprecate._moved_global('L3HARouterNetwork', new_module=l3ha_model)
+_deprecate._moved_global('L3HARouterVRIdAllocation', new_module=l3ha_model)
 
 VR_ID_RANGE = set(range(1, 255))
 MAX_ALLOCATION_TRIES = 10
@@ -65,15 +72,6 @@ L3_HA_OPTS = [
                help=_("Maximum number of L3 agents which a HA router will be "
                       "scheduled on. If it is set to 0 then the router will "
                       "be scheduled on every agent.")),
-    cfg.IntOpt('min_l3_agents_per_router',
-               default=n_const.DEFAULT_MINIMUM_AGENTS_FOR_HA,
-               help=_("DEPRECATED: Minimum number of L3 agents that have to "
-                      "be available in order to allow a new HA router to be "
-                      "scheduled. This option is deprecated in the Newton "
-                      "release and will be removed for the Ocata release "
-                      "where the scheduling of new HA routers will always "
-                      "be allowed."),
-               deprecated_for_removal=True),
     cfg.StrOpt('l3_ha_net_cidr',
                default=n_const.L3_HA_NET_CIDR,
                help=_('Subnet used for the l3 HA admin network.')),
@@ -90,80 +88,9 @@ L3_HA_OPTS = [
 cfg.CONF.register_opts(L3_HA_OPTS)
 
 
-class L3HARouterAgentPortBinding(model_base.BASEV2):
-    """Represent agent binding state of a HA router port.
-
-    A HA Router has one HA port per agent on which it is spawned.
-    This binding table stores which port is used for a HA router by a
-    L3 agent.
-    """
-
-    __tablename__ = 'ha_router_agent_port_bindings'
-    __table_args__ = (
-        sa.UniqueConstraint(
-            'router_id', 'l3_agent_id',
-            name='uniq_ha_router_agent_port_bindings0port_id0l3_agent_id'),
-        model_base.BASEV2.__table_args__
-    )
-    port_id = sa.Column(sa.String(36), sa.ForeignKey('ports.id',
-                                                     ondelete='CASCADE'),
-                        nullable=False, primary_key=True)
-    port = orm.relationship(models_v2.Port)
-
-    router_id = sa.Column(sa.String(36), sa.ForeignKey('routers.id',
-                                                       ondelete='CASCADE'),
-                          nullable=False)
-
-    l3_agent_id = sa.Column(sa.String(36),
-                            sa.ForeignKey("agents.id",
-                                          ondelete='CASCADE'))
-    agent = orm.relationship(agents_db.Agent)
-
-    state = sa.Column(sa.Enum(n_const.HA_ROUTER_STATE_ACTIVE,
-                              n_const.HA_ROUTER_STATE_STANDBY,
-                              name='l3_ha_states'),
-                      default=n_const.HA_ROUTER_STATE_STANDBY,
-                      server_default=n_const.HA_ROUTER_STATE_STANDBY)
-
-
-class L3HARouterNetwork(model_base.BASEV2, model_base.HasProjectPrimaryKey):
-    """Host HA network for a tenant.
-
-    One HA Network is used per tenant, all HA router ports are created
-    on this network.
-    """
-
-    __tablename__ = 'ha_router_networks'
-
-    network_id = sa.Column(sa.String(36),
-                           sa.ForeignKey('networks.id', ondelete="CASCADE"),
-                           nullable=False, primary_key=True)
-    network = orm.relationship(models_v2.Network)
-
-
-class L3HARouterVRIdAllocation(model_base.BASEV2):
-    """VRID allocation per HA network.
-
-    Keep a track of the VRID allocations per HA network.
-    """
-
-    __tablename__ = 'ha_router_vrid_allocations'
-
-    network_id = sa.Column(sa.String(36),
-                           sa.ForeignKey('networks.id', ondelete="CASCADE"),
-                           nullable=False, primary_key=True)
-    vr_id = sa.Column(sa.Integer(), nullable=False, primary_key=True)
-
-
 class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                          router_az_db.RouterAvailabilityZoneMixin):
     """Mixin class to add high availability capability to routers."""
-
-    extra_attributes = (
-        l3_dvr_db.L3_NAT_with_dvr_db_mixin.extra_attributes +
-        router_az_db.RouterAvailabilityZoneMixin.extra_attributes + [
-            {'name': 'ha', 'default': cfg.CONF.l3_ha},
-            {'name': 'ha_vr_id', 'default': 0}])
 
     def _verify_configuration(self):
         self.ha_cidr = cfg.CONF.l3_ha_net_cidr
@@ -178,29 +105,40 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
 
     def _check_num_agents_per_router(self):
         max_agents = cfg.CONF.max_l3_agents_per_router
-        min_agents = cfg.CONF.min_l3_agents_per_router
 
-        if (max_agents != UNLIMITED_AGENTS_PER_ROUTER
-            and max_agents < min_agents):
-            raise l3_ha.HAMaximumAgentsNumberNotValid(
-                max_agents=max_agents, min_agents=min_agents)
+        if max_agents != UNLIMITED_AGENTS_PER_ROUTER and max_agents < 1:
+            raise l3_ha.HAMaximumAgentsNumberNotValid(max_agents=max_agents)
 
-        if min_agents < n_const.MINIMUM_MINIMUM_AGENTS_FOR_HA:
-            raise l3_ha.HAMinimumAgentsNumberNotValid()
-
-    def __init__(self):
-        self._verify_configuration()
-        super(L3_HA_NAT_db_mixin, self).__init__()
+    def __new__(cls, *args, **kwargs):
+        inst = super(L3_HA_NAT_db_mixin, cls).__new__(cls, *args, **kwargs)
+        inst._verify_configuration()
+        registry.subscribe(inst._release_router_vr_id,
+                           resources.ROUTER, events.PRECOMMIT_DELETE)
+        registry.subscribe(inst._cleanup_ha_network,
+                           resources.ROUTER, events.AFTER_DELETE)
+        registry.subscribe(inst._precommit_router_create,
+                           resources.ROUTER, events.PRECOMMIT_CREATE)
+        registry.subscribe(inst._before_router_create,
+                           resources.ROUTER, events.BEFORE_CREATE)
+        registry.subscribe(inst._after_router_create,
+                           resources.ROUTER, events.AFTER_CREATE)
+        registry.subscribe(inst._validate_migration,
+                           resources.ROUTER, events.PRECOMMIT_UPDATE)
+        registry.subscribe(inst._reconfigure_ha_resources,
+                           resources.ROUTER, events.AFTER_UPDATE)
+        return inst
 
     def get_ha_network(self, context, tenant_id):
-        return (context.session.query(L3HARouterNetwork).
-                filter(L3HARouterNetwork.tenant_id == tenant_id).
+        return (context.session.query(l3ha_model.L3HARouterNetwork).
+                filter(l3ha_model.L3HARouterNetwork.tenant_id == tenant_id).
                 first())
 
     def _get_allocated_vr_id(self, context, network_id):
         with context.session.begin(subtransactions=True):
-            query = (context.session.query(L3HARouterVRIdAllocation).
-                     filter(L3HARouterVRIdAllocation.network_id == network_id))
+            query = (context.session.query(
+                l3ha_model.L3HARouterVRIdAllocation).
+                filter(l3ha_model.L3HARouterVRIdAllocation.network_id ==
+                       network_id))
 
             allocated_vr_ids = set(a.vr_id for a in query) - set([0])
 
@@ -233,7 +171,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                     if not available_vr_ids:
                         raise l3_ha.NoVRIDAvailable(router_id=router_id)
 
-                    allocation = L3HARouterVRIdAllocation()
+                    allocation = l3ha_model.L3HARouterVRIdAllocation()
                     allocation.network_id = network_id
                     allocation.vr_id = available_vr_ids.pop()
 
@@ -259,9 +197,9 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
     @db_api.retry_if_session_inactive()
     def _delete_vr_id_allocation(self, context, ha_network, vr_id):
         with context.session.begin(subtransactions=True):
-            context.session.query(L3HARouterVRIdAllocation).filter_by(
-                network_id=ha_network.network_id,
-                vr_id=vr_id).delete()
+            context.session.query(
+                l3ha_model.L3HARouterVRIdAllocation).filter_by(
+                    network_id=ha_network.network_id, vr_id=vr_id).delete()
 
     def _create_ha_subnet(self, context, network_id, tenant_id):
         args = {'network_id': network_id,
@@ -277,14 +215,14 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
     def _create_ha_network_tenant_binding(self, context, tenant_id,
                                           network_id):
         with context.session.begin():
-            ha_network = L3HARouterNetwork(tenant_id=tenant_id,
-                                           network_id=network_id)
+            ha_network = l3ha_model.L3HARouterNetwork(
+                tenant_id=tenant_id, network_id=network_id)
             context.session.add(ha_network)
         # we need to check if someone else just inserted at exactly the
         # same time as us because there is no constrain in L3HARouterNetwork
         # that prevents multiple networks per tenant
         with context.session.begin(subtransactions=True):
-            items = (context.session.query(L3HARouterNetwork).
+            items = (context.session.query(l3ha_model.L3HARouterNetwork).
                      filter_by(tenant_id=tenant_id).all())
             if len(items) > 1:
                 # we need to throw an error so our network is deleted
@@ -317,7 +255,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
         deletion = functools.partial(self._core_plugin.delete_network,
                                      admin_ctx)
 
-        network, ha_network = common_db_mixin.safe_creation(
+        network, ha_network = db_utils.safe_creation(
             context, creation, deletion, content, transaction=False)
         try:
             self._create_ha_subnet(admin_ctx, network['id'], tenant_id)
@@ -328,14 +266,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
         return ha_network
 
     def get_number_of_agents_for_scheduling(self, context):
-        """Return the number of agents on which the router will be scheduled.
+        """Return number of agents on which the router will be scheduled."""
 
-        Raises an exception if there are not enough agents available to honor
-        the min_agents config parameter. If the max_agents parameter is set to
-        0 all the agents will be used.
-        """
-
-        min_agents = cfg.CONF.min_l3_agents_per_router
         num_agents = len(self.get_l3_agents(context, active=True,
             filters={'agent_modes': [constants.L3_AGENT_MODE_LEGACY,
                                      constants.L3_AGENT_MODE_DVR_SNAT]}))
@@ -348,22 +280,18 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             else:
                 num_agents = max_agents
 
-        if num_agents < min_agents:
-            raise l3_ha.HANotEnoughAvailableAgents(min_agents=min_agents,
-                                                   num_agents=num_agents)
-
         return num_agents
 
     @db_api.retry_if_session_inactive()
     def _create_ha_port_binding(self, context, router_id, port_id):
         try:
             with context.session.begin():
-                routerportbinding = l3_db.RouterPort(
+                routerportbinding = l3_models.RouterPort(
                     port_id=port_id, router_id=router_id,
                     port_type=constants.DEVICE_OWNER_ROUTER_HA_INTF)
                 context.session.add(routerportbinding)
-                portbinding = L3HARouterAgentPortBinding(port_id=port_id,
-                                                         router_id=router_id)
+                portbinding = l3ha_model.L3HARouterAgentPortBinding(
+                    port_id=port_id, router_id=router_id)
                 context.session.add(portbinding)
 
             return portbinding
@@ -399,9 +327,9 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                                     router_id)
         deletion = functools.partial(self._core_plugin.delete_port, context,
                                      l3_port_check=False)
-        port, bindings = common_db_mixin.safe_creation(context, creation,
-                                                       deletion, content,
-                                                       transaction=False)
+        port, bindings = db_utils.safe_creation(context, creation,
+                                                deletion, content,
+                                                transaction=False)
         return bindings
 
     def _delete_ha_interfaces(self, context, router_id):
@@ -424,11 +352,9 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             self._core_plugin.delete_port(admin_ctx, port_id,
                                           l3_port_check=False)
 
-    def _notify_router_updated(self, context, router_id,
-                               schedule_routers=True):
+    def _notify_router_updated(self, context, router_id):
         self.l3_rpc_notifier.routers_updated(
-            context, [router_id], shuffle_agents=True,
-            schedule_routers=schedule_routers)
+            context, [router_id], shuffle_agents=True)
 
     @classmethod
     def _is_ha(cls, router):
@@ -461,105 +387,95 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
         return n_utils.create_object_with_dependency(
             creator, dep_getter, dep_creator, dep_id_attr, dep_deleter)[1]
 
-    def _process_extra_attr_router_create(self, context, router_db,
-                                          router_res):
-        router_res['ha'] = self._is_ha(router_res)
-        super(L3_HA_NAT_db_mixin, self)._process_extra_attr_router_create(
-            context, router_db, router_res)
-
     @db_api.retry_if_session_inactive()
-    def create_router(self, context, router):
-        is_ha = self._is_ha(router['router'])
-        if is_ha:
-            # This will throw an exception if there aren't enough agents to
-            # handle this HA router
-            self.get_number_of_agents_for_scheduling(context)
+    def _before_router_create(self, resource, event, trigger,
+                              context, router, **kwargs):
+        """Event handler to create HA resources before router creation."""
+        if not self._is_ha(router):
+            return
+        # ensure the HA network exists before we start router creation so
+        # we can provide meaningful errors back to the user if no network
+        # can be allocated
+        if not self.get_ha_network(context, router['tenant_id']):
+            self._create_ha_network(context, router['tenant_id'])
 
-            # we set the allocating status to hide it from the L3 agents
-            # until we have created all of the requisite interfaces/networks
-            router['router']['status'] = n_const.ROUTER_STATUS_ALLOCATING
+    def _precommit_router_create(self, resource, event, trigger, context,
+                                 router, router_db, **kwargs):
+        """Event handler to set ha flag and status on creation."""
+        is_ha = self._is_ha(router)
+        router['ha'] = is_ha
+        self.set_extra_attr_value(context, router_db, 'ha', is_ha)
+        if not is_ha:
+            return
+        # This will throw an exception if there aren't enough agents to
+        # handle this HA router
+        self.get_number_of_agents_for_scheduling(context)
+        ha_net = self.get_ha_network(context, router['tenant_id'])
+        if not ha_net:
+            # net was deleted, throw a retry to start over to create another
+            raise db_exc.RetryRequest(
+                    l3_ha.HANetworkConcurrentDeletion(
+                        tenant_id=router['tenant_id']))
 
-        router_dict = super(L3_HA_NAT_db_mixin,
-                            self).create_router(context, router)
-        if is_ha:
-            try:
-                router_db = self._get_router(context, router_dict['id'])
+    def _after_router_create(self, resource, event, trigger, context,
+                             router_id, router, router_db, **kwargs):
+        if not router['ha']:
+            return
+        try:
+            self.schedule_router(context, router_id)
+            router['ha_vr_id'] = router_db.extra_attributes.ha_vr_id
+            self._notify_router_updated(context, router_id)
+        except Exception as e:
+            with excutils.save_and_reraise_exception() as ctx:
+                if isinstance(e, l3_ha.NoVRIDAvailable):
+                    ctx.reraise = False
+                    LOG.warning(_LW("No more VRIDs for router: %s"), e)
+                else:
+                    LOG.exception(_LE("Failed to schedule HA router %s."),
+                                  router_id)
+                router['status'] = self._update_router_db(
+                    context, router_id,
+                    {'status': n_const.ROUTER_STATUS_ERROR})['status']
 
-                self.schedule_router(context, router_dict['id'])
+    def _validate_migration(self, resource, event, trigger, context,
+                            router_id, router, router_db, old_router,
+                            **kwargs):
+        """Event handler on precommit update to validate migration."""
 
-                router_dict['ha_vr_id'] = router_db.extra_attributes.ha_vr_id
-                router_dict['status'] = self._update_router_db(
-                    context, router_dict['id'],
-                    {'status': n_const.ROUTER_STATUS_ACTIVE})['status']
-                self._notify_router_updated(context, router_db.id,
-                                            schedule_routers=False)
-            except Exception:
-                with excutils.save_and_reraise_exception():
-                    self.delete_router(context, router_dict['id'])
-        return router_dict
-
-    @db_api.retry_if_session_inactive()
-    def _update_router_db(self, context, router_id, data):
-        router_db = self._get_router(context, router_id)
-
-        original_distributed_state = router_db.extra_attributes.distributed
-        original_ha_state = router_db.extra_attributes.ha
-
-        requested_ha_state = data.pop('ha', None)
-        requested_distributed_state = data.get('distributed', None)
-        # cvr to dvrha
-        if not original_distributed_state and not original_ha_state:
-            if (requested_ha_state is True and
-                    requested_distributed_state is True):
-                raise l3_ha.UpdateToDvrHamodeNotSupported()
-
-        # cvrha to any dvr...
-        elif not original_distributed_state and original_ha_state:
-            if requested_distributed_state is True:
-                raise l3_ha.DVRmodeUpdateOfHaNotSupported()
-
-        # dvr to any ha...
-        elif original_distributed_state and not original_ha_state:
-            if requested_ha_state is True:
-                raise l3_ha.HAmodeUpdateOfDvrNotSupported()
-
-        #dvrha to any cvr...
-        elif original_distributed_state and original_ha_state:
-            if requested_distributed_state is False:
-                raise l3_ha.DVRmodeUpdateOfDvrHaNotSupported()
-            #elif dvrha to dvr
-            if requested_ha_state is False:
-                raise l3_ha.HAmodeUpdateOfDvrHaNotSupported()
+        original_ha_state = old_router['ha']
+        requested_ha_state = router.get('ha')
 
         ha_changed = (requested_ha_state is not None and
                       requested_ha_state != original_ha_state)
-        if ha_changed:
-            if router_db.admin_state_up:
-                msg = _('Cannot change HA attribute of active routers. Please '
-                        'set router admin_state_up to False prior to upgrade.')
-                raise n_exc.BadRequest(resource='router', msg=msg)
-            # set status to ALLOCATING so this router is no longer
-            # provided to agents while its interfaces are being re-configured.
-            # Keep in mind that if we want conversion to be hitless, this
-            # status cannot be used because agents treat hidden routers as
-            # deleted routers.
-            data['status'] = n_const.ROUTER_STATUS_ALLOCATING
+        if not ha_changed:
+            return
 
-        with context.session.begin(subtransactions=True):
-            router_db = super(L3_HA_NAT_db_mixin, self)._update_router_db(
-                context, router_id, data)
+        if router_db.admin_state_up:
+            msg = _('Cannot change HA attribute of active routers. Please '
+                    'set router admin_state_up to False prior to upgrade')
+            raise n_exc.BadRequest(resource='router', msg=msg)
 
-            if not ha_changed:
-                return router_db
+        if requested_ha_state:
+            # This will throw HANotEnoughAvailableAgents if there aren't
+            # enough l3 agents to handle this router.
+            self.get_number_of_agents_for_scheduling(context)
+        else:
 
             ha_network = self.get_ha_network(context,
                                              router_db.tenant_id)
-            router_db.extra_attributes.ha = requested_ha_state
-            if not requested_ha_state:
-                self._delete_vr_id_allocation(
-                    context, ha_network, router_db.extra_attributes.ha_vr_id)
-                router_db.extra_attributes.ha_vr_id = None
+            self._delete_vr_id_allocation(
+                context, ha_network, router_db.extra_attributes.ha_vr_id)
+            router_db.extra_attributes.ha_vr_id = None
+        self.set_extra_attr_value(context, router_db, 'ha', requested_ha_state)
 
+    def _reconfigure_ha_resources(self, resource, event, trigger, context,
+                                  router_id, old_router, router, router_db,
+                                  **kwargs):
+        """Event handler to react to changes after HA flag has been updated."""
+        ha_changed = old_router['ha'] != router['ha']
+        if not ha_changed:
+            return
+        requested_ha_state = router['ha']
         # The HA attribute has changed. First unbind the router from agents
         # to force a proper re-scheduling to agents.
         # TODO(jschwarz): This will have to be more selective to get HA + DVR
@@ -570,20 +486,18 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             self._delete_ha_interfaces(context, router_db.id)
             # always attempt to cleanup the network as the router is
             # deleted. the core plugin will stop us if its in use
-            self.safe_delete_ha_network(context, ha_network,
-                                        router_db.tenant_id)
+            ha_network = self.get_ha_network(context,
+                                             router_db.tenant_id)
+            if ha_network:
+                self.safe_delete_ha_network(context, ha_network,
+                                            router_db.tenant_id)
             self._migrate_router_ports(
                 context, router_db,
                 old_owner=constants.DEVICE_OWNER_HA_REPLICATED_INT,
                 new_owner=constants.DEVICE_OWNER_ROUTER_INTF)
 
         self.schedule_router(context, router_id)
-        router_db = super(L3_HA_NAT_db_mixin, self)._update_router_db(
-            context, router_id, {'status': n_const.ROUTER_STATUS_ACTIVE})
-        self._notify_router_updated(context, router_db.id,
-                                    schedule_routers=False)
-
-        return router_db
+        self._notify_router_updated(context, router_db.id)
 
     def _delete_ha_network(self, context, net):
         admin_ctx = context.elevated()
@@ -612,11 +526,9 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                          "%(tenant)s."),
                      {'network': net_id, 'tenant': tenant_id})
 
-    @db_api.retry_if_session_inactive()
-    def delete_router(self, context, id):
-        router_db = self._get_router(context, id)
-        super(L3_HA_NAT_db_mixin, self).delete_router(context, id)
-
+    def _release_router_vr_id(self, resource, event, trigger, context,
+                              router_db, **kwargs):
+        """Event handler for removal of VRID during router delete."""
         if router_db.extra_attributes.ha:
             ha_network = self.get_ha_network(context,
                                              router_db.tenant_id)
@@ -624,10 +536,18 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                 self._delete_vr_id_allocation(
                     context, ha_network, router_db.extra_attributes.ha_vr_id)
 
-                # always attempt to cleanup the network as the router is
-                # deleted. the core plugin will stop us if its in use
-                self.safe_delete_ha_network(context, ha_network,
-                                            router_db.tenant_id)
+    @db_api.retry_if_session_inactive()
+    def _cleanup_ha_network(self, resource, event, trigger, context,
+                            router_id, original, **kwargs):
+        """Event handler to attempt HA network deletion after router delete."""
+        if not original['ha']:
+            return
+        ha_network = self.get_ha_network(context, original['tenant_id'])
+        if not ha_network:
+            return
+        # always attempt to cleanup the network as the router is
+        # deleted. the core plugin will stop us if its in use
+        self.safe_delete_ha_network(context, ha_network, original['tenant_id'])
 
     def _unbind_ha_router(self, context, router_id):
         for agent in self.get_l3_agents_hosting_routers(context, [router_id]):
@@ -636,23 +556,23 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
     def get_ha_router_port_bindings(self, context, router_ids, host=None):
         if not router_ids:
             return []
-        query = context.session.query(L3HARouterAgentPortBinding)
+        query = context.session.query(l3ha_model.L3HARouterAgentPortBinding)
 
         if host:
-            query = query.join(agents_db.Agent).filter(
-                agents_db.Agent.host == host)
+            query = query.join(agent_model.Agent).filter(
+                agent_model.Agent.host == host)
 
         query = query.filter(
-            L3HARouterAgentPortBinding.router_id.in_(router_ids))
+            l3ha_model.L3HARouterAgentPortBinding.router_id.in_(router_ids))
 
         return query.all()
 
     @staticmethod
     def _check_router_agent_ha_binding(context, router_id, agent_id):
-        query = context.session.query(L3HARouterAgentPortBinding)
+        query = context.session.query(l3ha_model.L3HARouterAgentPortBinding)
         query = query.filter(
-            L3HARouterAgentPortBinding.router_id == router_id,
-            L3HARouterAgentPortBinding.l3_agent_id == agent_id)
+            l3ha_model.L3HARouterAgentPortBinding.router_id == router_id,
+            l3ha_model.L3HARouterAgentPortBinding.l3_agent_id == agent_id)
         return query.first() is not None
 
     def _get_bindings_and_update_router_state_for_dead_agents(self, context,
@@ -805,15 +725,18 @@ def is_ha_router(router):
     return cfg.CONF.l3_ha
 
 
-def is_ha_router_port(device_owner, router_id):
-    session = db_api.get_session()
+def is_ha_router_port(context, device_owner, router_id):
+    session = db_api.get_reader_session()
     if device_owner == constants.DEVICE_OWNER_HA_REPLICATED_INT:
         return True
     elif device_owner == constants.DEVICE_OWNER_ROUTER_SNAT:
-        query = session.query(l3_attrs_db.RouterExtraAttributes)
+        query = session.query(l3_attrs.RouterExtraAttributes)
         query = query.filter_by(ha=True)
-        query = query.filter(l3_attrs_db.RouterExtraAttributes.router_id ==
+        query = query.filter(l3_attrs.RouterExtraAttributes.router_id ==
                              router_id)
         return bool(query.limit(1).count())
     else:
         return False
+
+
+_deprecate._MovedGlobals()

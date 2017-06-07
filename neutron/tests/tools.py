@@ -14,26 +14,27 @@
 #    under the License.
 
 import copy
+import datetime
 import os
 import platform
 import random
-import string
 import time
 import warnings
 
-from debtcollector import moves
 import fixtures
 import mock
 import netaddr
 from neutron_lib import constants
+from neutron_lib.utils import helpers
 from oslo_utils import netutils
+from oslo_utils import timeutils
 import six
 import unittest2
 
 from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
-from neutron.common import utils
 from neutron.db import common_db_mixin
+from neutron.plugins.common import constants as p_const
 
 
 class AttributeMapMemento(fixtures.Fixture):
@@ -124,7 +125,7 @@ class CommonDbMixinHooksFixture(fixtures.Fixture):
     def _setUp(self):
         self.original_hooks = common_db_mixin.CommonDbMixin._model_query_hooks
         self.addCleanup(self.restore_hooks)
-        common_db_mixin.CommonDbMixin._model_query_hooks = copy.deepcopy(
+        common_db_mixin.CommonDbMixin._model_query_hooks = copy.copy(
             common_db_mixin.CommonDbMixin._model_query_hooks)
 
     def restore_hooks(self):
@@ -193,19 +194,33 @@ class UnorderedList(list):
     def __eq__(self, other):
         if not isinstance(other, list):
             return False
-        return (sorted(self, key=utils.safe_sort_key) ==
-                sorted(other, key=utils.safe_sort_key))
+        return (sorted(self, key=helpers.safe_sort_key) ==
+                sorted(other, key=helpers.safe_sort_key))
 
     def __neq__(self, other):
         return not self == other
 
 
-def get_random_string(n=10):
-    return ''.join(random.choice(string.ascii_lowercase) for _ in range(n))
+def get_random_string_list(i=3, n=5):
+    return [helpers.get_random_string(n) for _ in range(0, i)]
 
 
 def get_random_boolean():
     return bool(random.getrandbits(1))
+
+
+def get_random_datetime(start_time=None,
+                        end_time=None):
+    start_time = start_time or timeutils.utcnow()
+    end_time = end_time or (start_time + datetime.timedelta(days=1))
+    # calculate the seconds difference between start and end time
+    delta_seconds_difference = int(timeutils.delta_seconds(start_time,
+                                                           end_time))
+    # get a random time_delta_seconds between 0 and
+    # delta_seconds_difference
+    random_time_delta = random.randint(0, delta_seconds_difference)
+    # generate a random datetime between start and end time
+    return start_time + datetime.timedelta(seconds=random_time_delta)
 
 
 def get_random_integer(range_begin=0, range_end=1000):
@@ -219,8 +234,12 @@ def get_random_prefixlen(version=4):
     return random.randint(0, maxlen)
 
 
-def get_random_port():
-    return random.randint(n_const.PORT_RANGE_MIN, n_const.PORT_RANGE_MAX)
+def get_random_port(start=n_const.PORT_RANGE_MIN):
+    return random.randint(start, n_const.PORT_RANGE_MAX)
+
+
+def get_random_vlan():
+    return random.randint(p_const.MIN_VLAN_TAG, p_const.MAX_VLAN_TAG)
 
 
 def get_random_ip_version():
@@ -272,8 +291,16 @@ def get_random_ether_type():
     return random.choice(n_const.VALID_ETHERTYPES)
 
 
+def get_random_ipam_status():
+    return random.choice(n_const.VALID_IPAM_ALLOCATION_STATUSES)
+
+
 def get_random_ip_protocol():
     return random.choice(list(constants.IP_PROTOCOL_MAP.keys()))
+
+
+def get_random_port_binding_statuses():
+    return random.choice(n_const.PORT_BINDING_STATUSES)
 
 
 def is_bsd():
@@ -299,8 +326,3 @@ def reset_random_seed():
 
 def get_random_ipv6_mode():
     return random.choice(constants.IPV6_MODES)
-
-
-import_modules_recursively = moves.moved_function(
-    utils.import_modules_recursively, 'import_modules_recursively', __name__,
-    version='Newton', removal_version='Ocata')

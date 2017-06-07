@@ -22,11 +22,12 @@ from neutron_lib import exceptions
 from neutron_lib.utils import file as file_utils
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import fileutils
 
 from neutron._i18n import _, _LE
 from neutron.agent.linux import external_process
 from neutron.common import constants
-from neutron.common import utils as common_utils
+from neutron.common import utils
 
 VALID_STATES = ['MASTER', 'BACKUP']
 VALID_AUTH_TYPES = ['AH', 'PASS']
@@ -380,7 +381,7 @@ class KeepalivedManager(object):
 
     #pylint: disable=method-hidden
     def _throttle_spawn(self, threshold):
-        self.spawn = common_utils.throttler(threshold)(self.spawn)
+        self.spawn = utils.throttler(threshold)(self.spawn)
 
     def get_conf_dir(self):
         confs_dir = os.path.abspath(os.path.normpath(self.conf_path))
@@ -390,13 +391,13 @@ class KeepalivedManager(object):
     def get_full_config_file_path(self, filename, ensure_conf_dir=True):
         conf_dir = self.get_conf_dir()
         if ensure_conf_dir:
-            common_utils.ensure_dir(conf_dir)
+            fileutils.ensure_tree(conf_dir, mode=0o755)
         return os.path.join(conf_dir, filename)
 
     def _output_config_file(self):
         config_str = self.config.get_config_str()
         config_path = self.get_full_config_file_path('keepalived.conf')
-        common_utils.replace_file(config_path, config_str)
+        file_utils.replace_file(config_path, config_str)
 
         return config_path
 
@@ -481,6 +482,8 @@ class KeepalivedManager(object):
                    '-f', config_path,
                    '-p', pid_file,
                    '-r', self.get_vrrp_pid_file_name(pid_file)]
+            if cfg.CONF.debug:
+                cmd.append('-D')
             return cmd
 
         return callback

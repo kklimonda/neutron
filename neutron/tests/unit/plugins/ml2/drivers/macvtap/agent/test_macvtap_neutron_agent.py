@@ -18,15 +18,13 @@ import os
 import sys
 
 import mock
-
+from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_service import service
 
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import utils
 from neutron.common import config as common_config
 from neutron.common import topics
-from neutron.common import utils as n_utils
 from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
 from neutron.plugins.ml2.drivers.macvtap.agent import macvtap_neutron_agent
 from neutron.plugins.ml2.drivers.macvtap import macvtap_common
@@ -119,7 +117,7 @@ class TestMacvtapManager(base.BaseTestCase):
         self.mgr.mac_device_name_mappings = {'foo': 'bar'}
         with mock.patch.object(os, 'listdir', return_value=listing)\
             as mock_ld,\
-            mock.patch.object(utils, 'get_interface_mac') as mock_gdn:
+            mock.patch.object(ip_lib, 'get_device_mac') as mock_gdn:
             mock_gdn.side_effect = ['mac0', 'mac1']
 
             result = self.mgr.get_all_devices()
@@ -136,7 +134,7 @@ class TestMacvtapManager(base.BaseTestCase):
         mock_devices = [ip_lib.IPDevice('macvtap1')]
         with mock.patch.object(ip_lib.IPWrapper, 'get_devices',
                                return_value=mock_devices),\
-            mock.patch.object(utils, 'get_interface_mac',
+            mock.patch.object(ip_lib, 'get_device_mac',
                               return_value='foo:bar'):
             self.assertEqual('macvtapfoobar', self.mgr.get_agent_id())
 
@@ -177,7 +175,7 @@ class TestMacvtapMain(base.BaseTestCase):
     def test_parse_interface_mappings_good(self):
         cfg.CONF.set_override('physical_interface_mappings', 'good_mapping',
                               'macvtap')
-        with mock.patch.object(n_utils, 'parse_mappings',
+        with mock.patch.object(helpers, 'parse_mappings',
                                return_value=INTERFACE_MAPPINGS):
             mappings = macvtap_neutron_agent.parse_interface_mappings()
             self.assertEqual(INTERFACE_MAPPINGS, mappings)
@@ -185,9 +183,14 @@ class TestMacvtapMain(base.BaseTestCase):
     def test_parse_interface_mappings_bad(self):
         cfg.CONF.set_override('physical_interface_mappings', 'bad_mapping',
                               'macvtap')
-        with mock.patch.object(n_utils, 'parse_mappings',
+        with mock.patch.object(helpers, 'parse_mappings',
                                side_effect=ValueError('bad mapping')),\
             mock.patch.object(sys, 'exit') as mock_exit:
+            macvtap_neutron_agent.parse_interface_mappings()
+            mock_exit.assert_called_with(1)
+
+    def test_parse_interface_mappings_no_mapping(self):
+        with mock.patch.object(sys, 'exit') as mock_exit:
             macvtap_neutron_agent.parse_interface_mappings()
             mock_exit.assert_called_with(1)
 

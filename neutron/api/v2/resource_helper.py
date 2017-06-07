@@ -13,13 +13,12 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo_config import cfg
+from neutron_lib import constants
+from neutron_lib.plugins import directory
 from oslo_log import log as logging
 
 from neutron.api import extensions
 from neutron.api.v2 import base
-from neutron import manager
-from neutron.plugins.common import constants
 from neutron.quota import resource_registry
 
 LOG = logging.getLogger(__name__)
@@ -73,10 +72,7 @@ def build_resource_info(plural_mappings, resource_map, which_service,
         which_service = constants.CORE
     if action_map is None:
         action_map = {}
-    if which_service != constants.CORE:
-        plugin = manager.NeutronManager.get_service_plugins()[which_service]
-    else:
-        plugin = manager.NeutronManager.get_plugin()
+    plugin = directory.get_plugin(which_service)
     path_prefix = getattr(plugin, "path_prefix", "")
     LOG.debug('Service %(service)s assigned prefix: %(prefix)s',
               {'service': which_service, 'prefix': path_prefix})
@@ -92,8 +88,8 @@ def build_resource_info(plural_mappings, resource_map, which_service,
             collection_name, resource_name, plugin, params,
             member_actions=member_actions,
             allow_bulk=allow_bulk,
-            allow_pagination=cfg.CONF.allow_pagination,
-            allow_sorting=cfg.CONF.allow_sorting)
+            allow_pagination=True,
+            allow_sorting=True)
         resource = extensions.ResourceExtension(
             collection_name,
             controller,

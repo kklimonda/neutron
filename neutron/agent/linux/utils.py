@@ -28,15 +28,19 @@ import eventlet
 from eventlet.green import subprocess
 from eventlet import greenthread
 from neutron_lib import constants
+from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_rootwrap import client
 from oslo_utils import encodeutils
 from oslo_utils import excutils
+from oslo_utils import fileutils
+from six import iterbytes
 from six.moves import http_client as httplib
 
 from neutron._i18n import _, _LE
 from neutron.agent.common import config
+from neutron.agent.linux import xenapi_root_helper
 from neutron.common import utils
 from neutron import wsgi
 
@@ -62,8 +66,12 @@ class RootwrapDaemonHelper(object):
     def get_client(cls):
         with cls.__lock:
             if cls.__client is None:
-                cls.__client = client.Client(
-                    shlex.split(cfg.CONF.AGENT.root_helper_daemon))
+                if xenapi_root_helper.ROOT_HELPER_DAEMON_TOKEN == \
+                    cfg.CONF.AGENT.root_helper_daemon:
+                    cls.__client = xenapi_root_helper.XenAPIClient()
+                else:
+                    cls.__client = client.Client(
+                        shlex.split(cfg.CONF.AGENT.root_helper_daemon))
             return cls.__client
 
 
@@ -128,8 +136,8 @@ def execute(cmd, process_input=None, addl_env=None,
             _stdout, _stderr = obj.communicate(_process_input)
             returncode = obj.returncode
             obj.stdin.close()
-        _stdout = utils.safe_decode_utf8(_stdout)
-        _stderr = utils.safe_decode_utf8(_stderr)
+        _stdout = helpers.safe_decode_utf8(_stdout)
+        _stderr = helpers.safe_decode_utf8(_stderr)
 
         extra_ok_codes = extra_ok_codes or []
         if returncode and returncode not in extra_ok_codes:
@@ -158,6 +166,10 @@ def execute(cmd, process_input=None, addl_env=None,
     return (_stdout, _stderr) if return_stderr else _stdout
 
 
+@debtcollector.removals.remove(
+    version='Ocata', removal_version='Pike',
+    message="Use 'neutron.agent.linux.ip_lib.get_device_mac' instead."
+)
 def get_interface_mac(interface):
     MAC_START = 18
     MAC_END = 24
@@ -165,8 +177,7 @@ def get_interface_mac(interface):
     dev = interface[:constants.DEVICE_NAME_MAX_LEN]
     dev = encodeutils.to_utf8(dev)
     info = fcntl.ioctl(s.fileno(), 0x8927, struct.pack('256s', dev))
-    return ''.join(['%02x:' % ord(char)
-                    for char in info[MAC_START:MAC_END]])[:-1]
+    return ':'.join(["%02x" % b for b in iterbytes(info[MAC_START:MAC_END])])
 
 
 def find_child_pids(pid, recursive=False):
@@ -245,7 +256,7 @@ def _get_conf_base(cfg_root, uuid, ensure_conf_dir):
     conf_dir = os.path.abspath(os.path.normpath(cfg_root))
     conf_base = os.path.join(conf_dir, uuid)
     if ensure_conf_dir:
-        utils.ensure_dir(conf_dir)
+        fileutils.ensure_tree(conf_dir, mode=0o755)
     return conf_base
 
 
@@ -346,11 +357,6 @@ def pid_invoked_with_cmdline(pid, expected_cmd):
     return cmd_matches_expected(cmd, expected_cmd)
 
 
-wait_until_true = debtcollector.moves.moved_function(
-    utils.wait_until_true, 'wait_until_true', __name__,
-    version='Newton', removal_version='Ocata')
-
-
 def ensure_directory_exists_without_file(path):
     dirname = os.path.dirname(path)
     if os.path.isdir(dirname):
@@ -361,7 +367,7 @@ def ensure_directory_exists_without_file(path):
                 if not os.path.exists(path):
                     ctxt.reraise = False
     else:
-        utils.ensure_dir(dirname)
+        fileutils.ensure_tree(dirname, mode=0o755)
 
 
 def is_effective_user(user_id_or_name):
@@ -405,7 +411,7 @@ class UnixDomainHttpProtocol(eventlet.wsgi.HttpProtocol):
     disable_nagle_algorithm = False
 
     def __init__(self, request, client_address, server):
-        if client_address == '':
+        if not client_address:
             client_address = ('<local>', 0)
         # base class is old-style, so super does not work properly
         eventlet.wsgi.HttpProtocol.__init__(self, request, client_address,

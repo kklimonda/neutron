@@ -23,6 +23,7 @@ import sys
 
 import netaddr
 from neutron_lib import constants
+from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -33,13 +34,11 @@ from six import moves
 from neutron._i18n import _LE, _LI, _LW
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import utils
-from neutron.agent import securitygroups_rpc as sg_rpc
+from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
 from neutron.common import config as common_config
 from neutron.common import exceptions
 from neutron.common import profiler as setup_profiler
 from neutron.common import topics
-from neutron.common import utils as n_utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as p_utils
 from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
@@ -437,12 +436,12 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                                              network_id: network_id})
 
     def add_tap_interface(self, network_id, network_type, physical_network,
-                          segmentation_id, tap_device_name, device_owner):
+                          segmentation_id, tap_device_name, device_owner, mtu):
         """Add tap interface and handle interface missing exceptions."""
         try:
             return self._add_tap_interface(network_id, network_type,
                                            physical_network, segmentation_id,
-                                           tap_device_name, device_owner)
+                                           tap_device_name, device_owner, mtu)
         except Exception:
             with excutils.save_and_reraise_exception() as ctx:
                 if not ip_lib.device_exists(tap_device_name):
@@ -453,7 +452,7 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                     return False
 
     def _add_tap_interface(self, network_id, network_type, physical_network,
-                          segmentation_id, tap_device_name, device_owner):
+                          segmentation_id, tap_device_name, device_owner, mtu):
         """Add tap interface.
 
         If a VIF has been plugged into a network, this function will
@@ -470,14 +469,17 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
         if network_type == p_const.TYPE_LOCAL:
             self.ensure_local_bridge(network_id, bridge_name)
-        else:
-            phy_dev_name = self.ensure_physical_in_bridge(network_id,
-                                                          network_type,
-                                                          physical_network,
-                                                          segmentation_id)
-            if not phy_dev_name:
-                return False
-            self.ensure_tap_mtu(tap_device_name, phy_dev_name)
+        elif not self.ensure_physical_in_bridge(network_id,
+                                                network_type,
+                                                physical_network,
+                                                segmentation_id):
+            return False
+        if mtu:  # <-None with device_details from older neutron servers.
+            # we ensure the MTU here because libvirt does not set the
+            # MTU of a bridge it creates and the tap device it creates will
+            # inherit from the bridge its plugged into, which will be 1500
+            # at the time. See bug/1684326 for details.
+            self._set_tap_mtu(tap_device_name, mtu)
         # Avoid messing with plugging devices into a bridge that the agent
         # does not own
         if not device_owner.startswith(constants.DEVICE_OWNER_COMPUTE_PREFIX):
@@ -499,17 +501,16 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                       "thus added elsewhere.", data)
         return True
 
-    def ensure_tap_mtu(self, tap_dev_name, phy_dev_name):
-        """Ensure the MTU on the tap is the same as the physical device."""
-        phy_dev_mtu = ip_lib.IPDevice(phy_dev_name).link.mtu
-        ip_lib.IPDevice(tap_dev_name).link.set_mtu(phy_dev_mtu)
+    def _set_tap_mtu(self, tap_device_name, mtu):
+        ip_lib.IPDevice(tap_device_name).link.set_mtu(mtu)
 
     def plug_interface(self, network_id, network_segment, tap_name,
                        device_owner):
         return self.add_tap_interface(network_id, network_segment.network_type,
                                       network_segment.physical_network,
                                       network_segment.segmentation_id,
-                                      tap_name, device_owner)
+                                      tap_name, device_owner,
+                                      network_segment.mtu)
 
     def delete_bridge(self, bridge_name):
         bridge_device = bridge_lib.BridgeDevice(bridge_name)
@@ -675,10 +676,10 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
         LOG.debug('Using %s VXLAN mode', self.vxlan_mode)
 
     def fdb_ip_entry_exists(self, mac, ip, interface):
-        entries = utils.execute(['ip', 'neigh', 'show', 'to', ip,
-                                 'dev', interface],
-                                run_as_root=True)
-        return mac in entries
+        ip_version = ip_lib.get_ip_version(ip)
+        entry = ip_lib.dump_neigh_entries(ip_version, interface, dst=ip,
+                                          lladdr=mac)
+        return entry != []
 
     def fdb_bridge_entry_exists(self, mac, interface, agent_ip=None):
         entries = bridge_lib.FdbInterface.show(interface)
@@ -689,11 +690,11 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
     def add_fdb_ip_entry(self, mac, ip, interface):
         if cfg.CONF.VXLAN.arp_responder:
-            ip_lib.IPDevice(interface).neigh.add(ip, mac)
+            ip_lib.add_neigh_entry(ip, mac, interface)
 
     def remove_fdb_ip_entry(self, mac, ip, interface):
         if cfg.CONF.VXLAN.arp_responder:
-            ip_lib.IPDevice(interface).neigh.delete(ip, mac)
+            ip_lib.delete_neigh_entry(ip, mac, interface)
 
     def add_fdb_entries(self, agent_ip, ports, interface):
         for mac, ip in ports:
@@ -721,12 +722,12 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
     def get_agent_id(self):
         if self.bridge_mappings:
-            mac = utils.get_interface_mac(
+            mac = ip_lib.get_device_mac(
                 list(self.bridge_mappings.values())[0])
         else:
             devices = ip_lib.IPWrapper().get_devices(True)
             for device in devices:
-                mac = utils.get_interface_mac(device.name)
+                mac = ip_lib.get_device_mac(device.name)
                 if mac:
                     break
             else:
@@ -913,7 +914,7 @@ def main():
 
     common_config.setup_logging()
     try:
-        interface_mappings = n_utils.parse_mappings(
+        interface_mappings = helpers.parse_mappings(
             cfg.CONF.LINUX_BRIDGE.physical_interface_mappings)
     except ValueError as e:
         LOG.error(_LE("Parsing physical_interface_mappings failed: %s. "
@@ -922,7 +923,7 @@ def main():
     LOG.info(_LI("Interface mappings: %s"), interface_mappings)
 
     try:
-        bridge_mappings = n_utils.parse_mappings(
+        bridge_mappings = helpers.parse_mappings(
             cfg.CONF.LINUX_BRIDGE.bridge_mappings)
     except ValueError as e:
         LOG.error(_LE("Parsing bridge_mappings failed: %s. "

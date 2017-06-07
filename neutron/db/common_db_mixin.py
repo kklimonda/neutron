@@ -13,89 +13,26 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import contextlib
 import weakref
 
 from neutron_lib.db import utils as db_utils
 from oslo_db.sqlalchemy import utils as sa_utils
-from oslo_log import log as logging
-from oslo_utils import excutils
 import six
 from sqlalchemy import and_
 from sqlalchemy.ext import associationproxy
 from sqlalchemy import or_
 from sqlalchemy import sql
 
-from neutron._i18n import _LE
 from neutron.api.v2 import attributes
+from neutron.common import utils
+from neutron.db import _utils as ndb_utils
 
 
-LOG = logging.getLogger(__name__)
-
-
-@contextlib.contextmanager
-def _noop_context_manager():
-    yield
-
-
-def safe_creation(context, create_fn, delete_fn, create_bindings,
-                  transaction=True):
-    '''This function wraps logic of object creation in safe atomic way.
-
-    In case of exception, object is deleted.
-
-    More information when this method could be used can be found in
-    developer guide - Effective Neutron: Database interaction section.
-    http://docs.openstack.org/developer/neutron/devref/effective_neutron.html
-
-    :param context: context
-
-    :param create_fn: function without arguments that is called to create
-        object and returns this object.
-
-    :param delete_fn: function that is called to delete an object. It is
-        called with object's id field as an argument.
-
-    :param create_bindings: function that is called to create bindings for
-        an object. It is called with object's id field as an argument.
-
-    :param transaction: if true the whole operation will be wrapped in a
-        transaction. if false, no transaction will be used.
-    '''
-    cm = (context.session.begin(subtransactions=True)
-          if transaction else _noop_context_manager())
-    with cm:
-        obj = create_fn()
-        try:
-            value = create_bindings(obj['id'])
-        except Exception:
-            with excutils.save_and_reraise_exception():
-                try:
-                    delete_fn(obj['id'])
-                except Exception as e:
-                    LOG.error(_LE("Cannot clean up created object %(obj)s. "
-                                  "Exception: %(exc)s"), {'obj': obj['id'],
-                                                          'exc': e})
-        return obj, value
-
-
-def model_query_scope(context, model):
-    # Unless a context has 'admin' or 'advanced-service' rights the
-    # query will be scoped to a single tenant_id
-    return ((not context.is_admin and hasattr(model, 'tenant_id')) and
-            (not context.is_advsvc and hasattr(model, 'tenant_id')))
-
-
-def model_query(context, model):
-    query = context.session.query(model)
-    # define basic filter condition for model query
-    query_filter = None
-    if model_query_scope(context, model):
-        query_filter = (model.tenant_id == context.tenant_id)
-
-    if query_filter is not None:
-        query = query.filter(query_filter)
-    return query
+# TODO(HenryG): Remove these when available in neutron-lib
+safe_creation = ndb_utils.safe_creation
+model_query_scope = ndb_utils.model_query_scope_is_project
+model_query = ndb_utils.model_query
+resource_fields = ndb_utils.resource_fields
 
 
 class CommonDbMixin(object):
@@ -129,12 +66,20 @@ class CommonDbMixin(object):
         Filter hooks take as input the filter expression being built and return
         a transformed filter expression
         """
+        if callable(query_hook):
+            query_hook = utils.make_weak_ref(query_hook)
+        if callable(filter_hook):
+            filter_hook = utils.make_weak_ref(filter_hook)
+        if callable(result_filters):
+            result_filters = utils.make_weak_ref(result_filters)
         cls._model_query_hooks.setdefault(model, {})[name] = {
             'query': query_hook, 'filter': filter_hook,
             'result_filters': result_filters}
 
     @classmethod
     def register_dict_extend_funcs(cls, resource, funcs):
+        funcs = [utils.make_weak_ref(f) if callable(f) else f
+                 for f in funcs]
         cls._dict_extend_functions.setdefault(resource, []).extend(funcs)
 
     @property
@@ -147,14 +92,15 @@ class CommonDbMixin(object):
         """
         return weakref.proxy(self)
 
+    # TODO(HenryG): Remove this when available in neutron-lib
     def model_query_scope(self, context, model):
-        return model_query_scope(context, model)
+        return ndb_utils.model_query_scope_is_project(context, model)
 
     def _model_query(self, context, model):
         query = context.session.query(model)
         # define basic filter condition for model query
         query_filter = None
-        if self.model_query_scope(context, model):
+        if ndb_utils.model_query_scope_is_project(context, model):
             if hasattr(model, 'rbac_entries'):
                 query = query.outerjoin(model.rbac_entries)
                 rbac_model = model.rbac_entries.property.mapper.class_
@@ -171,15 +117,11 @@ class CommonDbMixin(object):
         # Execute query hooks registered from mixins and plugins
         for _name, hooks in six.iteritems(self._model_query_hooks.get(model,
                                                                       {})):
-            query_hook = hooks.get('query')
-            if isinstance(query_hook, six.string_types):
-                query_hook = getattr(self, query_hook, None)
+            query_hook = self._resolve_ref(hooks.get('query'))
             if query_hook:
                 query = query_hook(context, model, query)
 
-            filter_hook = hooks.get('filter')
-            if isinstance(filter_hook, six.string_types):
-                filter_hook = getattr(self, filter_hook, None)
+            filter_hook = self._resolve_ref(hooks.get('filter'))
             if filter_hook:
                 query_filter = filter_hook(context, model, query_filter)
 
@@ -189,11 +131,9 @@ class CommonDbMixin(object):
             query = query.filter(query_filter)
         return query
 
+    # TODO(HenryG): Remove this when available in neutron-lib
     def _fields(self, resource, fields):
-        if fields:
-            resource = {key: item for key, item in resource.items()
-                        if key in fields}
-        return attributes.populate_project_info(resource)
+        return ndb_utils.resource_fields(resource, fields)
 
     def _get_by_id(self, context, model, id):
         query = self._model_query(context, model)
@@ -257,24 +197,29 @@ class CommonDbMixin(object):
                     query = query.filter(is_shared)
             for _nam, hooks in six.iteritems(self._model_query_hooks.get(model,
                                                                          {})):
-                result_filter = hooks.get('result_filters', None)
-                if isinstance(result_filter, six.string_types):
-                    result_filter = getattr(self, result_filter, None)
-
+                result_filter = self._resolve_ref(
+                    hooks.get('result_filters', None))
                 if result_filter:
                     query = result_filter(query, filters)
         return query
+
+    def _resolve_ref(self, ref):
+        """Finds string ref functions, handles dereference of weakref."""
+        if isinstance(ref, six.string_types):
+            ref = getattr(self, ref, None)
+        if isinstance(ref, weakref.ref):
+            ref = ref()
+        return ref
 
     def _apply_dict_extend_functions(self, resource_type,
                                      response, db_object):
         for func in self._dict_extend_functions.get(
             resource_type, []):
             args = (response, db_object)
-            if isinstance(func, six.string_types):
-                func = getattr(self, func, None)
-            else:
+            if not isinstance(func, six.string_types):
                 # must call unbound method - use self as 1st argument
                 args = (self,) + args
+            func = self._resolve_ref(func)
             if func:
                 func(*args)
 
@@ -307,7 +252,7 @@ class CommonDbMixin(object):
         # just grab first set of unique keys and use them.
         # if model has no unqiue sets, 'paginate_query' will
         # warn if sorting is unstable
-        uk_sets = sa_utils._get_unique_keys(model)
+        uk_sets = sa_utils.get_unique_keys(model)
         for kset in uk_sets:
             for k in kset:
                 if marker_obj and (isinstance(getattr(marker_obj, k), bool)
@@ -342,12 +287,6 @@ class CommonDbMixin(object):
             return getattr(self, '_get_%s' % resource)(context, marker)
         return None
 
+    # TODO(HenryG): Remove this when available in neutron-lib
     def _filter_non_model_columns(self, data, model):
-        """Remove all the attributes from data which are not columns or
-        association proxies of the model passed as second parameter
-        """
-        columns = [c.name for c in model.__table__.columns]
-        return dict((k, v) for (k, v) in
-                    six.iteritems(data) if k in columns or
-                    isinstance(getattr(model, k, None),
-                               associationproxy.AssociationProxy))
+        return ndb_utils.filter_non_model_columns(data, model)

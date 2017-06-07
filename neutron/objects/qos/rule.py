@@ -17,13 +17,13 @@ import abc
 import sys
 
 from neutron_lib import constants
+from neutron_lib.utils import helpers
 from oslo_utils import versionutils
 from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import exception
 from oslo_versionedobjects import fields as obj_fields
 import six
 
-from neutron.common import utils
 from neutron.db import api as db_api
 from neutron.db.qos import models as qos_db_model
 from neutron.objects import base
@@ -37,7 +37,7 @@ def get_rules(context, qos_policy_id):
     all_rules = []
     with db_api.autonested_transaction(context.session):
         for rule_type in qos_consts.VALID_RULE_TYPES:
-            rule_cls_name = 'Qos%sRule' % utils.camelize(rule_type)
+            rule_cls_name = 'Qos%sRule' % helpers.camelize(rule_type)
             rule_cls = getattr(sys.modules[__name__], rule_cls_name)
 
             rules = rule_cls.get_objects(context, qos_policy_id=qos_policy_id)
@@ -57,8 +57,8 @@ class QosRule(base.NeutronDbObject):
     VERSION = '1.2'
 
     fields = {
-        'id': obj_fields.UUIDField(),
-        'qos_policy_id': obj_fields.UUIDField()
+        'id': common_types.UUIDField(),
+        'qos_policy_id': common_types.UUIDField()
     }
 
     fields_no_update = ['id', 'qos_policy_id']
@@ -80,12 +80,17 @@ class QosRule(base.NeutronDbObject):
         this method, or we could make it abstract to allow different
         rule behaviour.
         """
-        is_network_rule = self.qos_policy_id != port[qos_consts.QOS_POLICY_ID]
+        is_port_policy = self.qos_policy_id == port[qos_consts.QOS_POLICY_ID]
+        is_network_policy_only = port[qos_consts.QOS_POLICY_ID] is None
         is_network_device_port = any(port['device_owner'].startswith(prefix)
                                      for prefix
                                      in constants.DEVICE_OWNER_PREFIXES)
-
-        return not (is_network_rule and is_network_device_port)
+        # NOTE(ralonsoh): return True if:
+        #    - Is a port QoS policy (not a network QoS policy)
+        #    - Is not a network device (e.g. router) and is a network QoS
+        #      policy and there is no port QoS policy
+        return (is_port_policy or
+                (not is_network_device_port and is_network_policy_only))
 
 
 @obj_base.VersionedObjectRegistry.register

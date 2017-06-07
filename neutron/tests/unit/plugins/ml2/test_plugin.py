@@ -14,7 +14,6 @@
 #    under the License.
 
 import functools
-import uuid
 
 import fixtures
 import mock
@@ -24,6 +23,7 @@ import webob
 
 from neutron_lib import constants
 from neutron_lib import exceptions as exc
+from neutron_lib.plugins import directory
 from oslo_db import exception as db_exc
 from oslo_utils import uuidutils
 from sqlalchemy.orm import exc as sqla_exc
@@ -38,7 +38,7 @@ from neutron import context
 from neutron.db import agents_db
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2 as base_plugin
-from neutron.db import l3_db
+from neutron.db.models import l3 as l3_models
 from neutron.db import models_v2
 from neutron.db import provisioning_blocks
 from neutron.db import segments_db
@@ -47,7 +47,6 @@ from neutron.extensions import external_net
 from neutron.extensions import multiprovidernet as mpnet
 from neutron.extensions import portbindings
 from neutron.extensions import providernet as pnet
-from neutron import manager
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import config
@@ -59,7 +58,6 @@ from neutron.plugins.ml2 import managers
 from neutron.plugins.ml2 import models
 from neutron.plugins.ml2 import plugin as ml2_plugin
 from neutron.services.l3_router import l3_router_plugin
-from neutron.services.qos import qos_consts
 from neutron.services.revisions import revision_plugin
 from neutron.services.segments import db as segments_plugin_db
 from neutron.services.segments import plugin as segments_plugin
@@ -149,7 +147,7 @@ class Ml2PluginV2TestCase(test_plugin.NeutronDbPluginV2TestCase):
                                      [self.phys_vrange, self.phys2_vrange],
                                      group='ml2_type_vlan')
         self.setup_parent()
-        self.driver = manager.NeutronManager.get_plugin()
+        self.driver = directory.get_plugin()
         self.context = context.get_admin_context()
 
 
@@ -159,54 +157,6 @@ class TestMl2BulkToggleWithoutBulkless(Ml2PluginV2TestCase):
 
     def test_bulk_enabled_with_bulk_drivers(self):
         self.assertFalse(self._skip_native_bulk)
-
-
-class TestMl2SupportedQosRuleTypes(Ml2PluginV2TestCase):
-
-    def test_empty_driver_list(self, *mocks):
-        mech_drivers_mock = mock.PropertyMock(return_value=[])
-        with mock.patch.object(self.driver.mechanism_manager,
-                               'ordered_mech_drivers',
-                               new_callable=mech_drivers_mock):
-            self.assertEqual(
-                [], self.driver.mechanism_manager.supported_qos_rule_types)
-
-    def test_no_rule_types_in_common(self):
-        self.assertEqual(
-            [], self.driver.mechanism_manager.supported_qos_rule_types)
-
-    @mock.patch.object(mech_logger.LoggerMechanismDriver,
-                       'supported_qos_rule_types',
-                       new_callable=mock.PropertyMock,
-                       create=True)
-    @mock.patch.object(mech_test.TestMechanismDriver,
-                       'supported_qos_rule_types',
-                       new_callable=mock.PropertyMock,
-                       create=True)
-    def test_rule_type_in_common(self, *mocks):
-        # make sure both plugins have the same supported qos rule types
-        for mock_ in mocks:
-            mock_.return_value = qos_consts.VALID_RULE_TYPES
-        for rule in qos_consts.VALID_RULE_TYPES:
-            self.assertIn(
-                rule,
-                self.driver.mechanism_manager.supported_qos_rule_types)
-
-    @mock.patch.object(mech_test.TestMechanismDriver,
-                       'supported_qos_rule_types',
-                       new_callable=mock.PropertyMock,
-                       return_value=qos_consts.VALID_RULE_TYPES,
-                       create=True)
-    @mock.patch.object(mech_logger.LoggerMechanismDriver,
-                       '_supports_port_binding',
-                       new_callable=mock.PropertyMock,
-                       return_value=False)
-    def test_rule_types_with_driver_that_does_not_implement_binding(self,
-                                                                    *mocks):
-        for rule in qos_consts.VALID_RULE_TYPES:
-            self.assertIn(
-                rule,
-                self.driver.mechanism_manager.supported_qos_rule_types)
 
 
 class TestMl2BasicGet(test_plugin.TestBasicGet,
@@ -296,7 +246,7 @@ class TestMl2NetworksV2(test_plugin.TestNetworksV2,
                              kwargs['network']['id'])
 
     def test_port_delete_helper_tolerates_failure(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with mock.patch.object(plugin, "delete_port",
                                side_effect=exc.PortNotFound(port_id="123")):
             plugin._delete_ports(mock.MagicMock(), [mock.MagicMock()])
@@ -306,7 +256,7 @@ class TestMl2NetworksV2(test_plugin.TestNetworksV2,
             plugin._delete_ports(mock.MagicMock(), [mock.MagicMock()])
 
     def test_subnet_delete_helper_tolerates_failure(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with mock.patch.object(plugin, "delete_subnet",
                                side_effect=exc.SubnetNotFound(subnet_id="1")):
             plugin._delete_subnets(mock.MagicMock(), [mock.MagicMock()])
@@ -376,7 +326,9 @@ class TestMl2NetworksV2(test_plugin.TestNetworksV2,
             self.assertEqual(expected, actual)
 
     def test_create_network_segment_allocation_fails(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
+        mock.patch.object(db_api._retry_db_errors, 'max_retries',
+                          new=2).start()
         with mock.patch.object(
             plugin.type_manager, 'create_network_segments',
             side_effect=db_exc.RetryRequest(ValueError())
@@ -386,7 +338,8 @@ class TestMl2NetworksV2(test_plugin.TestNetworksV2,
             req = self.new_create_request('networks', data)
             res = req.get_response(self.api)
             self.assertEqual(500, res.status_int)
-            self.assertEqual(db_api.MAX_RETRIES + 1, f.call_count)
+            # 1 + retry count
+            self.assertEqual(3, f.call_count)
 
 
 class TestExternalNetwork(Ml2PluginV2TestCase):
@@ -483,7 +436,6 @@ class TestMl2NetworksWithVlanTransparencyAndMTU(
                                return_value=True):
             config.cfg.CONF.set_override('path_mtu', 1000, group='ml2')
             config.cfg.CONF.set_override('global_physnet_mtu', 1000)
-            config.cfg.CONF.set_override('advertise_mtu', True)
             network_req = self.new_create_request('networks', self.data)
             res = network_req.get_response(self.api)
             self.assertEqual(201, res.status_int)
@@ -532,7 +484,7 @@ class TestMl2SubnetsV2(test_plugin.TestSubnetsV2,
                              {'subnet_id': s3['subnet']['id']}]
                 with self.port(subnet=s1, fixed_ips=fixed_ips,
                                device_owner=constants.DEVICE_OWNER_DHCP) as p:
-                    plugin = manager.NeutronManager.get_plugin()
+                    plugin = directory.get_plugin()
                     orig_update = plugin.update_port
 
                     def delete_before_update(ctx, *args, **kwargs):
@@ -617,6 +569,21 @@ class TestMl2SubnetsV2(test_plugin.TestSubnetsV2,
                 self.assertEqual(204, res.status_int)
                 self.assertEqual(1, attempt[0])
 
+    def test_create_subnet_check_mtu_in_mech_context(self):
+        plugin = directory.get_plugin()
+        plugin.mechanism_manager.create_subnet_precommit = mock.Mock()
+        net_arg = {pnet.NETWORK_TYPE: 'vxlan',
+                   pnet.SEGMENTATION_ID: '1'}
+        network = self._make_network(self.fmt, 'net1', True,
+                                     arg_list=(pnet.NETWORK_TYPE,
+                                               pnet.SEGMENTATION_ID,),
+                                     **net_arg)
+        with self.subnet(network=network):
+            mock_subnet_pre = plugin.mechanism_manager.create_subnet_precommit
+            observerd_mech_context = mock_subnet_pre.call_args_list[0][0][0]
+            self.assertEqual(network['network']['mtu'],
+                             observerd_mech_context.network.current['mtu'])
+
 
 class TestMl2DbOperationBounds(test_plugin.DbOperationBoundMixin,
                                Ml2PluginV2TestCase):
@@ -655,16 +622,47 @@ class TestMl2DbOperationBounds(test_plugin.DbOperationBoundMixin,
 
     def test_port_list_queries_constant(self):
         self._assert_object_list_queries_constant(self.make_port, 'ports')
+        self._assert_object_list_queries_constant(self.make_port, 'ports',
+                                                  filters=['device_id'])
+        self._assert_object_list_queries_constant(self.make_port, 'ports',
+                                                  filters=['device_id',
+                                                           'device_owner'])
+        self._assert_object_list_queries_constant(self.make_port, 'ports',
+                                                  filters=['tenant_id',
+                                                           'name',
+                                                           'device_id'])
 
 
 class TestMl2DbOperationBoundsTenant(TestMl2DbOperationBounds):
     admin = False
 
 
+class TestMl2DbOperationBoundsTenantRbac(TestMl2DbOperationBoundsTenant):
+
+    def make_port_in_shared_network(self):
+        context_ = self._get_context()
+        # create shared network owned by the tenant; we use direct driver call
+        # because default policy does not allow users to create shared networks
+        net = self.driver.create_network(
+            context.get_admin_context(),
+            {'network': {'name': 'net1',
+                         'tenant_id': context_.tenant,
+                         'admin_state_up': True,
+                         'shared': True}})
+        # create port that belongs to another tenant
+        return self._make_port(
+            self.fmt, net['id'],
+            set_context=True, tenant_id='fake_tenant')
+
+    def test_port_list_in_shared_network_queries_constant(self):
+        self._assert_object_list_queries_constant(
+            self.make_port_in_shared_network, 'ports')
+
+
 class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test__port_provisioned_with_blocks(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         ups = mock.patch.object(plugin, 'update_port_status').start()
         with self.port() as port:
             mock.patch('neutron.plugins.ml2.plugin.db.get_port').start()
@@ -675,7 +673,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
         self.assertFalse(ups.called)
 
     def test__port_provisioned_no_binding(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with self.network() as net:
             net_id = net['network']['id']
         port_id = 'fake_id'
@@ -696,8 +694,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                                'create_port_postcommit',
                                side_effect=ml2_exc.MechanismDriverError(
                                    method='create_port_postcommit')):
-            l3_plugin = manager.NeutronManager.get_service_plugins().get(
-                            p_const.L3_ROUTER_NAT)
+            l3_plugin = directory.get_plugin(constants.L3)
             data = {'router': {'name': 'router', 'admin_state_up': True,
                                'tenant_id': self.context.tenant_id}}
             r = l3_plugin.create_router(self.context, data)
@@ -714,8 +711,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
         with mock.patch.object(ml2_plugin.Ml2Plugin, '_bind_port_if_needed',
                                side_effect=ml2_exc.MechanismDriverError(
                                    method='_bind_port_if_needed')):
-            l3_plugin = manager.NeutronManager.get_service_plugins().get(
-                            p_const.L3_ROUTER_NAT)
+            l3_plugin = directory.get_plugin(constants.L3)
             data = {'router': {'name': 'router', 'admin_state_up': True,
                                'tenant_id': self.context.tenant_id}}
             r = l3_plugin.create_router(self.context, data)
@@ -734,7 +730,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_update_port_status_short_id(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with self.port() as port:
             with mock.patch.object(ml2_db, 'get_binding_levels',
                                    return_value=[]) as mock_gbl:
@@ -745,7 +741,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def _add_fake_dhcp_agent(self):
         agent = mock.Mock(configurations='{"notifies_port_ready": true}')
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         self.get_dhcp_mock = mock.patch.object(
             plugin, 'get_dhcp_agents_hosting_networks',
             return_value=[agent]).start()
@@ -774,7 +770,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_dhcp_provisioning_blocks_inserted_on_update(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         self._add_fake_dhcp_agent()
         with self.port() as port:
             with mock.patch.object(provisioning_blocks,
@@ -789,9 +785,25 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
             with self.port():
                 self.assertTrue(cp.called)
 
+    def test_create_update_get_port_same_fixed_ips_order(self):
+        ctx = context.get_admin_context()
+        plugin = directory.get_plugin()
+        initial_fixed_ips = [{'ip_address': '10.0.0.5'},
+                             {'ip_address': '10.0.0.7'},
+                             {'ip_address': '10.0.0.6'}]
+        with self.port(fixed_ips=initial_fixed_ips) as port:
+            show = plugin.get_port(ctx, port['port']['id'])
+            self.assertEqual(port['port']['fixed_ips'], show['fixed_ips'])
+            new_fixed_ips = list(reversed(initial_fixed_ips))
+            port['port']['fixed_ips'] = new_fixed_ips
+            updated = plugin.update_port(ctx, port['port']['id'], port)
+            self.assertEqual(show['fixed_ips'], updated['fixed_ips'])
+            updated = plugin.get_port(ctx, port['port']['id'])
+            self.assertEqual(show['fixed_ips'], updated['fixed_ips'])
+
     def test_update_port_fixed_ip_changed(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         fixed_ip_data = [{'ip_address': '10.0.0.4'}]
         with self.port(fixed_ips=fixed_ip_data) as port,\
             mock.patch.object(
@@ -804,7 +816,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
     def test_update_port_status_with_network(self):
         registry.clear()  # don't care about callback behavior
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with self.port() as port:
             net = plugin.get_network(ctx, port['port']['network_id'])
             with mock.patch.object(plugin, 'get_network') as get_net:
@@ -819,14 +831,14 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_update_non_existent_port(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         data = {'port': {'admin_state_up': False}}
         self.assertRaises(exc.PortNotFound, plugin.update_port, ctx,
                           'invalid-uuid', data)
 
     def test_delete_non_existent_port(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with mock.patch.object(ml2_plugin.LOG, 'debug') as log_debug:
             plugin.delete_port(ctx, 'invalid-uuid', l3_port_check=False)
             log_debug.assert_has_calls([
@@ -835,8 +847,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
             ])
 
     def test_l3_cleanup_on_net_delete(self):
-        l3plugin = manager.NeutronManager.get_service_plugins().get(
-            p_const.L3_ROUTER_NAT)
+        l3plugin = directory.get_plugin(constants.L3)
         kwargs = {'arg_list': (external_net.EXTERNAL,),
                   external_net.EXTERNAL: True}
         with self.network(**kwargs) as n:
@@ -854,7 +865,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
     def test_create_ports_bulk_port_binding_failure(self):
         ctx = context.get_admin_context()
         with self.network() as net:
-            plugin = manager.NeutronManager.get_plugin()
+            plugin = directory.get_plugin()
 
             with mock.patch.object(plugin, '_bind_port_if_needed',
                 side_effect=ml2_exc.MechanismDriverError(
@@ -870,7 +881,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_create_ports_bulk_with_sec_grp(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with self.network() as net,\
                 mock.patch.object(plugin.notifier,
                                   'security_groups_member_updated') as m_upd,\
@@ -895,7 +906,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_create_ports_bulk_with_sec_grp_member_provider_update(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with self.network() as net,\
                 mock.patch.object(plugin.notifier,
                                   'security_groups_member_updated') as m_upd,\
@@ -930,7 +941,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_create_ports_bulk_with_sec_grp_provider_update_ipv6(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         fake_prefix = '2001:db8::/64'
         fake_gateway = 'fe80::1'
         with self.network() as net:
@@ -961,9 +972,8 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_delete_port_no_notify_in_disassociate_floatingips(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
-        l3plugin = manager.NeutronManager.get_service_plugins().get(
-            p_const.L3_ROUTER_NAT)
+        plugin = directory.get_plugin()
+        l3plugin = directory.get_plugin(constants.L3)
         with self.port() as port,\
                 mock.patch.object(
                     l3plugin,
@@ -981,6 +991,23 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
             # check that notifier was still triggered
             self.assertTrue(notify.call_counts)
+
+    def test_registry_notify_after_port_binding(self):
+        plugin = directory.get_plugin()
+        ctx = context.get_admin_context()
+        update_events = []
+        receiver = lambda *a, **k: update_events.append(k['port'])
+        registry.subscribe(receiver, resources.PORT,
+                           events.AFTER_UPDATE)
+        with self.port() as p:
+            port = {'port': {'binding:host_id': 'newhost'}}
+            plugin.update_port(ctx, p['port']['id'], port)
+        # updating in the host should result in two AFTER_UPDATE events.
+        # one to change the host_id, the second to commit a binding
+        self.assertEqual('newhost', update_events[0]['binding:host_id'])
+        self.assertEqual('unbound', update_events[0]['binding:vif_type'])
+        self.assertEqual('newhost', update_events[1]['binding:host_id'])
+        self.assertNotEqual('unbound', update_events[1]['binding:vif_type'])
 
     def test_check_if_compute_port_serviced_by_dvr(self):
         self.assertTrue(utils.is_dvr_serviced(DEVICE_OWNER_COMPUTE))
@@ -1002,8 +1029,7 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_disassociate_floatingips_do_notify_returns_nothing(self):
         ctx = context.get_admin_context()
-        l3plugin = manager.NeutronManager.get_service_plugins().get(
-            p_const.L3_ROUTER_NAT)
+        l3plugin = directory.get_plugin(constants.L3)
         with self.port() as port:
 
             port_id = port['port']['id']
@@ -1041,10 +1067,10 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_delete_port_tolerates_db_deadlock(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with self.port() as port:
             port_db, binding = ml2_db.get_locked_port_and_binding(
-                ctx.session, port['port']['id'])
+                ctx, port['port']['id'])
             with mock.patch('neutron.plugins.ml2.plugin.'
                             'db.get_locked_port_and_binding') as lock:
                 lock.side_effect = [db_exc.DBDeadlock,
@@ -1081,7 +1107,6 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                     do_request)
 
     def _test_operation_resillient_to_ipallocation_failure(self, func):
-        from sqlalchemy import event
 
         class IPAllocationsGrenade(object):
             insert_ip_called = False
@@ -1099,13 +1124,9 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                     raise db_exc.DBDuplicateEntry()
 
         listener = IPAllocationsGrenade()
-        engine = db_api.context_manager.get_legacy_facade().get_engine()
-        event.listen(engine, 'before_cursor_execute', listener.execute)
-        event.listen(engine, 'commit', listener.commit)
-        self.addCleanup(event.remove, engine, 'before_cursor_execute',
-                        listener.execute)
-        self.addCleanup(event.remove, engine, 'commit',
-                        listener.commit)
+        engine = db_api.context_manager.writer.get_engine()
+        db_api.sqla_listen(engine, 'before_cursor_execute', listener.execute)
+        db_api.sqla_listen(engine, 'commit', listener.commit)
         func()
         # make sure that the grenade went off during the commit
         self.assertTrue(listener.except_raised)
@@ -1119,7 +1140,7 @@ class TestMl2PortsV2WithRevisionPlugin(Ml2PluginV2TestCase):
 
     def test_update_port_status_bumps_revision(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         host_arg = {portbindings.HOST_ID: HOST}
         with self.port(arg_list=(portbindings.HOST_ID,),
                        **host_arg) as port:
@@ -1140,11 +1161,10 @@ class TestMl2PortsV2WithL3(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
 
     def test_update_port_status_notify_port_event_after_update(self):
         ctx = context.get_admin_context()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         # enable subscription for events
         l3_router_plugin.L3RouterPlugin()
-        l3plugin = manager.NeutronManager.get_service_plugins().get(
-            p_const.L3_ROUTER_NAT)
+        l3plugin = directory.get_plugin(constants.L3)
         host_arg = {portbindings.HOST_ID: HOST}
         with mock.patch.object(l3plugin.l3_rpc_notifier,
                                'routers_updated_on_host') as mock_updated:
@@ -1163,7 +1183,7 @@ class TestMl2PluginOnly(Ml2PluginV2TestCase):
     """For testing methods that don't call drivers"""
 
     def test__verify_service_plugins_requirements(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with mock.patch.dict(ml2_plugin.SERVICE_PLUGINS_REQUIRED_DRIVERS,
                              {self.l3_plugin: self._mechanism_drivers}),\
                 mock.patch.object(plugin.extension_manager,
@@ -1173,7 +1193,7 @@ class TestMl2PluginOnly(Ml2PluginV2TestCase):
             plugin._verify_service_plugins_requirements()
 
     def test__verify_service_plugins_requirements_missing_driver(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with mock.patch.dict(ml2_plugin.SERVICE_PLUGINS_REQUIRED_DRIVERS,
                              {self.l3_plugin: ['test_required_driver']}),\
                 mock.patch.object(plugin.extension_manager,
@@ -1186,7 +1206,7 @@ class TestMl2PluginOnly(Ml2PluginV2TestCase):
             )
 
     def _test_check_mac_update_allowed(self, vif_type, expect_change=True):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         port = {'mac_address': "fake_mac", 'id': "fake_id"}
         if expect_change:
             new_attrs = {"mac_address": "dummy_mac"}
@@ -1237,7 +1257,7 @@ class TestMl2PluginOnly(Ml2PluginV2TestCase):
 class Test_GetNetworkMtu(Ml2PluginV2TestCase):
 
     def test_get_mtu_with_physical_net(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         mock_type_driver = mock.MagicMock()
         plugin.type_manager.drivers['driver1'] = mock.Mock()
         plugin.type_manager.drivers['driver1'].obj = mock_type_driver
@@ -1250,7 +1270,7 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
         mock_type_driver.get_mtu.assert_called_once_with('physnet1')
 
     def _register_type_driver_with_mtu(self, driver, mtu):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
 
         class FakeDriver(object):
             def get_mtu(self, physical_network=None):
@@ -1261,7 +1281,7 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
         plugin.type_manager.drivers[driver] = driver_mock
 
     def test_single_segment(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         self._register_type_driver_with_mtu('driver1', 1400)
 
         net = {
@@ -1276,7 +1296,7 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
         self.assertEqual(1400, plugin._get_network_mtu(net))
 
     def test_multiple_segments_returns_minimal_mtu(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         self._register_type_driver_with_mtu('driver1', 1400)
         self._register_type_driver_with_mtu('driver2', 1300)
 
@@ -1296,7 +1316,7 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
         self.assertEqual(1300, plugin._get_network_mtu(net))
 
     def test_no_segments(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         self._register_type_driver_with_mtu('driver1', 1400)
 
         net = {
@@ -1307,7 +1327,7 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
         self.assertEqual(1400, plugin._get_network_mtu(net))
 
     def test_get_mtu_None_returns_0(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         self._register_type_driver_with_mtu('driver1', None)
 
         net = {
@@ -1318,7 +1338,7 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
         self.assertEqual(0, plugin._get_network_mtu(net))
 
     def test_unknown_segment_type_ignored(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         self._register_type_driver_with_mtu('driver1', None)
         self._register_type_driver_with_mtu('driver2', 1300)
 
@@ -1344,23 +1364,20 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
         extensions = ['router',
                       constants.L3_AGENT_SCHEDULER_EXT_ALIAS,
                       constants.L3_DISTRIBUTED_EXT_ALIAS]
-        self.plugin = manager.NeutronManager.get_plugin()
+        self.plugin = directory.get_plugin()
         self.l3plugin = mock.Mock()
         type(self.l3plugin).supported_extension_aliases = (
             mock.PropertyMock(return_value=extensions))
-        self.service_plugins = {'L3_ROUTER_NAT': self.l3plugin}
 
     def test_delete_port_notifies_l3_plugin(self, floating_ip=False):
+        directory.add_plugin(constants.L3, self.l3plugin)
         ns_to_delete = {'host': 'myhost', 'agent_id': 'vm_l3_agent',
                         'router_id': 'my_router'}
         router_ids = set()
         if floating_ip:
             router_ids.add(ns_to_delete['router_id'])
 
-        with mock.patch.object(manager.NeutronManager,
-                               'get_service_plugins',
-                               return_value=self.service_plugins),\
-                self.port() as port,\
+        with self.port() as port,\
                 mock.patch.object(registry, 'notify') as notify,\
                 mock.patch.object(self.l3plugin,
                                   'disassociate_floatingips',
@@ -1383,8 +1400,7 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
         self.test_delete_port_notifies_l3_plugin(floating_ip=True)
 
     def test_concurrent_csnat_port_delete(self):
-        plugin = manager.NeutronManager.get_service_plugins()[
-            p_const.L3_ROUTER_NAT]
+        plugin = directory.get_plugin(constants.L3)
         r = plugin.create_router(
             self.context,
             {'router': {'name': 'router', 'admin_state_up': True,
@@ -1395,7 +1411,7 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
 
         # lie to turn the port into an SNAT interface
         with self.context.session.begin():
-            rp = self.context.session.query(l3_db.RouterPort).filter_by(
+            rp = self.context.session.query(l3_models.RouterPort).filter_by(
                 port_id=p['port_id']).first()
             rp.port_type = constants.DEVICE_OWNER_ROUTER_SNAT
 
@@ -1472,8 +1488,8 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
     def test_return_on_concurrent_delete_and_binding(self):
         # create a port and delete it so we have an expired mechanism context
         with self.port() as port:
-            plugin = manager.NeutronManager.get_plugin()
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            plugin = directory.get_plugin()
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'test'
             mech_context = driver_context.PortContext(
@@ -1493,8 +1509,8 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
 
     def _create_port_and_bound_context(self, port_vif_type, bound_vif_type):
         with self.port() as port:
-            plugin = manager.NeutronManager.get_plugin()
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            plugin = directory.get_plugin()
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'fake_host'
             binding['vif_type'] = port_vif_type
@@ -1593,8 +1609,8 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
 
     def test_update_port_binding_host_id_none(self):
         with self.port() as port:
-            plugin = manager.NeutronManager.get_plugin()
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            plugin = directory.get_plugin()
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'test'
             mech_context = driver_context.PortContext(
@@ -1610,8 +1626,8 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
 
     def test_update_port_binding_host_id_not_changed(self):
         with self.port() as port:
-            plugin = manager.NeutronManager.get_plugin()
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            plugin = directory.get_plugin()
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'test'
             mech_context = driver_context.PortContext(
@@ -1634,7 +1650,7 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
                             vif_type=portbindings.VIF_TYPE_OVS,
                             vnic_type=portbindings.VNIC_NORMAL,
                             status=constants.PORT_STATUS_DOWN)
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         mock_network = {'id': 'net_id'}
         mock_port = {'id': 'port_id'}
         context = mock.Mock()
@@ -1652,7 +1668,7 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
                 self.assertEqual(host_id, mech_context._binding.host)
 
     def test_update_distributed_port_binding_on_concurrent_port_delete(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with self.port() as port:
             port = {
                 'id': port['port']['id'],
@@ -1666,7 +1682,7 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
         self.assertIsNone(res)
 
     def test_update_distributed_port_binding_on_non_existent_port(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         port = {
             'id': 'foo_port_id',
             portbindings.HOST_ID: 'foo_host',
@@ -1676,6 +1692,20 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
             plugin.update_distributed_port_binding(
                 self.context, 'foo_port_id', {'port': port})
         self.assertFalse(mock_dist.called)
+
+    def test__bind_port_original_port_set(self):
+        plugin = directory.get_plugin()
+        plugin.mechanism_manager = mock.Mock()
+        mock_port = {'id': 'port_id'}
+        context = mock.Mock()
+        context.network.current = {'id': 'net_id'}
+        context.original = mock_port
+        with mock.patch.object(plugin, '_update_port_dict_binding'), \
+            mock.patch.object(segments_db, 'get_network_segments',
+                              return_value=[]):
+            new_context = plugin._bind_port(context)
+            self.assertEqual(mock_port, new_context.original)
+            self.assertFalse(new_context == context)
 
 
 class TestMl2PortBindingNoSG(TestMl2PortBinding):
@@ -1711,18 +1741,18 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1')
+            self.context, network_id, 'physnet1')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet1',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
-        self.assertTrue(dynamic_segment[driver_api.SEGMENTATION_ID] > 0)
+        self.assertGreater(dynamic_segment[driver_api.SEGMENTATION_ID], 0)
         segment2 = {driver_api.NETWORK_TYPE: 'vlan',
                     driver_api.SEGMENTATION_ID: 1234,
                     driver_api.PHYSICAL_NETWORK: 'physnet3'}
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment2)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, segmentation_id='1234')
+            self.context, network_id, segmentation_id='1234')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet3',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
@@ -1740,14 +1770,14 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1')
+            self.context, network_id, 'physnet1')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet1',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
         dynamic_segmentation_id = dynamic_segment[driver_api.SEGMENTATION_ID]
-        self.assertTrue(dynamic_segmentation_id > 0)
+        self.assertGreater(dynamic_segmentation_id, 0)
         dynamic_segment1 = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1')
+            self.context, network_id, 'physnet1')
         dynamic_segment1_id = dynamic_segment1[driver_api.SEGMENTATION_ID]
         self.assertEqual(dynamic_segmentation_id, dynamic_segment1_id)
         segment2 = {driver_api.NETWORK_TYPE: 'vlan',
@@ -1755,7 +1785,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment2)
         dynamic_segment2 = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet2')
+            self.context, network_id, 'physnet2')
         dynamic_segmentation2_id = dynamic_segment2[driver_api.SEGMENTATION_ID]
         self.assertNotEqual(dynamic_segmentation_id, dynamic_segmentation2_id)
 
@@ -1771,16 +1801,16 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1')
+            self.context, network_id, 'physnet1')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet1',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
         dynamic_segmentation_id = dynamic_segment[driver_api.SEGMENTATION_ID]
-        self.assertTrue(dynamic_segmentation_id > 0)
+        self.assertGreater(dynamic_segmentation_id, 0)
         self.driver.type_manager.release_dynamic_segment(
-            self.context.session, dynamic_segment[driver_api.ID])
+            self.context, dynamic_segment[driver_api.ID])
         self.assertIsNone(segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet1'))
+            self.context, network_id, 'physnet1'))
 
     def test_create_network_provider(self):
         data = {'network': {'name': 'net1',
@@ -1908,11 +1938,11 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
         self.driver.type_manager.allocate_dynamic_segment(
             self.context, network_id, segment)
         dynamic_segment = segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet2')
+            self.context, network_id, 'physnet2')
         self.assertEqual('vlan', dynamic_segment[driver_api.NETWORK_TYPE])
         self.assertEqual('physnet2',
                          dynamic_segment[driver_api.PHYSICAL_NETWORK])
-        self.assertTrue(dynamic_segment[driver_api.SEGMENTATION_ID] > 0)
+        self.assertGreater(dynamic_segment[driver_api.SEGMENTATION_ID], 0)
 
         with mock.patch.object(type_vlan.VlanTypeDriver,
                                'release_segment') as rs:
@@ -1921,9 +1951,9 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
             res = req.get_response(self.api)
             self.assertEqual(2, rs.call_count)
         self.assertEqual([], segments_db.get_network_segments(
-            self.context.session, network_id))
+            self.context, network_id))
         self.assertIsNone(segments_db.get_dynamic_segment(
-            self.context.session, network_id, 'physnet2'))
+            self.context, network_id, 'physnet2'))
 
     def test_release_segment_no_type_driver(self):
         data = {'network': {'name': 'net1',
@@ -1945,7 +1975,7 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
             with mock.patch('neutron.plugins.ml2.managers.segments_db') as db:
                 db.get_network_segments.return_value = (segment,)
                 self.driver.type_manager.release_network_segments(
-                    self.context.session, network_id)
+                    self.context, network_id)
 
                 log.error.assert_called_once_with(
                     "Failed to release segment '%s' because "
@@ -2010,7 +2040,7 @@ class TestMl2PortSecurity(Ml2PluginV2TestCase):
 
     def test_port_update_without_security_groups(self):
         with self.port() as port:
-            plugin = manager.NeutronManager.get_plugin()
+            plugin = directory.get_plugin()
             ctx = context.get_admin_context()
             self.assertTrue(port['port']['port_security_enabled'])
             updated_port = plugin.update_port(
@@ -2081,8 +2111,7 @@ class TestMl2HostsNetworkAccess(Ml2PluginV2TestCase):
 class DHCPOptsTestCase(test_dhcpopts.TestExtraDhcpOpt):
 
     def setUp(self, plugin=None):
-        super(test_dhcpopts.ExtraDhcpOptDBTestCase, self).setUp(
-            plugin=PLUGIN_NAME)
+        super(DHCPOptsTestCase, self).setUp(plugin=PLUGIN_NAME)
 
 
 class Ml2PluginV2FaultyDriverTestCase(test_plugin.NeutronDbPluginV2TestCase):
@@ -2107,7 +2136,7 @@ class TestFaultyMechansimDriver(Ml2PluginV2FaultyDriverTestCase):
                                'create_network_postcommit',
                                side_effect=(exc.InvalidInput(
                                                 error_message=err_msg))):
-            tenant_id = str(uuid.uuid4())
+            tenant_id = uuidutils.generate_uuid()
             data = {'network': {'name': 'net1',
                                 'tenant_id': tenant_id}}
             req = self.new_create_request('networks', data)
@@ -2441,7 +2470,7 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
         super(TestMl2PluginCreateUpdateDeletePort, self).setUp()
         # TODO(ihrachys): revisit plugin setup once we decouple
         # neutron.objects.db.api from core plugin instance
-        self.setup_coreplugin(PLUGIN_NAME)
+        self.setup_coreplugin(PLUGIN_NAME, load_plugins=False)
         self.context = mock.MagicMock()
         self.context.session.is_active = False
         self.notify_p = mock.patch('neutron.callbacks.registry.notify')
@@ -2455,6 +2484,7 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
 
     def _create_plugin_for_create_update_port(self):
         plugin = ml2_plugin.Ml2Plugin()
+        directory.add_plugin(constants.CORE, plugin)
         plugin.extension_manager = mock.Mock()
         plugin.type_manager = mock.Mock()
         plugin.mechanism_manager = mock.Mock()
@@ -2523,16 +2553,25 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
             plugin = self._create_plugin_for_create_update_port()
             original_port = plugin._make_port_dict(original_port_db)
 
-            plugin.update_port(self.context, port_id, mock.MagicMock())
+            res = plugin.update_port(self.context, port_id, mock.MagicMock())
 
-            kwargs = {
+            first_update = {
                 'context': self.context,
                 'port': updated_port,
                 'mac_address_updated': True,
                 'original_port': original_port,
             }
-            self.notify.assert_called_once_with('port', 'after_update',
-                plugin, **kwargs)
+            bind_update = {
+                'context': self.context,
+                'port': res,
+                'mac_address_updated': False,
+                'original_port': original_port,
+            }
+            expected = [
+                mock.call('port', 'after_update', plugin, **first_update),
+                mock.call('port', 'after_update', plugin, **bind_update)
+            ]
+            self.notify.assert_has_calls(expected)
 
     def test_notify_outside_of_delete_transaction(self):
         self.notify.side_effect = (
@@ -2545,9 +2584,9 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
         with mock.patch.object(ml2_plugin.Ml2Plugin,
                                '__init__',
                                return_value=None),\
-                mock.patch.object(manager.NeutronManager,
-                                  'get_service_plugins',
-                                  return_value={'L3_ROUTER_NAT': l3plugin}),\
+                mock.patch.object(directory,
+                                  'get_plugins',
+                                  return_value={constants.L3: l3plugin}),\
                 mock.patch.object(ml2_plugin.Ml2Plugin,
                                   '_get_network_mtu'):
             plugin = self._create_plugin_for_create_update_port()
@@ -2561,14 +2600,14 @@ class TestMl2PluginCreateUpdateDeletePort(base.BaseTestCase):
 
 class TestTransactionGuard(Ml2PluginV2TestCase):
     def test_delete_network_guard(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         ctx = context.get_admin_context()
         with ctx.session.begin(subtransactions=True):
             with testtools.ExpectedException(RuntimeError):
                 plugin.delete_network(ctx, 'id')
 
     def test_delete_subnet_guard(self):
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         ctx = context.get_admin_context()
         with ctx.session.begin(subtransactions=True):
             with testtools.ExpectedException(RuntimeError):
@@ -2639,10 +2678,9 @@ class TestML2Segments(Ml2PluginV2TestCase):
         with self.network() as network:
             network = network['network']
 
-        for stale_seg in segments_db.get_network_segments(self.context.session,
+        for stale_seg in segments_db.get_network_segments(self.context,
                                                           network['id']):
-            segments_db.delete_network_segment(self.context.session,
-                                               stale_seg['id'])
+            segments_db.delete_network_segment(self.context, stale_seg['id'])
 
         for seg in [seg1, seg2, seg3]:
             seg['network_id'] = network['id']
@@ -2682,9 +2720,9 @@ class TestML2Segments(Ml2PluginV2TestCase):
     def test_prevent_delete_segment_with_tenant_port(self):
         fake_owner_compute = constants.DEVICE_OWNER_COMPUTE_PREFIX + 'fake'
         ml2_db.subscribe()
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         with self.port(device_owner=fake_owner_compute) as port:
-            binding = ml2_db.get_locked_port_and_binding(self.context.session,
+            binding = ml2_db.get_locked_port_and_binding(self.context,
                                                          port['port']['id'])[1]
             binding['host'] = 'host-ovs-no_filter'
             mech_context = driver_context.PortContext(
@@ -2693,7 +2731,7 @@ class TestML2Segments(Ml2PluginV2TestCase):
                 binding, None)
             plugin._bind_port_if_needed(mech_context)
             segment = segments_db.get_network_segments(
-                self.context.session, port['port']['network_id'])[0]
+                self.context, port['port']['network_id'])[0]
             segment['network_id'] = port['port']['network_id']
             self.assertRaises(c_exc.CallbackFailure, registry.notify,
                               resources.SEGMENT, events.BEFORE_DELETE,

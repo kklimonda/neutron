@@ -25,6 +25,7 @@ from oslo_config import cfg
 import psutil
 
 from neutron.common import utils
+from neutron import manager
 from neutron import service
 from neutron.tests import base
 from neutron import worker as neutron_worker
@@ -109,7 +110,10 @@ class TestNeutronServer(base.BaseTestCase):
 
         def safe_ppid(proc):
             try:
-                return proc.ppid
+                if psutil.version_info[0] == 1:
+                    return proc.ppid
+                else:
+                    return proc.ppid()
             except psutil.NoSuchProcess:
                 return None
 
@@ -223,7 +227,7 @@ class TestRPCServer(TestNeutronServer):
 
     def setUp(self):
         super(TestRPCServer, self).setUp()
-        self.setup_coreplugin('ml2')
+        self.setup_coreplugin('ml2', load_plugins=False)
         self._plugin_patcher = mock.patch(TARGET_PLUGIN, autospec=True)
         self.plugin = self._plugin_patcher.start()
         self.plugin.return_value.rpc_workers_supported = True
@@ -235,7 +239,7 @@ class TestRPCServer(TestNeutronServer):
         # receiving SIGHUP.
         with mock.patch("neutron.service.RpcWorker.start") as start_method:
             with mock.patch(
-                    "neutron.manager.NeutronManager.get_plugin"
+                    "neutron_lib.plugins.directory.get_plugin"
             ) as get_plugin:
                 start_method.side_effect = self._fake_start
                 get_plugin.return_value = self.plugin
@@ -257,12 +261,13 @@ class TestPluginWorker(TestNeutronServer):
 
     def setUp(self):
         super(TestPluginWorker, self).setUp()
-        self.setup_coreplugin('ml2')
+        self.setup_coreplugin('ml2', load_plugins=False)
         self._plugin_patcher = mock.patch(TARGET_PLUGIN, autospec=True)
         self.plugin = self._plugin_patcher.start()
+        manager.init()
 
     def _start_plugin(self, workers=1):
-        with mock.patch('neutron.manager.NeutronManager.get_plugin') as gp:
+        with mock.patch('neutron_lib.plugins.directory.get_plugin') as gp:
             gp.return_value = self.plugin
             plugin_workers_launcher = service.start_plugins_workers()
             plugin_workers_launcher.wait()

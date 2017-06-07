@@ -14,39 +14,20 @@
 # limitations under the License.
 
 from neutron_lib import constants
-from oslo_config import cfg
 from oslo_log import log
 
-from neutron._i18n import _, _LE, _LW
+from neutron._i18n import _LW
 from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import mech_agent
 from neutron.plugins.ml2.drivers.mech_sriov.mech_driver \
     import exceptions as exc
-from neutron.services.qos import qos_consts
+from neutron.services.qos.drivers.sriov import driver as sriov_qos_driver
 
 
 LOG = log.getLogger(__name__)
-VIF_TYPE_HW_VEB = 'hw_veb'
-VIF_TYPE_HOSTDEV_PHY = 'hostdev_physical'
 FLAT_VLAN = 0
-
-sriov_opts = [
-    cfg.ListOpt('supported_pci_vendor_devs',
-               help=_("Comma-separated list of supported PCI vendor devices, "
-                      "as defined by vendor_id:product_id according to the "
-                      "PCI ID Repository. Default None accept all PCI vendor "
-                      "devices"
-                      "DEPRECATED: This option is deprecated in the Newton "
-                      "release and will be removed in the Ocata release. "
-                      "Starting from Ocata the mechanism driver will accept "
-                      "all PCI vendor devices."),
-                deprecated_for_removal=True),
-
-]
-
-cfg.CONF.register_opts(sriov_opts, "ml2_sriov")
 
 
 class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
@@ -61,11 +42,6 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
     VIF Driver via libvirt domain XML.
     L2 Agent presents in  order to manage port update events.
     """
-
-    supported_qos_rule_types = [
-        qos_consts.RULE_TYPE_BANDWIDTH_LIMIT,
-        qos_consts.RULE_TYPE_MINIMUM_BANDWIDTH,
-    ]
 
     def __init__(self,
                  agent_type=constants.AGENT_TYPE_NIC_SWITCH,
@@ -83,26 +59,18 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self.supported_vnic_types = supported_vnic_types
         # NOTE(ndipanov): PF passthrough requires a different vif type
         self.vnic_type_for_vif_type = (
-            {vtype: VIF_TYPE_HOSTDEV_PHY
+            {vtype: portbindings.VIF_TYPE_HOSTDEV_PHY
                 if vtype == portbindings.VNIC_DIRECT_PHYSICAL
-                else VIF_TYPE_HW_VEB
+                else portbindings.VIF_TYPE_HW_VEB
              for vtype in self.supported_vnic_types})
         self.vif_details = vif_details
+        sriov_qos_driver.register()
 
     def get_allowed_network_types(self, agent):
         return (p_const.TYPE_FLAT, p_const.TYPE_VLAN)
 
     def get_mappings(self, agent):
         return agent['configurations'].get('device_mappings', {})
-
-    def initialize(self):
-        try:
-            self.pci_vendor_info = cfg.CONF.ml2_sriov.supported_pci_vendor_devs
-            if self.pci_vendor_info is not None:
-                self._check_pci_vendor_config(self.pci_vendor_info)
-        except ValueError:
-            LOG.exception(_LE("Failed to parse supported PCI vendor devices"))
-            raise cfg.Error(_("Parsing supported pci_vendor_devs failed"))
 
     def bind_port(self, context):
         LOG.debug("Attempting to bind port %(port)s on "
@@ -114,10 +82,6 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         if vnic_type not in self.supported_vnic_types:
             LOG.debug("Refusing to bind due to unsupported vnic_type: %s",
                       vnic_type)
-            return
-
-        if not self._check_supported_pci_vendor_device(context):
-            LOG.debug("Refusing to bind due to unsupported pci_vendor device")
             return
 
         if vnic_type == portbindings.VNIC_DIRECT_PHYSICAL:
@@ -148,8 +112,9 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
     def try_to_bind_segment_for_agent(self, context, segment, agent):
         vnic_type = context.current.get(portbindings.VNIC_TYPE,
                                         portbindings.VNIC_DIRECT)
-        vif_type = self.vnic_type_for_vif_type.get(vnic_type,
-                                                   VIF_TYPE_HW_VEB)
+        vif_type = self.vnic_type_for_vif_type.get(
+            vnic_type, portbindings.VIF_TYPE_HW_VEB)
+
         if not self.check_segment_for_agent(segment, agent):
             return False
         port_status = (constants.PORT_STATUS_ACTIVE if agent is None
@@ -183,24 +148,6 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         """SR-IOV driver vlan transparency support."""
         return True
 
-    def _check_supported_pci_vendor_device(self, context):
-        if self.pci_vendor_info is None:
-            return True
-        if self.pci_vendor_info:
-            profile = context.current.get(portbindings.PROFILE, {})
-            if not profile:
-                LOG.debug("Missing profile in port binding")
-                return False
-            pci_vendor_info = profile.get('pci_vendor_info')
-            if not pci_vendor_info:
-                LOG.debug("Missing pci vendor info in profile")
-                return False
-            if pci_vendor_info not in self.pci_vendor_info:
-                LOG.debug("Unsupported pci_vendor %s", pci_vendor_info)
-                return False
-            return True
-        return False
-
     def _get_vif_details(self, segment):
         network_type = segment[api.NETWORK_TYPE]
         if network_type == p_const.TYPE_FLAT:
@@ -212,15 +159,3 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         vif_details = self.vif_details.copy()
         vif_details[portbindings.VIF_DETAILS_VLAN] = str(vlan_id)
         return vif_details
-
-    @staticmethod
-    def _check_pci_vendor_config(pci_vendor_list):
-        for pci_vendor_info in pci_vendor_list:
-            try:
-                vendor_id, product_id = [
-                    item.strip() for item in pci_vendor_info.split(':')
-                    if item.strip()]
-            except ValueError:
-                raise ValueError(_('Incorrect pci_vendor_info: "%s", should be'
-                                   ' pair vendor_id:product_id') %
-                                 pci_vendor_info)

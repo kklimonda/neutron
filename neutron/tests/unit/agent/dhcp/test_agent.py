@@ -69,7 +69,8 @@ fake_subnet2 = dhcp.DictModel(dict(id='dddddddd-dddd-dddd-dddddddddddd',
 
 fake_subnet3 = dhcp.DictModel(dict(id='bbbbbbbb-1111-2222-bbbbbbbbbbbb',
                               network_id='12345678-1234-5678-1234567890ab',
-                              cidr='192.168.1.1/24', enable_dhcp=True))
+                              cidr='192.168.1.1/24', enable_dhcp=True,
+                              ip_version=4))
 
 fake_ipv6_subnet = dhcp.DictModel(dict(id='bbbbbbbb-1111-2222-bbbbbbbbbbbb',
                               network_id='12345678-1234-5678-1234567890ab',
@@ -82,7 +83,7 @@ fake_meta_subnet = dhcp.DictModel(dict(id='bbbbbbbb-1111-2222-bbbbbbbbbbbb',
                                   network_id='12345678-1234-5678-1234567890ab',
                                   cidr='169.254.169.252/30',
                                   gateway_ip='169.254.169.253',
-                                  enable_dhcp=True))
+                                  enable_dhcp=True, ip_version=4))
 
 fake_fixed_ip1 = dhcp.DictModel(dict(id='', subnet_id=fake_subnet1.id,
                                 ip_address='172.9.9.9'))
@@ -958,7 +959,7 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
     def test_subnet_create_restarts_with_dhcp_disabled(self):
         payload = dict(subnet=dhcp.DictModel(
               dict(network_id=fake_network.id, enable_dhcp=False,
-                   cidr='99.99.99.0/24')))
+                   cidr='99.99.99.0/24', ip_version=4)))
         self.cache.get_network_by_id.return_value = fake_network
         new_net = copy.deepcopy(fake_network)
         new_net.subnets.append(payload['subnet'])
@@ -1456,18 +1457,20 @@ class TestDeviceManager(base.BaseTestCase):
                           'device_id': mock.ANY}})])
 
         if port == fake_ipv6_port:
-            expected_ips = ['169.254.169.254/16']
+            expected_ips = ['2001:db8::a8bb:ccff:fedd:ee99/64',
+                            '169.254.169.254/16']
         else:
             expected_ips = ['172.9.9.9/24', '169.254.169.254/16']
         expected = [
             mock.call.get_device_name(port),
+            mock.call.configure_ipv6_ra(net.namespace, 'default', 0),
             mock.call.init_l3(
                 'tap12345678-12',
                 expected_ips,
                 namespace=net.namespace)]
 
         if not device_is_ready:
-            expected.insert(1,
+            expected.insert(2,
                             mock.call.plug(net.id,
                                            port.id,
                                            'tap12345678-12',

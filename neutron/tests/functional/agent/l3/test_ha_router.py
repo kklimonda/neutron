@@ -99,7 +99,8 @@ class L3HATestCase(framework.L3AgentTestFramework):
         self._router_lifecycle(enable_ha=True, dual_stack=True,
                                v6_ext_gw_with_sub=False)
 
-    @testtools.skipUnless(ipv6_utils.is_enabled(), "IPv6 is not enabled")
+    @testtools.skipUnless(ipv6_utils.is_enabled_and_bind_by_default(),
+                          "IPv6 is not enabled")
     def test_ipv6_router_advts_after_router_state_change(self):
         # Schedule router to l3 agent, and then add router gateway. Verify
         # that router gw interface is configured to receive Router Advts.
@@ -110,7 +111,7 @@ class L3HATestCase(framework.L3AgentTestFramework):
         _ext_dev_name, ex_port = l3_test_common.prepare_ext_gw_test(
             mock.Mock(), router)
         router_info['gw_port'] = ex_port
-        router.process(self.agent)
+        router.process()
         self._assert_ipv6_accept_ra(router)
 
     def test_keepalived_configuration(self):
@@ -136,7 +137,7 @@ class L3HATestCase(framework.L3AgentTestFramework):
         router.router['gw_port']['subnets'] = subnets
         router.router['gw_port']['fixed_ips'] = fixed_ips
 
-        router.process(self.agent)
+        router.process()
 
         # Get the updated configuration and assert that both FIPs are in,
         # and that the GW IP address was updated.
@@ -218,7 +219,7 @@ class L3HATestCase(framework.L3AgentTestFramework):
         self._add_internal_interface_by_subnet(router.router, count=1,
                 ip_version=6, ipv6_subnet_modes=[slaac_mode],
                 interface_id=interface_id)
-        router.process(self.agent)
+        router.process()
         common_utils.wait_until_true(lambda: router.ha_state == 'master')
 
         # Verify that router internal interface is present and is configured
@@ -238,7 +239,7 @@ class L3HATestCase(framework.L3AgentTestFramework):
         subnets.append(interfaces[0]['subnets'][0])
         interfaces[0].update({'fixed_ips': fixed_ips, 'subnets': subnets})
         router.router[constants.INTERFACE_KEY] = interfaces
-        router.process(self.agent)
+        router.process()
 
         # Verify that router internal interface has a single ipaddress
         internal_iface = router.router[constants.INTERFACE_KEY][0]
@@ -267,7 +268,7 @@ class L3HATestCase(framework.L3AgentTestFramework):
         interface_name = router.get_external_device_interface_name(ex_gw_port)
         common_utils.wait_until_true(lambda: router.ha_state == 'master')
         self._add_fip(router, '172.168.1.20', fixed_address='10.0.0.3')
-        router.process(self.agent)
+        router.process()
         router.router[constants.FLOATINGIP_KEY] = []
         # The purpose of the test is to simply make sure no exception is raised
         # Because router.process will consume the FloatingIpSetupException,

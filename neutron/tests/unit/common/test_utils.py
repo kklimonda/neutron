@@ -12,10 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import errno
 import os.path
 import random
-import re
 import sys
 
 import eventlet
@@ -680,31 +678,6 @@ class TestDelayedStringRenderer(base.BaseTestCase):
         self.assertTrue(my_func.called)
 
 
-class TestEnsureDir(base.BaseTestCase):
-    @mock.patch('os.makedirs')
-    def test_ensure_dir_no_fail_if_exists(self, makedirs):
-        error = OSError()
-        error.errno = errno.EEXIST
-        makedirs.side_effect = error
-        utils.ensure_dir("/etc/create/concurrently")
-
-    @mock.patch('os.makedirs')
-    def test_ensure_dir_calls_makedirs(self, makedirs):
-        utils.ensure_dir("/etc/create/directory")
-        makedirs.assert_called_once_with("/etc/create/directory", 0o755)
-
-
-class TestCamelize(base.BaseTestCase):
-    def test_camelize(self):
-        data = {'bandwidth_limit': 'BandwidthLimit',
-                'test': 'Test',
-                'some__more__dashes': 'SomeMoreDashes',
-                'a_penguin_walks_into_a_bar': 'APenguinWalksIntoABar'}
-
-        for s, expected in data.items():
-            self.assertEqual(expected, utils.camelize(s))
-
-
 class TestRoundVal(base.BaseTestCase):
     def test_round_val_ok(self):
         for expected, value in ((0, 0),
@@ -713,15 +686,6 @@ class TestRoundVal(base.BaseTestCase):
                                 (1, 1.49),
                                 (2, 1.5)):
             self.assertEqual(expected, utils.round_val(value))
-
-
-class TestGetRandomString(base.BaseTestCase):
-    def test_get_random_string(self):
-        length = 127
-        random_string = utils.get_random_string(length)
-        self.assertEqual(length, len(random_string))
-        regex = re.compile('^[0-9a-fA-F]+$')
-        self.assertIsNotNone(regex.match(random_string))
 
 
 class TestSafeDecodeUtf8(base.BaseTestCase):

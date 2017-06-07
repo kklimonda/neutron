@@ -20,6 +20,7 @@ from oslo_log import log as logging
 from tempest.lib.common import ssh
 from tempest.lib import exceptions
 from tempest import test
+import testtools
 
 from neutron.common import utils
 from neutron.services.qos import qos_consts
@@ -82,6 +83,7 @@ class QoSTest(base.BaseTempestTestCase):
     @classmethod
     @test.requires_ext(extension="qos", service="network")
     @base_api.require_qos_rule_type(qos_consts.RULE_TYPE_BANDWIDTH_LIMIT)
+    @testtools.skip('bug/1662109')
     def resource_setup(cls):
         super(QoSTest, cls).resource_setup()
 
@@ -161,7 +163,9 @@ class QoSTest(base.BaseTempestTestCase):
                      'port_range_min': NC_PORT,
                      'port_range_max': NC_PORT,
                      'remote_ip_prefix': '0.0.0.0/0'}]
-        self.create_secgroup_rules(rulesets)
+        self.create_secgroup_rules(rulesets,
+                                   self.security_groups[-1]['id'])
+
         ssh_client = ssh.Client(self.fip['floating_ip_address'],
                                 CONF.validation.image_ssh_user,
                                 pkey=self.keypair['private_key'])

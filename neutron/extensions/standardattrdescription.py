@@ -13,14 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.api import extensions
-from neutron.api.v2 import attributes as attr
+from neutron_lib.api import extensions
+from neutron_lib.db import constants as db_const
+
 from neutron.db import standard_attr
 
 
 DESCRIPTION_BODY = {
     'description': {'allow_post': True, 'allow_put': True,
-                    'validate': {'type:string': attr.DESCRIPTION_MAX_LEN},
+                    'validate': {
+                        'type:string': db_const.DESCRIPTION_FIELD_SIZE},
                     'is_visible': True, 'default': ''}
 }
 

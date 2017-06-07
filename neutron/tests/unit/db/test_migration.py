@@ -25,6 +25,7 @@ from alembic.operations import ops as alembic_ops
 from alembic import script as alembic_script
 import fixtures
 import mock
+from neutron_lib.utils import helpers
 from oslo_utils import fileutils
 import pkg_resources
 import sqlalchemy as sa
@@ -51,7 +52,7 @@ class FakeRevision(object):
         self.branch_labels = labels
         self.down_revision = down_revision
         self.is_branch_point = is_branch_point
-        self.revision = tools.get_random_string()
+        self.revision = helpers.get_random_string(10)
         self.module = mock.MagicMock()
 
 
@@ -129,7 +130,7 @@ class TestCli(base.BaseTestCase):
         mock_root = mock.patch.object(cli, '_get_package_root_dir').start()
         mock_root.side_effect = mocked_root_dir
         # Avoid creating fake directories
-        mock.patch('neutron.common.utils.ensure_dir').start()
+        mock.patch('oslo_utils.fileutils.ensure_tree').start()
 
         # Set up some configs and entrypoints for tests to chew on
         self.configs = []

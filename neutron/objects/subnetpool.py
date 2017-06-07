@@ -31,8 +31,8 @@ class SubnetPool(base.NeutronDbObject):
     db_model = models.SubnetPool
 
     fields = {
-        'id': obj_fields.UUIDField(),
-        'tenant_id': obj_fields.StringField(nullable=True),
+        'id': common_types.UUIDField(),
+        'project_id': obj_fields.StringField(nullable=True),
         'name': obj_fields.StringField(nullable=True),
         'ip_version': common_types.IPVersionEnumField(),
         'default_prefixlen': common_types.IPNetworkPrefixLenField(),
@@ -42,11 +42,11 @@ class SubnetPool(base.NeutronDbObject):
         'is_default': obj_fields.BooleanField(),
         'default_quota': obj_fields.IntegerField(nullable=True),
         'hash': obj_fields.StringField(nullable=True),
-        'address_scope_id': obj_fields.UUIDField(nullable=True),
+        'address_scope_id': common_types.UUIDField(nullable=True),
         'prefixes': common_types.ListOfIPNetworksField(nullable=True)
     }
 
-    fields_no_update = ['id', 'tenant_id']
+    fields_no_update = ['id', 'project_id']
 
     synthetic_fields = ['prefixes']
 
@@ -119,10 +119,8 @@ class SubnetPool(base.NeutronDbObject):
             super(SubnetPool, self).update()
             if synthetic_changes:
                 if 'prefixes' in synthetic_changes:
-                    old = SubnetPoolPrefix.get_objects(
-                        self.obj_context, subnetpool_id=self.id)
-                    for prefix in old:
-                        prefix.delete()
+                    SubnetPoolPrefix.delete_objects(self.obj_context,
+                                                    subnetpool_id=self.id)
                     for prefix in self.prefixes:
                         prefix_obj = SubnetPoolPrefix(self.obj_context,
                                                       subnetpool_id=self.id,
@@ -138,8 +136,8 @@ class SubnetPoolPrefix(base.NeutronDbObject):
     db_model = models.SubnetPoolPrefix
 
     fields = {
-        'subnetpool_id': obj_fields.UUIDField(),
-        'cidr': obj_fields.IPNetworkField(),
+        'subnetpool_id': common_types.UUIDField(),
+        'cidr': common_types.IPNetworkField(),
     }
 
     primary_keys = ['subnetpool_id', 'cidr']

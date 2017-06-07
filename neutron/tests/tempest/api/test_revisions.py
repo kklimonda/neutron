@@ -193,12 +193,11 @@ class TestRevisions(base.BaseAdminNetworkTest, bsg.BaseSecGroupTest):
             router['id'],
             subnet['id'])
         router = self.client.show_router(router['id'])['router']
-        updated = self.client.update_router(
-            router['id'], routes=[{'destination': '2.0.0.0/24',
-                                   'nexthop': str(subgateway + 1)}])
+        updated = self.client.update_extra_routes(
+            router['id'], str(subgateway + 1), '2.0.0.0/24')
         self.assertGreater(updated['router']['revision_number'],
                            router['revision_number'])
-        updated2 = self.client.update_router(router['id'], routes=[])
+        updated2 = self.client.delete_extra_routes(router['id'])
         self.assertGreater(updated2['router']['revision_number'],
                            updated['router']['revision_number'])
 
@@ -328,7 +327,7 @@ class TestRevisions(base.BaseAdminNetworkTest, bsg.BaseSecGroupTest):
                            router['revision_number'])
 
     @test.idempotent_id('90743b00-b0e2-40e4-9524-1c884fe3ef23')
-    @test.requires_ext(extension="external-network", service="network")
+    @test.requires_ext(extension="external-net", service="network")
     @test.requires_ext(extension="auto-allocated-topology", service="network")
     @test.requires_ext(extension="subnet_allocation", service="network")
     @test.requires_ext(extension="router", service="network")

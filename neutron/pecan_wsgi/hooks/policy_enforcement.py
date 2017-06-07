@@ -36,19 +36,22 @@ def _custom_getter(resource, resource_id):
         return quota.get_tenant_quotas(resource_id)[quotasv2.RESOURCE_NAME]
 
 
-def fetch_resource(neutron_context, controller, resource, resource_id,
+def fetch_resource(method, neutron_context, controller,
+                   collection, resource, resource_id,
                    parent_id=None):
-    attrs = controller.resource_info
-    if not attrs:
-        # this isn't a request for a normal resource. it could be
-        # an action like removing a network from a dhcp agent.
-        # return None and assume the custom controller for this will
-        # handle the necessary logic.
-        return
-    field_list = [name for (name, value) in attrs.items()
-                  if (value.get('required_by_policy') or
-                      value.get('primary_key') or 'default' not in value)]
-    plugin = manager.NeutronManager.get_plugin_for_resource(resource)
+    field_list = []
+    if method == 'PUT':
+        attrs = controller.resource_info
+        if not attrs:
+            # this isn't a request for a normal resource. it could be
+            # an action like removing a network from a dhcp agent.
+            # return None and assume the custom controller for this will
+            # handle the necessary logic.
+            return
+        field_list = [name for (name, value) in attrs.items()
+                      if (value.get('required_by_policy') or
+                          value.get('primary_key') or 'default' not in value)]
+    plugin = manager.NeutronManager.get_plugin_for_resource(collection)
     if plugin:
         if utils.is_member_action(controller):
             getter = controller.parent_controller.plugin_shower
@@ -107,8 +110,9 @@ class PolicyHook(hooks.PecanHook):
                 item = {}
             resource_id = state.request.context.get('resource_id')
             parent_id = state.request.context.get('parent_id')
-            resource_obj = fetch_resource(neutron_context, controller,
-                                          resource, resource_id,
+            method = state.request.method
+            resource_obj = fetch_resource(method, neutron_context, controller,
+                                          collection, resource, resource_id,
                                           parent_id=parent_id)
             if resource_obj:
                 original_resources.append(resource_obj)
@@ -132,8 +136,10 @@ class PolicyHook(hooks.PecanHook):
                     # If a tenant is modifying it's own object, it's safe to
                     # return a 403. Otherwise, pretend that it doesn't exist
                     # to avoid giving away information.
+                    orig_item_tenant_id = item.get('tenant_id')
                     if (needs_prefetch and
-                        neutron_context.tenant_id != item['tenant_id']):
+                        (neutron_context.tenant_id != orig_item_tenant_id or
+                         orig_item_tenant_id is None)):
                         ctxt.reraise = False
                 msg = _('The resource could not be found.')
                 raise webob.exc.HTTPNotFound(msg)
@@ -155,17 +161,21 @@ class PolicyHook(hooks.PecanHook):
             return
         if state.request.method not in pecan_constants.ACTION_MAP:
             return
-        action = '%s_%s' % (pecan_constants.ACTION_MAP[state.request.method],
-                            resource)
         if not data or (resource not in data and collection not in data):
             return
+        policy.init()
         is_single = resource in data
+        action_type = pecan_constants.ACTION_MAP[state.request.method]
+        if action_type == 'get':
+            action = controller.plugin_handlers[controller.SHOW]
+        else:
+            action = controller.plugin_handlers[action_type]
         key = resource if is_single else collection
         to_process = [data[resource]] if is_single else data[collection]
         # in the single case, we enforce which raises on violation
         # in the plural case, we just check so violating items are hidden
         policy_method = policy.enforce if is_single else policy.check
-        plugin = manager.NeutronManager.get_plugin_for_resource(resource)
+        plugin = manager.NeutronManager.get_plugin_for_resource(collection)
         try:
             resp = [self._get_filtered_item(state.request, controller,
                                             resource, collection, item)

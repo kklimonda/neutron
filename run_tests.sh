@@ -3,6 +3,7 @@
 set -eu
 
 function usage {
+  echo "NOTE: This script is deprecated."
   echo "Usage: $0 [OPTION]..."
   echo "Run Neutron's test suite(s)"
   echo ""
@@ -94,6 +95,10 @@ LANGUAGE=en_US:en
 LC_ALL=C
 
 process_options $@
+
+echo "NOTE: this script (run_tests.sh) is deprecated and will be removed in the Pike release."
+echo ""
+
 # Make our paths available to other scripts we call
 export venv_path
 export venv_dir
@@ -156,7 +161,7 @@ function run_tests {
     echo "Generating coverage report in covhtml/"
     # Don't compute coverage for common code, which is tested elsewhere
     ${wrapper} coverage combine
-    ${wrapper} coverage html --include='neutron/*' --omit='neutron/openstack/common/*' -d covhtml -i
+    ${wrapper} coverage html --include='neutron/*' -d covhtml -i
   fi
 
   return $RESULT

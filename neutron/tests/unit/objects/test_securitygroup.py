@@ -10,8 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import itertools
-
 from neutron.objects import securitygroup
 from neutron.tests.unit.objects import test_base
 from neutron.tests.unit import testlib_api
@@ -112,14 +110,8 @@ class DefaultSecurityGroupDbObjTestCase(test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(DefaultSecurityGroupDbObjTestCase, self).setUp()
-        sg_db_obj = self.get_random_fields(securitygroup.SecurityGroup)
-        sg_fields = securitygroup.SecurityGroup.modify_fields_from_db(
-            sg_db_obj)
-        self.sg_obj = securitygroup.SecurityGroup(
-            self.context, **test_base.remove_timestamps_from_fields(sg_fields))
-        self.sg_obj.create()
-        for obj in itertools.chain(self.db_objs, self.obj_fields, self.objs):
-            obj['security_group_id'] = self.sg_obj['id']
+        self._create_test_security_group()
+        self.update_obj_fields({'security_group_id': self._securitygroup.id})
 
 
 class SecurityGroupRuleIfaceObjTestCase(test_base.BaseObjectIfaceTestCase):
@@ -134,12 +126,6 @@ class SecurityGroupRuleDbObjTestCase(test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(SecurityGroupRuleDbObjTestCase, self).setUp()
-        sg_db_obj = self.get_random_fields(securitygroup.SecurityGroup)
-        sg_fields = securitygroup.SecurityGroup.modify_fields_from_db(
-            sg_db_obj)
-        self.sg_obj = securitygroup.SecurityGroup(
-            self.context, **test_base.remove_timestamps_from_fields(sg_fields))
-        self.sg_obj.create()
-        for obj in itertools.chain(self.db_objs, self.obj_fields, self.objs):
-            obj['security_group_id'] = self.sg_obj['id']
-            obj['remote_group_id'] = self.sg_obj['id']
+        self._create_test_security_group()
+        self.update_obj_fields({'security_group_id': self._securitygroup.id,
+                                'remote_group_id': self._securitygroup.id})

@@ -47,6 +47,9 @@ class ContextBase(oslo_context.RequestContext):
         super(ContextBase, self).__init__(is_admin=is_admin, **kwargs)
 
         self.user_name = user_name
+        # NOTE(sdague): tenant* is a deprecated set of names from
+        # keystone, and is no longer set in modern keystone middleware
+        # code, as such this is almost always going to be None.
         self.tenant_name = tenant_name
 
         if not timestamp:
@@ -85,11 +88,35 @@ class ContextBase(oslo_context.RequestContext):
             'tenant_id': self.tenant_id,
             'project_id': self.project_id,
             'timestamp': str(self.timestamp),
-            'tenant_name': self.tenant_name,
-            'project_name': self.tenant_name,
+            # prefer project_name, as that's what's going to be set by
+            # keystone. Fall back if for some reason it's blank.
+            'tenant_name': self.project_name or self.tenant_name,
+            'project_name': self.project_name or self.tenant_name,
             'user_name': self.user_name,
         })
         return context
+
+    def to_policy_values(self):
+        values = super(ContextBase, self).to_policy_values()
+        values['tenant_id'] = self.tenant_id
+        values['is_admin'] = self.is_admin
+
+        # NOTE(jamielennox): These are almost certainly unused and non-standard
+        # but kept for backwards compatibility. Remove them in Pike
+        # (oslo.context from Ocata release already issues deprecation warnings
+        # for non-standard keys).
+        values['user'] = self.user
+        values['tenant'] = self.tenant
+        values['domain'] = self.domain
+        values['user_domain'] = self.user_domain
+        values['project_domain'] = self.project_domain
+        # prefer project_name, as that's what's going to be set by
+        # keystone. Fall back if for some reason it's blank.
+        values['tenant_name'] = self.project_name or self.tenant_name
+        values['project_name'] = self.project_name or self.tenant_name
+        values['user_name'] = self.user_name
+
+        return values
 
     @classmethod
     def from_dict(cls, values):
@@ -131,7 +158,7 @@ class Context(ContextBaseWithSession):
         if hasattr(super(Context, self), 'session'):
             return super(Context, self).session
         if self._session is None:
-            self._session = db_api.get_session()
+            self._session = db_api.get_writer_session()
         return self._session
 
 

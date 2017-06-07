@@ -33,7 +33,6 @@ from neutron.extensions import vlantransparent
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import models
-from neutron.services.qos import qos_consts
 
 LOG = log.getLogger(__name__)
 
@@ -156,7 +155,7 @@ class TypeManager(stevedore.named.NamedExtensionManager):
 
     def extend_networks_dict_provider(self, context, networks):
         ids = [network['id'] for network in networks]
-        net_segments = segments_db.get_networks_segments(context.session, ids)
+        net_segments = segments_db.get_networks_segments(context, ids)
         for network in networks:
             segments = net_segments[network['id']]
             self._extend_network_dict_provider(network, segments)
@@ -197,18 +196,18 @@ class TypeManager(stevedore.named.NamedExtensionManager):
             if segments:
                 for segment_index, segment in enumerate(segments):
                     segment = self.reserve_provider_segment(
-                        session, segment)
+                        context, segment)
                     self._add_network_segment(context, network_id, segment,
                                               segment_index)
             elif (cfg.CONF.ml2.external_network_type and
                   self._get_attribute(network, external_net.EXTERNAL)):
-                segment = self._allocate_ext_net_segment(session)
+                segment = self._allocate_ext_net_segment(context)
                 self._add_network_segment(context, network_id, segment)
             else:
-                segment = self._allocate_tenant_net_segment(session)
+                segment = self._allocate_tenant_net_segment(context)
                 self._add_network_segment(context, network_id, segment)
 
-    def reserve_network_segment(self, session, segment_data):
+    def reserve_network_segment(self, context, segment_data):
         """Call type drivers to reserve a network segment."""
         # Validate the data of segment
         if not validators.is_attr_set(segment_data[api.NETWORK_TYPE]):
@@ -225,8 +224,8 @@ class TypeManager(stevedore.named.NamedExtensionManager):
         self.validate_provider_segment(segment)
 
         # Reserve segment in type driver
-        with session.begin(subtransactions=True):
-            return self.reserve_provider_segment(session, segment)
+        with context.session.begin(subtransactions=True):
+            return self.reserve_provider_segment(context, segment)
 
     def is_partial_segment(self, segment):
         network_type = segment[api.NETWORK_TYPE]
@@ -246,41 +245,52 @@ class TypeManager(stevedore.named.NamedExtensionManager):
             msg = _("network_type value '%s' not supported") % network_type
             raise exc.InvalidInput(error_message=msg)
 
-    def reserve_provider_segment(self, session, segment):
+    def reserve_provider_segment(self, context, segment):
         network_type = segment.get(api.NETWORK_TYPE)
         driver = self.drivers.get(network_type)
-        return driver.obj.reserve_provider_segment(session, segment)
+        if isinstance(driver.obj, api.TypeDriver):
+            return driver.obj.reserve_provider_segment(context.session,
+                                                       segment)
+        else:
+            return driver.obj.reserve_provider_segment(context,
+                                                       segment)
 
-    def _allocate_segment(self, session, network_type):
+    def _allocate_segment(self, context, network_type):
         driver = self.drivers.get(network_type)
-        return driver.obj.allocate_tenant_segment(session)
+        if isinstance(driver.obj, api.TypeDriver):
+            return driver.obj.allocate_tenant_segment(context.session)
+        else:
+            return driver.obj.allocate_tenant_segment(context)
 
-    def _allocate_tenant_net_segment(self, session):
+    def _allocate_tenant_net_segment(self, context):
         for network_type in self.tenant_network_types:
-            segment = self._allocate_segment(session, network_type)
+            segment = self._allocate_segment(context, network_type)
             if segment:
                 return segment
         raise exc.NoNetworkAvailable()
 
-    def _allocate_ext_net_segment(self, session):
+    def _allocate_ext_net_segment(self, context):
         network_type = cfg.CONF.ml2.external_network_type
-        segment = self._allocate_segment(session, network_type)
+        segment = self._allocate_segment(context, network_type)
         if segment:
             return segment
         raise exc.NoNetworkAvailable()
 
-    def release_network_segments(self, session, network_id):
-        segments = segments_db.get_network_segments(session, network_id,
+    def release_network_segments(self, context, network_id):
+        segments = segments_db.get_network_segments(context, network_id,
                                                     filter_dynamic=None)
 
         for segment in segments:
-            self.release_network_segment(session, segment)
+            self.release_network_segment(context, segment)
 
-    def release_network_segment(self, session, segment):
+    def release_network_segment(self, context, segment):
         network_type = segment.get(api.NETWORK_TYPE)
         driver = self.drivers.get(network_type)
         if driver:
-            driver.obj.release_segment(session, segment)
+            if isinstance(driver.obj, api.TypeDriver):
+                driver.obj.release_segment(context.session, segment)
+            else:
+                driver.obj.release_segment(context, segment)
         else:
             LOG.error(_LE("Failed to release segment '%s' because "
                           "network type is not supported."), segment)
@@ -288,27 +298,34 @@ class TypeManager(stevedore.named.NamedExtensionManager):
     def allocate_dynamic_segment(self, context, network_id, segment):
         """Allocate a dynamic segment using a partial or full segment dict."""
         dynamic_segment = segments_db.get_dynamic_segment(
-            context.session, network_id, segment.get(api.PHYSICAL_NETWORK),
+            context, network_id, segment.get(api.PHYSICAL_NETWORK),
             segment.get(api.SEGMENTATION_ID))
 
         if dynamic_segment:
             return dynamic_segment
 
         driver = self.drivers.get(segment.get(api.NETWORK_TYPE))
-        dynamic_segment = driver.obj.reserve_provider_segment(context.session,
-                                                              segment)
+        if isinstance(driver.obj, api.TypeDriver):
+            dynamic_segment = driver.obj.reserve_provider_segment(
+                context.session, segment)
+        else:
+            dynamic_segment = driver.obj.reserve_provider_segment(
+                context, segment)
         segments_db.add_network_segment(context, network_id, dynamic_segment,
                                         is_dynamic=True)
         return dynamic_segment
 
-    def release_dynamic_segment(self, session, segment_id):
+    def release_dynamic_segment(self, context, segment_id):
         """Delete a dynamic segment."""
-        segment = segments_db.get_segment_by_id(session, segment_id)
+        segment = segments_db.get_segment_by_id(context, segment_id)
         if segment:
             driver = self.drivers.get(segment.get(api.NETWORK_TYPE))
             if driver:
-                driver.obj.release_segment(session, segment)
-                segments_db.delete_network_segment(session, segment_id)
+                if isinstance(driver.obj, api.TypeDriver):
+                    driver.obj.release_segment(context.session, segment)
+                else:
+                    driver.obj.release_segment(context, segment)
+                segments_db.delete_network_segment(context, segment_id)
             else:
                 LOG.error(_LE("Failed to release segment '%s' because "
                               "network type is not supported."), segment)
@@ -336,8 +353,8 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
         self._register_mechanisms()
         self.host_filtering_supported = self.is_host_filtering_supported()
         if not self.host_filtering_supported:
-            LOG.warning(_LW("Host filtering is disabled because at least one "
-                            "mechanism doesn't support it."))
+            LOG.info(_LI("No mechanism drivers provide segment reachability "
+                         "information for agent scheduling."))
 
     def _register_mechanisms(self):
         """Register all mechanism drivers.
@@ -350,48 +367,6 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
             self.ordered_mech_drivers.append(ext)
         LOG.info(_LI("Registered mechanism drivers: %s"),
                  [driver.name for driver in self.ordered_mech_drivers])
-
-    @property
-    def supported_qos_rule_types(self):
-        if not self.ordered_mech_drivers:
-            return []
-
-        rule_types = set(qos_consts.VALID_RULE_TYPES)
-        binding_driver_found = False
-
-        # Recalculate on every call to allow drivers determine supported rule
-        # types dynamically
-        for driver in self.ordered_mech_drivers:
-            driver_obj = driver.obj
-            if driver_obj._supports_port_binding:
-                binding_driver_found = True
-                if hasattr(driver_obj, 'supported_qos_rule_types'):
-                    new_rule_types = \
-                        rule_types & set(driver_obj.supported_qos_rule_types)
-                    dropped_rule_types = new_rule_types - rule_types
-                    if dropped_rule_types:
-                        LOG.info(
-                            _LI("%(rule_types)s rule types disabled for ml2 "
-                                "because %(driver)s does not support them"),
-                            {'rule_types': ', '.join(dropped_rule_types),
-                             'driver': driver.name})
-                    rule_types = new_rule_types
-                else:
-                    # at least one of drivers does not support QoS, meaning
-                    # there are no rule types supported by all of them
-                    LOG.warning(
-                        _LW("%s does not support QoS; "
-                            "no rule types available"),
-                        driver.name)
-                    return []
-
-        if binding_driver_found:
-            rule_types = list(rule_types)
-        else:
-            rule_types = []
-        LOG.debug("Supported QoS rule types "
-                  "(common subset for all mech drivers): %s", rule_types)
-        return rule_types
 
     def initialize(self):
         for driver in self.ordered_mech_drivers:

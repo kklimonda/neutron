@@ -35,10 +35,6 @@ from neutron.conf.agent.l3 import keepalived
 LOG = logging.getLogger(__name__)
 
 
-class L3HAConfig(object):
-    send_arp_for_ha = 3
-
-
 class KeepalivedUnixDomainConnection(agent_utils.UnixDomainHTTPConnection):
     def __init__(self, *args, **kwargs):
         # Old style super initialization is required!
@@ -120,7 +116,6 @@ class MonitorDaemon(daemon.Daemon):
             self.namespace,
             event.interface,
             str(netaddr.IPNetwork(event.cidr).ip),
-            L3HAConfig,
             log_exception=False
         )
 
@@ -144,6 +139,7 @@ def configure(conf):
     config.init(sys.argv[1:])
     conf.set_override('log_dir', cfg.CONF.conf_dir)
     conf.set_override('debug', True)
+    conf.set_override('use_syslog', True)
     config.setup_logging()
 
 

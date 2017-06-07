@@ -31,8 +31,7 @@ from neutron.conf.plugins.ml2.drivers import linuxbridge as \
     linuxbridge_agent_config
 from neutron.plugins.ml2.drivers.linuxbridge.agent import \
     linuxbridge_neutron_agent as linuxbridge_agent
-from neutron.plugins.ml2.drivers.openvswitch.mech_driver import \
-    mech_openvswitch as mech_ovs
+from neutron.services.qos.drivers.openvswitch import driver as ovs_drv
 
 
 load_tests = testlib_api.module_load_tests
@@ -45,14 +44,18 @@ DSCP_MARK = 16
 class BaseQoSRuleTestCase(object):
     of_interface = None
     ovsdb_interface = None
+    number_of_hosts = 1
 
     def setUp(self):
-        host_desc = [environment.HostDescription(
-            l3_agent=False,
-            of_interface=self.of_interface,
-            ovsdb_interface=self.ovsdb_interface,
-            l2_agent_type=self.l2_agent_type)]
-        env_desc = environment.EnvironmentDescription(qos=True)
+        host_desc = [
+            environment.HostDescription(
+                l3_agent=False,
+                of_interface=self.of_interface,
+                ovsdb_interface=self.ovsdb_interface,
+                l2_agent_type=self.l2_agent_type
+            ) for _ in range(self.number_of_hosts)]
+        env_desc = environment.EnvironmentDescription(
+            qos=True)
         env = environment.Environment(env_desc, host_desc)
         super(BaseQoSRuleTestCase, self).setUp(env)
 
@@ -95,6 +98,9 @@ class BaseQoSRuleTestCase(object):
 
 
 class _TestBwLimitQoS(BaseQoSRuleTestCase):
+
+    number_of_hosts = 1
+
     def _wait_for_bw_rule_removed(self, vm):
         # No values are provided when port doesn't have qos policy
         self._wait_for_bw_rule_applied(vm, None, None)
@@ -172,13 +178,9 @@ class TestBwLimitQoSLinuxbridge(_TestBwLimitQoS, base.BaseFullStackTestCase):
             lambda: tc.get_filters_bw_limits() == (limit, burst))
 
 
-class TestDscpMarkingQoSOvs(BaseQoSRuleTestCase, base.BaseFullStackTestCase):
-    scenarios = fullstack_utils.get_ovs_interface_scenarios()
-    l2_agent_type = constants.AGENT_TYPE_OVS
+class _TestDscpMarkingQoS(BaseQoSRuleTestCase):
 
-    def _wait_for_dscp_marking_rule_applied(self, vm, dscp_mark):
-        l2_extensions.wait_until_dscp_marking_rule_applied(
-            vm.bridge, vm.port.name, dscp_mark)
+    number_of_hosts = 2
 
     def _wait_for_dscp_marking_rule_removed(self, vm):
         self._wait_for_dscp_marking_rule_applied(vm, None)
@@ -223,26 +225,60 @@ class TestDscpMarkingQoSOvs(BaseQoSRuleTestCase, base.BaseFullStackTestCase):
             body={'port': {'qos_policy_id': None}})
         self._wait_for_dscp_marking_rule_removed(vm)
 
+    def test_dscp_marking_packets(self):
+        # Create port (vm) which will be used to received and test packets
+        receiver_port = self.safe_client.create_port(
+            self.tenant_id, self.network['id'],
+            self.environment.hosts[1].hostname)
+
+        receiver = self.useFixture(
+            machine.FakeFullstackMachine(
+                self.environment.hosts[1],
+                self.network['id'],
+                self.tenant_id,
+                self.safe_client,
+                neutron_port=receiver_port))
+
+        # Create port with qos policy attached
+        sender, qos_policy = self._prepare_vm_with_qos_policy(
+            [functools.partial(self._add_dscp_rule, DSCP_MARK)])
+
+        sender.block_until_boot()
+        receiver.block_until_boot()
+
+        self._wait_for_dscp_marking_rule_applied(sender, DSCP_MARK)
+        l2_extensions.wait_for_dscp_marked_packet(
+            sender, receiver, DSCP_MARK)
+
+
+class TestDscpMarkingQoSOvs(_TestDscpMarkingQoS, base.BaseFullStackTestCase):
+    scenarios = fullstack_utils.get_ovs_interface_scenarios()
+    l2_agent_type = constants.AGENT_TYPE_OVS
+
+    def _wait_for_dscp_marking_rule_applied(self, vm, dscp_mark):
+        l2_extensions.wait_until_dscp_marking_rule_applied_ovs(
+            vm.bridge, vm.port.name, dscp_mark)
+
+
+class TestDscpMarkingQoSLinuxbridge(_TestDscpMarkingQoS,
+                                    base.BaseFullStackTestCase):
+    l2_agent_type = constants.AGENT_TYPE_LINUXBRIDGE
+
+    def _wait_for_dscp_marking_rule_applied(self, vm, dscp_mark):
+        l2_extensions.wait_until_dscp_marking_rule_applied_linuxbridge(
+            vm.host.host_namespace, vm.port.name, dscp_mark)
+
 
 class TestQoSWithL2Population(base.BaseFullStackTestCase):
 
     def setUp(self):
-        # We limit this test to using the openvswitch mech driver, because DSCP
-        # is presently not implemented for Linux Bridge.  The 'rule_types' API
-        # call only returns rule types that are supported by all configured
-        # mech drivers.  So in a fullstack scenario, where both the OVS and the
-        # Linux Bridge mech drivers are configured, the DSCP rule type will be
-        # unavailable since it is not implemented in Linux Bridge.
-        mech_driver = 'openvswitch'
         host_desc = []  # No need to register agents for this test case
-        env_desc = environment.EnvironmentDescription(qos=True, l2_pop=True,
-                                                      mech_drivers=mech_driver)
+        env_desc = environment.EnvironmentDescription(qos=True, l2_pop=True)
         env = environment.Environment(env_desc, host_desc)
         super(TestQoSWithL2Population, self).setUp(env)
 
     def test_supported_qos_rule_types(self):
         res = self.client.list_qos_rule_types()
         rule_types = {t['type'] for t in res['rule_types']}
-        expected_rules = (
-            set(mech_ovs.OpenvswitchMechanismDriver.supported_qos_rule_types))
+        expected_rules = set(ovs_drv.SUPPORTED_RULES)
         self.assertEqual(expected_rules, rule_types)

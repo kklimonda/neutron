@@ -16,9 +16,11 @@
 import collections
 
 import netaddr
+from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
+import testtools
 
 from neutron.agent.common import config
 from neutron.agent.linux import interface
@@ -33,6 +35,7 @@ Device = collections.namedtuple('Device',
 
 WRONG_IP = '0.0.0.0'
 TEST_IP = '240.0.0.1'
+TEST_IP_NEIGH = '240.0.0.2'
 
 
 class IpLibTestFramework(functional_base.BaseSudoTestCase):
@@ -158,17 +161,46 @@ class IpLibTestCase(IpLibTestFramework):
 
         device.link.delete()
 
-    def test_get_routing_table(self):
+    def test_get_device_mac(self):
         attr = self.generate_device_details()
+        device = self.manage_device(attr)
+
+        mac_address = ip_lib.get_device_mac(attr.name,
+                                            namespace=attr.namespace)
+
+        self.assertEqual(attr.mac_address, mac_address)
+
+        device.link.delete()
+
+    def test_get_device_mac_too_long_name(self):
+        name = utils.get_rand_name(
+            max_length=constants.DEVICE_NAME_MAX_LEN + 5)
+        attr = self.generate_device_details(name=name)
+        device = self.manage_device(attr)
+
+        mac_address = ip_lib.get_device_mac(attr.name,
+                                            namespace=attr.namespace)
+
+        self.assertEqual(attr.mac_address, mac_address)
+
+        device.link.delete()
+
+    def test_get_routing_table(self):
+        attr = self.generate_device_details(
+            ip_cidrs=["%s/24" % TEST_IP, "fd00::1/64"]
+        )
         device = self.manage_device(attr)
         device_ip = attr.ip_cidrs[0].split('/')[0]
         destination = '8.8.8.0/24'
         device.route.add_route(destination, device_ip)
 
+        destination6 = 'fd01::/64'
+        device.route.add_route(destination6, "fd00::2")
+
         expected_routes = [{'nexthop': device_ip,
                             'device': attr.name,
                             'destination': destination,
-                            'scope': None},
+                            'scope': 'universe'},
                            {'nexthop': None,
                             'device': attr.name,
                             'destination': str(
@@ -176,7 +208,68 @@ class IpLibTestCase(IpLibTestFramework):
                             'scope': 'link'}]
 
         routes = ip_lib.get_routing_table(4, namespace=attr.namespace)
-        self.assertEqual(expected_routes, routes)
+        self.assertItemsEqual(expected_routes, routes)
+        self.assertIsInstance(routes, list)
+
+        expected_routes6 = [{'nexthop': "fd00::2",
+                             'device': attr.name,
+                             'destination': destination6,
+                             'scope': 'universe'},
+                            {'nexthop': None,
+                             'device': attr.name,
+                             'destination': str(
+                                 netaddr.IPNetwork(attr.ip_cidrs[1]).cidr),
+                             'scope': 'universe'}]
+        routes6 = ip_lib.get_routing_table(6, namespace=attr.namespace)
+        self.assertItemsEqual(expected_routes6, routes6)
+        self.assertIsInstance(routes6, list)
+
+    def test_get_routing_table_no_namespace(self):
+        with testtools.ExpectedException(ip_lib.NetworkNamespaceNotFound):
+            ip_lib.get_routing_table(4, namespace="nonexistent-netns")
+
+    def test_get_neigh_entries(self):
+        attr = self.generate_device_details(
+            ip_cidrs=["%s/24" % TEST_IP, "fd00::1/64"]
+        )
+        mac_address = utils.get_random_mac('fa:16:3e:00:00:00'.split(':'))
+        device = self.manage_device(attr)
+        device.neigh.add(TEST_IP_NEIGH, mac_address)
+
+        expected_neighs = [{'dst': TEST_IP_NEIGH,
+                            'lladdr': mac_address,
+                            'device': attr.name}]
+
+        neighs = device.neigh.dump(4)
+        self.assertItemsEqual(expected_neighs, neighs)
+        self.assertIsInstance(neighs, list)
+
+        device.neigh.delete(TEST_IP_NEIGH, mac_address)
+        neighs = device.neigh.dump(4, dst=TEST_IP_NEIGH, lladdr=mac_address)
+        self.assertEqual([], neighs)
+
+    def test_get_neigh_entries_no_namespace(self):
+        with testtools.ExpectedException(ip_lib.NetworkNamespaceNotFound):
+            ip_lib.dump_neigh_entries(4, namespace="nonexistent-netns")
+
+    def test_get_neigh_entries_no_interface(self):
+        attr = self.generate_device_details(
+            ip_cidrs=["%s/24" % TEST_IP, "fd00::1/64"]
+        )
+        self.manage_device(attr)
+        with testtools.ExpectedException(ip_lib.NetworkInterfaceNotFound):
+            ip_lib.dump_neigh_entries(4, device="nosuchdevice",
+                                      namespace=attr.namespace)
+
+    def test_delete_neigh_entries(self):
+        attr = self.generate_device_details(
+            ip_cidrs=["%s/24" % TEST_IP, "fd00::1/64"]
+        )
+        mac_address = utils.get_random_mac('fa:16:3e:00:00:00'.split(':'))
+        device = self.manage_device(attr)
+
+        # trying to delete a non-existent entry shouldn't raise an error
+        device.neigh.delete(TEST_IP_NEIGH, mac_address)
 
     def _check_for_device_name(self, ip, name, should_exist):
         exist = any(d for d in ip.get_devices() if d.name == name)
@@ -196,8 +289,9 @@ class TestSetIpNonlocalBind(functional_base.BaseSudoTestCase):
     def test_assigned_value(self):
         namespace = self.useFixture(net_helpers.NamespaceFixture())
         for expected in (0, 1):
+            failed = ip_lib.set_ip_nonlocal_bind(expected, namespace.name)
             try:
-                ip_lib.set_ip_nonlocal_bind(expected, namespace.name)
+                observed = ip_lib.get_ip_nonlocal_bind(namespace.name)
             except RuntimeError as rte:
                 stat_message = (
                     'cannot stat /proc/sys/net/ipv4/ip_nonlocal_bind')
@@ -206,5 +300,6 @@ class TestSetIpNonlocalBind(functional_base.BaseSudoTestCase):
                         "This kernel doesn't support %s in network "
                         "namespaces." % ip_lib.IP_NONLOCAL_BIND)
                 raise
-            observed = ip_lib.get_ip_nonlocal_bind(namespace.name)
+
+            self.assertFalse(failed)
             self.assertEqual(expected, observed)

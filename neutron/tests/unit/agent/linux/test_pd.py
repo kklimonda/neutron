@@ -75,7 +75,8 @@ class TestPrefixDelegation(tests_base.DietTestCase):
         l3_agent = mock.Mock()
         l3_agent.pd.routers = {}
         router_id = '1'
-        ri = legacy_router.LegacyRouter(router_id,
+        ri = legacy_router.LegacyRouter(l3_agent,
+                                        router_id,
                                         mock.Mock(),
                                         mock.Mock(),
                                         mock.Mock())

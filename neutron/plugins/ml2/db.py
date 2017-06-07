@@ -13,8 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from debtcollector import moves
 from neutron_lib import constants as n_const
+from neutron_lib.plugins import directory
 from oslo_db import exception as db_exc
 from oslo_log import log
 from oslo_utils import uuidutils
@@ -22,15 +22,15 @@ import six
 from sqlalchemy import or_
 from sqlalchemy.orm import exc
 
-from neutron._i18n import _, _LE
+from neutron._i18n import _, _LE, _LI
 from neutron.callbacks import events
 from neutron.callbacks import registry
 from neutron.callbacks import resources
+from neutron.db import api as db_api
 from neutron.db.models import securitygroup as sg_models
 from neutron.db import models_v2
-from neutron.db import segments_db
 from neutron.extensions import portbindings
-from neutron import manager
+from neutron.objects import ports as port_obj
 from neutron.plugins.ml2 import models
 from neutron.services.segments import exceptions as seg_exc
 
@@ -39,42 +39,17 @@ LOG = log.getLogger(__name__)
 # limit the number of port OR LIKE statements in one query
 MAX_PORTS_PER_QUERY = 500
 
-# The API methods from segments_db
-add_network_segment = moves.moved_function(
-    segments_db.add_network_segment, 'add_network_segment', __name__,
-    version='Newton', removal_version='Ocata')
 
-get_network_segments = moves.moved_function(
-    segments_db.get_network_segments, 'get_network_segments', __name__,
-    version='Newton', removal_version='Ocata')
-
-get_networks_segments = moves.moved_function(
-    segments_db.get_networks_segments, 'get_networks_segments', __name__,
-    version='Newton', removal_version='Ocata')
-
-get_segment_by_id = moves.moved_function(
-    segments_db.get_segment_by_id, 'get_segment_by_id', __name__,
-    version='Newton', removal_version='Ocata')
-
-get_dynamic_segment = moves.moved_function(
-    segments_db.get_dynamic_segment, 'get_dynamic_segment', __name__,
-    version='Newton', removal_version='Ocata')
-
-delete_network_segment = moves.moved_function(
-    segments_db.delete_network_segment, 'delete_network_segment', __name__,
-    version='Newton', removal_version='Ocata')
-
-
-def add_port_binding(session, port_id):
-    with session.begin(subtransactions=True):
+def add_port_binding(context, port_id):
+    with context.session.begin(subtransactions=True):
         record = models.PortBinding(
             port_id=port_id,
             vif_type=portbindings.VIF_TYPE_UNBOUND)
-        session.add(record)
+        context.session.add(record)
         return record
 
 
-def get_locked_port_and_binding(session, port_id):
+def get_locked_port_and_binding(context, port_id):
     """Get port and port binding records for update within transaction."""
 
     try:
@@ -82,12 +57,12 @@ def get_locked_port_and_binding(session, port_id):
         # to both be added to the session and locked for update. A
         # single joined query should work, but the combination of left
         # outer joins and postgresql doesn't seem to work.
-        port = (session.query(models_v2.Port).
+        port = (context.session.query(models_v2.Port).
                 enable_eagerloads(False).
                 filter_by(id=port_id).
                 with_lockmode('update').
                 one())
-        binding = (session.query(models.PortBinding).
+        binding = (context.session.query(models.PortBinding).
                    enable_eagerloads(False).
                    filter_by(port_id=port_id).
                    with_lockmode('update').
@@ -97,10 +72,10 @@ def get_locked_port_and_binding(session, port_id):
         return None, None
 
 
-def set_binding_levels(session, levels):
+def set_binding_levels(context, levels):
     if levels:
         for level in levels:
-            session.add(level)
+            context.session.add(level)
         LOG.debug("For port %(port_id)s, host %(host)s, "
                   "set binding levels %(levels)s",
                   {'port_id': levels[0].port_id,
@@ -110,9 +85,9 @@ def set_binding_levels(session, levels):
         LOG.debug("Attempted to set empty binding levels")
 
 
-def get_binding_levels(session, port_id, host):
+def get_binding_levels(context, port_id, host):
     if host:
-        result = (session.query(models.PortBindingLevel).
+        result = (context.session.query(models.PortBindingLevel).
                   filter_by(port_id=port_id, host=host).
                   order_by(models.PortBindingLevel.level).
                   all())
@@ -124,9 +99,9 @@ def get_binding_levels(session, port_id, host):
         return result
 
 
-def clear_binding_levels(session, port_id, host):
+def clear_binding_levels(context, port_id, host):
     if host:
-        (session.query(models.PortBindingLevel).
+        (context.session.query(models.PortBindingLevel).
          filter_by(port_id=port_id, host=host).
          delete())
         LOG.debug("For port %(port_id)s, host %(host)s, "
@@ -135,14 +110,14 @@ def clear_binding_levels(session, port_id, host):
                    'host': host})
 
 
-def ensure_distributed_port_binding(session, port_id, host, router_id=None):
-    record = (session.query(models.DistributedPortBinding).
+def ensure_distributed_port_binding(context, port_id, host, router_id=None):
+    record = (context.session.query(models.DistributedPortBinding).
               filter_by(port_id=port_id, host=host).first())
     if record:
         return record
 
     try:
-        with session.begin(subtransactions=True):
+        with context.session.begin(subtransactions=True):
             record = models.DistributedPortBinding(
                 port_id=port_id,
                 host=host,
@@ -150,27 +125,27 @@ def ensure_distributed_port_binding(session, port_id, host, router_id=None):
                 vif_type=portbindings.VIF_TYPE_UNBOUND,
                 vnic_type=portbindings.VNIC_NORMAL,
                 status=n_const.PORT_STATUS_DOWN)
-            session.add(record)
+            context.session.add(record)
             return record
     except db_exc.DBDuplicateEntry:
         LOG.debug("Distributed Port %s already bound", port_id)
-        return (session.query(models.DistributedPortBinding).
+        return (context.session.query(models.DistributedPortBinding).
                 filter_by(port_id=port_id, host=host).one())
 
 
-def delete_distributed_port_binding_if_stale(session, binding):
+def delete_distributed_port_binding_if_stale(context, binding):
     if not binding.router_id and binding.status == n_const.PORT_STATUS_DOWN:
-        with session.begin(subtransactions=True):
+        with context.session.begin(subtransactions=True):
             LOG.debug("Distributed port: Deleting binding %s", binding)
-            session.delete(binding)
+            context.session.delete(binding)
 
 
-def get_port(session, port_id):
+def get_port(context, port_id):
     """Get port record for update within transaction."""
 
-    with session.begin(subtransactions=True):
+    with context.session.begin(subtransactions=True):
         try:
-            record = (session.query(models_v2.Port).
+            record = (context.session.query(models_v2.Port).
                       enable_eagerloads(False).
                       filter(models_v2.Port.id.startswith(port_id)).
                       one())
@@ -185,9 +160,8 @@ def get_port(session, port_id):
 
 def get_port_from_device_mac(context, device_mac):
     LOG.debug("get_port_from_device_mac() called for mac %s", device_mac)
-    qry = context.session.query(models_v2.Port).filter_by(
-        mac_address=device_mac)
-    return qry.first()
+    ports = port_obj.Port.get_objects(context, mac_address=device_mac)
+    return ports.pop() if ports else None
 
 
 def get_ports_and_sgs(context, port_ids):
@@ -242,7 +216,7 @@ def get_sg_ids_grouped_by_port(context, port_ids):
 
 
 def make_port_dict_with_security_groups(port, sec_groups):
-    plugin = manager.NeutronManager.get_plugin()
+    plugin = directory.get_plugin()
     port_dict = plugin._make_port_dict(port)
     port_dict['security_groups'] = sec_groups
     port_dict['security_group_rules'] = []
@@ -252,10 +226,10 @@ def make_port_dict_with_security_groups(port, sec_groups):
     return port_dict
 
 
-def get_port_binding_host(session, port_id):
+def get_port_binding_host(context, port_id):
     try:
-        with session.begin(subtransactions=True):
-            query = (session.query(models.PortBinding).
+        with context.session.begin(subtransactions=True):
+            query = (context.session.query(models.PortBinding).
                      filter(models.PortBinding.port_id.startswith(port_id)).
                      one())
     except exc.NoResultFound:
@@ -269,10 +243,10 @@ def get_port_binding_host(session, port_id):
     return query.host
 
 
-def generate_distributed_port_status(session, port_id):
+def generate_distributed_port_status(context, port_id):
     # an OR'ed value of status assigned to parent port from the
     # distributedportbinding bucket
-    query = session.query(models.DistributedPortBinding)
+    query = context.session.query(models.DistributedPortBinding)
     final_status = n_const.PORT_STATUS_BUILD
     for bind in query.filter(models.DistributedPortBinding.port_id == port_id):
         if bind.status == n_const.PORT_STATUS_ACTIVE:
@@ -282,9 +256,9 @@ def generate_distributed_port_status(session, port_id):
     return final_status
 
 
-def get_distributed_port_binding_by_host(session, port_id, host):
-    with session.begin(subtransactions=True):
-        binding = (session.query(models.DistributedPortBinding).
+def get_distributed_port_binding_by_host(context, port_id, host):
+    with context.session.begin(subtransactions=True):
+        binding = (context.session.query(models.DistributedPortBinding).
             filter(models.DistributedPortBinding.port_id.startswith(port_id),
                    models.DistributedPortBinding.host == host).first())
     if not binding:
@@ -293,14 +267,55 @@ def get_distributed_port_binding_by_host(session, port_id, host):
     return binding
 
 
-def get_distributed_port_bindings(session, port_id):
-    with session.begin(subtransactions=True):
-        bindings = (session.query(models.DistributedPortBinding).
+def get_distributed_port_bindings(context, port_id):
+    with context.session.begin(subtransactions=True):
+        bindings = (context.session.query(models.DistributedPortBinding).
                     filter(models.DistributedPortBinding.port_id.startswith(
                            port_id)).all())
     if not bindings:
         LOG.debug("No bindings for distributed port %s", port_id)
     return bindings
+
+
+@db_api.context_manager.reader
+def partial_port_ids_to_full_ids(context, partial_ids):
+    """Takes a list of the start of port IDs and returns full IDs.
+
+    Returns dictionary of partial IDs to full IDs if a single match
+    is found.
+    """
+    result = {}
+    to_full_query = (context.session.query(models_v2.Port.id).
+                     filter(or_(*[models_v2.Port.id.startswith(p)
+                                  for p in partial_ids])))
+    candidates = [match[0] for match in to_full_query]
+    for partial_id in partial_ids:
+        matching = [c for c in candidates if c.startswith(partial_id)]
+        if len(matching) == 1:
+            result[partial_id] = matching[0]
+            continue
+        if len(matching) < 1:
+            LOG.info(_LI("No ports have port_id starting with %s"),
+                     partial_id)
+        elif len(matching) > 1:
+            LOG.error(_LE("Multiple ports have port_id starting with %s"),
+                      partial_id)
+    return result
+
+
+@db_api.context_manager.reader
+def get_port_db_objects(context, port_ids):
+    """Takes a list of port_ids and returns matching port db objects.
+
+    return format is a dictionary keyed by passed in IDs with db objects
+    for values or None if the port was not present.
+    """
+    port_qry = (context.session.query(models_v2.Port).
+                filter(models_v2.Port.id.in_(port_ids)))
+    result = {p: None for p in port_ids}
+    for port in port_qry:
+        result[port.id] = port
+    return result
 
 
 def is_dhcp_active_on_any_subnet(context, subnet_ids):

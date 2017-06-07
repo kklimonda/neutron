@@ -22,6 +22,7 @@ from neutron_lib import exceptions as lib_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
+from oslo_messaging.rpc import dispatcher
 from oslo_messaging import serializer as om_serializer
 from oslo_service import service
 from oslo_utils import excutils
@@ -46,17 +47,6 @@ ALLOWED_EXMODS = [
 EXTRA_EXMODS = []
 
 
-TRANSPORT_ALIASES = {
-    'neutron.openstack.common.rpc.impl_fake': 'fake',
-    'neutron.openstack.common.rpc.impl_qpid': 'qpid',
-    'neutron.openstack.common.rpc.impl_kombu': 'rabbit',
-    'neutron.openstack.common.rpc.impl_zmq': 'zmq',
-    'neutron.rpc.impl_fake': 'fake',
-    'neutron.rpc.impl_qpid': 'qpid',
-    'neutron.rpc.impl_kombu': 'rabbit',
-    'neutron.rpc.impl_zmq': 'zmq',
-}
-
 # NOTE(salv-orlando): I am afraid this is a global variable. While not ideal,
 # they're however widely used throughout the code base. It should be set to
 # true if the RPC server is not running in the current process space. This
@@ -68,10 +58,9 @@ def init(conf):
     global TRANSPORT, NOTIFICATION_TRANSPORT, NOTIFIER
     exmods = get_allowed_exmods()
     TRANSPORT = oslo_messaging.get_transport(conf,
-                                             allowed_remote_exmods=exmods,
-                                             aliases=TRANSPORT_ALIASES)
+                                             allowed_remote_exmods=exmods)
     NOTIFICATION_TRANSPORT = oslo_messaging.get_notification_transport(
-        conf, allowed_remote_exmods=exmods, aliases=TRANSPORT_ALIASES)
+        conf, allowed_remote_exmods=exmods)
     serializer = RequestContextSerializer()
     NOTIFIER = oslo_messaging.Notifier(NOTIFICATION_TRANSPORT,
                                        serializer=serializer)
@@ -216,8 +205,10 @@ def get_client(target, version_cap=None, serializer=None):
 def get_server(target, endpoints, serializer=None):
     assert TRANSPORT is not None
     serializer = RequestContextSerializer(serializer)
+    access_policy = dispatcher.LegacyRPCAccessPolicy
     return oslo_messaging.get_rpc_server(TRANSPORT, target, endpoints,
-                                         'eventlet', serializer)
+                                         'eventlet', serializer,
+                                         access_policy=access_policy)
 
 
 def get_notifier(service=None, host=None, publisher_id=None):

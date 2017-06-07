@@ -17,7 +17,7 @@ import importlib
 import itertools
 import os
 
-from neutron.conf.services import provider_configuration as prov_config
+from neutron_lib.db import constants as db_const
 from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -25,7 +25,8 @@ from oslo_log import versionutils
 import stevedore
 
 from neutron._i18n import _, _LW
-from neutron.api.v2 import attributes as attr
+from neutron.conf.services import provider_configuration as prov_config
+from neutron.db import _utils as db_utils
 
 LOG = logging.getLogger(__name__)
 
@@ -48,10 +49,10 @@ class NeutronModule(object):
         }
 
     def _import_or_none(self):
-            try:
-                return importlib.import_module(self.module_name)
-            except ImportError:
-                return None
+        try:
+            return importlib.import_module(self.module_name)
+        except ImportError:
+            return None
 
     def installed(self):
         LOG.debug("NeutronModule installed = %s", self.module_name)
@@ -126,7 +127,7 @@ class NeutronModule(object):
         return providers
 
 
-#global scope function that should be used in service APIs
+# global scope function that should be used in service APIs
 def normalize_provider_name(name):
     return name.lower()
 
@@ -159,10 +160,10 @@ def parse_service_provider_opt(service_module='neutron'):
 
     """Parse service definition opts and returns result."""
     def validate_name(name):
-        if len(name) > attr.NAME_MAX_LEN:
+        if len(name) > db_const.NAME_FIELD_SIZE:
             raise n_exc.Invalid(
                 _("Provider name %(name)s is limited by %(len)s characters")
-                % {'name': name, 'len': attr.NAME_MAX_LEN})
+                % {'name': name, 'len': db_const.NAME_FIELD_SIZE})
 
     neutron_mod = NeutronModule(service_module)
     svc_providers_opt = neutron_mod.service_providers()
@@ -265,17 +266,11 @@ class ProviderConfiguration(object):
                     return False
         return True
 
-    def _fields(self, resource, fields):
-        if fields:
-            return dict(((key, item) for key, item in resource.items()
-                         if key in fields))
-        return resource
-
     def get_service_providers(self, filters=None, fields=None):
-        return [self._fields({'service_type': k[0],
-                              'name': k[1],
-                              'driver': v['driver'],
-                              'default': v['default']},
-                             fields)
+        return [db_utils.resource_fields({'service_type': k[0],
+                                          'name': k[1],
+                                          'driver': v['driver'],
+                                          'default': v['default']},
+                                         fields)
                 for k, v in self.providers.items()
                 if self._check_entry(k, v, filters)]

@@ -17,6 +17,7 @@ from keystonemiddleware import auth_token
 from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_middleware import cors
+from oslo_middleware import http_proxy_to_wsgi
 from oslo_middleware import request_id
 import pecan
 
@@ -80,13 +81,16 @@ def _wrap_app(app):
     # version can be unauthenticated so it goes outside of auth
     app = versions.Versions(app)
 
+    # handle cases where neutron-server is behind a proxy
+    app = http_proxy_to_wsgi.HTTPProxyToWSGI(app)
+
     # This should be the last middleware in the list (which results in
     # it being the first in the middleware chain). This is to ensure
     # that any errors thrown by other middleware, such as an auth
     # middleware - are annotated with CORS headers, and thus accessible
     # by the browser.
     app = cors.CORS(app, cfg.CONF)
-    app.set_latent(
+    cors.set_defaults(
         allow_headers=['X-Auth-Token', 'X-Identity-Status', 'X-Roles',
                        'X-Service-Catalog', 'X-User-Id', 'X-Tenant-Id',
                        'X-OpenStack-Request-ID',

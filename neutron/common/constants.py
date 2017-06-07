@@ -15,17 +15,12 @@
 
 from neutron_lib import constants as lib_constants
 
-from neutron.common import _deprecate
-
 
 ROUTER_PORT_OWNERS = lib_constants.ROUTER_INTERFACE_OWNERS_SNAT + \
     (lib_constants.DEVICE_OWNER_ROUTER_GW,)
 
 ROUTER_STATUS_ACTIVE = 'ACTIVE'
-# NOTE(kevinbenton): a BUILD status for routers could be added in the future
-# for agents to indicate when they are wiring up the ports. The following is
-# to indicate when the server is busy building sub-components of a router
-ROUTER_STATUS_ALLOCATING = 'ALLOCATING'
+ROUTER_STATUS_ERROR = 'ERROR'
 
 DEVICE_ID_RESERVED_DHCP_PORT = "reserved_dhcp_port"
 
@@ -37,8 +32,6 @@ SNAT_ROUTER_INTF_KEY = '_snat_router_interfaces'
 HA_NETWORK_NAME = 'HA network tenant %s'
 HA_SUBNET_NAME = 'HA subnet tenant %s'
 HA_PORT_NAME = 'HA port tenant %s'
-MINIMUM_MINIMUM_AGENTS_FOR_HA = 1
-DEFAULT_MINIMUM_AGENTS_FOR_HA = 2
 HA_ROUTER_STATE_ACTIVE = 'active'
 HA_ROUTER_STATE_STANDBY = 'standby'
 
@@ -128,6 +121,18 @@ IP_ALLOWED_VERSIONS = [lib_constants.IP_VERSION_4, lib_constants.IP_VERSION_6]
 PORT_RANGE_MIN = 1
 PORT_RANGE_MAX = 65535
 
+# Configuration values for accept_ra sysctl, copied from linux kernel
+# networking (netdev) tree, file Documentation/networking/ip-sysctl.txt
+#
+# Possible values are:
+#         0 Do not accept Router Advertisements.
+#         1 Accept Router Advertisements if forwarding is disabled.
+#         2 Overrule forwarding behaviour. Accept Router Advertisements
+#           even if forwarding is enabled.
+ACCEPT_RA_DISABLED = 0
+ACCEPT_RA_WITHOUT_FORWARDING = 1
+ACCEPT_RA_WITH_FORWARDING = 2
+
 # Some components communicate using private address ranges, define
 # them all here. These address ranges should not cause any issues
 # even if they overlap since they are used in disjoint namespaces,
@@ -138,8 +143,14 @@ DVR_FIP_LL_CIDR = '169.254.64.0/18'
 L3_HA_NET_CIDR = '169.254.192.0/18'
 METADATA_CIDR = '169.254.169.254/32'
 
+# The only defined IpamAllocation status at this stage is 'ALLOCATED'.
+# More states will be available in the future - e.g.: RECYCLABLE
+IPAM_ALLOCATION_STATUS_ALLOCATED = 'ALLOCATED'
 
-# Neutron-lib migration shim. This will emit a deprecation warning on any
-# reference to constants that have been moved out of this module and into
-# the neutron_lib.constants module.
-_deprecate._MovedGlobals(lib_constants)
+VALID_IPAM_ALLOCATION_STATUSES = (IPAM_ALLOCATION_STATUS_ALLOCATED,)
+
+# Port binding states for Live Migration
+PORT_BINDING_STATUS_ACTIVE = 'ACTIVE'
+PORT_BINDING_STATUS_INACTIVE = 'INACTIVE'
+PORT_BINDING_STATUSES = (PORT_BINDING_STATUS_ACTIVE,
+                         PORT_BINDING_STATUS_INACTIVE)

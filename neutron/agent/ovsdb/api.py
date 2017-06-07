@@ -24,7 +24,7 @@ from neutron._i18n import _
 
 interface_map = {
     'vsctl': 'neutron.agent.ovsdb.impl_vsctl.OvsdbVsctl',
-    'native': 'neutron.agent.ovsdb.impl_idl.OvsdbIdl',
+    'native': 'neutron.agent.ovsdb.impl_idl.NeutronOvsdbIdl',
 }
 
 OPTS = [
@@ -34,8 +34,11 @@ OPTS = [
                help=_('The interface for interacting with the OVSDB')),
     cfg.StrOpt('ovsdb_connection',
                default='tcp:127.0.0.1:6640',
-               help=_('The connection string for the native OVSDB backend. '
-                      'Requires the native ovsdb_interface to be enabled.'))
+               help=_('The connection string for the OVSDB backend. '
+                      'Will be used by ovsdb-client when monitoring and '
+                      'used for the all ovsdb commands when native '
+                      'ovsdb_interface is enabled'
+                      ))
 ]
 cfg.CONF.register_opts(OPTS, 'OVS')
 
@@ -240,6 +243,27 @@ class API(object):
         # unit tests
 
     @abc.abstractmethod
+    def db_add(self, table, record, column, *values):
+        """Create a command to add a value to a record
+
+        Adds each value or key-value pair to column in record in table. If
+        column is a map, then each value will be a dict, otherwise a base type.
+        If key already exists in a map column, then the current value is not
+        replaced (use the set command to replace an existing value).
+
+        :param table:  The OVS table containing the record to be modified
+        :type table:   string
+        :param record: The record id (name/uuid) to modified
+        :type record:  string
+        :param column: The column name to be modified
+        :type column:  string
+        :param values: The values to be added to the column
+        :type values:  The base type of the column. If column is a map, then
+                       a dict containing the key name and the map's value type
+        :returns:     :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
     def db_clear(self, table, record, column):
         """Create a command to clear a field's value in a record
 
@@ -411,4 +435,5 @@ def py_to_val(pyval):
     elif pyval == '':
         return '""'
     else:
-        return pyval
+        # NOTE(twilson) If a Command object, return its record_id as a value
+        return getattr(pyval, "record_id", pyval)

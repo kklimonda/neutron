@@ -14,10 +14,10 @@
 #    under the License.
 
 import netaddr
+from neutron_lib import constants
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 
-from neutron.common import constants
 from neutron.tests.tempest.api import base
 from neutron.tests.tempest import config
 
@@ -26,6 +26,10 @@ CONF = config.CONF
 
 class NetworksTestDHCPv6(base.BaseNetworkTest):
     _ip_version = 6
+
+    def setUp(self):
+        super(NetworksTestDHCPv6, self).setUp()
+        self.addCleanup(self._clean_network)
 
     @classmethod
     def skip_checks(cls):
@@ -92,7 +96,3 @@ class NetworksTestDHCPv6(base.BaseNetworkTest):
                               self.network,
                               fixed_ips=[{'subnet_id': subnet['id'],
                                           'ip_address': ip}])
-
-    def tearDown(self):
-        self._clean_network()
-        super(NetworksTestDHCPv6, self).tearDown()

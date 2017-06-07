@@ -16,7 +16,6 @@ import os
 import shutil
 import signal
 
-import eventlet
 import netaddr
 from neutron_lib import constants as n_consts
 from oslo_log import log as logging
@@ -360,7 +359,7 @@ class HaRouter(router.RouterInfo):
         try:
             common_utils.wait_until_true(lambda: not pm.active,
                                          timeout=SIGTERM_TIMEOUT)
-        except eventlet.timeout.Timeout:
+        except common_utils.WaitTimeout:
             pm.disable(sig=str(int(signal.SIGKILL)))
 
     def update_initial_state(self, callback):
@@ -412,14 +411,14 @@ class HaRouter(router.RouterInfo):
                                namespace=self.ns_name,
                                prefix=router.EXTERNAL_DEV_PREFIX)
 
-    def delete(self, agent):
+    def delete(self):
         self.destroy_state_change_monitor(self.process_monitor)
         self.disable_keepalived()
         self.ha_network_removed()
-        super(HaRouter, self).delete(agent)
+        super(HaRouter, self).delete()
 
-    def process(self, agent):
-        super(HaRouter, self).process(agent)
+    def process(self):
+        super(HaRouter, self).process()
 
         self.ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
         if (self.ha_port and

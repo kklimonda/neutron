@@ -11,6 +11,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib import constants
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 import testtools
@@ -23,6 +24,7 @@ class RoutersFlavorTestCase(base.BaseRouterTest):
     @classmethod
     @test.requires_ext(extension="router", service="network")
     @test.requires_ext(extension="flavors", service="network")
+    @test.requires_ext(extension="l3-flavors", service="network")
     def skip_checks(cls):
         super(RoutersFlavorTestCase, cls).skip_checks()
 
@@ -34,12 +36,17 @@ class RoutersFlavorTestCase(base.BaseRouterTest):
         # make a flavor based on legacy router for regular tenant to use
         driver = ('neutron.services.l3_router.service_providers.'
                   'single_node.SingleNodeDriver')
-        sp = cls.admin_client.create_service_profile(driver=driver)
+        try:
+            sp = cls.admin_client.create_service_profile(driver=driver)
+        except lib_exc.NotFound as e:
+            if e.resp_body['type'] == 'ServiceProfileDriverNotFound':
+                raise cls.skipException("%s is not available" % driver)
+            raise
         cls.service_profiles.append(sp['service_profile'])
         cls.flavor = cls.create_flavor(
                 name='special_flavor',
                 description='econonomy class',
-                service_type='L3_ROUTER_NAT')
+                service_type=constants.L3)
         cls.admin_client.create_flavor_service_profile(
             cls.flavor['id'], sp['service_profile']['id'])
         cls.flavor_service_profiles.append((cls.flavor['id'],
@@ -47,12 +54,17 @@ class RoutersFlavorTestCase(base.BaseRouterTest):
         # make another with a different driver
         driver = ('neutron.services.l3_router.service_providers.'
                   'dvr.DvrDriver')
-        sp = cls.admin_client.create_service_profile(driver=driver)
+        try:
+            sp = cls.admin_client.create_service_profile(driver=driver)
+        except lib_exc.NotFound as e:
+            if e.resp_body['type'] == 'ServiceProfileDriverNotFound':
+                raise cls.skipException("%s is not available" % driver)
+            raise
         cls.service_profiles.append(sp['service_profile'])
         cls.prem_flavor = cls.create_flavor(
                 name='better_special_flavor',
                 description='econonomy comfort',
-                service_type='L3_ROUTER_NAT')
+                service_type=constants.L3)
         cls.admin_client.create_flavor_service_profile(
             cls.prem_flavor['id'], sp['service_profile']['id'])
         cls.flavor_service_profiles.append((cls.prem_flavor['id'],

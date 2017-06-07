@@ -15,6 +15,7 @@
 import netaddr
 from neutron_lib.api import validators
 from neutron_lib import constants
+from neutron_lib.utils import helpers
 from oslo_utils import uuidutils
 from sqlalchemy.orm import exc
 from sqlalchemy.orm import scoped_session
@@ -28,6 +29,7 @@ from neutron.callbacks import resources
 from neutron.common import _deprecate
 from neutron.common import constants as n_const
 from neutron.common import utils
+from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2
 from neutron.db.models import securitygroup as sg_models
@@ -81,6 +83,11 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
 
         if not default_sg:
             self._ensure_default_security_group(context, tenant_id)
+        else:
+            existing_def_sg_id = self._get_default_sg_id(context, tenant_id)
+            if existing_def_sg_id is not None:
+                # default already exists, return it
+                return self.get_security_group(context, existing_def_sg_id)
 
         with db_api.autonested_transaction(context.session):
             security_group_db = sg_models.SecurityGroup(id=s.get('id') or (
@@ -255,12 +262,13 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
                                        for r in security_group.rules]
         self._apply_dict_extend_functions(ext_sg.SECURITYGROUPS, res,
                                           security_group)
-        return self._fields(res, fields)
+        return db_utils.resource_fields(res, fields)
 
-    def _make_security_group_binding_dict(self, security_group, fields=None):
+    @staticmethod
+    def _make_security_group_binding_dict(security_group, fields=None):
         res = {'port_id': security_group['port_id'],
                'security_group_id': security_group['security_group_id']}
-        return self._fields(res, fields)
+        return db_utils.resource_fields(res, fields)
 
     @db_api.retry_if_session_inactive()
     def _create_port_security_group_binding(self, context, port_id,
@@ -308,11 +316,19 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
                 res_rule_dict = self._create_security_group_rule(
                     context, rule_dict, validate=False)
                 ret.append(res_rule_dict)
-            return ret
+        for rdict in ret:
+            registry.notify(
+                resources.SECURITY_GROUP_RULE, events.AFTER_CREATE, self,
+                context=context, security_group_rule=rdict)
+        return ret
 
     @db_api.retry_if_session_inactive()
     def create_security_group_rule(self, context, security_group_rule):
-        return self._create_security_group_rule(context, security_group_rule)
+        res = self._create_security_group_rule(context, security_group_rule)
+        registry.notify(
+            resources.SECURITY_GROUP_RULE, events.AFTER_CREATE, self,
+            context=context, security_group_rule=res)
+        return res
 
     def _create_security_group_rule(self, context, security_group_rule,
                                     validate=True):
@@ -348,12 +364,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
             self._registry_notify(resources.SECURITY_GROUP_RULE,
                               events.PRECOMMIT_CREATE,
                               exc_cls=ext_sg.SecurityGroupConflict, **kwargs)
-        res_rule_dict = self._make_security_group_rule_dict(db)
-        kwargs['security_group_rule'] = res_rule_dict
-        registry.notify(
-            resources.SECURITY_GROUP_RULE, events.AFTER_CREATE, self,
-            **kwargs)
-        return res_rule_dict
+        return self._make_security_group_rule_dict(db)
 
     def _get_ip_proto_number(self, protocol):
         if protocol is None:
@@ -478,7 +489,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
 
         self._apply_dict_extend_functions(ext_sg.SECURITYGROUPRULES, res,
                                           security_group_rule)
-        return self._fields(res, fields)
+        return db_utils.resource_fields(res, fields)
 
     def _make_security_group_rule_filter_dict(self, security_group_rule):
         sgr = security_group_rule['security_group_rule']
@@ -635,11 +646,14 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
                                   **kwargs)
 
             try:
+                sg_rule = query.one()
                 # As there is a filter on a primary key it is not possible for
                 # MultipleResultsFound to be raised
-                context.session.delete(query.one())
+                context.session.delete(sg_rule)
             except exc.NoResultFound:
                 raise ext_sg.SecurityGroupRuleNotFound(id=id)
+
+            kwargs['security_group_id'] = sg_rule['security_group_id']
 
         registry.notify(
             resources.SECURITY_GROUP_RULE, events.AFTER_DELETE, self,
@@ -669,27 +683,30 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         port[ext_sg.SECURITYGROUPS] = (security_group_ids and
                                        list(security_group_ids) or [])
 
-    def _ensure_default_security_group(self, context, tenant_id):
-        """Create a default security group if one doesn't exist.
-
-        :returns: the default security group id for given tenant.
-        """
+    def _get_default_sg_id(self, context, tenant_id):
         try:
             query = self._model_query(context, sg_models.DefaultSecurityGroup)
             default_group = query.filter_by(tenant_id=tenant_id).one()
             return default_group['security_group_id']
         except exc.NoResultFound:
-            security_group = {
-                'security_group':
-                    {'name': 'default',
-                     'tenant_id': tenant_id,
-                     'description': _('Default security group')}
-            }
-            # starting a transaction before create to avoid db retries
-            with context.session.begin(subtransactions=True):
-                sg_id = self.create_security_group(
-                    context, security_group, default_sg=True)['id']
-            return sg_id
+            pass
+
+    def _ensure_default_security_group(self, context, tenant_id):
+        """Create a default security group if one doesn't exist.
+
+        :returns: the default security group id for given tenant.
+        """
+        existing = self._get_default_sg_id(context, tenant_id)
+        if existing is not None:
+            return existing
+        security_group = {
+            'security_group':
+                {'name': 'default',
+                 'tenant_id': tenant_id,
+                 'description': _('Default security group')}
+        }
+        return self.create_security_group(context, security_group,
+                                          default_sg=True)['id']
 
     def _get_security_groups_on_port(self, context, port):
         """Check that all security groups on port belong to tenant.
@@ -760,7 +777,7 @@ class SecurityGroupDbMixin(ext_sg.SecurityGroupPluginBase):
         need_notify = False
         port_updates = port['port']
         if (ext_sg.SECURITYGROUPS in port_updates and
-            not utils.compare_elements(
+            not helpers.compare_elements(
                 original_port.get(ext_sg.SECURITYGROUPS),
                 port_updates[ext_sg.SECURITYGROUPS])):
             # delete the port binding and read it with the new rules

@@ -93,7 +93,7 @@ class BaseFirewallTestCase(base.BaseSudoTestCase):
     scenarios = scenarios_iptables + scenarios_ovs_fw_interfaces
 
     ip_cidr = None
-    vlan_range = set(range(test_constants.VLAN_COUNT))
+    vlan_range = set(range(1, test_constants.VLAN_COUNT - 1))
 
     def setUp(self):
         security_config.register_securitygroups_opts()
@@ -398,7 +398,7 @@ class FirewallTestCase(BaseFirewallTestCase):
         not_allowed_ip = "%s/24" % (allowed_ip + 1)
         self.src_port_desc['allowed_address_pairs'] = [
             {'mac_address': port_mac,
-             'ip_address': allowed_ip}]
+             'ip_address': "%s/32" % allowed_ip}]
         allowed_ip = "%s/24" % allowed_ip
 
         self.firewall.update_port_filter(self.src_port_desc)
@@ -582,7 +582,7 @@ class FirewallTestCase(BaseFirewallTestCase):
 
         """
         # Enable ip forwarding on the interface in order to reply with
-        # destionation net unreachable
+        # destination net unreachable
         self.tester._peer.execute([
             'sysctl', '-w', 'net.ipv4.conf.%s.forwarding=1' %
             self.tester._peer.port.name])

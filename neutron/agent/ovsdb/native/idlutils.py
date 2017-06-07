@@ -18,12 +18,17 @@ import time
 import uuid
 
 from neutron_lib import exceptions
+from oslo_utils import excutils
 from ovs.db import idl
 from ovs import jsonrpc
 from ovs import poller
 from ovs import stream
+import six
+import tenacity
 
 from neutron._i18n import _
+from neutron.agent.ovsdb import api
+from neutron.agent.ovsdb.native import helpers
 
 
 RowLookup = collections.namedtuple('RowLookup',
@@ -36,6 +41,7 @@ _LOOKUP_TABLE = {
     'IPFIX': RowLookup('Bridge', 'name', 'ipfix'),
     'Mirror': RowLookup('Mirror', 'name', None),
     'NetFlow': RowLookup('Bridge', 'name', 'netflow'),
+    'Open_vSwitch': RowLookup('Open_vSwitch', None, None),
     'QoS': RowLookup('Port', 'name', 'qos'),
     'Queue': RowLookup(None, None, None),
     'sFlow': RowLookup('Bridge', 'name', 'sflow'),
@@ -74,11 +80,11 @@ def row_by_record(idl_, table, record):
         raise RowNotFound(table=table, col='uuid', match=record)
 
     rl = _LOOKUP_TABLE.get(table, RowLookup(table, get_index_column(t), None))
-    # no table means uuid only, no column is just SSL which we don't need
+    # no table means uuid only, no column means lookup table only has one row
     if rl.table is None:
         raise ValueError(_("Table %s can only be queried by UUID") % table)
     if rl.column is None:
-        raise NotImplementedError(_("'.' searches are not implemented"))
+        return t.rows.values()[0]
     row = row_by_value(idl_, rl.table, rl.column, record)
     if rl.uuid_column:
         rows = getattr(row, rl.uuid_column)
@@ -94,7 +100,7 @@ class ExceptionResult(object):
         self.tb = tb
 
 
-def get_schema_helper(connection, schema_name):
+def _get_schema_helper(connection, schema_name):
     err, strm = stream.Stream.open_block(
         stream.Stream.open(connection))
     if err:
@@ -110,6 +116,26 @@ def get_schema_helper(connection, schema_name):
     elif resp.error:
         raise Exception(resp.error)
     return idl.SchemaHelper(None, resp.result)
+
+
+def get_schema_helper(connection, schema_name, retry=True):
+    try:
+        return _get_schema_helper(connection, schema_name)
+    except Exception:
+        with excutils.save_and_reraise_exception(reraise=False) as ctx:
+            if not retry:
+                ctx.reraise = True
+            # We may have failed due to set-manager not being called
+            helpers.enable_connection_uri(connection, set_timeout=True)
+
+            # There is a small window for a race, so retry up to a second
+            @tenacity.retry(wait=tenacity.wait_exponential(multiplier=0.01),
+                            stop=tenacity.stop_after_delay(1),
+                            reraise=True)
+            def do_get_schema_helper():
+                return _get_schema_helper(connection, schema_name)
+
+            return do_get_schema_helper()
 
 
 def wait_for_change(_idl, timeout, seqno=None):
@@ -233,3 +259,28 @@ def get_index_column(table):
         idx = table.indexes[0]
         if len(idx) == 1:
             return idx[0].name
+
+
+def db_replace_record(obj):
+    """Replace any api.Command objects with their results
+
+    This method should leave obj untouched unless the object contains an
+    api.Command object.
+    """
+    if isinstance(obj, collections.Mapping):
+        for k, v in six.iteritems(obj):
+            if isinstance(v, api.Command):
+                obj[k] = v.result
+    elif (isinstance(obj, collections.Sequence)
+          and not isinstance(obj, six.string_types)):
+        for i, v in enumerate(obj):
+            if isinstance(v, api.Command):
+                try:
+                    obj[i] = v.result
+                except TypeError:
+                    # NOTE(twilson) If someone passes a tuple, then just return
+                    # a tuple with the Commands replaced with their results
+                    return type(obj)(getattr(v, "result", v) for v in obj)
+    elif isinstance(obj, api.Command):
+        obj = obj.result
+    return obj

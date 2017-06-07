@@ -15,6 +15,7 @@
 import contextlib
 
 from neutron_lib import constants as n_consts
+from neutron_lib.db import constants as db_const
 from oslo_utils import uuidutils
 import webob.exc
 
@@ -33,6 +34,8 @@ DB_METERING_PLUGIN_KLASS = (
 )
 
 extensions_path = ':'.join(neutron.extensions.__path__)
+_long_description_ok = 'x' * (db_const.LONG_DESCRIPTION_FIELD_SIZE)
+_long_description_ng = 'x' * (db_const.LONG_DESCRIPTION_FIELD_SIZE + 1)
 _fake_uuid = uuidutils.generate_uuid
 
 
@@ -156,6 +159,16 @@ class TestMetering(MeteringPluginDbTestCase):
                                  shared=shared) as metering_label:
             for k, v, in keys:
                 self.assertEqual(metering_label['metering_label'][k], v)
+
+    def test_create_metering_label_with_max_description_length(self):
+        res = self._create_metering_label(self.fmt, 'my label',
+                                          _long_description_ok)
+        self.assertEqual(webob.exc.HTTPCreated.code, res.status_int)
+
+    def test_create_metering_label_with_too_long_description(self):
+        res = self._create_metering_label(self.fmt, 'my label',
+                                          _long_description_ng)
+        self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
 
     def test_update_metering_label(self):
         name = 'my label'

@@ -10,16 +10,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import exceptions as n_exc
-from oslo_utils import uuidutils
+# TODO(ihrachys): cover the module with functional tests targeting supported
+# backends
 
-from neutron import manager
+from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import directory
+from oslo_utils import uuidutils
 
 
 # Common database operation implementations
 def _get_filter_query(context, model, **kwargs):
     # TODO(jlibosva): decompose _get_collection_query from plugin instance
-    plugin = manager.NeutronManager.get_plugin()
+    plugin = directory.get_plugin()
     with context.session.begin(subtransactions=True):
         filters = _kwargs_to_filters(**kwargs)
         query = plugin._get_collection_query(context, model, filters)
@@ -43,7 +45,7 @@ def get_objects(context, model, _pager=None, **kwargs):
     with context.session.begin(subtransactions=True):
         filters = _kwargs_to_filters(**kwargs)
         # TODO(ihrachys): decompose _get_collection from plugin instance
-        plugin = manager.NeutronManager.get_plugin()
+        plugin = directory.get_plugin()
         return plugin._get_collection(
             context, model,
             # TODO(ihrachys): avoid this no-op call per model found
@@ -83,3 +85,19 @@ def delete_object(context, model, **kwargs):
     with context.session.begin(subtransactions=True):
         db_obj = _safe_get_object(context, model, **kwargs)
         context.session.delete(db_obj)
+
+
+def delete_objects(context, model, **kwargs):
+    '''Delete matching objects, if any. Return number of deleted objects.
+
+    This function does not raise exceptions if nothing matches.
+
+    :param model: SQL model
+    :param kwargs: multiple filters defined by key=value pairs
+    :return: Number of entries deleted
+    '''
+    with context.session.begin(subtransactions=True):
+        db_objs = get_objects(context, model, **kwargs)
+        for db_obj in db_objs:
+            context.session.delete(db_obj)
+        return len(db_objs)

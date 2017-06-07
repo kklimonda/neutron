@@ -10,8 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import itertools
-
 from oslo_utils import uuidutils
 
 from neutron import context
@@ -38,8 +36,7 @@ class IPAllocationPoolDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
         super(IPAllocationPoolDbObjectTestCase, self).setUp()
         self._create_test_network()
         self._create_test_subnet(self._network)
-        for obj in itertools.chain(self.db_objs, self.obj_fields, self.objs):
-            obj['subnet_id'] = self._subnet['id']
+        self.update_obj_fields({'subnet_id': self._subnet['id']})
 
 
 class DNSNameServerObjectIfaceTestCase(obj_test_base.BaseObjectIfaceTestCase):
@@ -61,8 +58,7 @@ class DNSNameServerDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
         super(DNSNameServerDbObjectTestCase, self).setUp()
         self._create_test_network()
         self._create_test_subnet(self._network)
-        for obj in itertools.chain(self.db_objs, self.obj_fields, self.objs):
-            obj['subnet_id'] = self._subnet['id']
+        self.update_obj_fields({'subnet_id': self._subnet['id']})
 
     def _create_dnsnameservers(self):
         for obj in self.obj_fields:
@@ -106,8 +102,25 @@ class RouteDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
         super(RouteDbObjectTestCase, self).setUp()
         self._create_test_network()
         self._create_test_subnet(self._network)
-        for obj in itertools.chain(self.db_objs, self.obj_fields, self.objs):
-            obj['subnet_id'] = self._subnet['id']
+        self.update_obj_fields({'subnet_id': self._subnet['id']})
+
+
+class SubnetServiceTypeObjectIfaceTestCase(
+    obj_test_base.BaseObjectIfaceTestCase):
+
+    _test_class = subnet.SubnetServiceType
+
+
+class SubnetServiceTypeDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
+                            testlib_api.SqlTestCase):
+
+    _test_class = subnet.SubnetServiceType
+
+    def setUp(self):
+        super(SubnetServiceTypeDbObjectTestCase, self).setUp()
+        self._create_test_network()
+        self._create_test_subnet(self._network)
+        self.update_obj_fields({'subnet_id': self._subnet['id']})
 
 
 class SubnetObjectIfaceTestCase(obj_test_base.BaseObjectIfaceTestCase):
@@ -129,9 +142,8 @@ class SubnetDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
         super(SubnetDbObjectTestCase, self).setUp()
         self._create_test_network()
         self._create_test_segment(self._network)
-        for obj in itertools.chain(self.db_objs, self.obj_fields, self.objs):
-            obj['network_id'] = self._network['id']
-            obj['segment_id'] = self._segment['id']
+        self.update_obj_fields({'network_id': self._network['id'],
+                                'segment_id': self._segment['id']})
 
     def test_get_dns_nameservers_in_order(self):
         obj = self._make_object(self.obj_fields[0])
@@ -222,3 +234,21 @@ class SubnetDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
         fetched_public_subnet = (
             self._test_class.get_object(new_ctx, id=shared_subnet.id))
         self.assertEqual(shared_subnet, fetched_public_subnet)
+
+    def test_get_service_types(self):
+        obj = self._make_object(self.obj_fields[0])
+        obj.create()
+
+        service_type_obj = subnet.SubnetServiceType(
+            self.context, subnet_id=obj.id, service_type='dhcp-agent')
+        service_type_obj.create()
+
+        listed_obj = subnet.Subnet.get_object(self.context, id=obj.id)
+
+        self.assertEqual([service_type_obj.service_type],
+                         listed_obj.service_types)
+
+        # Try to load the service_types by obj_load_attr
+        obj1 = self._make_object(self.obj_fields[0])
+        self.assertEqual([service_type_obj.service_type],
+                         obj1.service_types)

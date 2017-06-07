@@ -30,7 +30,8 @@ class BasicRouterTestCaseFramework(base.BaseTestCase):
         self.agent_conf = mock.Mock()
         self.driver = mock.Mock()
         self.router_id = _uuid()
-        return legacy_router.LegacyRouter(self.router_id,
+        return legacy_router.LegacyRouter(mock.Mock(),
+                                          self.router_id,
                                           router,
                                           self.agent_conf,
                                           self.driver,
@@ -100,7 +101,7 @@ class TestAddFloatingIpWithMockGarp(BasicRouterTestCaseFramework):
             ri.ns_name,
             mock.sentinel.interface_name,
             ip,
-            self.agent_conf)
+            self.agent_conf.send_arp_for_ha)
         self.assertEqual(lib_constants.FLOATINGIP_STATUS_ACTIVE, result)
 
     def test_add_floating_ip_error(self, send_ip_addr_adv_notif):
