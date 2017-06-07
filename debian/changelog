@@ -1,8 +1,8 @@
-neutron (2:10.0.2-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:10.0.2-0ubuntu1) zesty; urgency=medium
 
   * New upstream stable release for OpenStack Ocata (LP: #1696139).
 
- -- James Page <james.page@ubuntu.com>  Wed, 07 Jun 2017 13:33:38 +0100
+ -- James Page <james.page@ubuntu.com>  Wed, 07 Jun 2017 16:03:02 +0100
 
 neutron (2:10.0.0-0ubuntu5.1) zesty; urgency=medium
 
