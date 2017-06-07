@@ -1,6 +1,6 @@
 neutron (2:9.4.0-0ubuntu1) UNRELEASED; urgency=medium
 
-  * New upstream point release for OpenStack Newton (LP: #1696133).
+  * New upstream point release for OpenStack Newton (LP: #1696133, #1662804).
 
  -- James Page <james.page@ubuntu.com>  Tue, 06 Jun 2017 15:26:00 +0100
 
