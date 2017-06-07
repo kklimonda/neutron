@@ -1,9 +1,9 @@
-neutron (2:8.4.0-0ubuntu2.1) UNRELEASED; urgency=medium
+neutron (2:8.4.0-0ubuntu2.1) xenial; urgency=medium
 
   * d/p/avoid-router-ri.process-if-initialize-fails: Backport fix for
     avoid router ri process if initialize fails (LP: #1662804).
 
- -- Edward Hope-Morley <edward.hope-morley@canonical.com>  Tue, 23 May 2017 13:41:10 +0100
+ -- Edward Hope-Morley <edward.hope-morley@canonical.com>  Wed, 07 Jun 2017 09:48:11 +0100
 
 neutron (2:8.4.0-0ubuntu2) xenial; urgency=medium
 
