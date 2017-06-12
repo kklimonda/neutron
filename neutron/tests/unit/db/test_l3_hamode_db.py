@@ -13,7 +13,15 @@
 # under the License.
 
 import mock
+
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.api.definitions import provider_net as providernet
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import exceptions as c_exc
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
 from oslo_config import cfg
@@ -25,12 +33,7 @@ import testtools
 
 from neutron.agent.common import utils as agent_utils
 from neutron.api.rpc.handlers import l3_rpc
-from neutron.callbacks import events
-from neutron.callbacks import exceptions as c_exc
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.common import constants as n_const
-from neutron import context
 from neutron.db import agents_db
 from neutron.db import common_db_mixin
 from neutron.db import l3_agentschedulers_db
@@ -39,8 +42,6 @@ from neutron.db.models import l3ha as l3ha_model
 from neutron.extensions import external_net
 from neutron.extensions import l3
 from neutron.extensions import l3_ext_ha_mode
-from neutron.extensions import portbindings
-from neutron.extensions import providernet
 from neutron.scheduler import l3_agent_scheduler
 from neutron.services.revisions import revision_plugin
 from neutron.tests.common import helpers
@@ -92,6 +93,7 @@ class L3HATestFramework(testlib_api.SqlTestCase):
             router['ha'] = ha
         if distributed is not None:
             router['distributed'] = distributed
+
         return self.plugin.create_router(ctx, {'router': router})
 
     def _migrate_router(self, router_id, ha):
@@ -1005,26 +1007,41 @@ class L3HAModeDbTestCase(L3HATestFramework):
             self.admin_ctx,
             filters=device_filter)[0]
 
+    def _get_router_port_bindings(self, router_id):
+        device_filter = {'device_id': [router_id],
+                         'device_owner':
+                         [constants.DEVICE_OWNER_HA_REPLICATED_INT,
+                          constants.DEVICE_OWNER_ROUTER_SNAT,
+                          constants.DEVICE_OWNER_ROUTER_GW]}
+        return self.core_plugin.get_ports(
+            self.admin_ctx,
+            filters=device_filter)
+
     def test_update_router_port_bindings_updates_host(self):
+        ext_net = self._create_network(self.core_plugin, self.admin_ctx,
+                                       external=True)
         network_id = self._create_network(self.core_plugin, self.admin_ctx)
         subnet = self._create_subnet(self.core_plugin, self.admin_ctx,
                                      network_id)
         interface_info = {'subnet_id': subnet['id']}
 
         router = self._create_router()
+        self.plugin._update_router_gw_info(self.admin_ctx, router['id'],
+                                           {'network_id': ext_net})
         self.plugin.add_router_interface(self.admin_ctx,
                                          router['id'],
                                          interface_info)
         self.plugin._update_router_port_bindings(
             self.admin_ctx, {router['id']: 'active'}, self.agent1['host'])
 
-        port = self._get_first_interface(router['id'])
-        self.assertEqual(self.agent1['host'], port[portbindings.HOST_ID])
+        for port in self._get_router_port_bindings(router['id']):
+            self.assertEqual(self.agent1['host'], port[portbindings.HOST_ID])
 
         self.plugin._update_router_port_bindings(
             self.admin_ctx, {router['id']: 'active'}, self.agent2['host'])
-        port = self._get_first_interface(router['id'])
-        self.assertEqual(self.agent2['host'], port[portbindings.HOST_ID])
+
+        for port in self._get_router_port_bindings(router['id']):
+            self.assertEqual(self.agent2['host'], port[portbindings.HOST_ID])
 
     def test_ensure_host_set_on_ports_dvr_ha_binds_to_active(self):
         agent3 = helpers.register_l3_agent('host_3',

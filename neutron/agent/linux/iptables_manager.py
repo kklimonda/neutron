@@ -29,15 +29,14 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
-import six
 
 from neutron._i18n import _, _LE, _LW
-from neutron.agent.common import config
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import utils as linux_utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
+from neutron.conf.agent import common as config
 
 LOG = logging.getLogger(__name__)
 
@@ -355,7 +354,7 @@ class IptablesManager(object):
             elif ip_version == 6:
                 tables = self.ipv6
 
-            for table, chains in six.iteritems(builtin_chains[ip_version]):
+            for table, chains in builtin_chains[ip_version].items():
                 for chain in chains:
                     tables[table].add_chain(chain)
                     tables[table].add_rule(chain, '-j $%s' %
@@ -483,8 +482,8 @@ class IptablesManager(object):
                     if (self.namespace and not
                             ip_lib.IPWrapper().netns.exists(self.namespace)):
                         ctx.reraise = False
-                        LOG.error(_LE("Namespace %s was deleted during "
-                                  "IPTables operations."), self.namespace)
+                        LOG.error("Namespace %s was deleted during IPTables "
+                                  "operations.", self.namespace)
                         return []
             all_lines = save_output.split('\n')
             commands = []

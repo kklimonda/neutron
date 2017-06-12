@@ -76,29 +76,49 @@ case $VENV in
         compile_ovs_kernel_module
     fi
 
-    load_conf_hook iptables_verify
+    # prepare base environment for ./stack.sh
+    load_rc_hook stack_base
+
+    # enable monitoring
+    load_rc_hook dstat
+
     # Make the workspace owned by the stack user
     sudo chown -R $STACK_USER:$STACK_USER $BASE
+
+    # deploy devstack as per local.conf
+    cd $DEVSTACK_PATH && sudo -H -u $GATE_STACK_USER ./stack.sh
     ;;
 
-# TODO(ihrachys): remove dsvm-scenario from the list when it's no longer used in project-config
-"api"|"api-pecan"|"full-ovsfw"|"full-pecan"|"dsvm-scenario"|"dsvm-scenario-ovs"|"dsvm-scenario-linuxbridge")
-    load_rc_hook api_${FLAVOR}_extensions
+"api"|"api-pecan"|"full-ovsfw"|"full-pecan"|"dsvm-scenario-ovs"|"dsvm-scenario-linuxbridge")
+    # TODO(ihrachys) consider feeding result of ext-list into tempest.conf
+    load_rc_hook api_all_extensions
+    if [ "${FLAVOR}" = "dvrskip" ]; then
+        load_rc_hook disable_dvr_tests
+    fi
     load_conf_hook quotas
     load_rc_hook dns
     load_rc_hook qos
+    load_rc_hook segments
     load_rc_hook trunk
-    load_conf_hook mtu
+    load_conf_hook vlan_provider
+    load_conf_hook type_drivers
     load_conf_hook osprofiler
     if [[ "$VENV" =~ "dsvm-scenario" ]]; then
-        load_conf_hook iptables_verify
         load_rc_hook ubuntu_image
+        # bug/1662109
+        export DEVSTACK_GATE_TEMPEST_REGEX="^(?!.*(?:neutron\.tests\.tempest\.scenario\.test_qos.*))^neutron\.tests\.tempest\.scenario\."
+    fi
+    if [[ "$VENV" =~ "dsvm-scenario-linuxbridge" ]]; then
+        load_conf_hook iptables_verify
     fi
     if [[ "$VENV" =~ "pecan" ]]; then
         load_conf_hook pecan
     fi
     if [[ "$VENV" =~ "ovs" ]]; then
         load_conf_hook ovsfw
+    fi
+    if [[ "$FLAVOR" = "dvrskip" ]]; then
+        load_conf_hook disable_dvr
     fi
 
     export DEVSTACK_LOCALCONF=$(cat $LOCAL_CONF)

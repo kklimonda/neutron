@@ -18,7 +18,7 @@ from neutron_lib import constants
 from oslo_config import cfg
 
 from neutron._i18n import _
-from neutron.agent.common import config
+from neutron.conf.agent import common as config
 
 
 OPTS = [
@@ -41,11 +41,6 @@ OPTS = [
     cfg.PortOpt('metadata_port',
                 default=9697,
                 help=_("TCP Port used by Neutron metadata namespace proxy.")),
-    cfg.IntOpt('send_arp_for_ha',
-               deprecated_for_removal=True,
-               default=3,
-               help=_("Send this many gratuitous ARPs for HA setup, if "
-                      "less than or equal to 0, the feature is disabled")),
     cfg.BoolOpt('handle_internal_only_routers',
                 default=True,
                 help=_("Indicates that this L3 agent should also handle "
@@ -60,7 +55,8 @@ OPTS = [
                       "This value should be set to the UUID of that external "
                       "network. To allow L3 agent support multiple external "
                       "networks, both the external_network_bridge and "
-                      "gateway_external_network_id must be left empty.")),
+                      "gateway_external_network_id must be left empty."),
+               deprecated_for_removal=True),
     cfg.StrOpt('ipv6_gateway', default='',
                help=_("With IPv6, the network used for the external gateway "
                       "does not need to have an associated subnet, since the "

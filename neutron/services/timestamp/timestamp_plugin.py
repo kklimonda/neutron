@@ -12,11 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.db import db_base_plugin_v2
+from neutron_lib.services import base as service_base
+
 from neutron.db import models_v2
-from neutron.db import standard_attr
 from neutron.objects import base as base_obj
-from neutron.services import service_base
 from neutron.services.timestamp import timestamp_db as ts_db
 
 
@@ -29,13 +28,6 @@ class TimeStampPlugin(service_base.ServicePluginBase,
     def __init__(self):
         super(TimeStampPlugin, self).__init__()
         self.register_db_events()
-        rs_model_maps = standard_attr.get_standard_attr_resource_model_map()
-        for rsmap, model in rs_model_maps.items():
-            db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
-                rsmap, [self.extend_resource_dict_timestamp])
-            db_base_plugin_v2.NeutronDbPluginV2.register_model_query_hook(
-                model, "change_since_query", None, None,
-                self._change_since_result_filter_hook)
         # TODO(jlibosva): Move this to register_model_query_hook
         base_obj.register_filter_hook_on_model(
             models_v2.SubnetPool, ts_db.CHANGED_SINCE)

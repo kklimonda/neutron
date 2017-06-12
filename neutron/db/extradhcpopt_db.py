@@ -13,12 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api.definitions import extra_dhcp_opt as edo_ext
+
+
 from neutron.api.v2 import attributes
-from neutron.db import db_base_plugin_v2
-from neutron.extensions import extra_dhcp_opt as edo_ext
+from neutron.db import _resource_extend as resource_extend
+from neutron.db import api as db_api
 from neutron.objects.port.extensions import extra_dhcp_opt as obj_extra_dhcp
 
 
+@resource_extend.has_resource_extenders
 class ExtraDhcpOptMixin(object):
     """Mixin class to add extra options to the DHCP opts file
     and associate them to a port.
@@ -38,7 +42,7 @@ class ExtraDhcpOptMixin(object):
                                              extra_dhcp_opts):
         if not extra_dhcp_opts:
             return port
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             for dopt in extra_dhcp_opts:
                 if self._is_valid_opt_value(dopt['opt_name'],
                                             dopt['opt_value']):
@@ -76,7 +80,7 @@ class ExtraDhcpOptMixin(object):
                                 context, port_id=id)
             # if there are currently no dhcp_options associated to
             # this port, Then just insert the new ones and be done.
-            with context.session.begin(subtransactions=True):
+            with db_api.context_manager.writer.using(context):
                 for upd_rec in dopts:
                     for opt in opts:
                         if (opt['opt_name'] == upd_rec['opt_name']
@@ -113,12 +117,11 @@ class ExtraDhcpOptMixin(object):
 
         return bool(dopts)
 
-    def _extend_port_dict_extra_dhcp_opt(self, res, port):
+    @staticmethod
+    @resource_extend.extends([attributes.PORTS])
+    def _extend_port_dict_extra_dhcp_opt(res, port):
         res[edo_ext.EXTRADHCPOPTS] = [{'opt_name': dho.opt_name,
                                        'opt_value': dho.opt_value,
                                        'ip_version': dho.ip_version}
                                       for dho in port.dhcp_opts]
         return res
-
-    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
-        attributes.PORTS, ['_extend_port_dict_extra_dhcp_opt'])

@@ -15,10 +15,10 @@
 
 import netaddr
 from neutron_lib import constants
+from neutron_lib import context as nctx
 from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
 
-from neutron import context as nctx
 from neutron.db import models_v2
 from neutron.plugins.ml2 import config
 from neutron.tests.unit.plugins.ml2 import test_plugin
@@ -45,7 +45,18 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         super(TestRevisionPlugin, self).setUp()
         self.cp = directory.get_plugin()
         self.l3p = directory.get_plugin(constants.L3)
-        self.ctx = nctx.get_admin_context()
+        self._ctx = nctx.get_admin_context()
+
+    @property
+    def ctx(self):
+        # TODO(kevinbenton): return ctx without expire_all after switch to
+        # enginefacade complete. We expire_all here because the switch to
+        # the new engine facade is resulting in changes being spread over
+        # other sessions so we can end up getting stale reads in the parent
+        # session if objects remain in the identity map.
+        if not self._ctx.session.is_active:
+            self._ctx.session.expire_all()
+        return self._ctx
 
     def test_handle_expired_object(self):
         rp = directory.get_plugin('revision_plugin')
@@ -128,7 +139,8 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         # add an intf and make sure it bumps rev
         with self.subnet(tenant_id='some_tenant', cidr='10.0.1.0/24') as s:
             interface_info = {'subnet_id': s['subnet']['id']}
-        self.l3p.add_router_interface(self.ctx, router['id'], interface_info)
+        self.l3p.add_router_interface(self.ctx, router['id'],
+                                      interface_info)
         router = updated
         updated = self.l3p.get_router(self.ctx, router['id'])
         self.assertGreater(updated['revision_number'],
@@ -158,7 +170,8 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         with self.port() as port:
             rev = port['port']['revision_number']
             qos_plugin = directory.get_plugin('QOS')
-            qos_policy = {'policy': {'name': "policy1",
+            qos_policy = {'policy': {'id': uuidutils.generate_uuid(),
+                                     'name': "policy1",
                                      'project_id': uuidutils.generate_uuid()}}
             qos_obj = qos_plugin.create_policy(self.ctx, qos_policy)
             data = {'port': {'qos_policy_id': qos_obj['id']}}
@@ -170,7 +183,8 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         with self.network() as network:
             rev = network['network']['revision_number']
             qos_plugin = directory.get_plugin('QOS')
-            qos_policy = {'policy': {'name': "policy1",
+            qos_policy = {'policy': {'id': uuidutils.generate_uuid(),
+                                     'name': "policy1",
                                      'project_id': uuidutils.generate_uuid()}}
             qos_obj = qos_plugin.create_policy(self.ctx, qos_policy)
             data = {'network': {'qos_policy_id': qos_obj['id']}}

@@ -13,42 +13,45 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api.definitions import portbindings
 from neutron_lib.api import validators
+from neutron_lib.plugins import directory
 
 from neutron.api.v2 import attributes
-from neutron.common import _deprecate
-from neutron.db import db_base_plugin_v2
+from neutron.db import _model_query as model_query
+from neutron.db import _resource_extend as resource_extend
+from neutron.db import api as db_api
 from neutron.db.models import portbinding as pmodels
 from neutron.db import models_v2
 from neutron.db import portbindings_base
-from neutron.extensions import portbindings
 
 
-_deprecate._moved_global('PortBindingPort', new_module=pmodels)
+def _port_model_hook(context, original_model, query):
+    query = query.outerjoin(
+        pmodels.PortBindingPort,
+        (original_model.id == pmodels.PortBindingPort.port_id))
+    return query
 
 
+def _port_result_filter_hook(query, filters):
+    values = filters and filters.get(portbindings.HOST_ID, [])
+    if not values:
+        return query
+    query = query.filter(pmodels.PortBindingPort.host.in_(values))
+    return query
+
+
+@resource_extend.has_resource_extenders
 class PortBindingMixin(portbindings_base.PortBindingBaseMixin):
-    extra_binding_dict = None
 
-    def _port_model_hook(self, context, original_model, query):
-        query = query.outerjoin(
-            pmodels.PortBindingPort,
-            (original_model.id == pmodels.PortBindingPort.port_id))
-        return query
-
-    def _port_result_filter_hook(self, query, filters):
-        values = filters and filters.get(portbindings.HOST_ID, [])
-        if not values:
-            return query
-        query = query.filter(pmodels.PortBindingPort.host.in_(values))
-        return query
-
-    db_base_plugin_v2.NeutronDbPluginV2.register_model_query_hook(
-        models_v2.Port,
-        "portbindings_port",
-        '_port_model_hook',
-        None,
-        '_port_result_filter_hook')
+    def __new__(cls, *args, **kwargs):
+        model_query.register_hook(
+            models_v2.Port,
+            "portbindings_port",
+            query_hook=_port_model_hook,
+            filter_hook=None,
+            result_filters=_port_result_filter_hook)
+        return super(PortBindingMixin, cls).__new__(cls, *args, **kwargs)
 
     def _process_portbindings_create_and_update(self, context, port_data,
                                                 port):
@@ -68,7 +71,7 @@ class PortBindingMixin(portbindings_base.PortBindingBaseMixin):
 
         host = port_data.get(portbindings.HOST_ID)
         host_set = validators.is_attr_set(host)
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             bind_port = context.session.query(
                 pmodels.PortBindingPort).filter_by(port_id=port['id']).first()
             if host_set:
@@ -82,7 +85,7 @@ class PortBindingMixin(portbindings_base.PortBindingBaseMixin):
         self._extend_port_dict_binding_host(port, host)
 
     def get_port_host(self, context, port_id):
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.reader.using(context):
             bind_port = (
                 context.session.query(pmodels.PortBindingPort).
                 filter_by(port_id=port_id).
@@ -99,16 +102,10 @@ class PortBindingMixin(portbindings_base.PortBindingBaseMixin):
         host = port_db.portbinding.host if port_db.portbinding else None
         self._extend_port_dict_binding_host(port_res, host)
 
-
-def _extend_port_dict_binding(plugin, port_res, port_db):
-    if not isinstance(plugin, PortBindingMixin):
-        return
-    plugin.extend_port_dict_binding(port_res, port_db)
-
-
-# Register dict extend functions for ports
-db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
-    attributes.PORTS, [_extend_port_dict_binding])
-
-
-_deprecate._MovedGlobals()
+    @staticmethod
+    @resource_extend.extends([attributes.PORTS])
+    def _extend_port_dict_binding(port_res, port_db):
+        plugin = directory.get_plugin()
+        if not isinstance(plugin, PortBindingMixin):
+            return
+        plugin.extend_port_dict_binding(port_res, port_db)

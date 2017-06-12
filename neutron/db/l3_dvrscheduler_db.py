@@ -13,21 +13,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants as n_const
 from neutron_lib.plugins import directory
 from oslo_log import log as logging
 from sqlalchemy import or_
 
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.common import utils as n_utils
 
 from neutron.db import agentschedulers_db
 from neutron.db import l3_agentschedulers_db as l3agent_sch_db
-from neutron.db.models import l3agent as rb_model
 from neutron.db import models_v2
-from neutron.extensions import portbindings
+from neutron.objects import l3agent as rb_obj
 from neutron.plugins.ml2 import db as ml2_db
 from neutron.plugins.ml2 import models as ml2_models
 
@@ -163,11 +163,9 @@ class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
             context, n_const.AGENT_TYPE_L3, port_host)
         removed_router_info = []
         for router_id in router_ids:
-            snat_binding = context.session.query(
-                rb_model.RouterL3AgentBinding).filter_by(
-                    router_id=router_id).filter_by(
-                        l3_agent_id=agent.id).first()
-            if snat_binding:
+            if rb_obj.RouterL3AgentBinding.objects_exist(context,
+                                                         router_id=router_id,
+                                                         l3_agent_id=agent.id):
                 # not removing from the agent hosting SNAT for the router
                 continue
             subnet_ids = self.get_subnet_ids_on_router(admin_context,
@@ -428,8 +426,9 @@ def _notify_l3_agent_port_update(resource, event, trigger, **kwargs):
                 }
                 _notify_port_delete(
                     event, resource, trigger, **removed_router_args)
-            fip = l3plugin._get_floatingip_on_port(context,
-                                                   port_id=original_port['id'])
+            fips = l3plugin._get_floatingips_by_port_id(
+                context, port_id=original_port['id'])
+            fip = fips[0] if fips else None
             if fip and not (removed_routers and
                             fip['router_id'] in removed_routers):
                 l3plugin.l3_rpc_notifier.routers_updated_on_host(

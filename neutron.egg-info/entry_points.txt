@@ -11,7 +11,6 @@ neutron-macvtap-agent = neutron.cmd.eventlet.plugins.macvtap_neutron_agent:main
 neutron-metadata-agent = neutron.cmd.eventlet.agents.metadata:main
 neutron-metering-agent = neutron.cmd.eventlet.services.metering_agent:main
 neutron-netns-cleanup = neutron.cmd.netns_cleanup:main
-neutron-ns-metadata-proxy = neutron.cmd.eventlet.agents.metadata_proxy:main
 neutron-openvswitch-agent = neutron.cmd.eventlet.plugins.ovs_neutron_agent:main
 neutron-ovs-cleanup = neutron.cmd.ovs_cleanup:main
 neutron-pd-notify = neutron.cmd.pd_notify:main
@@ -53,6 +52,7 @@ fake = neutron.tests.unit.ipam.fake_driver:FakeDriver
 internal = neutron.ipam.drivers.neutrondb_ipam.driver:NeutronDbPool
 
 [neutron.ml2.extension_drivers]
+data_plane_status = neutron.plugins.ml2.extensions.data_plane_status:DataPlaneStatusExtensionDriver
 dns = neutron.plugins.ml2.extensions.dns_integration:DNSExtensionDriverML2
 port_security = neutron.plugins.ml2.extensions.port_security:PortSecurityExtensionDriver
 qos = neutron.plugins.ml2.extensions.qos:QosExtensionDriver
@@ -61,6 +61,7 @@ testdb = neutron.tests.unit.plugins.ml2.drivers.ext_test:TestDBExtensionDriver
 
 [neutron.ml2.mechanism_drivers]
 fake_agent = neutron.tests.unit.plugins.ml2.drivers.mech_fake_agent:FakeAgentMechanismDriver
+faulty_agent = neutron.tests.unit.plugins.ml2.drivers.mech_faulty_agent:FaultyAgentMechanismDriver
 l2population = neutron.plugins.ml2.drivers.l2pop.mech_driver:L2populationMechanismDriver
 linuxbridge = neutron.plugins.ml2.drivers.linuxbridge.mech_driver.mech_linuxbridge:LinuxbridgeMechanismDriver
 logger = neutron.tests.unit.plugins.ml2.drivers.mechanism_logger:LoggerMechanismDriver
@@ -82,9 +83,6 @@ linuxbridge = neutron.plugins.ml2.drivers.linuxbridge.agent.extension_drivers.qo
 ovs = neutron.plugins.ml2.drivers.openvswitch.agent.extension_drivers.qos_driver:QosOVSAgentDriver
 sriov = neutron.plugins.ml2.drivers.mech_sriov.agent.extension_drivers.qos_driver:QosSRIOVAgentDriver
 
-[neutron.qos.notification_drivers]
-message_queue = neutron.services.qos.notification_drivers.message_queue:RpcQosServiceNotificationDriver
-
 [neutron.service_plugins]
 auto_allocate = neutron.services.auto_allocate.plugin:Plugin
 dummy = neutron.tests.unit.dummy_plugin:DummyServicePlugin
@@ -103,6 +101,10 @@ trunk = neutron.services.trunk.plugin:TrunkPlugin
 [neutron.services.external_dns_drivers]
 designate = neutron.services.externaldns.drivers.designate.driver:Designate
 
+[neutron.services.metering_drivers]
+iptables = neutron.services.metering.iptables.iptables_driver:IptablesMeteringDriver
+noop = neutron.services.metering.drivers.noop.noop_driver:NoopMeteringDriver
+
 [oslo.config.opts]
 neutron = neutron.opts:list_opts
 neutron.agent = neutron.opts:list_agent_opts
@@ -120,7 +122,6 @@ neutron.ml2.macvtap.agent = neutron.opts:list_macvtap_opts
 neutron.ml2.ovs.agent = neutron.opts:list_ovs_opts
 neutron.ml2.sriov.agent = neutron.opts:list_sriov_agent_opts
 neutron.ml2.xenapi = neutron.opts:list_xenapi_opts
-neutron.qos = neutron.opts:list_qos_opts
 nova.auth = neutron.opts:list_auth_opts
 
 [oslo.config.opts.defaults]
@@ -128,4 +129,7 @@ neutron = neutron.common.config:set_cors_middleware_defaults
 
 [tempest.test_plugins]
 neutron_tests = neutron.tests.tempest.plugin:NeutronTempestPlugin
+
+[wsgi_scripts]
+neutron-api = neutron.server:get_application
 

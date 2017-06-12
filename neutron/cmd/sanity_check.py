@@ -236,6 +236,14 @@ def check_ip6tables():
     return result
 
 
+def check_conntrack():
+    result = checks.conntrack_supported()
+    if not result:
+        LOG.error(_LE('Cannot run conntrack. Please ensure that it '
+                      'is installed.'))
+    return result
+
+
 def check_dhcp_release6():
     result = checks.dhcp_release6_supported()
     if not result:
@@ -297,7 +305,9 @@ OPTS = [
     BoolOptCallback('read_netns', check_read_netns,
                     help=_('Check netns permission settings')),
     BoolOptCallback('dnsmasq_version', check_dnsmasq_version,
-                    help=_('Check minimal dnsmasq version')),
+                    help=_('Check minimal dnsmasq version'),
+                    deprecated_for_removal=True,
+                    deprecated_since='Pike'),
     BoolOptCallback('ovsdb_native', check_ovsdb_native,
                     help=_('Check ovsdb native interface support')),
     BoolOptCallback('ovs_conntrack', check_ovs_conntrack,
@@ -307,11 +317,15 @@ OPTS = [
     BoolOptCallback('keepalived_ipv6_support', check_keepalived_ipv6_support,
                     help=_('Check keepalived IPv6 support')),
     BoolOptCallback('dibbler_version', check_dibbler_version,
-                    help=_('Check minimal dibbler version')),
+                    help=_('Check minimal dibbler version'),
+                    deprecated_for_removal=True,
+                    deprecated_since='Pike'),
     BoolOptCallback('ipset_installed', check_ipset,
                     help=_('Check ipset installation')),
     BoolOptCallback('ip6tables_installed', check_ip6tables,
                     help=_('Check ip6tables installation')),
+    BoolOptCallback('conntrack_installed', check_conntrack,
+                    help=_('Check conntrack installation')),
     BoolOptCallback('dhcp_release6', check_dhcp_release6,
                     help=_('Check dhcp_release6 installation')),
     BoolOptCallback('bridge_firewalling', check_bridge_firewalling_enabled,
@@ -352,8 +366,6 @@ def enable_tests_from_config():
         cfg.CONF.set_default('icmpv6_header_match', True)
     if not cfg.CONF.AGENT.use_helper_for_ns_read:
         cfg.CONF.set_default('read_netns', True)
-    if cfg.CONF.dhcp_driver == 'neutron.agent.linux.dhcp.Dnsmasq':
-        cfg.CONF.set_default('dnsmasq_version', True)
     if cfg.CONF.OVS.ovsdb_interface == 'native':
         cfg.CONF.set_default('ovsdb_native', True)
     if cfg.CONF.l3_ha:

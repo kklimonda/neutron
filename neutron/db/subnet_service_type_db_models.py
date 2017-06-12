@@ -17,24 +17,16 @@
 # any models at all
 
 from neutron.api.v2 import attributes
-from neutron.common import _deprecate
-from neutron.db import common_db_mixin
-from neutron.db.models import subnet_service_type as sst_model
+from neutron.db import _resource_extend as resource_extend
 
 
-_deprecate._moved_global('SubnetServiceType', new_module=sst_model)
-
-
+@resource_extend.has_resource_extenders
 class SubnetServiceTypeMixin(object):
     """Mixin class to extend subnet with service type attribute"""
 
-    def _extend_subnet_service_types(self, subnet_res, subnet_db):
+    @staticmethod
+    @resource_extend.extends([attributes.SUBNETS])
+    def _extend_subnet_service_types(subnet_res, subnet_db):
         subnet_res['service_types'] = [service_type['service_type'] for
                                        service_type in
                                        subnet_db.service_types]
-
-    common_db_mixin.CommonDbMixin.register_dict_extend_funcs(
-        attributes.SUBNETS, [_extend_subnet_service_types])
-
-
-_deprecate._MovedGlobals()

@@ -70,10 +70,10 @@ Neutron Internals
    ovs_vhostuser
    quality_of_service
    service_extensions
-   callbacks
    dns_order
    external_dns_integration
    upgrade
+   objects_usage
    i18n
    address_scopes
    openvswitch_firewall
@@ -82,6 +82,7 @@ Neutron Internals
    provisioning_blocks
    retries
    l3_agent_extensions
+   live_migration
 
 Testing
 -------

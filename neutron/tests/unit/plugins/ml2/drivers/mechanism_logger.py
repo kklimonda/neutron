@@ -13,10 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.plugins.ml2 import api
 from oslo_log import log
 
 from neutron._i18n import _
-from neutron.plugins.ml2 import driver_api as api
 
 LOG = log.getLogger(__name__)
 
@@ -56,6 +56,10 @@ class LoggerMechanismDriver(api.MechanismDriver):
 
     def delete_network_postcommit(self, context):
         self._log_network_call("delete_network_postcommit", context)
+
+    def check_vlan_transparency(self, context):
+        self._log_network_call("check_vlan_transparency", context)
+        return True
 
     def _log_subnet_call(self, method_name, context):
         LOG.info(_("%(method)s called with subnet settings %(current)s "

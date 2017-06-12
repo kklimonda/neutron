@@ -10,6 +10,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+# NOTE(boden): This module will be removed soon; use neutron-lib callbacks
+
 # String literals representing events associated to data store operations
 BEFORE_CREATE = 'before_create'
 BEFORE_READ = 'before_read'
@@ -32,6 +34,7 @@ AFTER_REQUEST = 'after_request'
 # String literals representing events associated to process operations
 BEFORE_INIT = 'before_init'
 BEFORE_SPAWN = 'before_spawn'  # sent per process
+AFTER_SPAWN = 'after_spawn'  # sent per process
 AFTER_INIT = 'after_init'  # sent per worker
 
 # String literals representing events associated to error conditions

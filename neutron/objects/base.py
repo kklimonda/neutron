@@ -61,6 +61,15 @@ class Pager(object):
     specify sorting and pagination criteria.
     '''
     def __init__(self, sorts=None, limit=None, page_reverse=None, marker=None):
+        '''
+        :param sorts: A list of (key, direction) tuples.
+                      direction: True == ASC, False == DESC
+        :param limit: maximum number of items to return
+        :param page_reverse: True if sort direction is reversed.
+        :param marker: the last item of the previous page; when used, returns
+                       next results after the marker resource.
+        '''
+
         self.sorts = sorts
         self.limit = limit
         self.page_reverse = page_reverse
@@ -174,8 +183,19 @@ class NeutronObject(obj_base.VersionedObject,
         raise NotImplementedError()
 
     @classmethod
+    def update_objects(cls, context, values, validate_filters=True, **kwargs):
+        objs = cls.get_objects(
+            context, validate_filters=validate_filters, **kwargs)
+        for obj in objs:
+            for k, v in values.items():
+                setattr(obj, k, v)
+            obj.update()
+        return len(objs)
+
+    @classmethod
     def delete_objects(cls, context, validate_filters=True, **kwargs):
-        objs = cls.get_objects(context, validate_filters, **kwargs)
+        objs = cls.get_objects(
+            context, validate_filters=validate_filters, **kwargs)
         for obj in objs:
             obj.delete()
         return len(objs)
@@ -192,7 +212,9 @@ class NeutronObject(obj_base.VersionedObject,
     @classmethod
     def count(cls, context, validate_filters=True, **kwargs):
         '''Count the number of objects matching filtering criteria.'''
-        return len(cls.get_objects(context, validate_filters, **kwargs))
+        return len(
+            cls.get_objects(
+                context, validate_filters=validate_filters, **kwargs))
 
 
 def _detach_db_obj(func):
@@ -396,11 +418,12 @@ class NeutronDbObject(NeutronObject):
     @classmethod
     def get_object(cls, context, **kwargs):
         """
-        Fetch object from DB and convert it to a versioned object.
+        Return the first result of given context or None if the result doesn't
+        contain any row. Next, convert it to a versioned object.
 
         :param context:
         :param kwargs: multiple keys defined by key=value pairs
-        :return: single object of NeutronDbObject class
+        :return: single object of NeutronDbObject class or None
         """
         lookup_keys = set(kwargs.keys())
         all_keys = itertools.chain([cls.primary_keys], cls.unique_keys)
@@ -421,7 +444,7 @@ class NeutronDbObject(NeutronObject):
     def get_objects(cls, context, _pager=None, validate_filters=True,
                     **kwargs):
         """
-        Fetch objects from DB and convert them to versioned objects.
+        Fetch all results from DB and convert them to versioned objects.
 
         :param context:
         :param _pager: a Pager object representing advanced sorting/pagination
@@ -429,7 +452,7 @@ class NeutronDbObject(NeutronObject):
         :param validate_filters: Raises an error in case of passing an unknown
                                  filter
         :param kwargs: multiple keys defined by key=value pairs
-        :return: list of objects of NeutronDbObject class
+        :return: list of objects of NeutronDbObject class or empty list
         """
         if validate_filters:
             cls.validate_filters(**kwargs)
@@ -439,6 +462,33 @@ class NeutronDbObject(NeutronObject):
                 **cls.modify_fields_to_db(kwargs)
             )
             return [cls._load_object(context, db_obj) for db_obj in db_objs]
+
+    @classmethod
+    def update_objects(cls, context, values, validate_filters=True, **kwargs):
+        """
+        Update objects that match filtering criteria from DB.
+
+        :param context:
+        :param values: multiple keys to update in matching objects
+        :param validate_filters: Raises an error in case of passing an unknown
+                                 filter
+        :param kwargs: multiple keys defined by key=value pairs
+        :return: Number of entries updated
+        """
+        if validate_filters:
+            cls.validate_filters(**kwargs)
+
+        # if we have standard attributes, we will need to fetch records to
+        # update revision numbers
+        if cls.has_standard_attributes():
+            return super(NeutronDbObject, cls).update_objects(
+                context, values, validate_filters=False, **kwargs)
+
+        with db_api.autonested_transaction(context.session):
+            return obj_db_api.update_objects(
+                context, cls.db_model,
+                cls.modify_fields_to_db(values),
+                **cls.modify_fields_to_db(kwargs))
 
     @classmethod
     def delete_objects(cls, context, validate_filters=True, **kwargs):

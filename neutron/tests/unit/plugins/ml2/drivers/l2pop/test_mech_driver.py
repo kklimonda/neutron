@@ -14,7 +14,11 @@
 #    under the License.
 
 import mock
+
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.api.definitions import provider_net as pnet
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
 from oslo_serialization import jsonutils
@@ -23,13 +27,10 @@ import testtools
 from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
 from neutron.common import topics
-from neutron import context
 from neutron.db import agents_db
 from neutron.db import common_db_mixin
 from neutron.db import l3_agentschedulers_db
 from neutron.db import l3_hamode_db
-from neutron.extensions import portbindings
-from neutron.extensions import providernet as pnet
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.drivers.l2pop import db as l2pop_db
 from neutron.plugins.ml2.drivers.l2pop import mech_driver as l2pop_mech_driver
@@ -1119,6 +1120,35 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
             # The point is to provide coverage and to assert that no exceptions
             # are raised.
             l2pop_mech.delete_port_postcommit(port_context)
+
+    def test_delete_dvr_snat_port_fdb_entries(self):
+        l2pop_mech = l2pop_mech_driver.L2populationMechanismDriver()
+        l2pop_mech.initialize()
+
+        self._setup_l3()
+
+        with self.subnet(network=self._network, enable_dhcp=False) as snet:
+            host_arg = {portbindings.HOST_ID: HOST, 'admin_state_up': True}
+            with self.port(subnet=snet,
+                           device_owner=constants.DEVICE_OWNER_ROUTER_SNAT,
+                           arg_list=(portbindings.HOST_ID,),
+                           **host_arg) as p:
+                device = 'tap' + p['port']['id']
+                self.callbacks.update_device_up(self.adminContext,
+                                                agent_id=HOST, device=device)
+                self.mock_fanout.reset_mock()
+
+                p['port'][portbindings.HOST_ID] = HOST
+                bindings = [mock.Mock()]
+                port_context = driver_context.PortContext(
+                    self.driver, self.context, p['port'],
+                    self.driver.get_network(
+                        self.context, p['port']['network_id']),
+                    None, bindings)
+                mock.patch.object(port_context, '_expand_segment').start()
+                # The point is to provide coverage and to assert that
+                # no exceptions are raised.
+                l2pop_mech.delete_port_postcommit(port_context)
 
     def test_fixed_ips_change_unbound_port_no_rpc(self):
         l2pop_mech = l2pop_mech_driver.L2populationMechanismDriver()

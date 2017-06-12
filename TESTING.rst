@@ -150,10 +150,7 @@ Functional tests (neutron/tests/functional/) are intended to
 validate actual system interaction. Mocks should be used sparingly,
 if at all. Care should be taken to ensure that existing system
 resources are not modified and that resources created in tests are
-properly cleaned up both on test success and failure. Note that when run
-at the gate, the functional tests compile OVS from source. Check out
-neutron/tests/contrib/gate_hook.sh. Other jobs presently use OVS from
-packages.
+properly cleaned up both on test success and failure.
 
 Let's examine the benefits of the functional testing framework.
 Neutron offers a library called 'ip_lib' that wraps around the 'ip' binary.
@@ -191,7 +188,7 @@ One such method creates a virtual device in a namespace,
 and ensures that both the namespace and the device are cleaned up at the
 end of the test run regardless of success or failure using the 'addCleanup'
 method. The test generates details for a temporary device, asserts that
-a device by that name does not exist, create that device, asserts that
+a device by that name does not exist, creates that device, asserts that
 it now exists, deletes it, and asserts that it no longer exists.
 Such a test avoids all three issues mentioned above if it were written
 using the unit testing framework.
@@ -199,7 +196,7 @@ using the unit testing framework.
 Functional tests are also used to target larger scope, such as agents.
 Many good examples exist: See the OVS, L3 and DHCP agents functional tests.
 Such tests target a top level agent method and assert that the system
-interaction that was supposed to be perform was indeed performed.
+interaction that was supposed to be performed was indeed performed.
 For example, to test the DHCP agent's top level method that accepts network
 attributes and configures dnsmasq for that network, the test:
 
@@ -209,6 +206,17 @@ attributes and configures dnsmasq for that network, the test:
 * Creates a temporary namespace and device, and calls 'dhclient' from that
   namespace.
 * Assert that the device successfully obtained the expected IP address.
+
+Test exceptions
++++++++++++++++
+
+Test neutron.tests.functional.agent.test_ovs_flows.OVSFlowTestCase.\
+test_install_flood_to_tun is currently skipped if openvswitch version is less
+than 2.5.1. This version contains bug where appctl command prints wrong output
+for Final flow. It's been fixed in openvswitch
+2.5.1 in `this commit <https://github.com/openvswitch/ovs/commit/8c0b419a0b9ac0141d6973dcc80306dfc6a83d31>`_.
+If openvswitch version meets the test requirement then the test is triggered
+normally.
 
 Fullstack Tests
 ~~~~~~~~~~~~~~~
@@ -302,6 +310,19 @@ It then asserts that the expected bandwidth limitation is present on the OVS
 bridge connected to that port. The test is a true integration test, in the
 sense that it invokes the API and then asserts that Neutron interacted with
 the hypervisor appropriately.
+
+Gate exceptions
++++++++++++++++
+
+Currently we compile openvswitch kernel module from source for fullstack job on
+the gate. The reason is to fix bug related to local VXLAN tunneling which is
+present in current Ubuntu Xenial 16.04 kernel. Kernel was fixed with this
+`commit <https://github.com/torvalds/linux/commit/bbec7802c6948c8626b71a4fe31283cb4691c358>`_
+and backported with this
+`openvswitch commit <https://github.com/openvswitch/ovs/commit/b1c74f35273122db4ce2728a70fd34b98f525434>`_.
+Due to kernel compatibility, Ubuntu Trusty (Mitaka release) uses openvswitch
+version 2.5.1. Ubuntu Xenial jobs use 2.6.1. Both versions contain fixes for
+local VXLAN tunneling.
 
 API Tests
 ~~~~~~~~~

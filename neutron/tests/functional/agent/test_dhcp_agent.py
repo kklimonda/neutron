@@ -24,7 +24,6 @@ from neutron_lib import constants as lib_const
 from oslo_config import fixture as fixture_config
 from oslo_utils import uuidutils
 
-from neutron.agent.common import config
 from neutron.agent.common import ovs_lib
 from neutron.agent.dhcp import agent
 from neutron.agent import dhcp_agent
@@ -34,6 +33,7 @@ from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
 from neutron.common import utils as common_utils
+from neutron.conf.agent import common as config
 from neutron.tests.common import net_helpers
 from neutron.tests.functional.agent.linux import helpers
 from neutron.tests.functional import base
@@ -50,9 +50,9 @@ class DHCPAgentOVSTestFramework(base.BaseSudoTestCase):
         4: {'addr': '192.168.10.11',
             'cidr': '192.168.10.0/24',
             'gateway': '192.168.10.1'},
-        6: {'addr': '0:0:0:0:0:ffff:c0a8:a0b',
-            'cidr': '0:0:0:0:0:ffff:c0a8:a00/120',
-            'gateway': '0:0:0:0:0:ffff:c0a8:a01'}, }
+        6: {'addr': '2001:db8:0:1::c0a8:a0b',
+            'cidr': '2001:db8:0:1::c0a8:a00/120',
+            'gateway': '2001:db8:0:1::c0a8:a01'}, }
 
     def setUp(self):
         super(DHCPAgentOVSTestFramework, self).setUp()

@@ -20,10 +20,10 @@ import testtools
 from neutron_lib.api.definitions import trunk as trunk_api
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
+from neutron_lib.plugins.ml2 import api
 from oslo_utils import uuidutils
 
 from neutron.plugins.common import utils
-from neutron.plugins.ml2 import driver_api as api
 from neutron.services.trunk import constants
 from neutron.services.trunk import drivers
 from neutron.services.trunk import exceptions as trunk_exc
@@ -43,6 +43,8 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
         self.context = mock.ANY
 
         mock.patch.object(rules.SubPortsValidator, '_get_port_mtu',
+                          return_value=None).start()
+        mock.patch.object(rules.SubPortsValidator, '_prepare_subports',
                           return_value=None).start()
 
     def test_validate_subport_subport_and_trunk_shared_port_id(self):
@@ -86,7 +88,7 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
             validator.validate(self.context)
             f.assert_called_once_with(self.context, parent_port=False)
 
-    def test_validate_subport_subport_invalid_segmenation_type(self):
+    def test_validate_subport_subport_invalid_segmentation_type(self):
         validator = rules.SubPortsValidator(
             self.segmentation_types,
             [{'port_id': uuidutils.generate_uuid(),
@@ -96,7 +98,7 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
                           validator.validate,
                           self.context)
 
-    def test_validate_subport_missing_segmenation_type(self):
+    def test_validate_subport_missing_segmentation_type(self):
         validator = rules.SubPortsValidator(
             self.segmentation_types,
             [{'port_id': uuidutils.generate_uuid(),
@@ -105,7 +107,7 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
                           validator.validate,
                           self.context)
 
-    def test_validate_subport_missing_segmenation_id(self):
+    def test_validate_subport_missing_segmentation_id(self):
         validator = rules.SubPortsValidator(
             self.segmentation_types,
             [{'port_id': uuidutils.generate_uuid(),
@@ -122,6 +124,26 @@ class SubPortsValidatorTestCase(base.BaseTestCase):
         self.assertRaises(n_exc.InvalidInput,
                           validator.validate,
                           self.context, basic_validation=True)
+
+
+class SubPortsValidatorPrepareTestCase(base.BaseTestCase):
+
+    def setUp(self):
+        super(SubPortsValidatorPrepareTestCase, self).setUp()
+        self.segmentation_types = {constants.VLAN: utils.is_valid_vlan_tag}
+        self.context = mock.ANY
+
+        mock.patch.object(rules.SubPortsValidator, '_get_port_mtu',
+                          return_value=None).start()
+
+    def test__prepare_subports_raise_no_provider_ext(self):
+        validator = rules.SubPortsValidator(
+            self.segmentation_types,
+            [{'port_id': uuidutils.generate_uuid(),
+              'segmentation_type': 'inherit'}])
+        self.assertRaises(n_exc.InvalidInput,
+                          validator._prepare_subports,
+                          self.context)
 
 
 class SubPortsValidatorMtuSanityTestCase(test_plugin.Ml2PluginV2TestCase):

@@ -14,27 +14,22 @@
 #    under the License.
 
 from neutron_lib import exceptions as exc
+from neutron_lib.plugins.ml2 import api
 from oslo_config import cfg
 from oslo_log import log
-import six
 
 from neutron._i18n import _, _LI, _LW
-from neutron.common import _deprecate
 from neutron.common import exceptions as n_exc
 from neutron.conf.plugins.ml2.drivers import driver_type
-from neutron.db.models.plugins.ml2 import flatallocation as type_flat_model
+from neutron.db import api as db_api
 from neutron.objects import exceptions as obj_base
 from neutron.objects.plugins.ml2 import flatallocation as flat_obj
 from neutron.plugins.common import constants as p_const
-from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import helpers
 
 LOG = log.getLogger(__name__)
 
 driver_type.register_ml2_drivers_flat_opts()
-
-
-_deprecate._moved_global('FlatAllocation', new_module=type_flat_model)
 
 
 class FlatTypeDriver(helpers.BaseTypeDriver):
@@ -85,7 +80,7 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
                    % physical_network)
             raise exc.InvalidInput(error_message=msg)
 
-        for key, value in six.iteritems(segment):
+        for key, value in segment.items():
             if value and key not in [api.NETWORK_TYPE,
                                      api.PHYSICAL_NETWORK]:
                 msg = _("%s prohibited for flat provider network") % key
@@ -112,7 +107,7 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
 
     def release_segment(self, context, segment):
         physical_network = segment[api.PHYSICAL_NETWORK]
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             obj = flat_obj.FlatAllocation.get_object(
                 context,
                 physical_network=physical_network)
@@ -133,6 +128,3 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
         if physical_network in self.physnet_mtus:
             mtu.append(int(self.physnet_mtus[physical_network]))
         return min(mtu) if mtu else 0
-
-
-_deprecate._MovedGlobals()

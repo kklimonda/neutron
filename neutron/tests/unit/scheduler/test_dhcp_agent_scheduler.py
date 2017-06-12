@@ -17,11 +17,11 @@ import random
 
 import mock
 from neutron_lib import constants
+from neutron_lib import context
 from oslo_config import cfg
 from oslo_utils import importutils
 import testscenarios
 
-from neutron import context
 from neutron.db import agentschedulers_db as sched_db
 from neutron.db import common_db_mixin
 from neutron.db import models_v2
@@ -305,6 +305,9 @@ class TestAutoScheduleSegments(test_plugin.Ml2PluginV2TestCase,
         self.segments_plugin = importutils.import_object(
             'neutron.services.segments.plugin.Plugin')
         self.ctx = context.get_admin_context()
+        # Remove MissingAuthPlugin exception from logs
+        mock.patch(
+            'neutron.notifiers.batch_notifier.BatchNotifier._notify').start()
 
     def _create_network(self):
         net = self.plugin.create_network(
@@ -485,7 +488,7 @@ class TestNetworksFailover(TestDhcpSchedulerBaseTestCase,
             self.remove_networks_from_down_agents()
 
     def test_reschedule_network_catches_exceptions_on_fetching_bindings(self):
-        with mock.patch('neutron.context.get_admin_context') as get_ctx:
+        with mock.patch('neutron_lib.context.get_admin_context') as get_ctx:
             mock_ctx = mock.Mock()
             get_ctx.return_value = mock_ctx
             mock_ctx.session.query.side_effect = Exception()

@@ -15,25 +15,25 @@
 import sys
 
 from neutron_lib import constants
+from neutron_lib import context
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_service import loopingcall
 from oslo_service import periodic_task
 from oslo_service import service
-from oslo_utils import importutils
 from oslo_utils import timeutils
 
+from neutron.services.metering.drivers import utils as driverutils
 from neutron._i18n import _, _LE, _LI, _LW
-from neutron.agent.common import config
 from neutron.agent import rpc as agent_rpc
 from neutron.common import config as common_config
 from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
+from neutron.conf.agent import common as config
 from neutron.conf.services import metering_agent
-from neutron import context
 from neutron import manager
 from neutron import service as neutron_service
 
@@ -86,8 +86,8 @@ class MeteringAgent(MeteringPluginRpc, manager.Manager):
         LOG.info(_LI("Loading Metering driver %s"), self.conf.driver)
         if not self.conf.driver:
             raise SystemExit(_('A metering driver must be specified'))
-        self.metering_driver = importutils.import_object(
-            self.conf.driver, self, self.conf)
+        self.metering_driver = driverutils.load_metering_driver(self,
+                                                                self.conf)
 
     def _metering_notification(self):
         for label_id, info in self.metering_infos.items():

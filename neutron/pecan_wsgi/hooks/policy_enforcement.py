@@ -124,7 +124,7 @@ class PolicyHook(hooks.PecanHook):
                 resources_copy.append(obj)
         # TODO(salv-orlando): as other hooks might need to prefetch resources,
         # store them in the request context. However, this should be done in a
-        # separate hook which is conventietly called before all other hooks
+        # separate hook which is conveniently called before all other hooks
         state.request.context['original_resources'] = original_resources
         for item in resources_copy:
             try:
@@ -184,11 +184,14 @@ class PolicyHook(hooks.PecanHook):
                         policy_method(neutron_context, action, item,
                                       plugin=plugin,
                                       pluralized=collection))]
-        except oslo_policy.PolicyNotAuthorized as e:
+        except oslo_policy.PolicyNotAuthorized:
             # This exception must be explicitly caught as the exception
             # translation hook won't be called if an error occurs in the
-            # 'after' handler.
-            raise webob.exc.HTTPForbidden(str(e))
+            # 'after' handler.  Instead of raising an HTTPForbidden exception,
+            # we have to set the status_code here to prevent the catch_errors
+            # middleware from turning this into a 500.
+            state.response.status_code = 403
+            return
 
         if is_single:
             resp = resp[0]
@@ -220,6 +223,13 @@ class PolicyHook(hooks.PecanHook):
         """
         attributes_to_exclude = []
         for attr_name in data.keys():
+            # TODO(amotoki): All attribute maps have tenant_id and
+            # it determines excluded attributes based on tenant_id.
+            # We need to migrate tenant_id to project_id later
+            # as attr_info is referred to in various places and we need
+            # to check all logs carefully.
+            if attr_name == 'project_id':
+                continue
             attr_data = controller.resource_info.get(attr_name)
             if attr_data and attr_data['is_visible']:
                 if policy.check(
@@ -235,4 +245,9 @@ class PolicyHook(hooks.PecanHook):
             # if the code reaches this point then either the policy check
             # failed or the attribute was not visible in the first place
             attributes_to_exclude.append(attr_name)
+            # TODO(amotoki): As mentioned in the above TODO,
+            # we treat project_id and tenant_id equivalently.
+            # This should be migrated to project_id later.
+            if attr_name == 'tenant_id':
+                attributes_to_exclude.append('project_id')
         return attributes_to_exclude

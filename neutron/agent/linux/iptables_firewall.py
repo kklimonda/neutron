@@ -19,17 +19,14 @@ import netaddr
 from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_log import versionutils
 from oslo_utils import netutils
-import six
 
-from neutron._i18n import _, _LI, _LW
+from neutron._i18n import _LI
 from neutron.agent import firewall
 from neutron.agent.linux import ip_conntrack
 from neutron.agent.linux import ipset_manager
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_manager
-from neutron.agent.linux import utils
 from neutron.common import constants as n_const
 from neutron.common import ipv6_utils
 from neutron.common import utils as c_utils
@@ -87,51 +84,9 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
             lambda: collections.defaultdict(list))
         self.pre_sg_members = None
         self.enable_ipset = cfg.CONF.SECURITYGROUP.enable_ipset
-        self._enabled_netfilter_for_bridges = False
         self.updated_rule_sg_ids = set()
         self.updated_sg_members = set()
         self.devices_with_updated_sg_members = collections.defaultdict(list)
-
-    def _enable_netfilter_for_bridges(self):
-        # we only need to set these values once, but it has to be when
-        # we create a bridge; before that the bridge module might not
-        # be loaded and the proc values aren't there.
-        if self._enabled_netfilter_for_bridges:
-            return
-        else:
-            self._enabled_netfilter_for_bridges = True
-
-        # These proc values ensure that netfilter is enabled on
-        # bridges; essential for enforcing security groups rules with
-        # OVS Hybrid.  Distributions can differ on whether this is
-        # enabled by default or not (Ubuntu - yes, Redhat - no, for
-        # example).
-        LOG.debug("Enabling netfilter for bridges")
-        try:
-            entries = utils.execute(
-                ['sysctl', '-N', 'net.bridge'], run_as_root=True,
-                log_fail_as_error=False).splitlines()
-        except utils.ProcessExecutionError:
-            LOG.info(_LI("Process is probably running in namespace or "
-                         "kernel module br_netfilter is not loaded. "
-                         "Please ensure that netfilter options for bridge "
-                         "are enabled to provide working security groups."))
-            return
-
-        for proto in ('ip', 'ip6'):
-            knob = 'net.bridge.bridge-nf-call-%stables' % proto
-            if knob not in entries:
-                raise SystemExit(
-                    _("sysctl value %s not present on this system.") % knob)
-            enabled = utils.execute(['sysctl', '-b', knob])
-            if enabled != '1':
-                versionutils.report_deprecated_feature(
-                    LOG,
-                    _LW('Bridge firewalling is disabled; enabling to make '
-                        'iptables firewall work. This may not work in future '
-                        'releases.'))
-                utils.execute(
-                    ['sysctl', '-w', '%s=1' % knob], run_as_root=True)
 
     @property
     def ports(self):
@@ -198,7 +153,6 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
     def prepare_port_filter(self, port):
         LOG.debug("Preparing device (%s) filter", port['device'])
         self._set_ports(port)
-        self._enable_netfilter_for_bridges()
         # each security group has it own chains
         self._setup_chains()
         return self.iptables.apply()
@@ -294,17 +248,9 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         self.iptables.ipv6['filter'].add_rule('sg-fallback', '-j DROP',
                                               comment=ic.UNMATCH_DROP)
 
-    def _add_raw_chain(self, chain_name):
-        self.iptables.ipv4['raw'].add_chain(chain_name)
-        self.iptables.ipv6['raw'].add_chain(chain_name)
-
     def _add_chain_by_name_v4v6(self, chain_name):
         self.iptables.ipv4['filter'].add_chain(chain_name)
         self.iptables.ipv6['filter'].add_chain(chain_name)
-
-    def _remove_raw_chain(self, chain_name):
-        self.iptables.ipv4['raw'].remove_chain(chain_name)
-        self.iptables.ipv6['raw'].remove_chain(chain_name)
 
     def _remove_chain_by_name_v4v6(self, chain_name):
         self.iptables.ipv4['filter'].remove_chain(chain_name)
@@ -695,11 +641,9 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
             protocol = 'ipv6-icmp'
         iptables_rule = ['-p', protocol]
 
-        if (is_port and protocol in ['udp', 'tcp', 'icmp', 'ipv6-icmp']):
-            protocol_modules = {'udp': 'udp', 'tcp': 'tcp',
-                                'icmp': 'icmp', 'ipv6-icmp': 'icmp6'}
+        if (is_port and protocol in n_const.IPTABLES_PROTOCOL_MAP):
             # iptables adds '-m protocol' when the port number is specified
-            iptables_rule += ['-m', protocol_modules[protocol]]
+            iptables_rule += ['-m', n_const.IPTABLES_PROTOCOL_MAP[protocol]]
         return iptables_rule
 
     def _port_arg(self, direction, protocol, port_range_min, port_range_max):
@@ -761,7 +705,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         remote_sgs_to_remove = self._determine_remote_sgs_to_remove(
             filtered_ports)
 
-        for ip_version, remote_sg_ids in six.iteritems(remote_sgs_to_remove):
+        for ip_version, remote_sg_ids in remote_sgs_to_remove.items():
             if self.enable_ipset:
                 self._remove_ipsets_for_remote_sgs(ip_version, remote_sg_ids)
 
@@ -781,8 +725,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                                        constants.IPv6: set()}
         remote_group_id_sets = self._get_remote_sg_ids_sets_by_ipversion(
             filtered_ports)
-        for ip_version, remote_group_id_set in (
-                six.iteritems(remote_group_id_sets)):
+        for ip_version, remote_group_id_set in remote_group_id_sets.items():
             sgs_to_remove_per_ipversion[ip_version].update(
                 set(self.pre_sg_members) - remote_group_id_set)
         return sgs_to_remove_per_ipversion

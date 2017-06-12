@@ -14,6 +14,7 @@
 #    under the License.
 
 import mock
+from neutron_lib import context
 from oslo_utils import uuidutils
 
 from neutron.agent.l2.extensions import qos
@@ -22,7 +23,6 @@ from neutron.api.rpc.callbacks.consumer import registry
 from neutron.api.rpc.callbacks import events
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import resources_rpc
-from neutron import context
 from neutron.objects.qos import policy
 from neutron.objects.qos import rule
 from neutron.plugins.ml2.drivers.openvswitch.agent import (
@@ -138,7 +138,7 @@ class QosExtensionBaseTestCase(base.BaseTestCase):
     def setUp(self):
         super(QosExtensionBaseTestCase, self).setUp()
         conn_patcher = mock.patch(
-            'neutron.agent.ovsdb.native.connection.Connection.start')
+            'neutron.agent.ovsdb.impl_idl._connection')
         conn_patcher.start()
         self.addCleanup(conn_patcher.stop)
         self.qos_ext = qos.QosAgentExtension()

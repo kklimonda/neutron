@@ -12,16 +12,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import functools
-
 import mock
 from oslo_config import cfg
 
-from neutron.agent.common import config
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.common import utils as common_utils
+from neutron.conf.agent import common as config
 from neutron.conf.agent import dhcp as dhcp_conf
 from neutron.conf import common as common_conf
 from neutron.tests import base as tests_base
@@ -38,7 +36,7 @@ class TestDhcp(functional_base.BaseSudoTestCase):
         conf.register_opts(common_conf.core_opts)
         conf.register_opts(dhcp_conf.DHCP_AGENT_OPTS)
         conf.set_override('interface_driver', 'openvswitch')
-        conf.set_override('host', 'foo_host')
+        conf.set_override('host', 'foo-host')
         self.conf = conf
         br_int = self.useFixture(net_helpers.OVSBridgeFixture()).bridge
         self.conf.set_override('ovs_integration_bridge', br_int.br_name)
@@ -77,19 +75,16 @@ class TestDhcp(functional_base.BaseSudoTestCase):
                             "10:22:33:44:55:69",
                             namespace="qdhcp-foo_id")
         ipw = ip_lib.IPWrapper(namespace="qdhcp-foo_id")
-        get_devices = functools.partial(
-            ipw.get_devices,
-            exclude_loopback=True, exclude_gre_devices=True)
-        devices = get_devices()
+        devices = ipw.get_devices()
         self.addCleanup(ipw.netns.delete, 'qdhcp-foo_id')
         self.assertEqual(sorted(["tapfoo_id2", "tapfoo_id3"]),
                          sorted(map(str, devices)))
         # setting up dhcp for the network
         dev_mgr.setup(tests_base.AttributeDict(network))
         common_utils.wait_until_true(
-            lambda: 1 == len(get_devices()),
+            lambda: 1 == len(ipw.get_devices()),
             timeout=5,
             sleep=0.1,
             exception=RuntimeError("only one non-loopback device must remain"))
-        devices = get_devices()
+        devices = ipw.get_devices()
         self.assertEqual("tapfoo_port_id", devices[0].name)

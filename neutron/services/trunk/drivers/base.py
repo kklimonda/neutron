@@ -15,12 +15,14 @@
 
 import abc
 
-from neutron.callbacks import events
-from neutron.callbacks import registry
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+
 from neutron.services.trunk import constants as trunk_consts
 from neutron.services.trunk.rpc import backend
 
 
+@registry.has_registry_receivers
 class DriverBase(object):
 
     def __init__(self, name, interfaces, segmentation_types,
@@ -40,9 +42,6 @@ class DriverBase(object):
         self.segmentation_types = segmentation_types
         self.agent_type = agent_type
         self.can_trunk_bound_port = can_trunk_bound_port
-        registry.subscribe(self.register,
-                           trunk_consts.TRUNK_PLUGIN,
-                           events.AFTER_INIT)
 
     @abc.abstractproperty
     def is_loaded(self):
@@ -62,6 +61,7 @@ class DriverBase(object):
         """True if the driver is compatible with the agent type."""
         return agent_type == self.agent_type
 
+    @registry.receives(trunk_consts.TRUNK_PLUGIN, [events.AFTER_INIT])
     def register(self, resource, event, trigger, **kwargs):
         """Register the trunk driver.
 
@@ -76,7 +76,7 @@ class DriverBase(object):
         register() method invocation.
 
         :param resource: neutron.services.trunk.constants.TRUNK_PLUGIN
-        :param event: neutron.callbacks.events.AFTER_INIT
+        :param event: neutron_lib.callbacks.events.AFTER_INIT
         :param trigger: neutron.service.trunks.plugin.TrunkPlugin
         """
 

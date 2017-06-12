@@ -17,7 +17,13 @@ from keystoneauth1 import exceptions as ks_exc
 
 import mock
 import netaddr
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import exceptions
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
 from novaclient import exceptions as nova_exc
@@ -26,13 +32,8 @@ from oslo_utils import uuidutils
 import webob.exc
 
 from neutron.api.v2 import attributes
-from neutron.callbacks import events
-from neutron.callbacks import exceptions
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.common import exceptions as neutron_exc
 from neutron.conf.plugins.ml2.drivers import driver_type
-from neutron import context
 from neutron.db import agents_db
 from neutron.db import agentschedulers_db
 from neutron.db import db_base_plugin_v2
@@ -40,7 +41,6 @@ from neutron.db import portbindings_db
 from neutron.db import segments_db
 from neutron.extensions import ip_allocation
 from neutron.extensions import l2_adjacency
-from neutron.extensions import portbindings
 from neutron.extensions import segment as ext_segment
 from neutron.objects import network
 from neutron.plugins.common import constants as p_constants
@@ -82,6 +82,10 @@ class SegmentTestExtensionManager(object):
 class SegmentTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
     def setUp(self, plugin=None):
+        # Remove MissingAuthPlugin exception from logs
+        self.patch_notifier = mock.patch(
+            'neutron.notifiers.batch_notifier.BatchNotifier._notify')
+        self.patch_notifier.start()
         if not plugin:
             plugin = TEST_PLUGIN_KLASS
         service_plugins = {'segments_plugin_name': SERVICE_PLUGIN_KLASS}
@@ -1427,6 +1431,9 @@ class TestNovaSegmentNotifier(SegmentAwareIpamTestCase):
                                       'physnet1:200:209', 'physnet2:200:209'],
                                      group='ml2_type_vlan')
         super(TestNovaSegmentNotifier, self).setUp(plugin='ml2')
+        # Need notifier here
+        self.patch_notifier.stop()
+        self._mock_keystone_auth()
         self.segments_plugin = directory.get_plugin(ext_segment.SEGMENTS)
 
         nova_updater = self.segments_plugin.nova_updater
@@ -1436,6 +1443,15 @@ class TestNovaSegmentNotifier(SegmentAwareIpamTestCase):
         self.mock_n_client = nova_updater.n_client
         self.batch_notifier = nova_updater.batch_notifier
         self.batch_notifier._waiting_to_send = True
+
+    def _mock_keystone_auth(self):
+        # Use to remove MissingAuthPlugin exception when notifier is needed
+        self.mock_load_auth_p = mock.patch(
+            'keystoneauth1.loading.load_auth_from_conf_options')
+        self.mock_load_auth = self.mock_load_auth_p.start()
+        self.mock_request_p = mock.patch(
+            'keystoneauth1.session.Session.request')
+        self.mock_request = self.mock_request_p.start()
 
     def _calculate_inventory_total_and_reserved(self, subnet):
         total = 0
@@ -1719,6 +1735,7 @@ class TestNovaSegmentNotifier(SegmentAwareIpamTestCase):
                                                                   host)
 
     def test_add_host_to_non_existent_segment_aggregate(self):
+        self._mock_keystone_auth()
         db.subscribe()
         network, segment, first_subnet = (
             self._test_first_subnet_association_with_segment())
@@ -1975,6 +1992,7 @@ class TestDhcpAgentSegmentScheduling(HostSegmentMappingTestCase):
 
     _mechanism_drivers = ['openvswitch', 'logger']
     mock_path = 'neutron.services.segments.db.update_segment_host_mapping'
+    block_dhcp_notifier = False
 
     def setUp(self):
         super(TestDhcpAgentSegmentScheduling, self).setUp()

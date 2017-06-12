@@ -18,7 +18,6 @@ import re
 
 from neutron_lib.utils import helpers
 from oslo_log import log as logging
-import six
 
 from neutron._i18n import _, _LE, _LW
 from neutron.agent.linux import ip_link_support
@@ -115,14 +114,12 @@ class EmbSwitch(object):
     @ivar pci_dev_wrapper: pci device wrapper
     """
 
-    def __init__(self, phys_net, dev_name, exclude_devices):
+    def __init__(self, dev_name, exclude_devices):
         """Constructor
 
-        @param phys_net: physical network
         @param dev_name: network device name
         @param exclude_devices: list of pci slots to exclude
         """
-        self.phys_net = phys_net
         self.dev_name = dev_name
         self.pci_slot_map = {}
         self.pci_dev_wrapper = pci_lib.PciDeviceIPWrapper(dev_name)
@@ -391,13 +388,13 @@ class ESwitchManager(object):
         """
         if exclude_devices is None:
             exclude_devices = {}
-        for phys_net, dev_names in six.iteritems(device_mappings):
+        for phys_net, dev_names in device_mappings.items():
             for dev_name in dev_names:
                 self._process_emb_switch_map(phys_net, dev_name,
                                              exclude_devices)
 
     def _create_emb_switch(self, phys_net, dev_name, exclude_devices):
-        embedded_switch = EmbSwitch(phys_net, dev_name, exclude_devices)
+        embedded_switch = EmbSwitch(dev_name, exclude_devices)
         self.emb_switches_map.setdefault(phys_net, []).append(embedded_switch)
         for pci_slot in embedded_switch.get_pci_slot_list():
             self.pci_slot_map[pci_slot] = embedded_switch

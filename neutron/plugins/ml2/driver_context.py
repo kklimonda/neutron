@@ -13,13 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import copy
+
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
+from neutron_lib.plugins.ml2 import api as ml2_api
 from oslo_log import log
 from oslo_serialization import jsonutils
 
 from neutron._i18n import _LW
 from neutron.db import segments_db
-from neutron.extensions import portbindings
 from neutron.plugins.ml2 import driver_api as api
 
 LOG = log.getLogger(__name__)
@@ -98,8 +101,10 @@ class PortContext(MechanismDriverContext, api.PortContext):
         else:
             self._network_context = NetworkContext(
                 plugin, plugin_context, network) if network else None
-        self._binding = binding
-        self._binding_levels = binding_levels
+        # NOTE(kevinbenton): these copys can go away once we are working with
+        # OVO objects here instead of native SQLA objects.
+        self._binding = copy.deepcopy(binding)
+        self._binding_levels = copy.deepcopy(binding_levels)
         self._segments_to_bind = None
         self._new_bound_segment = None
         self._next_segments_to_bind = None
@@ -170,16 +175,16 @@ class PortContext(MechanismDriverContext, api.PortContext):
     def binding_levels(self):
         if self._binding_levels:
             return [{
-                api.BOUND_DRIVER: level.driver,
-                api.BOUND_SEGMENT: self._expand_segment(level.segment_id)
+                ml2_api.BOUND_DRIVER: level.driver,
+                ml2_api.BOUND_SEGMENT: self._expand_segment(level.segment_id)
             } for level in self._binding_levels]
 
     @property
     def original_binding_levels(self):
         if self._original_binding_levels:
             return [{
-                api.BOUND_DRIVER: level.driver,
-                api.BOUND_SEGMENT: self._expand_segment(level.segment_id)
+                ml2_api.BOUND_DRIVER: level.driver,
+                ml2_api.BOUND_SEGMENT: self._expand_segment(level.segment_id)
             } for level in self._original_binding_levels]
 
     @property

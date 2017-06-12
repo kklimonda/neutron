@@ -32,7 +32,6 @@ from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
 
-from neutron.agent.common import config
 from neutron.agent.common import ovs_lib
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import interface
@@ -40,6 +39,7 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_firewall
 from neutron.agent.linux import utils
 from neutron.common import utils as common_utils
+from neutron.conf.agent import common as config
 from neutron.db import db_base_plugin_common
 from neutron.plugins.ml2.drivers.linuxbridge.agent import \
     linuxbridge_neutron_agent as linuxbridge_agent
@@ -283,7 +283,7 @@ class RootHelperProcess(subprocess.Popen):
         utils.execute(['kill', '-%d' % sig, pid], run_as_root=True)
 
     def read_stdout(self, timeout=None):
-        return self._read_stream(self.stdout, timeout)
+        return self._read_stream(self.stdout, timeout).decode('utf-8')
 
     @staticmethod
     def _read_stream(stream, timeout):
@@ -294,7 +294,7 @@ class RootHelperProcess(subprocess.Popen):
         return stream.readline()
 
     def writeline(self, data):
-        self.stdin.write(data + os.linesep)
+        self.stdin.write((data + os.linesep).encode('utf-8'))
         self.stdin.flush()
 
     def _wait_for_child_process(self, timeout=CHILD_PROCESS_TIMEOUT,
@@ -376,7 +376,7 @@ class Pinger(object):
     def start(self):
         if self.proc and self.proc.is_running:
             raise RuntimeError("This pinger has already a running process")
-        ip_version = ip_lib.get_ip_version(self.address)
+        ip_version = common_utils.get_ip_version(self.address)
         ping_exec = 'ping' if ip_version == 4 else 'ping6'
         cmd = [ping_exec, self.address, '-W', str(self.timeout)]
         if self.count:

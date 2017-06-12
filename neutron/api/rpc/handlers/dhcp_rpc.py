@@ -17,6 +17,8 @@ import copy
 import itertools
 import operator
 
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import resources
 from neutron_lib import constants
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
@@ -27,13 +29,11 @@ import oslo_messaging
 from oslo_utils import excutils
 
 from neutron._i18n import _, _LW
-from neutron.callbacks import resources
 from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
 from neutron.db import api as db_api
 from neutron.db import provisioning_blocks
-from neutron.extensions import portbindings
 from neutron.extensions import segment as segment_ext
 from neutron.plugins.common import utils as p_utils
 from neutron.quota import resource_registry
@@ -234,6 +234,7 @@ class DhcpRpcCallback(object):
         plugin = directory.get_plugin()
         plugin.delete_ports_by_device_id(context, device_id, network_id)
 
+    @oslo_messaging.expected_exceptions(exceptions.IpAddressGenerationFailure)
     @db_api.retry_db_errors
     @resource_registry.mark_resources_dirty
     def create_dhcp_port(self, context, **kwargs):
@@ -258,6 +259,7 @@ class DhcpRpcCallback(object):
         plugin = directory.get_plugin()
         return self._port_action(plugin, context, port, 'create_port')
 
+    @oslo_messaging.expected_exceptions(exceptions.IpAddressGenerationFailure)
     @db_api.retry_db_errors
     def update_dhcp_port(self, context, **kwargs):
         """Update the dhcp port."""

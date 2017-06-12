@@ -13,12 +13,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import six
 from tempest.lib.common.utils import data_utils
+from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 
 from neutron.tests.tempest.api import base
+from neutron.tests.tempest import config
+
+CONF = config.CONF
 
 
 class QuotasTestBase(base.BaseAdminNetworkTest):
@@ -26,6 +29,9 @@ class QuotasTestBase(base.BaseAdminNetworkTest):
     @classmethod
     @test.requires_ext(extension="quotas", service="network")
     def resource_setup(cls):
+        if not CONF.identity_feature_enabled.api_v2_admin:
+            # TODO(ihrachys) adopt to v3
+            raise cls.skipException('Identity v2 admin not available')
         super(QuotasTestBase, cls).resource_setup()
 
     def _create_tenant(self):
@@ -75,14 +81,14 @@ class QuotasTest(QuotasTestBase):
     """
 
     @test.attr(type='gate')
-    @test.idempotent_id('2390f766-836d-40ef-9aeb-e810d78207fb')
+    @decorators.idempotent_id('2390f766-836d-40ef-9aeb-e810d78207fb')
     def test_quotas(self):
         tenant_id = self._create_tenant()['id']
         new_quotas = {'network': 0, 'security_group': 0}
 
         # Change quotas for tenant
         quota_set = self._setup_quotas(tenant_id, **new_quotas)
-        for key, value in six.iteritems(new_quotas):
+        for key, value in new_quotas.items():
             self.assertEqual(value, quota_set[key])
 
         # Confirm our tenant is listed among tenants with non default quotas
@@ -90,13 +96,14 @@ class QuotasTest(QuotasTestBase):
         found = False
         for qs in non_default_quotas['quotas']:
             if qs['tenant_id'] == tenant_id:
+                self.assertEqual(tenant_id, qs['project_id'])
                 found = True
         self.assertTrue(found)
 
         # Confirm from API quotas were changed as requested for tenant
         quota_set = self.admin_client.show_quotas(tenant_id)
         quota_set = quota_set['quota']
-        for key, value in six.iteritems(new_quotas):
+        for key, value in new_quotas.items():
             self.assertEqual(value, quota_set[key])
 
         # Reset quotas to default and confirm

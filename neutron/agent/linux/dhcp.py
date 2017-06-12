@@ -21,6 +21,7 @@ import shutil
 import time
 
 import netaddr
+from neutron_lib.api.definitions import extra_dhcp_opt as edo_ext
 from neutron_lib import constants
 from neutron_lib import exceptions
 from neutron_lib.utils import file as file_utils
@@ -36,10 +37,9 @@ from neutron.agent.common import utils as agent_common_utils
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
-from neutron.cmd.sanity import checks
+from neutron.cmd import runtime_checks as checks
 from neutron.common import constants as n_const
 from neutron.common import utils as common_utils
-from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.ipam import utils as ipam_utils
 
 LOG = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ class DictModel(dict):
             else:
                 return item
 
-        for key, value in six.iteritems(self):
+        for key, value in self.items():
             if isinstance(value, (list, tuple)):
                 # Keep the same type but convert dicts to DictModels
                 self[key] = type(value)(
@@ -717,7 +717,7 @@ class Dnsmasq(DhcpLocalProcess):
     def _get_client_id(self, port):
         if self._get_port_extra_dhcp_opts(port):
             for opt in port.extra_dhcp_opts:
-                if opt.opt_name == edo_ext.CLIENT_ID:
+                if opt.opt_name == edo_ext.DHCP_OPT_CLIENT_ID:
                     return opt.opt_value
 
     def _read_hosts_file_leases(self, filename):
@@ -869,6 +869,7 @@ class Dnsmasq(DhcpLocalProcess):
         isolated_subnets = self.get_isolated_subnets(self.network)
         for i, subnet in enumerate(self.network.subnets):
             addr_mode = getattr(subnet, 'ipv6_address_mode', None)
+            segment_id = getattr(subnet, 'segment_id', None)
             if (not subnet.enable_dhcp or
                 (subnet.ip_version == 6 and
                  addr_mode == constants.IPV6_SLAAC)):
@@ -914,10 +915,12 @@ class Dnsmasq(DhcpLocalProcess):
                 )
 
             if subnet.ip_version == 4:
-                host_routes.extend(["%s,0.0.0.0" % (s.cidr) for s in
-                                    self.network.subnets
-                                    if (s.ip_version == 4 and
-                                        s.cidr != subnet.cidr)])
+                for s in self.network.subnets:
+                    sub_segment_id = getattr(s, 'segment_id', None)
+                    if (s.ip_version == 4 and
+                            s.cidr != subnet.cidr and
+                            sub_segment_id == segment_id):
+                        host_routes.append("%s,0.0.0.0" % s.cidr)
 
                 if host_routes:
                     if gateway:
@@ -950,7 +953,7 @@ class Dnsmasq(DhcpLocalProcess):
                     [netaddr.IPAddress(ip.ip_address).version
                      for ip in port.fixed_ips])
                 for opt in port.extra_dhcp_opts:
-                    if opt.opt_name == edo_ext.CLIENT_ID:
+                    if opt.opt_name == edo_ext.DHCP_OPT_CLIENT_ID:
                         continue
                     opt_ip_version = opt.ip_version
                     if opt_ip_version in port_ip_versions:
@@ -1111,31 +1114,39 @@ class DeviceManager(object):
         return common_utils.get_dhcp_agent_device_id(network.id,
                                                      self.conf.host)
 
-    def _set_default_route(self, network, device_name):
-        """Sets the default gateway for this dhcp namespace.
-
-        This method is idempotent and will only adjust the route if adjusting
-        it would change it from what it already is.  This makes it safe to call
-        and avoids unnecessary perturbation of the system.
-        """
+    def _set_default_route_ip_version(self, network, device_name, ip_version):
         device = ip_lib.IPDevice(device_name, namespace=network.namespace)
-        gateway = device.route.get_gateway()
+        gateway = device.route.get_gateway(ip_version=ip_version)
         if gateway:
             gateway = gateway.get('gateway')
 
         for subnet in network.subnets:
             skip_subnet = (
-                subnet.ip_version != 4
+                subnet.ip_version != ip_version
                 or not subnet.enable_dhcp
                 or subnet.gateway_ip is None)
 
             if skip_subnet:
                 continue
 
+            if subnet.ip_version == constants.IP_VERSION_6:
+                # This is duplicating some of the API checks already done,
+                # but some of the functional tests call directly
+                prefixlen = netaddr.IPNetwork(subnet.cidr).prefixlen
+                if prefixlen == 0 or prefixlen > 126:
+                    continue
+                modes = [constants.IPV6_SLAAC, constants.DHCPV6_STATELESS]
+                addr_mode = getattr(subnet, 'ipv6_address_mode', None)
+                ra_mode = getattr(subnet, 'ipv6_ra_mode', None)
+                if (prefixlen != 64 and
+                        (addr_mode in modes or ra_mode in modes)):
+                    continue
+
             if gateway != subnet.gateway_ip:
-                LOG.debug('Setting gateway for dhcp netns on net %(n)s to '
-                          '%(ip)s',
-                          {'n': network.id, 'ip': subnet.gateway_ip})
+                LOG.debug('Setting IPv%(version)s gateway for dhcp netns '
+                          'on net %(n)s to %(ip)s',
+                          {'n': network.id, 'ip': subnet.gateway_ip,
+                           'version': ip_version})
 
                 # Check for and remove the on-link route for the old
                 # gateway being replaced, if it is outside the subnet
@@ -1143,12 +1154,8 @@ class DeviceManager(object):
                                                 not ipam_utils.check_subnet_ip(
                                                         subnet.cidr, gateway))
                 if is_old_gateway_not_in_subnet:
-                    v4_onlink = device.route.list_onlink_routes(
-                        constants.IP_VERSION_4)
-                    v6_onlink = device.route.list_onlink_routes(
-                        constants.IP_VERSION_6)
-                    existing_onlink_routes = set(
-                        r['cidr'] for r in v4_onlink + v6_onlink)
+                    onlink = device.route.list_onlink_routes(ip_version)
+                    existing_onlink_routes = set(r['cidr'] for r in onlink)
                     if gateway in existing_onlink_routes:
                         device.route.delete_route(gateway, scope='link')
 
@@ -1165,9 +1172,22 @@ class DeviceManager(object):
         # No subnets on the network have a valid gateway.  Clean it up to avoid
         # confusion from seeing an invalid gateway here.
         if gateway is not None:
-            LOG.debug('Removing gateway for dhcp netns on net %s', network.id)
+            LOG.debug('Removing IPv%(version)s gateway for dhcp netns on '
+                      'net %(n)s',
+                      {'n': network.id, 'version': ip_version})
 
             device.route.delete_gateway(gateway)
+
+    def _set_default_route(self, network, device_name):
+        """Sets the default gateway for this dhcp namespace.
+
+        This method is idempotent and will only adjust the route if adjusting
+        it would change it from what it already is.  This makes it safe to call
+        and avoids unnecessary perturbation of the system.
+        """
+        for ip_version in (constants.IP_VERSION_4, constants.IP_VERSION_6):
+            self._set_default_route_ip_version(network, device_name,
+                                               ip_version)
 
     def _setup_existing_dhcp_port(self, network, device_id, dhcp_subnets):
         """Set up the existing DHCP port, if there is one."""
@@ -1337,7 +1357,7 @@ class DeviceManager(object):
         ns_ip = ip_lib.IPWrapper(namespace=network.namespace)
         if not ns_ip.netns.exists(network.namespace):
             return
-        for d in ns_ip.get_devices(exclude_loopback=True):
+        for d in ns_ip.get_devices():
             # delete all devices except current active DHCP port device
             if d.name != skip_dev_name:
                 LOG.debug("Found stale device %s, deleting", d.name)

@@ -17,8 +17,6 @@ import re
 
 from hacking import core
 from neutron_lib.hacking import checks
-import pep8
-import six
 
 
 def flake8ext(f):
@@ -63,12 +61,6 @@ def _regex_for_level(level, hint):
     }
 
 
-log_translation_hint = re.compile(
-    '|'.join('(?:%s)' % _regex_for_level(level, hint)
-             for level, hint in six.iteritems(_all_log_levels)))
-
-log_warn = re.compile(
-    r"(.)*LOG\.(warn)\(\s*('|\"|_)")
 unittest_imports_dot = re.compile(r"\bimport[\s]+unittest\b")
 unittest_imports_from = re.compile(r"\bfrom[\s]+unittest\b")
 filter_match = re.compile(r".*filter\(lambda ")
@@ -76,59 +68,6 @@ filter_match = re.compile(r".*filter\(lambda ")
 tests_imports_dot = re.compile(r"\bimport[\s]+neutron.tests\b")
 tests_imports_from1 = re.compile(r"\bfrom[\s]+neutron.tests\b")
 tests_imports_from2 = re.compile(r"\bfrom[\s]+neutron[\s]+import[\s]+tests\b")
-
-
-@flake8ext
-def validate_log_translations(logical_line, physical_line, filename):
-    """N320 - Log messages require translation."""
-    # Translations are not required in the test directory
-    if "neutron/tests" in filename:
-        return
-    if pep8.noqa(physical_line):
-        return
-
-    msg = "N320: Log messages require translation hints!"
-    if log_translation_hint.match(logical_line):
-        yield (0, msg)
-
-
-@flake8ext
-def use_jsonutils(logical_line, filename):
-    """N321 - Use jsonutils instead of json."""
-    msg = "N321: jsonutils.%(fun)s must be used instead of json.%(fun)s"
-
-    # Some files in the tree are not meant to be run from inside Neutron
-    # itself, so we should not complain about them not using jsonutils
-    json_check_skipped_patterns = [
-        "neutron/plugins/ml2/drivers/openvswitch/agent/xenapi/etc/xapi.d/"
-        "plugins/netwrap",
-    ]
-
-    for pattern in json_check_skipped_patterns:
-        if pattern in filename:
-            return
-
-    if "json." in logical_line:
-        json_funcs = ['dumps(', 'dump(', 'loads(', 'load(']
-        for f in json_funcs:
-            pos = logical_line.find('json.%s' % f)
-            if pos != -1:
-                yield (pos, msg % {'fun': f[:-1]})
-
-
-@flake8ext
-def no_translate_debug_logs(logical_line, filename):
-    """N319 - Check for 'LOG.debug(_(' and 'LOG.debug(_Lx('
-
-    As per our translation policy,
-    https://wiki.openstack.org/wiki/LoggingStandards#Log_Translation
-    we shouldn't translate debug level logs.
-
-    * This check assumes that 'LOG' is a logger.
-    """
-    for hint in _all_hints:
-        if logical_line.startswith("LOG.debug(%s(" % hint):
-            yield(0, "N319 Don't translate debug level logs")
 
 
 @flake8ext
@@ -157,43 +96,6 @@ def check_assert_called_once_with(logical_line, filename):
 
 
 @flake8ext
-def check_no_contextlib_nested(logical_line, filename):
-    """N324 - Don't use contextlib.nested."""
-    msg = ("N324: contextlib.nested is deprecated. With Python 2.7 and later "
-           "the with-statement supports multiple nested objects. See https://"
-           "docs.python.org/2/library/contextlib.html#contextlib.nested for "
-           "more information.")
-
-    if checks.contextlib_nested.match(logical_line):
-        yield(0, msg)
-
-
-@flake8ext
-def check_python3_xrange(logical_line):
-    """N325 - Do not use xrange."""
-    if re.search(r"\bxrange\s*\(", logical_line):
-        yield(0, "N325: Do not use xrange. Use range, or six.moves.range for "
-                 "large loops.")
-
-
-@flake8ext
-def check_no_basestring(logical_line):
-    """N326 - Don't use basestring."""
-    if re.search(r"\bbasestring\b", logical_line):
-        msg = ("N326: basestring is not Python3-compatible, use "
-               "six.string_types instead.")
-        yield(0, msg)
-
-
-@flake8ext
-def check_python3_no_iteritems(logical_line):
-    """N327 - Use six.iteritems()"""
-    if re.search(r".*\.iteritems\(\)", logical_line):
-        msg = ("N327: Use six.iteritems() instead of dict.iteritems().")
-        yield(0, msg)
-
-
-@flake8ext
 def check_asserttruefalse(logical_line, filename):
     """N328 - Don't use assertEqual(True/False, observed)."""
     if 'neutron/tests/' in filename:
@@ -213,14 +115,6 @@ def check_asserttruefalse(logical_line, filename):
             msg = ("N328: Use assertFalse(observed) instead of "
                    "assertEqual(False, observed)")
             yield (0, msg)
-
-
-@flake8ext
-def no_mutable_default_args(logical_line):
-    """N329 - Don't use mutable default arguments."""
-    msg = "N329: Method's default argument shouldn't be mutable!"
-    if checks.mutable_default_args.match(logical_line):
-        yield (0, msg)
 
 
 @flake8ext
@@ -258,14 +152,6 @@ def check_assertequal_for_httpcode(logical_line, filename):
         if re.search(r"assertEqual\(\s*[^,]*,[^,]*HTTP[^\.]*\.code\s*\)",
                      logical_line):
             yield (0, msg)
-
-
-@flake8ext
-def check_log_warn_deprecated(logical_line, filename):
-    """N333 - Use LOG.warning."""
-    msg = "N333: Use LOG.warning due to compatibility with py3"
-    if log_warn.match(logical_line):
-        yield (0, msg)
 
 
 @flake8ext
@@ -369,24 +255,11 @@ def check_no_imports_from_tests(logical_line, filename, noqa):
 def check_python3_no_filter(logical_line):
     """N344 - Use list comprehension instead of filter(lambda)."""
 
-    msg = ("N343: Use list comprehension instead of "
+    msg = ("N344: Use list comprehension instead of "
            "filter(lambda obj: test(obj), data) on python3.")
 
     if filter_match.match(logical_line):
         yield(0, msg)
-
-
-@flake8ext
-def check_assertIsNone(logical_line, filename):
-    """N345 - Enforce using assertIsNone."""
-    if 'neutron/tests/' in filename:
-        asse_eq_end_with_none_re = re.compile(r"assertEqual\(.*?,\s+None\)$")
-        asse_eq_start_with_none_re = re.compile(r"assertEqual\(None,")
-        res = (asse_eq_start_with_none_re.search(logical_line) or
-               asse_eq_end_with_none_re.search(logical_line))
-        if res:
-            yield (0, "N345: assertEqual(A, None) or assertEqual(None, A) "
-                   "sentences not allowed")
 
 
 @flake8ext
@@ -407,24 +280,15 @@ def check_no_sqlalchemy_event_import(logical_line, filename, noqa):
 
 
 def factory(register):
-    register(validate_log_translations)
-    register(use_jsonutils)
+    checks.factory(register)
     register(check_assert_called_once_with)
-    register(no_translate_debug_logs)
-    register(check_no_contextlib_nested)
-    register(check_python3_xrange)
-    register(check_no_basestring)
-    register(check_python3_no_iteritems)
     register(check_asserttruefalse)
-    register(no_mutable_default_args)
     register(check_assertempty)
     register(check_assertisinstance)
     register(check_assertequal_for_httpcode)
-    register(check_log_warn_deprecated)
     register(check_oslo_i18n_wrapper)
     register(check_builtins_gettext)
     register(check_unittest_imports)
     register(check_no_imports_from_tests)
     register(check_python3_no_filter)
-    register(check_assertIsNone)
     register(check_no_sqlalchemy_event_import)

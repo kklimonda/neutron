@@ -17,6 +17,7 @@ import datetime
 
 import mock
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
@@ -30,14 +31,14 @@ from neutron.api.rpc.handlers import dhcp_rpc
 from neutron.api.rpc.handlers import l3_rpc
 from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
-from neutron import context
 from neutron.db import agents_db
 from neutron.db import agentschedulers_db
 from neutron.db.models import agent as agent_model
-from neutron.db.models import l3agent as rb_model
 from neutron.extensions import agent
 from neutron.extensions import dhcpagentscheduler
 from neutron.extensions import l3agentscheduler
+from neutron.objects import agent as ag_obj
+from neutron.objects import l3agent as rb_obj
 from neutron.tests.common import helpers
 from neutron.tests import fake_notifier
 from neutron.tests import tools
@@ -59,6 +60,8 @@ DEVICE_OWNER_COMPUTE = ''.join([constants.DEVICE_OWNER_COMPUTE_PREFIX,
 
 
 class AgentSchedulerTestMixIn(object):
+
+    block_dhcp_notifier = False
 
     def _request_list(self, path, admin_context=True,
                       expected_code=exc.HTTPOk.code):
@@ -706,7 +709,7 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
             self._take_down_agent_and_run_reschedule(L3_HOSTA)  # Exception
 
     def test_router_rescheduler_catches_exceptions_on_fetching_bindings(self):
-        with mock.patch('neutron.context.get_admin_context') as get_ctx:
+        with mock.patch('neutron_lib.context.get_admin_context') as get_ctx:
             mock_ctx = mock.Mock()
             get_ctx.return_value = mock_ctx
             mock_ctx.session.query.side_effect = db_exc.DBError()
@@ -790,10 +793,12 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
 
             # A should still have it even though it was inactive due to the
             # admin_state being down
-            rab = rb_model.RouterL3AgentBinding
-            binding = (self.adminContext.session.query(rab).
-                       filter(rab.router_id == r['router']['id']).first())
-            self.assertEqual(binding.l3_agent.host, L3_HOSTA)
+            bindings = rb_obj.RouterL3AgentBinding.get_objects(
+                    self.adminContext, router_id=r['router']['id'])
+            binding = bindings.pop() if bindings else None
+            l3_agent = ag_obj.Agent.get_objects(
+                self.adminContext, id=binding.l3_agent_id)
+            self.assertEqual(l3_agent[0].host, L3_HOSTA)
 
             # B should not pick up the router
             ret_b = l3_rpc_cb.get_router_ids(self.adminContext, host=L3_HOSTB)

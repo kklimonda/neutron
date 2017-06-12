@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import abc
 import collections
 import imp
 import os
@@ -24,7 +23,6 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_middleware import base
 import routes
-import six
 import webob.dec
 import webob.exc
 
@@ -60,31 +58,6 @@ def register_custom_supported_check(alias, f, plugin_agnostic=False):
         _PLUGIN_AGNOSTIC_EXTENSIONS.add(alias)
 
 
-@six.add_metaclass(abc.ABCMeta)
-class PluginInterface(object):
-
-    @classmethod
-    def __subclasshook__(cls, klass):
-        """Checking plugin class.
-
-        The __subclasshook__ method is a class method
-        that will be called every time a class is tested
-        using issubclass(klass, PluginInterface).
-        In that case, it will check that every method
-        marked with the abstractmethod decorator is
-        provided by the plugin class.
-        """
-
-        if not cls.__abstractmethods__:
-            return NotImplemented
-
-        for method in cls.__abstractmethods__:
-            if any(method in base.__dict__ for base in klass.__mro__):
-                continue
-            return NotImplemented
-        return True
-
-
 class ActionExtensionController(wsgi.Controller):
 
     def __init__(self, application):
@@ -97,7 +70,7 @@ class ActionExtensionController(wsgi.Controller):
     def action(self, request, id):
         input_dict = self._deserialize(request.body,
                                        request.get_content_type())
-        for action_name, handler in six.iteritems(self.action_handlers):
+        for action_name, handler in self.action_handlers.items():
             if action_name in input_dict:
                 return handler(input_dict, request, id)
         # no action handler found (bump to downstream application)
@@ -139,7 +112,7 @@ class ExtensionController(wsgi.Controller):
 
     def index(self, request):
         extensions = []
-        for _alias, ext in six.iteritems(self.extension_manager.extensions):
+        for _alias, ext in self.extension_manager.extensions.items():
             extensions.append(self._translate(ext))
         return dict(extensions=extensions)
 
@@ -180,7 +153,7 @@ class ExtensionMiddleware(base.ConfigurableMiddleware):
 
             LOG.debug('Extended resource: %s',
                       resource.collection)
-            for action, method in six.iteritems(resource.collection_actions):
+            for action, method in resource.collection_actions.items():
                 conditions = dict(method=[method])
                 path = "/%s/%s" % (resource.collection, action)
                 with mapper.submapper(controller=resource.controller,
@@ -371,7 +344,7 @@ class ExtensionManager(object):
                 if check_optionals and optional_exts_set - set(processed_exts):
                     continue
                 extended_attrs = ext.get_extended_resources(version)
-                for res, resource_attrs in six.iteritems(extended_attrs):
+                for res, resource_attrs in extended_attrs.items():
                     attr_map.setdefault(res, {}).update(resource_attrs)
                 processed_exts[ext_name] = ext
                 del exts_to_process[ext_name]
@@ -455,7 +428,7 @@ class ExtensionManager(object):
                 ext_path = os.path.join(path, f)
                 if file_ext.lower() == '.py' and not mod_name.startswith('_'):
                     mod = imp.load_source(mod_name, ext_path)
-                    ext_name = mod_name[0].upper() + mod_name[1:]
+                    ext_name = mod_name.capitalize()
                     new_ext_class = getattr(mod, ext_name, None)
                     if not new_ext_class:
                         LOG.warning(_LW('Did not find expected name '

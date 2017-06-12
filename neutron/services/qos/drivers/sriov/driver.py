@@ -13,9 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api.definitions import portbindings
 from oslo_log import log as logging
 
-from neutron.extensions import portbindings
+from neutron.common import constants
 from neutron.services.qos.drivers import base
 from neutron.services.qos import qos_consts
 
@@ -23,8 +24,21 @@ LOG = logging.getLogger(__name__)
 
 DRIVER = None
 
-SUPPORTED_RULES = [qos_consts.RULE_TYPE_BANDWIDTH_LIMIT,
-                   qos_consts.RULE_TYPE_MINIMUM_BANDWIDTH]
+SUPPORTED_RULES = {
+    qos_consts.RULE_TYPE_BANDWIDTH_LIMIT: {
+        qos_consts.MAX_KBPS: {
+            'type:range': [0, constants.DB_INTEGER_MAX_VALUE]},
+        qos_consts.MAX_BURST: {
+            'type:range': [0, constants.DB_INTEGER_MAX_VALUE]},
+        qos_consts.DIRECTION: {
+            'type:values': [constants.EGRESS_DIRECTION]}
+    },
+    qos_consts.RULE_TYPE_MINIMUM_BANDWIDTH: {
+        qos_consts.MIN_KBPS: {
+            'type:range': [0, constants.DB_INTEGER_MAX_VALUE]},
+        qos_consts.DIRECTION: {'type:values': constants.VALID_DIRECTIONS}
+    }
+}
 
 
 class SRIOVNICSwitchDriver(base.DriverBase):

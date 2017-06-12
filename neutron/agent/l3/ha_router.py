@@ -17,6 +17,7 @@ import shutil
 import signal
 
 import netaddr
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as n_consts
 from oslo_log import log as logging
 
@@ -27,7 +28,6 @@ from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
 from neutron.common import utils as common_utils
-from neutron.extensions import portbindings
 
 LOG = logging.getLogger(__name__)
 HA_DEV_PREFIX = 'ha-'
@@ -99,6 +99,15 @@ class HaRouter(router.RouterInfo):
     @property
     def ha_namespace(self):
         return self.ns_name
+
+    def is_router_master(self):
+        """this method is normally called before the ha_router object is fully
+        initialized
+        """
+        if self.router.get('_ha_state') == 'active':
+            return True
+        else:
+            return False
 
     def initialize(self, process_monitor):
         ha_port = self.router.get(n_consts.HA_INTERFACE_KEY)
@@ -387,8 +396,13 @@ class HaRouter(router.RouterInfo):
         self._plug_external_gateway(ex_gw_port, interface_name, self.ns_name)
         self._add_gateway_vip(ex_gw_port, interface_name)
         self._disable_ipv6_addressing_on_interface(interface_name)
-        if self.ha_state == 'master':
-            self._enable_ra_on_gw(ex_gw_port, self.ns_name, interface_name)
+
+        # Enable RA and IPv6 forwarding only for master instances. This will
+        # prevent backup routers from sending packets to the upstream switch
+        # and disrupt connections.
+        enable = self.ha_state == 'master'
+        self._configure_ipv6_params_on_gw(ex_gw_port, self.ns_name,
+                                          interface_name, enable)
 
     def external_gateway_updated(self, ex_gw_port, interface_name):
         self._plug_external_gateway(

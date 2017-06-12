@@ -16,11 +16,11 @@ import functools
 import netaddr
 
 import fixtures
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 from neutronclient.common import exceptions
 
 from neutron.common import utils
-from neutron.extensions import portbindings
 
 
 def _safe_method(f):
@@ -132,12 +132,14 @@ class ClientFixture(fixtures.Fixture):
                         router=router_id, body=body)
         return router_interface_info
 
-    def create_qos_policy(self, tenant_id, name, description, shared):
+    def create_qos_policy(self, tenant_id, name, description, shared,
+                          is_default):
         policy = self.client.create_qos_policy(
             body={'policy': {'name': name,
                              'description': description,
                              'shared': shared,
-                             'tenant_id': tenant_id}})
+                             'tenant_id': tenant_id,
+                             'is_default': is_default}})
 
         def detach_and_delete_policy():
             qos_policy_id = policy['policy']['id']

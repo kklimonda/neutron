@@ -18,6 +18,7 @@ import os
 
 import eventlet
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib import exceptions
 from oslo_concurrency import lockutils
 from oslo_config import cfg
@@ -37,7 +38,6 @@ from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
-from neutron import context
 from neutron import manager
 
 LOG = logging.getLogger(__name__)
@@ -227,14 +227,7 @@ class DhcpAgent(manager.Manager):
                 except oslo_messaging.MessagingTimeout:
                     LOG.error(_LE("Timeout notifying server of ports ready. "
                                   "Retrying..."))
-                except Exception as e:
-                    if (isinstance(e, oslo_messaging.RemoteError)
-                            and e.exc_type == 'NoSuchMethod'):
-                        LOG.info(_LI("Server does not support port ready "
-                                     "notifications. Waiting for 5 minutes "
-                                     "before retrying."))
-                        eventlet.sleep(300)
-                        continue
+                except Exception:
                     LOG.exception(_LE("Failure notifying DHCP server of "
                                       "ready DHCP ports. Will retry on next "
                                       "iteration."))
@@ -523,7 +516,7 @@ class DhcpAgent(manager.Manager):
             uuid = network.id
             is_router_id = False
         metadata_driver.MetadataDriver.destroy_monitored_metadata_proxy(
-            self._process_monitor, uuid, self.conf)
+            self._process_monitor, uuid, self.conf, network.namespace)
         if is_router_id:
             del self._metadata_routers[network.id]
 
@@ -712,7 +705,6 @@ class DhcpAgentWithStateReport(DhcpAgent):
             'availability_zone': self.conf.AGENT.availability_zone,
             'topic': topics.DHCP_AGENT,
             'configurations': {
-                'notifies_port_ready': True,
                 'dhcp_driver': self.conf.dhcp_driver,
                 'dhcp_lease_duration': self.conf.dhcp_lease_duration,
                 'log_agent_heartbeats': self.conf.AGENT.log_agent_heartbeats},

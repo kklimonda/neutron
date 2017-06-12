@@ -12,6 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants as lib_const
 from neutron_lib import exceptions as lib_exc
 from neutron_lib.plugins import directory
@@ -19,9 +22,6 @@ from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron._i18n import _
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.db import servicetype_db as st_db
 from neutron.plugins.common import constants
 from neutron.services import provider_configuration
@@ -30,6 +30,7 @@ from neutron.services import service_base
 LOG = logging.getLogger(__name__)
 
 
+@registry.has_registry_receivers
 class DriverController(object):
     """Driver controller for the L3 service plugin.
 
@@ -47,14 +48,6 @@ class DriverController(object):
         self._stm.add_provider_configuration(
                 lib_const.L3, _LegacyPlusProviderConfiguration())
         self._load_drivers()
-        registry.subscribe(self._check_router_request,
-                           resources.ROUTER, events.BEFORE_CREATE)
-        registry.subscribe(self._set_router_provider,
-                           resources.ROUTER, events.PRECOMMIT_CREATE)
-        registry.subscribe(self._update_router_provider,
-                           resources.ROUTER, events.PRECOMMIT_UPDATE)
-        registry.subscribe(self._clear_router_provider,
-                           resources.ROUTER, events.PRECOMMIT_DELETE)
 
     def _load_drivers(self):
         self.drivers, self.default_provider = (
@@ -69,12 +62,14 @@ class DriverController(object):
             self._flavor_plugin_ref = directory.get_plugin(constants.FLAVORS)
         return self._flavor_plugin_ref
 
+    @registry.receives(resources.ROUTER, [events.BEFORE_CREATE])
     def _check_router_request(self, resource, event, trigger, context,
                               router, **kwargs):
         """Validates that API request is sane (flags compat with flavor)."""
         drv = self._get_provider_for_create(context, router)
         _ensure_driver_supports_request(drv, router)
 
+    @registry.receives(resources.ROUTER, [events.PRECOMMIT_CREATE])
     def _set_router_provider(self, resource, event, trigger, context, router,
                              router_db, **kwargs):
         """Associates a router with a service provider.
@@ -89,11 +84,13 @@ class DriverController(object):
         self._stm.add_resource_association(context, lib_const.L3,
                                            drv.name, router['id'])
 
+    @registry.receives(resources.ROUTER, [events.PRECOMMIT_DELETE])
     def _clear_router_provider(self, resource, event, trigger, context,
                                router_id, **kwargs):
         """Remove the association between a router and a service provider."""
         self._stm.del_resource_associations(context, [router_id])
 
+    @registry.receives(resources.ROUTER, [events.PRECOMMIT_UPDATE])
     def _update_router_provider(self, resource, event, trigger, context,
                                 router_id, router, old_router, router_db,
                                 **kwargs):
@@ -103,7 +100,7 @@ class DriverController(object):
         'ha' and/or 'distributed' attributes. If we allow updates of flavor_id
         directly in the future those requests will also land here.
         """
-        drv = self._get_provider_for_router(context, router_id)
+        drv = self.get_provider_for_router(context, router_id)
         new_drv = None
         if _flavor_specified(router):
             if router['flavor_id'] != old_router['flavor_id']:
@@ -145,7 +142,7 @@ class DriverController(object):
                 self._stm.add_resource_association(
                     context, lib_const.L3, new_drv.name, router_id)
 
-    def _get_provider_for_router(self, context, router_id):
+    def get_provider_for_router(self, context, router_id):
         """Return the provider driver handle for a router id."""
         driver_name = self._stm.get_provider_names_by_resource_ids(
             context, [router_id]).get(router_id)
@@ -194,7 +191,7 @@ class DriverController(object):
 
     def uses_scheduler(self, context, router_id):
         """Returns True if the integrated L3 scheduler should be used."""
-        return (self._get_provider_for_router(context, router_id).
+        return (self.get_provider_for_router(context, router_id).
                 use_integrated_agent_scheduler)
 
 

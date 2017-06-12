@@ -18,10 +18,8 @@ import copy
 import mock
 from neutron_lib import constants
 from oslo_config import cfg
-import six
 import testtools
 
-from neutron.agent.common import config as a_cfg
 from neutron.agent import firewall
 from neutron.agent.linux import ip_conntrack
 from neutron.agent.linux import ipset_manager
@@ -29,6 +27,7 @@ from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import iptables_firewall
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
+from neutron.conf.agent import common as agent_config
 from neutron.conf.agent import securitygroups_rpc as security_config
 from neutron.tests import base
 from neutron.tests.unit.api.v2 import test_base
@@ -71,8 +70,8 @@ COMMIT
 class BaseIptablesFirewallTestCase(base.BaseTestCase):
     def setUp(self):
         super(BaseIptablesFirewallTestCase, self).setUp()
-        cfg.CONF.register_opts(a_cfg.ROOT_HELPER_OPTS, 'AGENT')
         security_config.register_securitygroups_opts()
+        agent_config.register_root_helper(cfg.CONF)
         cfg.CONF.set_override('comment_iptables_rules', False, 'AGENT')
         self.utils_exec_p = mock.patch(
             'neutron.agent.linux.utils.execute')
@@ -363,6 +362,30 @@ class IptablesFirewallTestCase(BaseIptablesFirewallTestCase):
             'ifake_dev',
             '-s %s -p udp -m udp -m multiport --dports 10:100 '
             '-j RETURN' % prefix, comment=None)
+        egress = None
+        self._test_prepare_port_filter(rule, ingress, egress)
+
+    def test_filter_ipv4_ingress_dccp_port(self):
+        rule = {'ethertype': 'IPv4',
+                'direction': 'ingress',
+                'protocol': 'dccp',
+                'port_range_min': 10,
+                'port_range_max': 10}
+        ingress = mock.call.add_rule('ifake_dev',
+                                     '-p dccp -m dccp --dport 10 -j RETURN',
+                                     comment=None)
+        egress = None
+        self._test_prepare_port_filter(rule, ingress, egress)
+
+    def test_filter_ipv4_ingress_sctp_port(self):
+        rule = {'ethertype': 'IPv4',
+                'direction': 'ingress',
+                'protocol': 'sctp',
+                'port_range_min': 10,
+                'port_range_max': 10}
+        ingress = mock.call.add_rule('ifake_dev',
+                                     '-p sctp -m sctp --dport 10 -j RETURN',
+                                     comment=None)
         egress = None
         self._test_prepare_port_filter(rule, ingress, egress)
 
@@ -1825,7 +1848,7 @@ class IptablesFirewallEnhancedIpsetTestCase(BaseIptablesFirewallTestCase):
         remote_groups = remote_groups or {_IPv4: [FAKE_SGID],
                                           _IPv6: [FAKE_SGID]}
         rules = []
-        for ip_version, remote_group_list in six.iteritems(remote_groups):
+        for ip_version, remote_group_list in remote_groups.items():
             for remote_group in remote_group_list:
                 rules.append(self._fake_sg_rule_for_ethertype(ip_version,
                                                               remote_group))

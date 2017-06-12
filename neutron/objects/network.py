@@ -17,6 +17,7 @@ from oslo_versionedobjects import fields as obj_fields
 
 from neutron.db import api as db_api
 from neutron.db.models import dns as dns_models
+from neutron.db.models import external_net as ext_net_model
 from neutron.db.models import segment as segment_model
 from neutron.db import models_v2
 from neutron.db.port_security import models as ps_models
@@ -40,18 +41,70 @@ class NetworkSegment(base.NeutronDbObject):
     fields = {
         'id': common_types.UUIDField(),
         'network_id': common_types.UUIDField(),
-        'name': obj_fields.StringField(),
+        'name': obj_fields.StringField(nullable=True),
         'network_type': obj_fields.StringField(),
         'physical_network': obj_fields.StringField(nullable=True),
         'segmentation_id': obj_fields.IntegerField(nullable=True),
         'is_dynamic': obj_fields.BooleanField(default=False),
-        'segment_index': obj_fields.IntegerField(default=0)
+        'segment_index': obj_fields.IntegerField(default=0),
+        'hosts': obj_fields.ListOfStringsField(nullable=True)
     }
+
+    synthetic_fields = ['hosts']
+
+    fields_no_update = ['network_id']
 
     foreign_keys = {
         'Network': {'network_id': 'id'},
         'PortBindingLevel': {'id': 'segment_id'},
     }
+
+    def create(self):
+        fields = self.obj_get_changes()
+        with db_api.autonested_transaction(self.obj_context.session):
+            hosts = self.hosts
+            if hosts is None:
+                hosts = []
+            super(NetworkSegment, self).create()
+            if 'hosts' in fields:
+                self._attach_hosts(hosts)
+
+    def update(self):
+        fields = self.obj_get_changes()
+        with db_api.autonested_transaction(self.obj_context.session):
+            super(NetworkSegment, self).update()
+            if 'hosts' in fields:
+                self._attach_hosts(fields['hosts'])
+
+    def _attach_hosts(self, hosts):
+        SegmentHostMapping.delete_objects(
+            self.obj_context, segment_id=self.id,
+        )
+        if hosts:
+            for host in hosts:
+                SegmentHostMapping(
+                    self.obj_context, segment_id=self.id, host=host).create()
+        self.hosts = hosts
+        self.obj_reset_changes(['hosts'])
+
+    def obj_load_attr(self, attrname):
+        if attrname == 'hosts':
+            return self._load_hosts()
+        super(NetworkSegment, self).obj_load_attr(attrname)
+
+    def _load_hosts(self, db_obj=None):
+        if db_obj:
+            hosts = db_obj.get('segment_host_mapping', [])
+        else:
+            hosts = SegmentHostMapping.get_objects(self.obj_context,
+                                                   segment_id=self.id)
+
+        self.hosts = [host['host'] for host in hosts]
+        self.obj_reset_changes(['hosts'])
+
+    def from_db_object(self, db_obj):
+        super(NetworkSegment, self).from_db_object(db_obj)
+        self._load_hosts(db_obj)
 
     @classmethod
     def get_objects(cls, context, _pager=None, **kwargs):
@@ -74,6 +127,23 @@ class NetworkPortSecurity(base_ps._PortSecurity):
     db_model = ps_models.NetworkSecurityBinding
 
     fields_need_translation = {'id': 'network_id'}
+
+
+@obj_base.VersionedObjectRegistry.register
+class ExternalNetwork(base.NeutronDbObject):
+    # Version 1.0: Initial version
+    VERSION = '1.0'
+
+    db_model = ext_net_model.ExternalNetwork
+
+    foreign_keys = {'Network': {'network_id': 'id'}}
+
+    primary_keys = ['network_id']
+
+    fields = {
+        'network_id': common_types.UUIDField(),
+        'is_default': obj_fields.BooleanField(default=False),
+    }
 
 
 @obj_base.VersionedObjectRegistry.register

@@ -13,20 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
+from neutron_lib import context as neutron_context
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
-import six
 
 from neutron.common import constants as n_const
 from neutron.common import utils
-from neutron import context as neutron_context
 from neutron.db import api as db_api
 from neutron.extensions import l3
-from neutron.extensions import portbindings
 
 
 LOG = logging.getLogger(__name__)
@@ -214,7 +213,7 @@ class L3RpcCallback(object):
     def update_floatingip_statuses(self, context, router_id, fip_statuses):
         """Update operational status for a floating IP."""
         with context.session.begin(subtransactions=True):
-            for (floatingip_id, status) in six.iteritems(fip_statuses):
+            for (floatingip_id, status) in fip_statuses.items():
                 LOG.debug("New status for floating IP %(floatingip_id)s: "
                           "%(status)s", {'floatingip_id': floatingip_id,
                                          'status': status})

@@ -18,6 +18,7 @@ import collections
 import random
 import time
 
+from neutron_lib import context
 from neutron_lib import exceptions as lib_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -30,7 +31,6 @@ from osprofiler import profiler
 
 from neutron._i18n import _LE, _LW
 from neutron.common import exceptions
-from neutron import context
 
 
 LOG = logging.getLogger(__name__)
@@ -205,7 +205,7 @@ def get_client(target, version_cap=None, serializer=None):
 def get_server(target, endpoints, serializer=None):
     assert TRANSPORT is not None
     serializer = RequestContextSerializer(serializer)
-    access_policy = dispatcher.LegacyRPCAccessPolicy
+    access_policy = dispatcher.DefaultRPCAccessPolicy
     return oslo_messaging.get_rpc_server(TRANSPORT, target, endpoints,
                                          'eventlet', serializer,
                                          access_policy=access_policy)

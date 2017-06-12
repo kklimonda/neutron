@@ -41,6 +41,7 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
     of_interface = None
     ovsdb_interface = None
     arp_responder = False
+    use_dhcp = True
 
     num_hosts = 3
 
@@ -53,7 +54,9 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
                 l3_agent=self.l2_pop,
                 of_interface=self.of_interface,
                 ovsdb_interface=self.ovsdb_interface,
-                l2_agent_type=self.l2_agent_type)
+                l2_agent_type=self.l2_agent_type,
+                dhcp_agent=self.use_dhcp,
+            )
             for _ in range(self.num_hosts)]
         env = environment.Environment(
             environment.EnvironmentDescription(
@@ -72,7 +75,8 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
 
         network = self.safe_client.create_network(tenant_uuid, **net_args)
         self.safe_client.create_subnet(
-            tenant_uuid, network['id'], '20.0.0.0/24')
+            tenant_uuid, network['id'], '20.0.0.0/24',
+            enable_dhcp=self.use_dhcp)
 
         return network
 
@@ -83,7 +87,8 @@ class BaseConnectivitySameNetworkTest(base.BaseFullStackTestCase):
                     host,
                     network['id'],
                     tenant_uuid,
-                    self.safe_client))
+                    self.safe_client,
+                    use_dhcp=self.use_dhcp))
             for host in self.environment.hosts)
 
         vms.block_until_all_boot()
@@ -141,6 +146,7 @@ class TestOvsConnectivitySameNetworkOnOvsBridgeControllerStop(
                                                              kill_signal=None):
         # Environment preparation is effectively the same as connectivity test
         vms = self._prepare_vms_in_single_network()
+        vms.ping_all()
 
         ns0 = vms[0].namespace
         ip1 = vms[1].ip
@@ -188,6 +194,25 @@ class TestLinuxBridgeConnectivitySameNetwork(BaseConnectivitySameNetworkTest):
         self._test_connectivity()
 
 
+class TestConnectivitySameNetworkNoDhcp(BaseConnectivitySameNetworkTest):
+
+    scenarios = [
+        (constants.AGENT_TYPE_OVS,
+         {'l2_agent_type': constants.AGENT_TYPE_OVS}),
+        (constants.AGENT_TYPE_LINUXBRIDGE,
+         {'l2_agent_type': constants.AGENT_TYPE_LINUXBRIDGE})
+    ]
+
+    use_dhcp = False
+    network_type = 'vxlan'
+    l2_pop = False
+    ovsdb_interface = 'native'
+    of_interface = 'native'
+
+    def test_connectivity(self):
+        self._test_connectivity()
+
+
 class TestUninterruptedConnectivityOnL2AgentRestart(
         BaseConnectivitySameNetworkTest):
 
@@ -215,6 +240,7 @@ class TestUninterruptedConnectivityOnL2AgentRestart(
     def test_l2_agent_restart(self, agent_restart_timeout=20):
         # Environment preparation is effectively the same as connectivity test
         vms = self._prepare_vms_in_single_network()
+        vms.ping_all()
 
         ns0 = vms[0].namespace
         ip1 = vms[1].ip

@@ -13,9 +13,9 @@
 import copy
 
 import mock
+from neutron_lib import context
 from oslo_utils import uuidutils
 
-from neutron import context
 from neutron.objects.qos import policy
 from neutron.objects.qos import rule
 from neutron.plugins.ml2.drivers.openvswitch.agent import (
@@ -33,7 +33,7 @@ class QosOVSAgentDriverTestCase(ovs_test_base.OVSAgentConfigTestBase):
     def setUp(self):
         super(QosOVSAgentDriverTestCase, self).setUp()
         conn_patcher = mock.patch(
-            'neutron.agent.ovsdb.native.connection.Connection.start')
+            'neutron.agent.ovsdb.impl_idl._connection')
         conn_patcher.start()
         self.addCleanup(conn_patcher.stop)
         self.context = context.get_admin_context()

@@ -20,7 +20,9 @@ import socket
 import sys
 import time
 
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as n_constants
+from neutron_lib import context
 from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -38,8 +40,6 @@ from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
 from neutron.common import config as common_config
 from neutron.common import profiler as setup_profiler
 from neutron.common import topics
-from neutron import context
-from neutron.extensions import portbindings
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common import config
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
@@ -254,20 +254,11 @@ class SriovNicSwitchAgent(object):
                             device)
             except exc.SriovNicError:
                 LOG.warning(_LW("Failed to set device %s state"), device)
-                return
-            if admin_state_up:
-                # update plugin about port status
-                self.plugin_rpc.update_device_up(self.context,
-                                                 device,
-                                                 self.agent_id,
-                                                 cfg.CONF.host)
-            else:
-                self.plugin_rpc.update_device_down(self.context,
-                                                   device,
-                                                   self.agent_id,
-                                                   cfg.CONF.host)
+                return False
         else:
             LOG.info(_LI("No device with MAC %s defined on agent."), device)
+            return False
+        return True
 
     def _update_network_ports(self, network_id, port_id, mac_pci_slot):
         self._clean_network_ports(mac_pci_slot)
@@ -276,7 +267,7 @@ class SriovNicSwitchAgent(object):
             "device": mac_pci_slot})
 
     def _clean_network_ports(self, mac_pci_slot):
-        for netid, ports_list in six.iteritems(self.network_ports):
+        for netid, ports_list in self.network_ports.items():
             for port_data in ports_list:
                 if mac_pci_slot == port_data['device']:
                     ports_list.remove(port_data)
@@ -296,6 +287,8 @@ class SriovNicSwitchAgent(object):
             # resync is needed
             return True
 
+        devices_up = set()
+        devices_down = set()
         for device_details in devices_details_list:
             device = device_details['device']
             LOG.debug("Port with MAC address %s is added", device)
@@ -306,10 +299,14 @@ class SriovNicSwitchAgent(object):
                 port_id = device_details['port_id']
                 profile = device_details['profile']
                 spoofcheck = device_details.get('port_security_enabled', True)
-                self.treat_device(device,
-                                  profile.get('pci_slot'),
-                                  device_details['admin_state_up'],
-                                  spoofcheck)
+                if self.treat_device(device,
+                                     profile.get('pci_slot'),
+                                     device_details['admin_state_up'],
+                                     spoofcheck):
+                    if device_details['admin_state_up']:
+                        devices_up.add(device)
+                    else:
+                        devices_down.add(device)
                 self._update_network_ports(device_details['network_id'],
                                            port_id,
                                            (device, profile.get('pci_slot')))
@@ -317,6 +314,11 @@ class SriovNicSwitchAgent(object):
             else:
                 LOG.info(_LI("Device with MAC %s not defined on plugin"),
                          device)
+        self.plugin_rpc.update_device_list(self.context,
+                                           devices_up,
+                                           devices_down,
+                                           self.agent_id,
+                                           self.conf.host)
         return False
 
     def treat_devices_removed(self, devices):
