@@ -14,6 +14,9 @@
 #    under the License.
 
 from neutron_lib.api import validators
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
@@ -21,10 +24,6 @@ from sqlalchemy.sql import expression as expr
 
 from neutron._i18n import _
 from neutron.api.v2 import attributes
-from neutron.callbacks import events
-from neutron.callbacks import exceptions as c_exc
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.db import _model_query as model_query
 from neutron.db import _resource_extend as resource_extend
 from neutron.db import _utils as db_utils
@@ -39,53 +38,56 @@ from neutron.objects import network as net_obj
 DEVICE_OWNER_ROUTER_GW = constants.DEVICE_OWNER_ROUTER_GW
 
 
+def _network_filter_hook(context, original_model, conditions):
+    if conditions is not None and not hasattr(conditions, '__iter__'):
+        conditions = (conditions, )
+    # Apply the external network filter only in non-admin and non-advsvc
+    # context
+    if db_utils.model_query_scope_is_project(context, original_model):
+        # the table will already be joined to the rbac entries for the
+        # shared check so we don't need to worry about ensuring that
+        rbac_model = original_model.rbac_entries.property.mapper.class_
+        tenant_allowed = (
+            (rbac_model.action == 'access_as_external') &
+            (rbac_model.target_tenant == context.tenant_id) |
+            (rbac_model.target_tenant == '*'))
+        conditions = expr.or_(tenant_allowed, *conditions)
+    return conditions
+
+
+def _network_result_filter_hook(query, filters):
+    vals = filters and filters.get(external_net.EXTERNAL, [])
+    if not vals:
+        return query
+    if vals[0]:
+        return query.filter(models_v2.Network.external.has())
+    return query.filter(~models_v2.Network.external.has())
+
+
+@resource_extend.has_resource_extenders
 @registry.has_registry_receivers
 class External_net_db_mixin(object):
     """Mixin class to add external network methods to db_base_plugin_v2."""
 
-    @staticmethod
-    def _network_filter_hook(context, original_model, conditions):
-        if conditions is not None and not hasattr(conditions, '__iter__'):
-            conditions = (conditions, )
-        # Apply the external network filter only in non-admin and non-advsvc
-        # context
-        if db_utils.model_query_scope_is_project(context, original_model):
-            # the table will already be joined to the rbac entries for the
-            # shared check so we don't need to worry about ensuring that
-            rbac_model = original_model.rbac_entries.property.mapper.class_
-            tenant_allowed = (
-                (rbac_model.action == 'access_as_external') &
-                (rbac_model.target_tenant == context.tenant_id) |
-                (rbac_model.target_tenant == '*'))
-            conditions = expr.or_(tenant_allowed, *conditions)
-        return conditions
-
-    def _network_result_filter_hook(self, query, filters):
-        vals = filters and filters.get(external_net.EXTERNAL, [])
-        if not vals:
-            return query
-        if vals[0]:
-            return query.filter(models_v2.Network.external.has())
-        return query.filter(~models_v2.Network.external.has())
-
-    model_query.register_hook(
-        models_v2.Network,
-        "external_net",
-        None,
-        '_network_filter_hook',
-        '_network_result_filter_hook')
+    def __new__(cls, *args, **kwargs):
+        model_query.register_hook(
+            models_v2.Network,
+            "external_net",
+            query_hook=None,
+            filter_hook=_network_filter_hook,
+            result_filters=_network_result_filter_hook)
+        return super(External_net_db_mixin, cls).__new__(cls, *args, **kwargs)
 
     def _network_is_external(self, context, net_id):
         return net_obj.ExternalNetwork.objects_exist(
             context, network_id=net_id)
 
-    def _extend_network_dict_l3(self, network_res, network_db):
+    @staticmethod
+    @resource_extend.extends([attributes.NETWORKS])
+    def _extend_network_dict_l3(network_res, network_db):
         # Comparing with None for converting uuid into bool
         network_res[external_net.EXTERNAL] = network_db.external is not None
         return network_res
-
-    resource_extend.register_funcs(
-        attributes.NETWORKS, ['_extend_network_dict_l3'])
 
     def _process_l3_create(self, context, net_data, req_data):
         external = req_data.get(external_net.EXTERNAL)
@@ -100,26 +102,9 @@ class External_net_db_mixin(object):
             context.session.add(rbac_db.NetworkRBAC(
                   object_id=net_data['id'], action='access_as_external',
                   target_tenant='*', tenant_id=net_data['tenant_id']))
-            try:
-                registry.notify(
-                    resources.EXTERNAL_NETWORK, events.PRECOMMIT_CREATE,
-                    self, context=context,
-                    request=req_data, network=net_data)
-            except c_exc.CallbackFailure as e:
-                # raise the underlying exception
-                raise e.errors[0].error
         net_data[external_net.EXTERNAL] = external
 
     def _process_l3_update(self, context, net_data, req_data, allow_all=True):
-        try:
-            registry.notify(
-                resources.EXTERNAL_NETWORK, events.BEFORE_UPDATE,
-                self, context=context,
-                request=req_data, network=net_data)
-        except c_exc.CallbackFailure as e:
-            # raise the underlying exception
-            raise e.errors[0].error
-
         new_value = req_data.get(external_net.EXTERNAL)
         net_id = net_data['id']
         if not validators.is_attr_set(new_value):

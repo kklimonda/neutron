@@ -98,7 +98,30 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                           {'brq': bridge, 'net': physnet})
                 sys.exit(1)
 
+    def _is_valid_multicast_range(self, mrange):
+        try:
+            addr, vxlan_min, vxlan_max = mrange.split(':')
+            if int(vxlan_min) > int(vxlan_max):
+                raise ValueError()
+            try:
+                local_ver = netaddr.IPAddress(self.local_ip).version
+                n_addr = netaddr.IPAddress(addr)
+                if not n_addr.is_multicast() or n_addr.version != local_ver:
+                    raise ValueError()
+            except netaddr.core.AddrFormatError:
+                raise ValueError()
+        except ValueError:
+            return False
+        return True
+
     def validate_vxlan_group_with_local_ip(self):
+        for r in cfg.CONF.VXLAN.multicast_ranges:
+            if not self._is_valid_multicast_range(r):
+                LOG.error("Invalid multicast_range %(r)s. Must be in "
+                          "<multicast address>:<vni_min>:<vni_max> format and "
+                          "addresses must be in the same family as local IP "
+                          "%(loc)s.", {'r': r, 'loc': self.local_ip})
+                sys.exit(1)
         if not cfg.CONF.VXLAN.vxlan_group:
             return
         try:
@@ -186,8 +209,19 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             LOG.warning(_LW("Invalid Segmentation ID: %s, will lead to "
                             "incorrect vxlan device name"), segmentation_id)
 
+    @staticmethod
+    def _match_multicast_range(segmentation_id):
+        for mrange in cfg.CONF.VXLAN.multicast_ranges:
+            addr, vxlan_min, vxlan_max = mrange.split(':')
+            if int(vxlan_min) <= segmentation_id <= int(vxlan_max):
+                return addr
+
     def get_vxlan_group(self, segmentation_id):
-        net = netaddr.IPNetwork(cfg.CONF.VXLAN.vxlan_group)
+        mcast_addr = self._match_multicast_range(segmentation_id)
+        if mcast_addr:
+            net = netaddr.IPNetwork(mcast_addr)
+        else:
+            net = netaddr.IPNetwork(cfg.CONF.VXLAN.vxlan_group)
         # Map the segmentation ID to (one of) the group address(es)
         return str(net.network +
                    (int(segmentation_id) & int(net.hostmask)))
@@ -445,12 +479,12 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                                              network_id: network_id})
 
     def add_tap_interface(self, network_id, network_type, physical_network,
-                          segmentation_id, tap_device_name, device_owner):
+                          segmentation_id, tap_device_name, device_owner, mtu):
         """Add tap interface and handle interface missing exceptions."""
         try:
             return self._add_tap_interface(network_id, network_type,
                                            physical_network, segmentation_id,
-                                           tap_device_name, device_owner)
+                                           tap_device_name, device_owner, mtu)
         except Exception:
             with excutils.save_and_reraise_exception() as ctx:
                 if not ip_lib.device_exists(tap_device_name):
@@ -461,7 +495,7 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                     return False
 
     def _add_tap_interface(self, network_id, network_type, physical_network,
-                          segmentation_id, tap_device_name, device_owner):
+                          segmentation_id, tap_device_name, device_owner, mtu):
         """Add tap interface.
 
         If a VIF has been plugged into a network, this function will
@@ -483,33 +517,33 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                                                 physical_network,
                                                 segmentation_id):
             return False
-        # Avoid messing with plugging devices into a bridge that the agent
-        # does not own
-        if not device_owner.startswith(constants.DEVICE_OWNER_COMPUTE_PREFIX):
-            # Check if device needs to be added to bridge
-            if not bridge_lib.BridgeDevice.get_interface_bridge(
-                tap_device_name):
-                data = {'tap_device_name': tap_device_name,
-                        'bridge_name': bridge_name}
-                LOG.debug("Adding device %(tap_device_name)s to bridge "
-                          "%(bridge_name)s", data)
-                if bridge_lib.BridgeDevice(bridge_name).addif(tap_device_name):
-                    return False
-        else:
+        if mtu:  # <-None with device_details from older neutron servers.
+            # we ensure the MTU here because libvirt does not set the
+            # MTU of a bridge it creates and the tap device it creates will
+            # inherit from the bridge its plugged into, which will be 1500
+            # at the time. See bug/1684326 for details.
+            self._set_tap_mtu(tap_device_name, mtu)
+        # Check if device needs to be added to bridge
+        if not bridge_lib.BridgeDevice.get_interface_bridge(
+            tap_device_name):
             data = {'tap_device_name': tap_device_name,
-                    'device_owner': device_owner,
                     'bridge_name': bridge_name}
-            LOG.debug("Skip adding device %(tap_device_name)s to "
-                      "%(bridge_name)s. It is owned by %(device_owner)s and "
-                      "thus added elsewhere.", data)
+            LOG.debug("Adding device %(tap_device_name)s to bridge "
+                      "%(bridge_name)s", data)
+            if bridge_lib.BridgeDevice(bridge_name).addif(tap_device_name):
+                return False
         return True
+
+    def _set_tap_mtu(self, tap_device_name, mtu):
+        ip_lib.IPDevice(tap_device_name).link.set_mtu(mtu)
 
     def plug_interface(self, network_id, network_segment, tap_name,
                        device_owner):
         return self.add_tap_interface(network_id, network_segment.network_type,
                                       network_segment.physical_network,
                                       network_segment.segmentation_id,
-                                      tap_name, device_owner)
+                                      tap_name, device_owner,
+                                      network_segment.mtu)
 
     def delete_bridge(self, bridge_name):
         bridge_device = bridge_lib.BridgeDevice(bridge_name)
@@ -734,8 +768,8 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
     def get_agent_configurations(self):
         configurations = {'bridge_mappings': self.bridge_mappings,
-                          'interface_mappings': self.interface_mappings
-                          }
+                          'interface_mappings': self.interface_mappings,
+                          'wires_compute_ports': True}
         if self.vxlan_mode != lconst.VXLAN_NONE:
             configurations['tunneling_ip'] = self.local_ip
             configurations['tunnel_types'] = [p_const.TYPE_VXLAN]

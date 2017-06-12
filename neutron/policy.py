@@ -87,7 +87,7 @@ def set_rules(policies, overwrite=True):
 
 def _is_attribute_explicitly_set(attribute_name, resource, target, action):
     """Verify that an attribute is present and is explicitly set."""
-    if 'update' in action:
+    if target.get(const.ATTRIBUTES_TO_UPDATE):
         # In the case of update, the function should not pay attention to a
         # default value of an attribute, but check whether it was explicitly
         # marked as being updated instead.
@@ -105,7 +105,7 @@ def _should_validate_sub_attributes(attribute, sub_attr):
     validate = attribute.get('validate')
     return (validate and isinstance(sub_attr, collections.Iterable) and
             any([k.startswith('type:dict') and
-                 v for (k, v) in six.iteritems(validate)]))
+                 v for (k, v) in validate.items()]))
 
 
 def _build_subattr_match_rule(attr_name, attr, action, target):

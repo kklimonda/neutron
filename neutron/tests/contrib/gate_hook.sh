@@ -68,7 +68,12 @@ case $VENV in
     # Because of bug present in current Ubuntu Xenial kernel version
     # we need a fix for VXLAN local tunneling.
     if [[ "$VENV" =~ "dsvm-fullstack" ]]; then
-        upgrade_ovs_if_necessary
+        # The OVS_BRANCH variable is used by git checkout. In the case below,
+        # we use v2.6.1 openvswitch tag that contains a fix for usage of VXLAN
+        # tunnels on a single node and is compatible with Ubuntu Xenial kernel:
+        # https://github.com/openvswitch/ovs/commit/741f47cf35df2bfc7811b2cff75c9bb8d05fd26f
+        OVS_BRANCH="v2.6.1"
+        compile_ovs_kernel_module
     fi
 
     # prepare base environment for ./stack.sh
@@ -85,16 +90,23 @@ case $VENV in
     ;;
 
 "api"|"api-pecan"|"full-ovsfw"|"full-pecan"|"dsvm-scenario-ovs"|"dsvm-scenario-linuxbridge")
-    load_rc_hook api_${FLAVOR}_extensions
+    # TODO(ihrachys) consider feeding result of ext-list into tempest.conf
+    load_rc_hook api_all_extensions
+    if [ "${FLAVOR}" = "dvrskip" ]; then
+        load_rc_hook disable_dvr_tests
+    fi
     load_conf_hook quotas
     load_rc_hook dns
     load_rc_hook qos
+    load_rc_hook segments
     load_rc_hook trunk
-    load_conf_hook mtu
     load_conf_hook vlan_provider
+    load_conf_hook type_drivers
     load_conf_hook osprofiler
     if [[ "$VENV" =~ "dsvm-scenario" ]]; then
         load_rc_hook ubuntu_image
+        # bug/1662109
+        export DEVSTACK_GATE_TEMPEST_REGEX="^(?!.*(?:neutron\.tests\.tempest\.scenario\.test_qos.*))^neutron\.tests\.tempest\.scenario\."
     fi
     if [[ "$VENV" =~ "dsvm-scenario-linuxbridge" ]]; then
         load_conf_hook iptables_verify
@@ -104,6 +116,9 @@ case $VENV in
     fi
     if [[ "$VENV" =~ "ovs" ]]; then
         load_conf_hook ovsfw
+    fi
+    if [[ "$FLAVOR" = "dvrskip" ]]; then
+        load_conf_hook disable_dvr
     fi
 
     export DEVSTACK_LOCALCONF=$(cat $LOCAL_CONF)

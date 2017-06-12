@@ -31,6 +31,15 @@ class QosRuleNotFound(e.NotFound):
                 "could not be found.")
 
 
+class QoSPolicyDefaultAlreadyExists(e.Conflict):
+    message = _("A default QoS policy exists for project %(project_id)s.")
+
+
+class QoSPolicyDefaultNotFound(e.Conflict):
+    message = _("Default QoS policy for project %(project_id)s could not be "
+                "found.")
+
+
 class PortQosBindingNotFound(e.NotFound):
     message = _("QoS binding for port %(port_id)s and policy %(policy_id)s "
                 "could not be found.")
@@ -111,6 +120,10 @@ class InvalidAllocationPool(e.BadRequest):
     message = _("The allocation pool %(pool)s is not valid.")
 
 
+class QosRuleNotSupported(e.Conflict):
+    message = _("Rule %(rule_type)s is not supported by port %(port_id)s")
+
+
 class UnsupportedPortDeviceOwner(e.Conflict):
     message = _("Operation %(op)s is not supported for device_owner "
                 "%(device_owner)s on port %(port_id)s.")
@@ -157,6 +170,13 @@ class InvalidSharedSetting(e.Conflict):
                 "%(network)s. Multiple tenants are using it.")
 
 
+class QoSRuleParameterConflict(e.Conflict):
+    message = _("Unable to add the rule with value %(rule_value)s to the "
+                "policy %(policy_id)s as the existing rule of type "
+                "%(existing_rule)s restricts the bandwidth to "
+                "%(existing_value)s.")
+
+
 class InvalidExtensionEnv(e.BadRequest):
     message = _("Invalid extension environment: %(reason)s.")
 
@@ -199,6 +219,11 @@ class VxlanNetworkUnsupported(e.NeutronException):
 
 class DuplicatedExtension(e.NeutronException):
     message = _("Found duplicate extension: %(alias)s.")
+
+
+class DriverCallError(e.MultipleExceptions):
+    def __init__(self, exc_list=None):
+        super(DriverCallError, self).__init__(exc_list or [])
 
 
 class DeviceIDNotOwnedByTenant(e.Conflict):

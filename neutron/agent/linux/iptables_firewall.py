@@ -20,7 +20,6 @@ from neutron_lib import constants
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import netutils
-import six
 
 from neutron._i18n import _LI
 from neutron.agent import firewall
@@ -249,17 +248,9 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         self.iptables.ipv6['filter'].add_rule('sg-fallback', '-j DROP',
                                               comment=ic.UNMATCH_DROP)
 
-    def _add_raw_chain(self, chain_name):
-        self.iptables.ipv4['raw'].add_chain(chain_name)
-        self.iptables.ipv6['raw'].add_chain(chain_name)
-
     def _add_chain_by_name_v4v6(self, chain_name):
         self.iptables.ipv4['filter'].add_chain(chain_name)
         self.iptables.ipv6['filter'].add_chain(chain_name)
-
-    def _remove_raw_chain(self, chain_name):
-        self.iptables.ipv4['raw'].remove_chain(chain_name)
-        self.iptables.ipv6['raw'].remove_chain(chain_name)
 
     def _remove_chain_by_name_v4v6(self, chain_name):
         self.iptables.ipv4['filter'].remove_chain(chain_name)
@@ -714,7 +705,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
         remote_sgs_to_remove = self._determine_remote_sgs_to_remove(
             filtered_ports)
 
-        for ip_version, remote_sg_ids in six.iteritems(remote_sgs_to_remove):
+        for ip_version, remote_sg_ids in remote_sgs_to_remove.items():
             if self.enable_ipset:
                 self._remove_ipsets_for_remote_sgs(ip_version, remote_sg_ids)
 
@@ -734,8 +725,7 @@ class IptablesFirewallDriver(firewall.FirewallDriver):
                                        constants.IPv6: set()}
         remote_group_id_sets = self._get_remote_sg_ids_sets_by_ipversion(
             filtered_ports)
-        for ip_version, remote_group_id_set in (
-                six.iteritems(remote_group_id_sets)):
+        for ip_version, remote_group_id_set in remote_group_id_sets.items():
             sgs_to_remove_per_ipversion[ip_version].update(
                 set(self.pre_sg_members) - remote_group_id_set)
         return sgs_to_remove_per_ipversion

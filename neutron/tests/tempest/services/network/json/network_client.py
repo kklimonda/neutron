@@ -366,6 +366,8 @@ class NetworkClientJSON(service_client.RestClient):
             'external_gateway_info', body['router']['external_gateway_info'])
         if 'distributed' in kwargs:
             update_body['distributed'] = kwargs['distributed']
+        if 'ha' in kwargs:
+            update_body['ha'] = kwargs['ha']
         update_body = dict(router=update_body)
         update_body = jsonutils.dumps(update_body)
         resp, body = self.put(uri, update_body)
@@ -575,16 +577,19 @@ class NetworkClientJSON(service_client.RestClient):
         self.expected_success(200, resp.status)
         return service_client.ResponseBody(resp, body)
 
-    def create_bandwidth_limit_rule(self, policy_id, max_kbps, max_burst_kbps):
+    def create_bandwidth_limit_rule(self, policy_id, max_kbps,
+                                    max_burst_kbps, direction=None):
         uri = '%s/qos/policies/%s/bandwidth_limit_rules' % (
             self.uri_prefix, policy_id)
-        post_data = self.serialize({
+        post_data = {
             'bandwidth_limit_rule': {
                 'max_kbps': max_kbps,
                 'max_burst_kbps': max_burst_kbps
             }
-        })
-        resp, body = self.post(uri, post_data)
+        }
+        if direction:
+            post_data['bandwidth_limit_rule']['direction'] = direction
+        resp, body = self.post(uri, self.serialize(post_data))
         self.expected_success(201, resp.status)
         body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
@@ -608,6 +613,8 @@ class NetworkClientJSON(service_client.RestClient):
     def update_bandwidth_limit_rule(self, policy_id, rule_id, **kwargs):
         uri = '%s/qos/policies/%s/bandwidth_limit_rules/%s' % (
             self.uri_prefix, policy_id, rule_id)
+        if "direction" in kwargs and kwargs['direction'] is None:
+            kwargs.pop('direction')
         post_data = {'bandwidth_limit_rule': kwargs}
         resp, body = self.put(uri, jsonutils.dumps(post_data))
         body = self.deserialize_single(body)

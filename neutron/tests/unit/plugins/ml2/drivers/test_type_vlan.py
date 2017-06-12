@@ -16,13 +16,14 @@
 import mock
 from neutron_lib import context
 from neutron_lib import exceptions as exc
+from neutron_lib.plugins.ml2 import api
 from testtools import matchers
 
+from neutron.db import api as db_api
 from neutron.db.models.plugins.ml2 import vlanallocation as vlan_alloc_model
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
 from neutron.plugins.ml2 import config
-from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import type_vlan
 from neutron.tests.unit import testlib_api
 
@@ -59,6 +60,7 @@ class VlanTypeTest(testlib_api.SqlTestCase):
             self.assertRaises(SystemExit,
                               self.driver._parse_network_vlan_ranges)
 
+    @db_api.context_manager.reader
     def _get_allocation(self, context, segment):
         return context.session.query(
             vlan_alloc_model.VlanAllocation).filter_by(
@@ -118,6 +120,13 @@ class VlanTypeTest(testlib_api.SqlTestCase):
                    api.PHYSICAL_NETWORK: PROVIDER_NET,
                    api.SEGMENTATION_ID: 1,
                    'invalid': 1}
+        self.assertRaises(exc.InvalidInput,
+                          self.driver.validate_provider_segment,
+                          segment)
+
+    def test_validate_provider_segment_with_physical_network_only(self):
+        segment = {api.NETWORK_TYPE: p_const.TYPE_VLAN,
+                   api.PHYSICAL_NETWORK: PROVIDER_NET}
         self.assertRaises(exc.InvalidInput,
                           self.driver.validate_provider_segment,
                           segment)
@@ -259,3 +268,36 @@ class VlanTypeTest(testlib_api.SqlTestCase):
                 "No vlan_id %(vlan_id)s found on physical network "
                 "%(physical_network)s",
                 {'vlan_id': 101, 'physical_network': PROVIDER_NET})
+
+
+class VlanTypeAllocationTest(testlib_api.SqlTestCase):
+
+    def test_allocate_tenant_segment_in_order_of_config(self):
+        ranges = NETWORK_VLAN_RANGES + ['phys_net3:20:30']
+        config.cfg.CONF.set_override('network_vlan_ranges',
+                                     ranges,
+                                     group='ml2_type_vlan')
+        driver = type_vlan.VlanTypeDriver()
+        driver.physnet_mtus = []
+        driver._sync_vlan_allocations()
+        # swap config order from DB order after sync has happened to
+        # ensure config order is followed and not DB order
+        config.cfg.CONF.set_override('network_vlan_ranges',
+                                     list(reversed(ranges)),
+                                     group='ml2_type_vlan')
+        driver._parse_network_vlan_ranges()
+        ctx = context.Context()
+        for vlan in range(11):
+            # all of physnet3 should be exhausted first
+            self.assertEqual(
+                {'network_type': 'vlan', 'physical_network': 'phys_net3',
+                 'segmentation_id': mock.ANY, 'mtu': 1500},
+                driver.allocate_tenant_segment(ctx))
+        for vlan in range(10):
+            # then physnet2
+            self.assertEqual(
+                {'network_type': 'vlan', 'physical_network': 'phys_net2',
+                 'segmentation_id': mock.ANY, 'mtu': 1500},
+                driver.allocate_tenant_segment(ctx))
+        # then nothing
+        self.assertFalse(driver.allocate_tenant_segment(ctx))

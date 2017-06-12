@@ -30,7 +30,7 @@ import tenacity
 from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.common import ip_lib
 from neutron.agent.common import utils
-from neutron.agent.ovsdb import api as ovsdb
+from neutron.agent.ovsdb import api as ovsdb_api
 from neutron.conf.agent import ovs_conf
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common \
@@ -61,17 +61,13 @@ OVS_DEFAULT_CAPS = {
 _SENTINEL = object()
 
 
-def _ofport_result_pending(result):
+def _ovsdb_result_pending(result):
     """Return True if ovs-vsctl indicates the result is still pending."""
     # ovs-vsctl can return '[]' for an ofport that has not yet been assigned
-    try:
-        int(result)
-        return False
-    except (ValueError, TypeError):
-        return True
+    return result == []
 
 
-def _ofport_retry(fn):
+def _ovsdb_retry(fn):
     """Decorator for retrying when OVS has yet to assign an ofport.
 
     The instance's vsctl_timeout is used as the max waiting time. This relies
@@ -82,7 +78,7 @@ def _ofport_retry(fn):
         self = args[0]
         new_fn = tenacity.retry(
             reraise=True,
-            retry=tenacity.retry_if_result(_ofport_result_pending),
+            retry=tenacity.retry_if_result(_ovsdb_result_pending),
             wait=tenacity.wait_exponential(multiplier=0.01, max=1),
             stop=tenacity.stop_after_delay(
                 self.vsctl_timeout))(fn)
@@ -110,7 +106,7 @@ class BaseOVS(object):
 
     def __init__(self):
         self.vsctl_timeout = cfg.CONF.ovs_vsctl_timeout
-        self.ovsdb = ovsdb.API.get(self)
+        self.ovsdb = ovsdb_api.from_config(self)
 
     def add_manager(self, connection_uri, timeout=_SENTINEL):
         """Have ovsdb-server listen for manager connections
@@ -310,19 +306,29 @@ class OVSBridge(BaseOVS):
     def remove_all_flows(self):
         self.run_ofctl("del-flows", [])
 
-    @_ofport_retry
-    def _get_port_ofport(self, port_name):
-        return self.db_get_val("Interface", port_name, "ofport")
+    @_ovsdb_retry
+    def _get_port_val(self, port_name, port_val):
+        return self.db_get_val("Interface", port_name, port_val)
 
     def get_port_ofport(self, port_name):
         """Get the port's assigned ofport, retrying if not yet assigned."""
         ofport = INVALID_OFPORT
         try:
-            ofport = self._get_port_ofport(port_name)
+            ofport = self._get_port_val(port_name, "ofport")
         except tenacity.RetryError:
             LOG.exception(_LE("Timed out retrieving ofport on port %s."),
                           port_name)
         return ofport
+
+    def get_port_external_ids(self, port_name):
+        """Get the port's assigned ofport, retrying if not yet assigned."""
+        port_external_ids = dict()
+        try:
+            port_external_ids = self._get_port_val(port_name, "external_ids")
+        except tenacity.RetryError:
+            LOG.exception(_LE("Timed out retrieving external_ids on port %s."),
+                          port_name)
+        return port_external_ids
 
     def get_port_mac(self, port_name):
         """Get the port's mac address.
@@ -332,11 +338,25 @@ class OVSBridge(BaseOVS):
         """
         return self.db_get_val("Interface", port_name, "mac_in_use")
 
+    @_ovsdb_retry
+    def _get_datapath_id(self):
+        return self.db_get_val('Bridge', self.br_name, 'datapath_id')
+
     def get_datapath_id(self):
-        return self.db_get_val('Bridge',
-                               self.br_name, 'datapath_id')
+        try:
+            return self._get_datapath_id()
+        except tenacity.RetryError:
+            # if ovs fails to find datapath_id then something is likely to be
+            # broken here
+            LOG.exception("Timed out retrieving datapath_id on bridge %s.",
+                          self.br_name)
+            raise RuntimeError('No datapath_id on bridge %s' % self.br_name)
 
     def do_action_flows(self, action, kwargs_list):
+        # we can't mix strict and non-strict, so we'll use the first kw
+        # and check against other kw being different
+        strict = kwargs_list[0].get('strict', False)
+
         for kw in kwargs_list:
             if action is 'del':
                 if kw.get('cookie') == COOKIE_ANY:
@@ -356,14 +376,27 @@ class OVSBridge(BaseOVS):
                 if 'cookie' not in kw:
                     kw['cookie'] = self._default_cookie
 
+            if action in ('mod', 'del'):
+                if kw.pop('strict', False) != strict:
+                    msg = ("cannot mix 'strict' and not 'strict' in a batch "
+                           "call")
+                    raise exceptions.InvalidInput(error_message=msg)
+            else:
+                if kw.pop('strict', False):
+                    msg = "cannot use 'strict' with 'add' action"
+                    raise exceptions.InvalidInput(error_message=msg)
+
+        strict_param = ["--strict"] if strict else []
+
         if action == 'del' and {} in kwargs_list:
             # the 'del' case simplifies itself if kwargs_list has at least
             # one item that matches everything
             self.run_ofctl('%s-flows' % action, [])
         else:
-            flow_strs = [_build_flow_expr_str(kw, action)
+            flow_strs = [_build_flow_expr_str(kw, action, strict)
                          for kw in kwargs_list]
-            self.run_ofctl('%s-flows' % action, ['-'], '\n'.join(flow_strs))
+            self.run_ofctl('%s-flows' % action, strict_param + ['-'],
+                           '\n'.join(flow_strs))
 
     def add_flow(self, **kwargs):
         self.do_action_flows('add', [kwargs])
@@ -709,7 +742,7 @@ class DeferredOVSBridge(object):
                           self.br.br_name)
 
 
-def _build_flow_expr_str(flow_dict, cmd):
+def _build_flow_expr_str(flow_dict, cmd, strict):
     flow_expr_arr = []
     actions = None
 
@@ -721,8 +754,10 @@ def _build_flow_expr_str(flow_dict, cmd):
         flow_expr_arr.append("priority=%s" %
                              flow_dict.pop('priority', '1'))
     elif 'priority' in flow_dict:
-        msg = _("Cannot match priority on flow deletion or modification")
-        raise exceptions.InvalidInput(error_message=msg)
+        if not strict:
+            msg = _("Cannot match priority on flow deletion or modification "
+                    "without 'strict'")
+            raise exceptions.InvalidInput(error_message=msg)
 
     if cmd != 'del':
         if "actions" not in flow_dict:
@@ -731,7 +766,7 @@ def _build_flow_expr_str(flow_dict, cmd):
             raise exceptions.InvalidInput(error_message=msg)
         actions = "actions=%s" % flow_dict.pop('actions')
 
-    for key, value in six.iteritems(flow_dict):
+    for key, value in flow_dict.items():
         if key == 'proto':
             flow_expr_arr.append(value)
         else:

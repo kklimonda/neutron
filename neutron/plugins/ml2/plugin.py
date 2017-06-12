@@ -16,12 +16,20 @@
 import copy
 
 from eventlet import greenthread
+from neutron_lib.api.definitions import extra_dhcp_opt as edo_ext
+from neutron_lib.api.definitions import port_security as psec
 from neutron_lib.api.definitions import portbindings
 from neutron_lib.api.definitions import provider_net
 from neutron_lib.api import validators
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import exceptions
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants as const
 from neutron_lib import exceptions as exc
+from neutron_lib.exceptions import port_security as psec_exc
 from neutron_lib.plugins import directory
+from neutron_lib.plugins.ml2 import api
 from oslo_config import cfg
 from oslo_db import exception as os_db_exception
 from oslo_log import helpers as log_helpers
@@ -42,10 +50,6 @@ from neutron.api.rpc.handlers import metadata_rpc
 from neutron.api.rpc.handlers import resources_rpc
 from neutron.api.rpc.handlers import securitygroups_rpc
 from neutron.api.v2 import attributes
-from neutron.callbacks import events
-from neutron.callbacks import exceptions
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
@@ -72,15 +76,12 @@ from neutron.db import subnet_service_type_db_models as service_type_db
 from neutron.db import vlantransparent_db
 from neutron.extensions import allowedaddresspairs as addr_pair
 from neutron.extensions import availability_zone as az_ext
-from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.extensions import multiprovidernet as mpnet
-from neutron.extensions import portsecurity as psec
 from neutron.extensions import providernet as provider
 from neutron.extensions import vlantransparent
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import config  # noqa
 from neutron.plugins.ml2 import db
-from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import driver_context
 from neutron.plugins.ml2.extensions import qos as qos_ext
 from neutron.plugins.ml2 import managers
@@ -101,6 +102,15 @@ SERVICE_PLUGINS_REQUIRED_DRIVERS = {
 }
 
 
+def _ml2_port_result_filter_hook(query, filters):
+    values = filters and filters.get(portbindings.HOST_ID, [])
+    if not values:
+        return query
+    bind_criteria = models.PortBinding.host.in_(values)
+    return query.filter(models_v2.Port.port_binding.has(bind_criteria))
+
+
+@resource_extend.has_resource_extenders
 @registry.has_registry_receivers
 class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 dvr_mac_db.DVRDbMixin,
@@ -151,6 +161,15 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             vlantransparent.disable_extension_by_config(aliases)
             self._aliases = aliases
         return self._aliases
+
+    def __new__(cls, *args, **kwargs):
+        model_query.register_hook(
+            models_v2.Port,
+            "ml2_port_bindings",
+            query_hook=None,
+            filter_hook=None,
+            result_filters=_ml2_port_result_filter_hook)
+        return super(Ml2Plugin, cls).__new__(cls, *args, **kwargs)
 
     @resource_registry.tracked_resources(
         network=models_v2.Network,
@@ -585,34 +604,37 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                            'port': binding.port_id})
         return {}
 
-    def _ml2_extend_port_dict_binding(self, port_res, port_db):
+    @staticmethod
+    @resource_extend.extends([attributes.PORTS])
+    def _ml2_extend_port_dict_binding(port_res, port_db):
+        plugin = directory.get_plugin()
         # None when called during unit tests for other plugins.
         if port_db.port_binding:
-            self._update_port_dict_binding(port_res, port_db.port_binding)
-
-    resource_extend.register_funcs(
-        attributes.PORTS, ['_ml2_extend_port_dict_binding'])
+            plugin._update_port_dict_binding(port_res, port_db.port_binding)
 
     # ML2's resource extend functions allow extension drivers that extend
     # attributes for the resources to add those attributes to the result.
-    resource_extend.register_funcs(
-               attributes.NETWORKS, ['_ml2_md_extend_network_dict'])
-    resource_extend.register_funcs(
-               attributes.PORTS, ['_ml2_md_extend_port_dict'])
-    resource_extend.register_funcs(
-               attributes.SUBNETS, ['_ml2_md_extend_subnet_dict'])
 
-    def _ml2_md_extend_network_dict(self, result, netdb):
-        session = self._object_session_or_new_session(netdb)
-        self.extension_manager.extend_network_dict(session, netdb, result)
+    @staticmethod
+    @resource_extend.extends([attributes.NETWORKS])
+    def _ml2_md_extend_network_dict(result, netdb):
+        plugin = directory.get_plugin()
+        session = plugin._object_session_or_new_session(netdb)
+        plugin.extension_manager.extend_network_dict(session, netdb, result)
 
-    def _ml2_md_extend_port_dict(self, result, portdb):
-        session = self._object_session_or_new_session(portdb)
-        self.extension_manager.extend_port_dict(session, portdb, result)
+    @staticmethod
+    @resource_extend.extends([attributes.PORTS])
+    def _ml2_md_extend_port_dict(result, portdb):
+        plugin = directory.get_plugin()
+        session = plugin._object_session_or_new_session(portdb)
+        plugin.extension_manager.extend_port_dict(session, portdb, result)
 
-    def _ml2_md_extend_subnet_dict(self, result, subnetdb):
-        session = self._object_session_or_new_session(subnetdb)
-        self.extension_manager.extend_subnet_dict(session, subnetdb, result)
+    @staticmethod
+    @resource_extend.extends([attributes.SUBNETS])
+    def _ml2_md_extend_subnet_dict(result, subnetdb):
+        plugin = directory.get_plugin()
+        session = plugin._object_session_or_new_session(subnetdb)
+        plugin.extension_manager.extend_subnet_dict(session, subnetdb, result)
 
     @staticmethod
     def _object_session_or_new_session(sql_obj):
@@ -620,25 +642,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         if not session:
             session = db_api.get_reader_session()
         return session
-
-    # Note - The following hook methods have "ml2" in their names so
-    # that they are not called twice during unit tests due to global
-    # registration of hooks in portbindings_db.py used by other
-    # plugins.
-
-    def _ml2_port_result_filter_hook(self, query, filters):
-        values = filters and filters.get(portbindings.HOST_ID, [])
-        if not values:
-            return query
-        bind_criteria = models.PortBinding.host.in_(values)
-        return query.filter(models_v2.Port.port_binding.has(bind_criteria))
-
-    model_query.register_hook(
-        models_v2.Port,
-        "ml2_port_bindings",
-        None,
-        None,
-        '_ml2_port_result_filter_hook')
 
     def _notify_port_updated(self, mech_context):
         port = mech_context.current
@@ -672,6 +675,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         objects = []
         collection = "%ss" % resource
         items = request_items[collection]
+        obj_before_create = getattr(self, '_before_create_%s' % resource)
+        for item in items:
+            obj_before_create(context, item)
         with db_api.context_manager.writer.using(context):
             obj_creator = getattr(self, '_create_%s_db' % resource)
             for item in items:
@@ -689,22 +695,23 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                    "the %(resource)s:%(item)s"),
                             {'resource': resource, 'item': item})
 
-        postcommit_op = getattr(self.mechanism_manager,
-                                'create_%s_postcommit' % resource)
+        postcommit_op = getattr(self, '_after_create_%s' % resource)
         for obj in objects:
             try:
-                postcommit_op(obj['mech_context'])
-            except ml2_exc.MechanismDriverError:
+                postcommit_op(context, obj['result'], obj['mech_context'])
+            except Exception:
                 with excutils.save_and_reraise_exception():
                     resource_ids = [res['result']['id'] for res in objects]
-                    LOG.exception(_LE("mechanism_manager.create_%(res)s"
-                                      "_postcommit failed for %(res)s: "
+                    LOG.exception(_LE("ML2 _after_create_%(res)s "
+                                      "failed for %(res)s: "
                                       "'%(failed_id)s'. Deleting "
                                       "%(res)ss %(resource_ids)s"),
                                   {'res': resource,
                                    'failed_id': obj['result']['id'],
                                    'resource_ids': ', '.join(resource_ids)})
-                    self._delete_objects(context, resource, objects)
+                    # _after_handler will have deleted the object that threw
+                    to_delete = [o for o in objects if o != obj]
+                    self._delete_objects(context, resource, to_delete)
         return objects
 
     def _get_network_mtu(self, network):
@@ -746,11 +753,14 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                     mtus.append(mtu)
         return min(mtus) if mtus else 0
 
+    def _before_create_network(self, context, network):
+        net_data = network[attributes.NETWORK]
+        registry.notify(resources.NETWORK, events.BEFORE_CREATE, self,
+                        context=context, network=net_data)
+
     def _create_network_db(self, context, network):
         net_data = network[attributes.NETWORK]
         tenant_id = net_data['tenant_id']
-        registry.notify(resources.NETWORK, events.BEFORE_CREATE, self,
-                        context=context, network=net_data)
         with db_api.context_manager.writer.using(context):
             net_db = self.create_network_db(context, network)
             result = self._make_network_dict(net_db, process_extensions=False,
@@ -767,9 +777,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 vlt = vlantransparent.get_vlan_transparent(net_data)
                 net_db['vlan_transparent'] = vlt
                 result['vlan_transparent'] = vlt
-            mech_context = driver_context.NetworkContext(self, context,
-                                                         result)
-            self.mechanism_manager.create_network_precommit(mech_context)
 
             result[api.MTU] = self._get_network_mtu(result)
 
@@ -780,14 +787,23 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                                 net_data[az_ext.AZ_HINTS])
                 net_db[az_ext.AZ_HINTS] = az_hints
                 result[az_ext.AZ_HINTS] = az_hints
+            registry.notify(resources.NETWORK, events.PRECOMMIT_CREATE, self,
+                            context=context, request=net_data, network=result)
 
-            self._apply_dict_extend_functions('networks', result, net_db)
+            resource_extend.apply_funcs('networks', result, net_db)
+            mech_context = driver_context.NetworkContext(self, context,
+                                                         result)
+            self.mechanism_manager.create_network_precommit(mech_context)
         return result, mech_context
 
     @utils.transaction_guard
     @db_api.retry_if_session_inactive()
     def create_network(self, context, network):
+        self._before_create_network(context, network)
         result, mech_context = self._create_network_db(context, network)
+        return self._after_create_network(context, result, mech_context)
+
+    def _after_create_network(self, context, result, mech_context):
         kwargs = {'context': context, 'network': result}
         registry.notify(resources.NETWORK, events.AFTER_CREATE, self, **kwargs)
         try:
@@ -832,7 +848,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 db_network, context=context)
 
             kwargs = {'context': context, 'network': updated_network,
-                      'original_network': original_network}
+                      'original_network': original_network,
+                      'request': net_data}
             registry.notify(
                 resources.NETWORK, events.PRECOMMIT_UPDATE, self, **kwargs)
 
@@ -884,6 +901,23 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
 
         return [db_utils.resource_fields(net, fields) for net in nets]
 
+    def get_network_contexts(self, context, network_ids):
+        """Return a map of network_id to NetworkContext for network_ids."""
+        net_filters = {'id': list(set(network_ids))}
+        nets_by_netid = {
+            n['id']: n for n in self.get_networks(context,
+                                                  filters=net_filters)
+        }
+        segments_by_netid = segments_db.get_networks_segments(
+            context, list(nets_by_netid.keys()))
+        netctxs_by_netid = {
+            net_id: driver_context.NetworkContext(
+                self, context, nets_by_netid[net_id],
+                segments=segments_by_netid[net_id])
+            for net_id in nets_by_netid.keys()
+        }
+        return netctxs_by_netid
+
     @utils.transaction_guard
     def delete_network(self, context, id):
         # the only purpose of this override is to protect this from being
@@ -917,6 +951,10 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                           " failed"))
         self.notifier.network_delete(context, network['id'])
 
+    def _before_create_subnet(self, context, subnet):
+        # TODO(kevinbenton): BEFORE notification should be added here
+        pass
+
     def _create_subnet_db(self, context, subnet):
         with db_api.context_manager.writer.using(context):
             result, net_db, ipam_sub = self._create_subnet_precommit(
@@ -929,11 +967,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             mech_context = driver_context.SubnetContext(self, context,
                                                         result, network)
             self.mechanism_manager.create_subnet_precommit(mech_context)
-            # TODO(ataraday): temporary flush until this will be available
-            # in oslo.db (change https://review.openstack.org/#/c/433758/
-            # got merged)
-            context.session.flush()
 
+        # TODO(kevinbenton): move this to '_after_subnet_create'
         # db base plugin post commit ops
         self._create_subnet_postcommit(context, result, net_db, ipam_sub)
 
@@ -942,7 +977,11 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
     @utils.transaction_guard
     @db_api.retry_if_session_inactive()
     def create_subnet(self, context, subnet):
+        self._before_create_subnet(context, subnet)
         result, mech_context = self._create_subnet_db(context, subnet)
+        return self._after_create_subnet(context, result, mech_context)
+
+    def _after_create_subnet(self, context, result, mech_context):
         kwargs = {'context': context, 'subnet': result}
         registry.notify(resources.SUBNET, events.AFTER_CREATE, self, **kwargs)
         try:
@@ -964,8 +1003,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
     @db_api.retry_if_session_inactive()
     def update_subnet(self, context, id, subnet):
         with db_api.context_manager.writer.using(context):
-            original_subnet = self.get_subnet(context, id)
-            updated_subnet = self._update_subnet_precommit(
+            updated_subnet, original_subnet = self._update_subnet_precommit(
                 context, id, subnet)
             self.extension_manager.process_update_subnet(
                 context, subnet[attributes.SUBNET], updated_subnet)
@@ -981,9 +1019,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         # by re-calling update_subnet with the previous attributes. For
         # now the error is propagated to the caller, which is expected to
         # either undo/retry the operation or delete the resource.
-        kwargs = {'context': context, 'subnet': updated_subnet,
-                  'original_subnet': original_subnet}
-        registry.notify(resources.SUBNET, events.AFTER_UPDATE, self, **kwargs)
         self.mechanism_manager.update_subnet_postcommit(mech_context)
         return updated_subnet
 
@@ -1036,18 +1071,16 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         if port_security:
             self._ensure_default_security_group_on_port(context, port)
         elif self._check_update_has_security_groups(port):
-            raise psec.PortSecurityAndIPRequiredForSecurityGroups()
+            raise psec_exc.PortSecurityAndIPRequiredForSecurityGroups()
 
     def _setup_dhcp_agent_provisioning_component(self, context, port):
         subnet_ids = [f['subnet_id'] for f in port['fixed_ips']]
         if (db.is_dhcp_active_on_any_subnet(context, subnet_ids) and
-            any(self.get_configuration_dict(a).get('notifies_port_ready')
-                for a in self.get_dhcp_agents_hosting_networks(
-                    context, [port['network_id']]))):
-            # at least one of the agents will tell us when the dhcp config
-            # is ready so we setup a provisioning component to prevent the
-            # port from going ACTIVE until a dhcp_ready_on_port
-            # notification is received.
+            len(self.get_dhcp_agents_hosting_networks(context,
+                                                      [port['network_id']]))):
+            # the agents will tell us when the dhcp config is ready so we setup
+            # a provisioning component to prevent the port from going ACTIVE
+            # until a dhcp_ready_on_port notification is received.
             provisioning_blocks.add_provisioning_component(
                 context, port['id'], resources.PORT,
                 provisioning_blocks.DHCP_ENTITY)
@@ -1056,7 +1089,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 context, port['id'], resources.PORT,
                 provisioning_blocks.DHCP_ENTITY)
 
-    def _create_port_db(self, context, port):
+    def _before_create_port(self, context, port):
         attrs = port[attributes.PORT]
         if not attrs.get('status'):
             attrs['status'] = const.PORT_STATUS_DOWN
@@ -1066,6 +1099,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         # NOTE(kevinbenton): triggered outside of transaction since it
         # emits 'AFTER' events if it creates.
         self._ensure_default_security_group(context, attrs['tenant_id'])
+
+    def _create_port_db(self, context, port):
+        attrs = port[attributes.PORT]
         with db_api.context_manager.writer.using(context):
             dhcp_opts = attrs.get(edo_ext.EXTRADHCPOPTS, [])
             port_db = self.create_port_db(context, port)
@@ -1094,13 +1130,17 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             self.mechanism_manager.create_port_precommit(mech_context)
             self._setup_dhcp_agent_provisioning_component(context, result)
 
-        self._apply_dict_extend_functions('ports', result, port_db)
+        resource_extend.apply_funcs('ports', result, port_db)
         return result, mech_context
 
     @utils.transaction_guard
     @db_api.retry_if_session_inactive()
     def create_port(self, context, port):
+        self._before_create_port(context, port)
         result, mech_context = self._create_port_db(context, port)
+        return self._after_create_port(context, result, mech_context)
+
+    def _after_create_port(self, context, result, mech_context):
         # notify any plugin that is interested in port create events
         kwargs = {'context': context, 'port': result}
         registry.notify(resources.PORT, events.AFTER_CREATE, self, **kwargs)
@@ -1112,11 +1152,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 LOG.error(_LE("mechanism_manager.create_port_postcommit "
                               "failed, deleting port '%s'"), result['id'])
                 self.delete_port(context, result['id'], l3_port_check=False)
-
-        # REVISIT(rkukura): Is there any point in calling this before
-        # a binding has been successfully established?
-        self.notify_security_groups_member_updated(context, result)
-
         try:
             bound_context = self._bind_port_if_needed(mech_context)
         except ml2_exc.MechanismDriverError:
@@ -1131,31 +1166,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
     @db_api.retry_if_session_inactive()
     def create_port_bulk(self, context, ports):
         objects = self._create_bulk_ml2(attributes.PORT, context, ports)
-
-        # REVISIT(rkukura): Is there any point in calling this before
-        # a binding has been successfully established?
-        results = [obj['result'] for obj in objects]
-        self.notify_security_groups_member_updated_bulk(context, results)
-
-        for obj in objects:
-            attrs = obj['attributes']
-            if attrs and attrs.get(portbindings.HOST_ID):
-                kwargs = {'context': context, 'port': obj['result']}
-                registry.notify(
-                    resources.PORT, events.AFTER_CREATE, self, **kwargs)
-
-        try:
-            for obj in objects:
-                obj['bound_context'] = self._bind_port_if_needed(
-                    obj['mech_context'])
-            return [obj['bound_context'].current for obj in objects]
-        except ml2_exc.MechanismDriverError:
-            with excutils.save_and_reraise_exception():
-                resource_ids = [res['result']['id'] for res in objects]
-                LOG.error(_LE("_bind_port_if_needed failed. "
-                              "Deleting all ports from create bulk '%s'"),
-                          resource_ids)
-                self._delete_objects(context, attributes.PORT, objects)
+        return [obj['result'] for obj in objects]
 
     # TODO(yalei) - will be simplified after security group and address pair be
     # converted to ext driver too.
@@ -1185,9 +1196,11 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         # checks if security groups were updated adding/modifying
         # security groups, port security is set
         if self._check_update_has_security_groups(port):
-            raise psec.PortSecurityAndIPRequiredForSecurityGroups()
+            raise psec_exc.PortSecurityAndIPRequiredForSecurityGroups()
         elif (not
           self._check_update_deletes_security_groups(port)):
+            if not utils.is_extension_supported(self, 'security-group'):
+                return
             # Update did not have security groups passed in. Check
             # that port does not have any security groups already on it.
             filters = {'port_id': [id]}
@@ -1196,7 +1209,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                         context, filters)
                      )
             if security_groups:
-                raise psec.PortSecurityPortHasSecurityGroup()
+                raise psec_exc.PortSecurityPortHasSecurityGroup()
 
     @utils.transaction_guard
     @db_api.retry_if_session_inactive()
@@ -1481,7 +1494,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             LOG.error(_LE("mechanism_manager.delete_port_postcommit failed for"
                           " port %s"), port['id'])
         self.notifier.port_delete(context, port['id'])
-        self.notify_security_groups_member_updated(context, port)
 
     @utils.transaction_guard
     @db_api.retry_if_session_inactive(context_var_name='plugin_context')
@@ -1537,22 +1549,98 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         return self._bind_port_if_needed(port_context)
 
     @utils.transaction_guard
-    @db_api.retry_if_session_inactive()
+    @db_api.retry_if_session_inactive(context_var_name='plugin_context')
+    def get_bound_ports_contexts(self, plugin_context, dev_ids, host=None):
+        result = {}
+        with db_api.context_manager.reader.using(plugin_context):
+            dev_to_full_pids = db.partial_port_ids_to_full_ids(
+                plugin_context, dev_ids)
+            # get all port objects for IDs
+            port_dbs_by_id = db.get_port_db_objects(
+                plugin_context, dev_to_full_pids.values())
+            # get all networks for PortContext construction
+            netctxs_by_netid = self.get_network_contexts(
+                plugin_context,
+                {p.network_id for p in port_dbs_by_id.values()})
+            for dev_id in dev_ids:
+                port_id = dev_to_full_pids.get(dev_id)
+                port_db = port_dbs_by_id.get(port_id)
+                if (not port_id or not port_db or
+                        port_db.network_id not in netctxs_by_netid):
+                    result[dev_id] = None
+                    continue
+                port = self._make_port_dict(port_db)
+                if port['device_owner'] == const.DEVICE_OWNER_DVR_INTERFACE:
+                    binding = db.get_distributed_port_binding_by_host(
+                        plugin_context, port['id'], host)
+                    bindlevelhost_match = host
+                else:
+                    binding = port_db.port_binding
+                    bindlevelhost_match = binding.host if binding else None
+                if not binding:
+                    LOG.info(_LI("Binding info for port %s was not found, "
+                                 "it might have been deleted already."),
+                             port_id)
+                    result[dev_id] = None
+                    continue
+                levels = [l for l in port_db.binding_levels
+                          if l.host == bindlevelhost_match]
+                levels = sorted(levels, key=lambda l: l.level)
+                network_ctx = netctxs_by_netid.get(port_db.network_id)
+                port_context = driver_context.PortContext(
+                    self, plugin_context, port, network_ctx, binding, levels)
+                result[dev_id] = port_context
+
+        return {d: self._bind_port_if_needed(pctx) if pctx else None
+                for d, pctx in result.items()}
+
     def update_port_status(self, context, port_id, status, host=None,
                            network=None):
         """
         Returns port_id (non-truncated uuid) if the port exists.
         Otherwise returns None.
-        network can be passed in to avoid another get_network call if
-        one was already performed by the caller.
+        'network' is deprecated and has no effect
         """
-        updated = False
-        with db_api.context_manager.writer.using(context):
-            port = db.get_port(context, port_id)
-            if not port:
+        full = db.partial_port_ids_to_full_ids(context, [port_id])
+        if port_id not in full:
+            return None
+        port_id = full[port_id]
+        return self.update_port_statuses(
+            context, {port_id: status}, host)[port_id]
+
+    @utils.transaction_guard
+    @db_api.retry_if_session_inactive()
+    def update_port_statuses(self, context, port_id_to_status, host=None):
+        result = {}
+        port_ids = port_id_to_status.keys()
+        port_dbs_by_id = db.get_port_db_objects(context, port_ids)
+        for port_id, status in port_id_to_status.items():
+            if not port_dbs_by_id.get(port_id):
                 LOG.debug("Port %(port)s update to %(val)s by agent not found",
                           {'port': port_id, 'val': status})
-                return None
+                result[port_id] = None
+                continue
+            result[port_id] = self._safe_update_individual_port_db_status(
+                context, port_dbs_by_id[port_id], status, host)
+        return result
+
+    def _safe_update_individual_port_db_status(self, context, port,
+                                               status, host):
+        port_id = port.id
+        try:
+            return self._update_individual_port_db_status(
+                context, port, status, host)
+        except Exception:
+            with excutils.save_and_reraise_exception() as ectx:
+                # don't reraise if port doesn't exist anymore
+                ectx.reraise = bool(db.get_port(context, port_id))
+
+    def _update_individual_port_db_status(self, context, port, status, host):
+        updated = False
+        network = None
+        port_id = port.id
+        with db_api.context_manager.writer.using(context):
+            context.session.add(port)  # bring port into writer session
             if (port.status != status and
                 port['device_owner'] != const.DEVICE_OWNER_DVR_INTERFACE):
                 original_port = self._make_port_dict(port)

@@ -17,6 +17,9 @@ import functools
 import signal
 
 import eventlet
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -25,9 +28,6 @@ import six
 from stevedore import driver
 
 from neutron._i18n import _, _LE
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.common import constants as l3_constants
 from neutron.common import utils
 
@@ -153,7 +153,7 @@ class PrefixDelegation(object):
         if not self._is_pd_master_router(router):
             return
         prefix_update = {}
-        for subnet_id, pd_info in six.iteritems(router['subnets']):
+        for subnet_id, pd_info in router['subnets'].items():
             self._delete_lla(router, pd_info.get_bind_lla_with_mask())
             if pd_info.client_started:
                 pd_info.driver.disable(self.pmon, router['ns_name'])
@@ -191,10 +191,14 @@ class PrefixDelegation(object):
     def remove_stale_ri_ifname(self, router_id, stale_ifname):
         router = self.routers.get(router_id)
         if router is not None:
-            for subnet_id, pd_info in six.iteriterms(router['subnets']):
+            subnet_to_delete = None
+            for subnet_id, pd_info in six.iteritems(router['subnets']):
                 if pd_info.ri_ifname == stale_ifname:
                     self._delete_pd(router, pd_info)
-                    del router['subnets'][subnet_id]
+                    subnet_to_delete = subnet_id
+                    break
+            if subnet_to_delete:
+                del router['subnets'][subnet_to_delete]
 
     @staticmethod
     def _get_lla(mac):
@@ -289,13 +293,13 @@ class PrefixDelegation(object):
         LOG.debug("Processing IPv6 PD Prefix Update")
 
         prefix_update = {}
-        for router_id, router in six.iteritems(self.routers):
+        for router_id, router in self.routers.items():
             if not (self._is_pd_master_router(router) and
                     router['gw_interface']):
                 continue
 
             llas = None
-            for subnet_id, pd_info in six.iteritems(router['subnets']):
+            for subnet_id, pd_info in router['subnets'].items():
                 if pd_info.client_started:
                     prefix = pd_info.driver.get_prefix()
                     if prefix != pd_info.prefix:

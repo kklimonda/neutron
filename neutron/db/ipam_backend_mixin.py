@@ -22,6 +22,7 @@ from neutron_lib.api.definitions import portbindings
 from neutron_lib.api import validators
 from neutron_lib import constants as const
 from neutron_lib import exceptions as exc
+from neutron_lib.utils import net
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log as logging
@@ -33,7 +34,9 @@ from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
+from neutron.db import _model_query as model_query
 from neutron.db import _utils as db_utils
+from neutron.db import api as db_api
 from neutron.db import db_base_plugin_common
 from neutron.db.models import segment as segment_model
 from neutron.db.models import subnet_service_type as sst_model
@@ -42,6 +45,7 @@ from neutron.extensions import ip_allocation as ipa
 from neutron.extensions import segment
 from neutron.ipam import exceptions as ipam_exceptions
 from neutron.ipam import utils as ipam_utils
+from neutron.objects import network as network_obj
 from neutron.objects import subnet as subnet_obj
 from neutron.services.segments import exceptions as segment_exc
 
@@ -162,6 +166,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         del s["dns_nameservers"]
         return new_dns_addr_list
 
+    @db_api.context_manager.writer
     def _update_subnet_allocation_pools(self, context, subnet_id, s):
         context.session.query(models_v2.IPAllocationPool).filter_by(
             subnet_id=subnet_id).delete()
@@ -316,7 +321,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                         subnet_cidr=subnet_cidr)
 
     def _validate_max_ips_per_port(self, fixed_ip_list, device_owner):
-        if common_utils.is_port_trusted({'device_owner': device_owner}):
+        if net.is_port_trusted({'device_owner': device_owner}):
             return
 
         if len(fixed_ip_list) > cfg.CONF.max_fixed_ips_per_port:
@@ -332,10 +337,8 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                 network_id=network_id)
 
         if segment_id:
-            query = context.session.query(segment_model.NetworkSegment)
-            query = query.filter(
-                segment_model.NetworkSegment.id == segment_id)
-            segment = query.one()
+            segment = network_obj.NetworkSegment.get_object(context,
+                                                            id=segment_id)
             if segment.network_id != network_id:
                 raise segment_exc.NetworkIdsDontMatch(
                     subnet_network=network_id,
@@ -590,7 +593,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         return fixed_ip_list
 
     def _query_subnets_on_network(self, context, network_id):
-        query = self._get_collection_query(context, models_v2.Subnet)
+        query = model_query.get_collection_query(context, models_v2.Subnet)
         return query.filter(models_v2.Subnet.network_id == network_id)
 
     def _query_filter_service_subnets(self, query, service_type):
@@ -782,4 +785,5 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         context.session.expire(old_port_db, ['fixed_ips'])
         ips = self.allocate_ips_for_port_and_store(
             context, {'port': port_copy}, port_copy['id'])
+        getattr(old_port_db, 'fixed_ips')  # refresh relationship before return
         return self.Changes(add=ips, original=[], remove=[])

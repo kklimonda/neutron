@@ -374,13 +374,32 @@ class OVS_Lib_Test(base.BaseTestCase):
         ]
         self.execute.assert_has_calls(expected_calls)
 
-    def test_delete_flow_with_priority_set(self):
-        params = {'in_port': '1',
-                  'priority': '1'}
+    def test_mod_delete_flows_strict(self):
+        self.br.delete_flows(in_port=5, priority=1, strict=True)
+        self.br.mod_flow(in_port=5, priority=1, strict=True, actions='drop')
+        cookie_spec = "cookie=%s" % self.br._default_cookie
+        expected_calls = [
+            self._ofctl_mock("del-flows", self.BR_NAME, '--strict', '-',
+                             process_input=StringSetMatcher(
+                                 "%s/-1,in_port=5,priority=1" % cookie_spec)),
+            self._ofctl_mock("mod-flows", self.BR_NAME, '--strict', '-',
+                             process_input=StringSetMatcher(
+                                 "%s,in_port=5,priority=1,actions=drop" %
+                                 cookie_spec)),
+        ]
+        self.execute.assert_has_calls(expected_calls)
 
+    def test_mod_delete_flows_priority_without_strict(self):
         self.assertRaises(exceptions.InvalidInput,
                           self.br.delete_flows,
-                          **params)
+                          in_port=5, priority=1)
+
+    def test_mod_delete_flows_mixed_strict(self):
+        deferred_br = self.br.deferred()
+        deferred_br.delete_flows(in_port=5)
+        deferred_br.delete_flows(in_port=5, priority=1, strict=True)
+        self.assertRaises(exceptions.InvalidInput,
+                          deferred_br.apply_flows)
 
     def test_dump_flows(self):
         table = 23
@@ -856,7 +875,7 @@ class OVS_Lib_Test(base.BaseTestCase):
         with mock.patch.object(
                 self.br, 'db_get_val',
                 side_effect=[[], [], [], [], 1]):
-            self.assertEqual(1, self.br._get_port_ofport('1'))
+            self.assertEqual(1, self.br._get_port_val('1', 'ofport'))
 
     def test_get_port_ofport_retry_fails(self):
         # reduce timeout for faster execution
@@ -866,7 +885,27 @@ class OVS_Lib_Test(base.BaseTestCase):
                 self.br, 'db_get_val',
                 side_effect=[[] for _ in range(7)]):
             self.assertRaises(tenacity.RetryError,
-                              self.br._get_port_ofport, '1')
+                              self.br._get_port_val, '1', 'ofport')
+
+    def test_get_port_external_ids_retry(self):
+        external_ids = [["iface-id", "tap99id"],
+                        ["iface-status", "active"],
+                        ["attached-mac", "de:ad:be:ef:13:37"]]
+        with mock.patch.object(
+                self.br, 'db_get_val',
+                side_effect=[[], [], [], [], external_ids]):
+            self.assertEqual(external_ids,
+                             self.br._get_port_val('1', 'external_ids'))
+
+    def test_get_port_external_ids_retry_fails(self):
+        # reduce timeout for faster execution
+        self.br.vsctl_timeout = 1
+        # after 7 calls the retry will timeout and raise
+        with mock.patch.object(
+                self.br, 'db_get_val',
+                side_effect=[[] for _ in range(7)]):
+            self.assertRaises(tenacity.RetryError,
+                              self.br._get_port_val, '1', 'external_ids')
 
 
 class TestDeferredOVSBridge(base.BaseTestCase):

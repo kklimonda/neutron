@@ -14,9 +14,14 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from neutron.callbacks import events
-from neutron.callbacks import registry
+from neutron_lib.api import validators as lib_validators
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from oslo_log import log as logging
+
 from neutron.services.qos import qos_consts
+
+LOG = logging.getLogger(__name__)
 
 
 @registry.has_registry_receivers
@@ -30,7 +35,7 @@ class DriverBase(object):
         :param name: driver name.
         :param vif_types: list of interfaces (VIFs) supported.
         :param vnic_types: list of vnic types supported.
-        :param supported_rules: list of supported rules.
+        :param supported_rules: dict of supported rules.
         :param requires_rpc_notifications: indicates if this driver
                expects rpc push notifications to be sent from the driver.
         """
@@ -64,7 +69,34 @@ class DriverBase(object):
         return vnic_type in self.vnic_types
 
     def is_rule_supported(self, rule):
-        return rule.rule_type in self.supported_rules
+        supported_parameters = self.supported_rules.get(rule.rule_type)
+        if not supported_parameters:
+            LOG.debug("Rule type %(rule_type)s is not supported by "
+                      "%(driver_name)s",
+                      {'rule_type': rule.rule_type,
+                       'driver_name': self.name})
+            return False
+        for parameter, validators in supported_parameters.items():
+            parameter_value = rule.get(parameter)
+            for validator_type, validator_data in validators.items():
+                validator_function = lib_validators.get_validator(
+                    validator_type)
+                validate_result = validator_function(parameter_value,
+                                                     validator_data)
+                # NOTE(slaweq): validator functions returns None if data is
+                # valid or string with reason why data is not valid
+                if validate_result:
+                    LOG.debug("Parameter %(parameter)s=%(value)s in "
+                              "rule type %(rule_type)s is not "
+                              "supported by %(driver_name)s. "
+                              "Validate result: %(validate_result)s",
+                              {'parameter': parameter,
+                               'value': parameter_value,
+                               'rule_type': rule.rule_type,
+                               'driver_name': self.name,
+                               'validate_result': validate_result})
+                    return False
+        return True
 
     def create_policy(self, context, policy):
         """Create policy invocation.
@@ -72,6 +104,17 @@ class DriverBase(object):
         This method can be implemented by the specific driver subclass
         to update the backend where necessary with the specific policy
         information.
+
+        :param context: current running context information
+        :param policy: a QoSPolicy object being created, which will have no
+                      rules.
+        """
+
+    def create_policy_precommit(self, context, policy):
+        """Create policy precommit.
+
+        This method can be implemented by the specific driver subclass
+        to handle the precommit event of a policy that is being created.
 
         :param context: current running context information
         :param policy: a QoSPolicy object being created, which will have no
@@ -88,11 +131,31 @@ class DriverBase(object):
         :param policy: a QoSPolicy object being updated.
         """
 
+    def update_policy_precommit(self, context, policy):
+        """Update policy precommit.
+
+        This method can be implemented by the specific driver subclass
+        to handle update precommit event of a policy that is being updated.
+
+        :param context: current running context information
+        :param policy: a QoSPolicy object being updated.
+        """
+
     def delete_policy(self, context, policy):
         """Delete policy invocation.
 
         This method can be implemented by the specific driver subclass
         to delete the backend policy where necessary.
+
+        :param context: current running context information
+        :param policy: a QoSPolicy object being deleted
+        """
+
+    def delete_policy_precommit(self, context, policy):
+        """Delete policy precommit.
+
+        This method can be implemented by the specific driver subclass
+        to handle delete precommit event of a policy that is being deleted.
 
         :param context: current running context information
         :param policy: a QoSPolicy object being deleted

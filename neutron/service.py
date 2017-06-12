@@ -17,8 +17,12 @@ import inspect
 import os
 import random
 
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import context
 from neutron_lib.plugins import directory
+from neutron_lib import worker as neutron_worker
 from oslo_concurrency import processutils
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -29,15 +33,12 @@ from oslo_utils import excutils
 from oslo_utils import importutils
 
 from neutron._i18n import _LE, _LI
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
+from neutron.callbacks import events as n_events
 from neutron.common import config
 from neutron.common import profiler
 from neutron.common import rpc as n_rpc
 from neutron.conf import service
 from neutron.db import api as session
-from neutron import worker as neutron_worker
 from neutron import wsgi
 
 
@@ -94,7 +95,7 @@ def serve_wsgi(cls):
     return service
 
 
-class RpcWorker(neutron_worker.NeutronWorker):
+class RpcWorker(neutron_worker.BaseWorker):
     """Wraps a worker to be handled by ProcessLauncher"""
     start_listeners_method = 'start_rpc_listeners'
 
@@ -197,7 +198,7 @@ def _get_plugins_workers():
     ]
 
 
-class AllServicesNeutronWorker(neutron_worker.NeutronWorker):
+class AllServicesNeutronWorker(neutron_worker.BaseWorker):
     def __init__(self, services, worker_process_count=1):
         super(AllServicesNeutronWorker, self).__init__(worker_process_count)
         self._services = services
@@ -262,7 +263,10 @@ def _start_workers(workers):
 
 def start_all_workers():
     workers = _get_rpc_workers() + _get_plugins_workers()
-    return _start_workers(workers)
+    launcher = _start_workers(workers)
+    # TODO(yamahata): replace n_events with neutron_lib.callback.events
+    registry.notify(resources.PROCESS, n_events.AFTER_SPAWN, None)
+    return launcher
 
 
 def start_rpc_workers():

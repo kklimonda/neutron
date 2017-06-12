@@ -27,6 +27,7 @@ from sqlalchemy import and_
 from neutron._i18n import _LE, _LW
 from neutron.common import constants as n_const
 from neutron.common import ipv6_utils
+from neutron.db import api as db_api
 from neutron.db import ipam_backend_mixin
 from neutron.db import models_v2
 from neutron.ipam import driver
@@ -321,6 +322,7 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                             original=changes.original,
                             remove=removed)
 
+    @db_api.context_manager.writer
     def save_allocation_pools(self, context, subnet, allocation_pools):
         for pool in allocation_pools:
             first_ip = str(netaddr.IPAddress(pool.first, pool.version))
@@ -332,6 +334,25 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
 
     def update_port_with_ips(self, context, host, db_port, new_port, new_mac):
         changes = self.Changes(add=[], original=[], remove=[])
+
+        auto_assign_subnets = []
+        if new_mac:
+            original = self._make_port_dict(db_port, process_extensions=False)
+            if original.get('mac_address') != new_mac:
+                original_ips = original.get('fixed_ips', [])
+                new_ips = new_port.setdefault('fixed_ips', original_ips)
+                new_ips_subnets = [new_ip['subnet_id'] for new_ip in new_ips]
+                for orig_ip in original_ips:
+                    if ipv6_utils.is_eui64_address(orig_ip.get('ip_address')):
+                        subnet_to_delete = {}
+                        subnet_to_delete['subnet_id'] = orig_ip['subnet_id']
+                        subnet_to_delete['delete_subnet'] = True
+                        auto_assign_subnets.append(subnet_to_delete)
+                        try:
+                            i = new_ips_subnets.index(orig_ip['subnet_id'])
+                            new_ips[i] = subnet_to_delete
+                        except ValueError:
+                            new_ips.append(subnet_to_delete)
 
         if 'fixed_ips' in new_port:
             original = self._make_port_dict(db_port,
@@ -359,6 +380,15 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     ip['subnet_id'], db_port.id)
             self._update_db_port(context, db_port, new_port, network_id,
                                  new_mac)
+            getattr(db_port, 'fixed_ips')  # refresh relationship before return
+
+            if auto_assign_subnets:
+                port_copy = copy.deepcopy(original)
+                port_copy.update(new_port)
+                port_copy['fixed_ips'] = auto_assign_subnets
+                self.allocate_ips_for_port_and_store(context,
+                            {'port': port_copy}, port_copy['id'])
+
         except Exception:
             with excutils.save_and_reraise_exception():
                 if 'fixed_ips' in new_port:
@@ -423,6 +453,8 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
             raise RuntimeError(
                 "Subnet manager doesn't match subnet. %s != %s"
                 % (subnet['id'], ipam_subnet.subnet_manager.neutron_id))
+        # TODO(ataraday): switched for writer when flush_on_subtransaction
+        # will be available for neutron
         with context.session.begin(subtransactions=True):
             network_id = subnet['network_id']
             port_qry = context.session.query(models_v2.Port)
@@ -453,7 +485,7 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     # the context of a nested transaction, so that the entry
                     # is rolled back independently of other entries whenever
                     # the corresponding port has been deleted.
-                    with context.session.begin_nested():
+                    with db_api.context_manager.writer.using(context):
                         context.session.add(allocated)
                     updated_ports.append(port['id'])
                 except db_exc.DBReferenceError:

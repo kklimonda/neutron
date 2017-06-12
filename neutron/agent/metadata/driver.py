@@ -18,6 +18,9 @@ import grp
 import os
 import pwd
 
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from oslo_config import cfg
 from oslo_log import log as logging
 
@@ -25,9 +28,6 @@ from neutron._i18n import _
 from neutron.agent.l3 import ha_router
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import external_process
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.common import constants
 from neutron.common import exceptions
 
@@ -84,7 +84,8 @@ class HaproxyConfigurator(object):
         self.state_path = state_path
         self.unix_socket_path = unix_socket_path
         self.pidfile = pid_file
-        self.log_level = 'debug' if cfg.CONF.debug else 'info'
+        self.log_level = (
+            'debug' if logging.is_debug_enabled(cfg.CONF) else 'info')
 
     def create_config_file(self):
         """Create the config file for haproxy."""
@@ -258,10 +259,10 @@ class MetadataDriver(object):
             pm.disable()
 
     @classmethod
-    def destroy_monitored_metadata_proxy(cls, monitor, uuid, conf):
+    def destroy_monitored_metadata_proxy(cls, monitor, uuid, conf, ns_name):
         monitor.unregister(uuid, METADATA_SERVICE_NAME)
-        # No need to pass ns name as it's not needed for disable()
-        pm = cls._get_metadata_proxy_process_manager(uuid, conf)
+        pm = cls._get_metadata_proxy_process_manager(uuid, conf,
+                                                     ns_name=ns_name)
         pm.disable()
 
         # Delete metadata proxy config file
@@ -319,4 +320,5 @@ def before_router_removed(resource, event, l3_agent, **kwargs):
 
     proxy.destroy_monitored_metadata_proxy(l3_agent.process_monitor,
                                           router.router['id'],
-                                          l3_agent.conf)
+                                          l3_agent.conf,
+                                          router.ns_name)

@@ -19,6 +19,7 @@ import operator
 import netaddr
 from neutron_lib import context
 from neutron_lib import exceptions as exc
+from neutron_lib.plugins.ml2 import api
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_log import log
@@ -31,7 +32,6 @@ from neutron.common import topics
 from neutron.db import api as db_api
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
-from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import helpers
 
 LOG = log.getLogger(__name__)
@@ -311,7 +311,7 @@ class ML2TunnelTypeDriver(_TunnelTypeDriverBase):
         inside = any(lo <= tunnel_id <= hi for lo, hi in self.tunnel_ranges)
 
         info = {'type': self.get_type(), 'id': tunnel_id}
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             query = (context.session.query(self.model).
                      filter_by(**{self.segmentation_key: tunnel_id}))
             if inside:
@@ -328,6 +328,7 @@ class ML2TunnelTypeDriver(_TunnelTypeDriverBase):
         if not count:
             LOG.warning(_LW("%(type)s tunnel %(id)s not found"), info)
 
+    @db_api.context_manager.reader
     def get_allocation(self, context, tunnel_id):
         return (context.session.query(self.model).
                 filter_by(**{self.segmentation_key: tunnel_id}).

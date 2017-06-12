@@ -36,7 +36,7 @@ class TestDhcp(functional_base.BaseSudoTestCase):
         conf.register_opts(common_conf.core_opts)
         conf.register_opts(dhcp_conf.DHCP_AGENT_OPTS)
         conf.set_override('interface_driver', 'openvswitch')
-        conf.set_override('host', 'foo_host')
+        conf.set_override('host', 'foo-host')
         self.conf = conf
         br_int = self.useFixture(net_helpers.OVSBridgeFixture()).bridge
         self.conf.set_override('ovs_integration_bridge', br_int.br_name)
@@ -75,16 +75,16 @@ class TestDhcp(functional_base.BaseSudoTestCase):
                             "10:22:33:44:55:69",
                             namespace="qdhcp-foo_id")
         ipw = ip_lib.IPWrapper(namespace="qdhcp-foo_id")
-        devices = ipw.get_devices(exclude_loopback=True)
+        devices = ipw.get_devices()
         self.addCleanup(ipw.netns.delete, 'qdhcp-foo_id')
         self.assertEqual(sorted(["tapfoo_id2", "tapfoo_id3"]),
                          sorted(map(str, devices)))
         # setting up dhcp for the network
         dev_mgr.setup(tests_base.AttributeDict(network))
         common_utils.wait_until_true(
-            lambda: 1 == len(ipw.get_devices(exclude_loopback=True)),
+            lambda: 1 == len(ipw.get_devices()),
             timeout=5,
             sleep=0.1,
             exception=RuntimeError("only one non-loopback device must remain"))
-        devices = ipw.get_devices(exclude_loopback=True)
+        devices = ipw.get_devices()
         self.assertEqual("tapfoo_port_id", devices[0].name)

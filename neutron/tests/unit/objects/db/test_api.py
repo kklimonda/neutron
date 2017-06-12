@@ -10,11 +10,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import copy
+
 import mock
 from neutron_lib import context
 from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import directory
 
+from neutron.db import _model_query as model_query
 from neutron.db import models_v2
 from neutron.objects import base
 from neutron.objects.db import api
@@ -40,8 +42,8 @@ class GetObjectsTestCase(test_base.BaseTestCase):
         limit = mock.sentinel.limit
         pager = base.Pager(marker=marker, limit=limit)
 
-        plugin = directory.get_plugin()
-        with mock.patch.object(plugin, '_get_collection') as get_collection:
+        with mock.patch.object(
+                model_query, 'get_collection') as get_collection:
             with mock.patch.object(api, 'get_object') as get_object:
                 api.get_objects(ctxt, model, _pager=pager)
         get_object.assert_called_with(ctxt, model, id=marker)
@@ -50,6 +52,23 @@ class GetObjectsTestCase(test_base.BaseTestCase):
             filters={},
             limit=limit,
             marker_obj=get_object.return_value)
+
+
+class CreateObjectTestCase(test_base.BaseTestCase):
+    def test_populate_id(self, populate_id=True):
+        ctxt = context.get_admin_context()
+        model_cls = mock.Mock()
+        values = {'x': 1, 'y': 2, 'z': 3}
+        with mock.patch.object(ctxt.__class__, 'session'):
+            api.create_object(ctxt, model_cls, values,
+                              populate_id=populate_id)
+        expected = copy.copy(values)
+        if populate_id:
+            expected['id'] = mock.ANY
+        model_cls.assert_called_with(**expected)
+
+    def test_populate_id_False(self):
+        self.test_populate_id(populate_id=False)
 
 
 class CRUDScenarioTestCase(testlib_api.SqlTestCase):

@@ -7,6 +7,7 @@ source $LIBDIR/l2_agent_sriovnicswitch
 source $LIBDIR/ml2
 source $LIBDIR/qos
 source $LIBDIR/ovs
+source $LIBDIR/segments
 source $LIBDIR/trunk
 
 Q_BUILD_OVS_FROM_GIT=$(trueorfalse False Q_BUILD_OVS_FROM_GIT)
@@ -30,6 +31,9 @@ if [[ "$1" == "stack" ]]; then
             if is_service_enabled q-dns neutron-dns; then
                 configure_dns_extension
             fi
+            if is_service_enabled neutron-segments; then
+                configure_segments_extension
+            fi
             if [[ "$NEUTRON_AGENT" == "openvswitch" ]] && \
                [[ "$Q_BUILD_OVS_FROM_GIT" == "True" ]]; then
                 remove_ovs_packages
@@ -49,20 +53,20 @@ if [[ "$1" == "stack" ]]; then
             #Currently devstack lacks the option to run two agents on the same node.
             #Therefore we create new service, q-sriov-agt, and the
             # q-agt/neutron-agent should be OVS or linux bridge.
-            if is_service_enabled q-sriov-agt; then
+            if is_service_enabled q-sriov-agt neutron-sriov-agent; then
                 configure_$NEUTRON_CORE_PLUGIN
                 configure_l2_agent
                 configure_l2_agent_sriovnicswitch
             fi
             ;;
         extra)
-            if is_service_enabled q-sriov-agt; then
+            if is_service_enabled q-sriov-agt neutron-sriov-agent; then
                 start_l2_agent_sriov
             fi
             ;;
     esac
 elif [[ "$1" == "unstack" ]]; then
-    if is_service_enabled q-sriov-agt; then
+    if is_service_enabled q-sriov-agt neutron-sriov-agent; then
         stop_l2_agent_sriov
     fi
 fi

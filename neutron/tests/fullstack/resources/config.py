@@ -87,7 +87,17 @@ class NeutronConfigFixture(ConfigFixture):
             'oslo_policy': {
                 'policy_file': self._generate_policy_json(),
             },
+            'agent': {
+                'report_interval': env_desc.agent_down_time / 2.0
+            },
         })
+        # Set root_helper/root_helper_daemon only when env var is set
+        root_helper = os.environ.get('OS_ROOTWRAP_CMD')
+        if root_helper:
+            self.config['agent']['root_helper'] = root_helper
+        root_helper_daemon = os.environ.get('OS_ROOTWRAP_DAEMON_CMD')
+        if root_helper_daemon:
+            self.config['agent']['root_helper_daemon'] = root_helper_daemon
 
     def _setUp(self):
         self.config['DEFAULT'].update({

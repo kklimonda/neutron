@@ -52,8 +52,9 @@ Service side design
 * neutron.services.qos.drivers.base:
   the interface class for pluggable QoS drivers that are used to update
   backends about new {create, update, delete} events on any rule or policy
-  change. The drivers also declare which QoS rules, VIF drivers and VNIC
-  types are supported.
+  change, including precommit events that some backends could need for
+  synchronization reason. The drivers also declare which QoS rules,
+  VIF drivers and VNIC types are supported.
 
 * neutron.core_extensions.base:
   Contains an interface class to implement core resource (port/network)
@@ -100,12 +101,14 @@ For a list of all rule types, see:
 neutron.services.qos.qos_consts.VALID_RULE_TYPES.
 
 The list of supported QoS rule types exposed by neutron is calculated as
-the common subset of rules supported by all active QoS drivers.
+set of rules supported by at least one active QoS driver.
 
 Note: the list of supported rule types reported by core plugin is not enforced
-when accessing QoS rule resources. This is mostly because then we would not be
-able to create rules while at least one of the QoS driver in gate lacks
-support for the rules we're trying to test.
+when accessing QoS rule resources.
+
+When a policy is attached to a port or a network, or when a rule is created or updated,
+core plugins may validate write requests against their backends, and invalidate requests
+that don't make sense or can't be implemented by affected backends.
 
 
 Database models
@@ -137,7 +140,8 @@ From database point of view, following objects are defined in schema:
   bandwidth.
 * QosDscpMarkingRule: defines the rule that marks the Differentiated Service
   bits for egress traffic.
-
+* QosMinimumBandwidthRule: defines the rule that creates a minimum bandwidth
+  constraint.
 
 All database models are defined under:
 
@@ -147,33 +151,13 @@ All database models are defined under:
 QoS versioned objects
 ~~~~~~~~~~~~~~~~~~~~~
 
-There is a long history of passing database dictionaries directly into business
-logic of Neutron. This path is not the one we wanted to take for QoS effort, so
-we've also introduced a new objects middleware to encapsulate the database logic
-from the rest of the Neutron code that works with QoS resources. For this, we've
-adopted oslo.versionedobjects library and introduced a new NeutronObject class
-that is a base for all other objects that will belong to the middle layer.
-There is an expectation that Neutron will evolve into using objects for all
-resources it handles, though that part was obviously out of scope for the QoS
-effort.
-
-Every NeutronObject supports the following operations:
-
-* get_object: returns specific object that is represented by the id passed as an
-  argument.
-* get_objects: returns all objects of the type, potentially with a filter
-  applied.
-* create/update/delete: usual persistence operations.
-
-Base object class is defined in:
-
-* neutron.objects.base
-
-For QoS, new neutron objects were implemented:
+For QoS, the following neutron objects are implemented:
 
 * QosPolicy: directly maps to the conceptual policy resource, as defined above.
-* QosBandwidthLimitRule: defines the instance-egress bandwidth limit rule
-  type, characterized by a max kbps and a max burst kbits.
+* QosBandwidthLimitRule: defines the bandwidth limit rule, characterized by a
+  max_kbps parameter and a max_burst_kbits parameter. This rule also has a
+  direction parameter to set the traffic direction, from the instance point of
+  view.
 * QosDscpMarkingRule: defines the DSCP rule type, characterized by an even integer
   between 0 and 56.  These integers are the result of the bits in the DiffServ section
   of the IP header, and only certain configurations are valid.  As a result, the list
@@ -237,24 +221,6 @@ RPC communication
 Details on RPC communication implemented in reference backend driver are
 discussed in `a separate page <rpc_callbacks.html>`_.
 
-One thing that should be mentioned here explicitly is that RPC callback
-endpoints communicate using real versioned objects (as defined by serialization
-for oslo.versionedobjects library), not vague json dictionaries. Meaning,
-oslo.versionedobjects are on the wire and not just used internally inside a
-component.
-
-One more thing to note is that though RPC interface relies on versioned
-objects, it does not yet rely on versioning features the oslo.versionedobjects
-library provides. This is because Liberty is the first release where we start
-using the RPC interface, so we have no way to get different versions in a
-cluster. That said, the versioning strategy for QoS is thought through and
-described in `the separate page <rpc_callbacks.html>`_.
-
-There is expectation that after RPC callbacks are introduced in Neutron, we
-will be able to migrate propagation from server to agents for other resources
-(f.e. security groups) to the new mechanism. This will need to wait until those
-resources get proper NeutronObject implementations.
-
 The flow of updates is as follows:
 
 * if a port that is bound to the agent is attached to a QoS policy, then ML2
@@ -304,6 +270,22 @@ interface:
 * Open vSwitch (QosOVSAgentDriver);
 * SR-IOV (QosSRIOVAgentDriver);
 * Linux bridge (QosLinuxbridgeAgentDriver).
+
+Table of Neutron backends, supported rules and traffic direction (from the VM
+point of view)
+::
+
+    +----------------------+----------------+----------------+----------------+
+    | Rule \ Backend       | Open vSwitch   | SR-IOV         | Linux Bridge   |
+    +----------------------+----------------+----------------+----------------+
+    | Bandwidth Limit      | Egress         | Egress (1)     | Egress         |
+    +----------------------+----------------+----------------+----------------+
+    | Minimum Bandwidth    | -              | Egress         | -              |
+    +----------------------+----------------+----------------+----------------+
+    | DSCP Marking         | Egress         | -              | Egress         |
+    +----------------------+----------------+----------------+----------------+
+
+    (1) Max burst parameter is skipped because it's not supported by ip tool.
 
 
 Open vSwitch

@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
 import datetime
 import os
 import platform
@@ -30,12 +29,10 @@ from neutron_lib.utils import helpers
 from neutron_lib.utils import net
 from oslo_utils import netutils
 from oslo_utils import timeutils
-import six
 import unittest2
 
 from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
-from neutron.db import _model_query as model_query
 from neutron.plugins.common import constants as p_const
 
 
@@ -61,7 +58,7 @@ class AttributeMapMemento(fixtures.Fixture):
         # to result in test failures. A compromise is to copy one level
         # deeper than a shallow copy.
         self.contents_backup = {}
-        for res, attrs in six.iteritems(attributes.RESOURCE_ATTRIBUTE_MAP):
+        for res, attrs in attributes.RESOURCE_ATTRIBUTE_MAP.items():
             self.contents_backup[res] = attrs.copy()
         self.addCleanup(self.restore)
 
@@ -121,17 +118,6 @@ class SafeCleanupFixture(fixtures.Fixture):
 
         self.fixture.setUp()
         self.addCleanup(cleanUp)
-
-
-class CommonDbMixinHooksFixture(fixtures.Fixture):
-    def _setUp(self):
-        self.original_hooks = model_query._model_query_hooks
-        self.addCleanup(self.restore_hooks)
-        model_query._model_query_hooks = copy.copy(
-            model_query._model_query_hooks)
-
-    def restore_hooks(self):
-        model_query._model_query_hooks = self.original_hooks
 
 
 def setup_mock_calls(mocked_call, expected_calls_and_values):

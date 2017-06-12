@@ -26,7 +26,7 @@ from neutron.tests import base
 
 class TestOVSCleanup(base.BaseTestCase):
 
-    @mock.patch('neutron.agent.ovsdb.native.connection.Connection.start')
+    @mock.patch('neutron.agent.ovsdb.impl_idl._connection')
     @mock.patch('neutron.common.config.setup_logging')
     @mock.patch('neutron.cmd.ovs_cleanup.setup_conf')
     @mock.patch('neutron.agent.common.ovs_lib.BaseOVS.get_bridges')
@@ -46,8 +46,6 @@ class TestOVSCleanup(base.BaseTestCase):
         mock_collect.return_value = ports
 
         util.main()
-        mock_ovs.assert_has_calls([mock.call().delete_ports(
-            all_ports=False)])
         mock_collect.assert_called_once_with(set(bridges))
         mock_delete.assert_called_once_with(ports)
 

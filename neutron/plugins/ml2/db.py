@@ -15,6 +15,9 @@
 
 from debtcollector import removals
 from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants as n_const
 from neutron_lib.plugins import directory
 from oslo_db import exception as db_exc
@@ -25,9 +28,6 @@ from sqlalchemy import or_
 from sqlalchemy.orm import exc
 
 from neutron._i18n import _, _LE
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.db import api as db_api
 from neutron.db.models import securitygroup as sg_models
 from neutron.db import models_v2
@@ -290,6 +290,46 @@ def get_distributed_port_bindings(context, port_id):
     if not bindings:
         LOG.debug("No bindings for distributed port %s", port_id)
     return bindings
+
+
+@db_api.context_manager.reader
+def partial_port_ids_to_full_ids(context, partial_ids):
+    """Takes a list of the start of port IDs and returns full IDs.
+
+    Returns dictionary of partial IDs to full IDs if a single match
+    is found.
+    """
+    result = {}
+    to_full_query = (context.session.query(models_v2.Port.id).
+                     filter(or_(*[models_v2.Port.id.startswith(p)
+                                  for p in partial_ids])))
+    candidates = [match[0] for match in to_full_query]
+    for partial_id in partial_ids:
+        matching = [c for c in candidates if c.startswith(partial_id)]
+        if len(matching) == 1:
+            result[partial_id] = matching[0]
+            continue
+        if len(matching) < 1:
+            LOG.info("No ports have port_id starting with %s", partial_id)
+        elif len(matching) > 1:
+            LOG.error(_LE("Multiple ports have port_id starting with %s"),
+                      partial_id)
+    return result
+
+
+@db_api.context_manager.reader
+def get_port_db_objects(context, port_ids):
+    """Takes a list of port_ids and returns matching port db objects.
+
+    return format is a dictionary keyed by passed in IDs with db objects
+    for values or None if the port was not present.
+    """
+    port_qry = (context.session.query(models_v2.Port).
+                filter(models_v2.Port.id.in_(port_ids)))
+    result = {p: None for p in port_ids}
+    for port in port_qry:
+        result[port.id] = port
+    return result
 
 
 @db_api.context_manager.reader

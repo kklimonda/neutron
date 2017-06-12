@@ -19,6 +19,9 @@ import netaddr
 from neutron_lib.api.definitions import portbindings
 from neutron_lib.api.definitions import provider_net as providernet
 from neutron_lib.api import validators
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
@@ -33,9 +36,6 @@ from sqlalchemy import orm
 
 from neutron._i18n import _, _LE, _LI, _LW
 from neutron.api.v2 import attributes
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.common import constants as n_const
 from neutron.common import utils as n_utils
 from neutron.db import _utils as db_utils
@@ -45,10 +45,10 @@ from neutron.db import l3_dvr_db
 from neutron.db.l3_dvr_db import is_distributed_router
 from neutron.db.models import agent as agent_model
 from neutron.db.models import l3 as l3_models
-from neutron.db.models import l3_attrs
 from neutron.db.models import l3ha as l3ha_model
 from neutron.extensions import l3
 from neutron.extensions import l3_ext_ha_mode as l3_ha
+from neutron.objects import router as l3_objs
 from neutron.plugins.common import utils as p_utils
 
 
@@ -633,10 +633,13 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             router[constants.HA_INTERFACE_KEY] = port_dict
             router[n_const.HA_ROUTER_STATE_KEY] = binding.state
 
+        interfaces = []
         for router in routers_dict.values():
             interface = router.get(constants.HA_INTERFACE_KEY)
             if interface:
-                self._populate_mtu_and_subnets_for_ports(context, [interface])
+                interfaces.append(interface)
+
+        self._populate_mtu_and_subnets_for_ports(context, interfaces)
 
         # If this is a DVR+HA router, but the agent is question is in 'dvr'
         # mode (as opposed to 'dvr_snat'), then we want to always return it
@@ -685,7 +688,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
         device_filter = {'device_id': list(states.keys()),
                          'device_owner':
                          [constants.DEVICE_OWNER_HA_REPLICATED_INT,
-                          constants.DEVICE_OWNER_ROUTER_SNAT]}
+                          constants.DEVICE_OWNER_ROUTER_SNAT,
+                          constants.DEVICE_OWNER_ROUTER_GW]}
         ports = self._core_plugin.get_ports(admin_ctx, filters=device_filter)
         active_ports = (port for port in ports
             if states[port['device_id']] == n_const.HA_ROUTER_STATE_ACTIVE)
@@ -715,14 +719,10 @@ def is_ha_router(router):
 
 
 def is_ha_router_port(context, device_owner, router_id):
-    session = db_api.get_reader_session()
     if device_owner == constants.DEVICE_OWNER_HA_REPLICATED_INT:
         return True
     elif device_owner == constants.DEVICE_OWNER_ROUTER_SNAT:
-        query = session.query(l3_attrs.RouterExtraAttributes)
-        query = query.filter_by(ha=True)
-        query = query.filter(l3_attrs.RouterExtraAttributes.router_id ==
-                             router_id)
-        return bool(query.limit(1).count())
+        return l3_objs.RouterExtraAttributes.objects_exist(
+            context, router_id=router_id, ha=True)
     else:
         return False

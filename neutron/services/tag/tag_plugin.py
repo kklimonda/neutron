@@ -44,22 +44,36 @@ resource_model_map = {
 }
 
 
-def _extend_tags_dict(plugin, response_data, db_data):
-    if not directory.get_plugin(tag_ext.TAG_PLUGIN_TYPE):
-        return
-    tags = [tag_db.tag for tag_db in db_data.standard_attr.tags]
-    response_data['tags'] = tags
-
-
+@resource_extend.has_resource_extenders
 class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
     """Implementation of the Neutron Tag Service Plugin."""
 
     supported_extension_aliases = ['tag', 'tag-ext']
 
+    def __new__(cls, *args, **kwargs):
+        inst = super(TagPlugin, cls).__new__(cls, *args, **kwargs)
+        inst._filter_methods = []  # prevent GC of our partial functions
+        for model in resource_model_map.values():
+            method = functools.partial(tag_methods.apply_tag_filters, model)
+            inst._filter_methods.append(method)
+            model_query.register_hook(model, "tag",
+                                      query_hook=None,
+                                      filter_hook=None,
+                                      result_filters=method)
+        return inst
+
+    @staticmethod
+    @resource_extend.extends(list(resource_model_map))
+    def _extend_tags_dict(response_data, db_data):
+        if not directory.get_plugin(tag_ext.TAG_PLUGIN_TYPE):
+            return
+        tags = [tag_db.tag for tag_db in db_data.standard_attr.tags]
+        response_data['tags'] = tags
+
     def _get_resource(self, context, resource, resource_id):
         model = resource_model_map[resource]
         try:
-            return self._get_by_id(context, model, resource_id)
+            return model_query.get_by_id(context, model, resource_id)
         except exc.NoResultFound:
             raise tag_ext.TagResourceNotFound(resource=resource,
                                               resource_id=resource_id)
@@ -124,15 +138,3 @@ class TagPlugin(common_db_mixin.CommonDbMixin, tag_ext.TagPluginBase):
         if not tag_obj.Tag.delete_objects(context,
             tag=tag, standard_attr_id=res.standard_attr_id):
             raise tag_ext.TagNotFound(tag=tag)
-
-    def __new__(cls, *args, **kwargs):
-        inst = super(TagPlugin, cls).__new__(cls, *args, **kwargs)
-        inst._filter_methods = []  # prevent GC of our partial functions
-        for resource, model in resource_model_map.items():
-            resource_extend.register_funcs(
-                resource, [_extend_tags_dict])
-            method = functools.partial(tag_methods.apply_tag_filters, model)
-            inst._filter_methods.append(method)
-            model_query.register_hook(
-                model, "tag", None, None, method)
-        return inst

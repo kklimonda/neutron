@@ -19,7 +19,6 @@ import contextlib
 
 from oslo_log import log as logging
 from oslo_utils import excutils
-import six
 from sqlalchemy.ext import associationproxy
 
 from neutron._i18n import _LE
@@ -118,6 +117,24 @@ def filter_non_model_columns(data, model):
     """
     columns = [c.name for c in model.__table__.columns]
     return dict((k, v) for (k, v) in
-                six.iteritems(data) if k in columns or
+                data.items() if k in columns or
                 isinstance(getattr(model, k, None),
                            associationproxy.AssociationProxy))
+
+
+# NOTE: This used to be CommonDbMixin._get_marker_obj
+def get_marker_obj(plugin, context, resource, limit, marker):
+    """Retrieve a resource marker object.
+
+    This function is used to invoke:
+        plugin._get_<resource>(context, marker)
+    It is used for pagination.
+
+    :param plugin: The plugin processing the request.
+    :param context: The request context.
+    :param resource: The resource name.
+    :param limit: Indicates if pagination is in effect.
+    :param marker: The id of the marker object.
+    """
+    if limit and marker:
+        return getattr(plugin, '_get_%s' % resource)(context, marker)

@@ -16,6 +16,7 @@
 Common utilities and helper functions for OpenStack Networking Plugins.
 """
 
+import collections
 import contextlib
 import hashlib
 
@@ -131,7 +132,7 @@ def parse_network_vlan_range(network_vlan_range):
 
 def parse_network_vlan_ranges(network_vlan_ranges_cfg_entries):
     """Interpret a list of strings as network[:vlan_begin:vlan_end] entries."""
-    networks = {}
+    networks = collections.OrderedDict()
     for entry in network_vlan_ranges_cfg_entries:
         network, vlan_range = parse_network_vlan_range(entry)
         if vlan_range:
@@ -192,6 +193,8 @@ def delete_port_on_error(core_plugin, context, port_id):
             try:
                 core_plugin.delete_port(context, port_id,
                                         l3_port_check=False)
+            except exceptions.PortNotFound:
+                LOG.debug("Port %s not found", port_id)
             except Exception:
                 LOG.exception(_LE("Failed to delete port: %s"), port_id)
 

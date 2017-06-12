@@ -17,19 +17,18 @@ import collections
 import copy
 
 import netaddr
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
 from neutron_lib import exceptions
 from oslo_log import log as logging
 from oslo_policy import policy as oslo_policy
 from oslo_utils import excutils
-import six
 import webob.exc
 
 from neutron._i18n import _, _LE, _LI
 from neutron.api import api_common
 from neutron.api.v2 import attributes
 from neutron.api.v2 import resource as wsgi_resource
-from neutron.callbacks import events
-from neutron.callbacks import registry
 from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
@@ -145,7 +144,7 @@ class Controller(object):
                                                          self._resource)
 
     def _get_primary_key(self, default_primary_key='id'):
-        for key, value in six.iteritems(self._attr_info):
+        for key, value in self._attr_info.items():
             if value.get('primary_key', False):
                 return key
         return default_primary_key
@@ -215,7 +214,7 @@ class Controller(object):
     def _filter_attributes(self, data, fields_to_strip=None):
         if not fields_to_strip:
             return data
-        return dict(item for item in six.iteritems(data)
+        return dict(item for item in data.items()
                     if (item[0] not in fields_to_strip))
 
     def _do_field_list(self, original_fields):
@@ -575,7 +574,13 @@ class Controller(object):
                            pluralized=self._collection)
         except oslo_policy.PolicyNotAuthorized:
             # To avoid giving away information, pretend that it
-            # doesn't exist
+            # doesn't exist if policy does not authorize SHOW
+            with excutils.save_and_reraise_exception() as ctxt:
+                if not policy.check(request.context,
+                                    self._plugin_handlers[self.SHOW],
+                                    obj,
+                                    pluralized=self._collection):
+                    ctxt.reraise = False
             msg = _('The resource could not be found.')
             raise webob.exc.HTTPNotFound(msg)
 
@@ -619,7 +624,7 @@ class Controller(object):
         # Load object to check authz
         # but pass only attributes in the original body and required
         # by the policy engine to the policy 'brain'
-        field_list = [name for (name, value) in six.iteritems(self._attr_info)
+        field_list = [name for (name, value) in self._attr_info.items()
                       if (value.get('required_by_policy') or
                           value.get('primary_key') or
                           'default' not in value)]
@@ -640,13 +645,13 @@ class Controller(object):
                            orig_obj,
                            pluralized=self._collection)
         except oslo_policy.PolicyNotAuthorized:
+            # To avoid giving away information, pretend that it
+            # doesn't exist if policy does not authorize SHOW
             with excutils.save_and_reraise_exception() as ctxt:
-                # If a tenant is modifying its own object, it's safe to return
-                # a 403. Otherwise, pretend that it doesn't exist to avoid
-                # giving away information.
-                orig_obj_tenant_id = orig_obj.get("tenant_id")
-                if (request.context.tenant_id != orig_obj_tenant_id or
-                    orig_obj_tenant_id is None):
+                if not policy.check(request.context,
+                                    self._plugin_handlers[self.SHOW],
+                                    orig_obj,
+                                    pluralized=self._collection):
                     ctxt.reraise = False
             msg = _('The resource could not be found.')
             raise webob.exc.HTTPNotFound(msg)
@@ -717,7 +722,7 @@ class Controller(object):
             attributes.fill_default_value(attr_info, res_dict,
                                           webob.exc.HTTPBadRequest)
         else:  # PUT
-            for attr, attr_vals in six.iteritems(attr_info):
+            for attr, attr_vals in attr_info.items():
                 if attr in res_dict and not attr_vals['allow_put']:
                     msg = _("Cannot update read-only attribute %s") % attr
                     raise webob.exc.HTTPBadRequest(msg)

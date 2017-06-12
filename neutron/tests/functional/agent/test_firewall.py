@@ -277,7 +277,7 @@ class FirewallTestCase(BaseFirewallTestCase):
                                (outgoing_rule_pref, i['port_range_min']))
                    for i in sg_rules]
         # all indexes should be in order with no unexpected rules in between
-        self.assertEqual(range(indexes[0], indexes[-1] + 1), indexes)
+        self.assertEqual(list(range(indexes[0], indexes[-1] + 1)), indexes)
 
     def test_ingress_icmp_secgroup(self):
         # update the sg_group to make ping pass
@@ -398,7 +398,7 @@ class FirewallTestCase(BaseFirewallTestCase):
         not_allowed_ip = "%s/24" % (allowed_ip + 1)
         self.src_port_desc['allowed_address_pairs'] = [
             {'mac_address': port_mac,
-             'ip_address': allowed_ip}]
+             'ip_address': "%s/32" % allowed_ip}]
         allowed_ip = "%s/24" % allowed_ip
 
         self.firewall.update_port_filter(self.src_port_desc)

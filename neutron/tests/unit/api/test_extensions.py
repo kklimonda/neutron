@@ -25,7 +25,6 @@ from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from oslo_service import wsgi as base_wsgi
 import routes
-import six
 import testtools
 import webob
 import webob.exc as webexc
@@ -107,6 +106,8 @@ class ExtensionPathTest(base.BaseTestCase):
         super(ExtensionPathTest, self).setUp()
 
     def test_get_extensions_path_with_plugins(self):
+        cfg.CONF.set_override('api_extensions_path',
+                              'neutron/tests/unit/extensions')
         path = extensions.get_extensions_path(
             {lib_const.CORE: FakePluginWithExtension()})
         self.assertEqual(path,
@@ -968,7 +969,7 @@ class ExtensionExtendedAttributeTestCase(base.BaseTestCase):
         self._tenant_id = "8c70909f-b081-452d-872b-df48e6c355d1"
         # Save the global RESOURCE_ATTRIBUTE_MAP
         self.saved_attr_map = {}
-        for res, attrs in six.iteritems(attributes.RESOURCE_ATTRIBUTE_MAP):
+        for res, attrs in attributes.RESOURCE_ATTRIBUTE_MAP.items():
             self.saved_attr_map[res] = attrs.copy()
         # Add the resources to the global attribute map
         # This is done here as the setup process won't

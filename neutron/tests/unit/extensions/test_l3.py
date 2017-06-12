@@ -20,6 +20,10 @@ import copy
 import mock
 import netaddr
 from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import exceptions
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants as lib_constants
 from neutron_lib import context
 from neutron_lib import exceptions as n_exc
@@ -34,10 +38,6 @@ from webob import exc
 from neutron.api.rpc.agentnotifiers import l3_rpc_agent_api
 from neutron.api.rpc.handlers import l3_rpc
 from neutron.api.v2 import attributes
-from neutron.callbacks import events
-from neutron.callbacks import exceptions
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.db import _resource_extend as resource_extend
 from neutron.db import common_db_mixin
 from neutron.db import db_base_plugin_v2
@@ -571,6 +571,7 @@ class ExtraAttributesMixinTestCase(testlib_api.SqlTestCase):
     def setUp(self):
         super(ExtraAttributesMixinTestCase, self).setUp()
         self.mixin = l3_attrs_db.ExtraAttributesMixin()
+        directory.add_plugin(lib_constants.L3, self.mixin)
         self.ctx = context.get_admin_context()
         self.router = l3_models.Router()
         with self.ctx.session.begin():
@@ -1022,10 +1023,10 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                 self.assertIn('id', payload)
                 self.assertEqual(payload['id'], router['router']['id'])
                 self.assertIn('tenant_id', payload)
-                stid = subnet['subnet']['tenant_id']
+                rtid = router['router']['tenant_id']
                 # tolerate subnet tenant deliberately set to '' in the
                 # nsx metadata access case
-                self.assertIn(payload['tenant_id'], [stid, ''], msg)
+                self.assertIn(payload['tenant_id'], [rtid, ''], msg)
 
     def test_router_add_interface_bad_values(self):
         with self.router() as r:
@@ -2153,6 +2154,39 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                 self.assertEqual(ip_address,
                                  body['floatingip']['fixed_ip_address'])
 
+    def test_floatingip_update_subnet_gateway_disabled(
+        self, expected_status=lib_constants.FLOATINGIP_STATUS_ACTIVE):
+        """Attach a floating IP to an instance
+
+        Verify that the floating IP can be associated to a port whose subnet's
+        gateway ip is not connected to the external router, but the router
+        has an ip in that subnet.
+        """
+        with self.subnet(cidr='30.0.0.0/24', gateway_ip=None) as private_sub:
+            with self.port(private_sub) as p:
+                subnet_id = p['port']['fixed_ips'][0]['subnet_id']
+                private_sub = {'subnet': {'id': subnet_id}}
+                port_id = p['port']['id']
+                with self.router() as r:
+                    self._router_interface_action('add', r['router']['id'],
+                                                None, port_id)
+                with self.subnet(cidr='12.0.0.0/24') as public_sub:
+                    self._set_net_external(public_sub['subnet']['network_id'])
+                    self._add_external_gateway_to_router(
+                         r['router']['id'], public_sub['subnet']['network_id'])
+                    fip = self._make_floatingip(self.fmt,
+                                 public_sub['subnet']['network_id'])
+                    body = self._show('floatingips', fip['floatingip']['id'])
+                    self.assertEqual(expected_status,
+                                     body['floatingip']['status'])
+                    body = self._update('floatingips', fip['floatingip']['id'],
+                                  {'floatingip': {'port_id': port_id}})
+                    self.assertEqual(port_id, body['floatingip']['port_id'])
+                    self.assertEqual(p['port']['fixed_ips'][0]['ip_address'],
+                                     body['floatingip']['fixed_ip_address'])
+                    self.assertEqual(r['router']['id'],
+                                     body['floatingip']['router_id'])
+
     def test_floatingip_create_different_fixed_ip_same_port(self):
         '''This tests that it is possible to delete a port that has
         multiple floating ip addresses associated with it (each floating
@@ -2527,6 +2561,16 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                             {'floatingip': {'port_id': None}})
                         fip2_r2_res = associate_and_assert(fip2, p2)
                         self.assertEqual(fip2_r2_res, r2['router']['id'])
+
+    def test_floatingip_update_different_port_owner_as_admin(self):
+        with self.subnet() as private_sub:
+            with self.floatingip_no_assoc(private_sub) as fip:
+                with self.port(subnet=private_sub, tenant_id='other') as p:
+                    body = self._update('floatingips', fip['floatingip']['id'],
+                                        {'floatingip':
+                                         {'port_id': p['port']['id']}})
+                    self.assertEqual(p['port']['id'],
+                                     body['floatingip']['port_id'])
 
     def test_floatingip_port_delete(self):
         with self.subnet() as private_sub:
@@ -3219,7 +3263,8 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
             self.skipTest("Plugin does not support l3_rpc_notifier")
         # make sure the callback is registered.
         registry.subscribe(
-            l3_db._notify_subnet_gateway_ip_update, resources.SUBNET_GATEWAY,
+            l3_db.L3RpcNotifierMixin._notify_subnet_gateway_ip_update,
+            resources.SUBNET,
             events.AFTER_UPDATE)
         with mock.patch.object(plugin.l3_rpc_notifier,
                                'routers_updated') as chk_method:
@@ -3269,7 +3314,7 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
             plugin.add_router_interface(
                 admin_ctx,
                 router['router']['id'], {'subnet_id': subnet['subnet']['id']})
-            l3_db._notify_subnetpool_address_scope_update(
+            l3_db.L3RpcNotifierMixin._notify_subnetpool_address_scope_update(
                 mock.ANY, mock.ANY, mock.ANY,
                 context=admin_ctx, subnetpool_id=subnetpool_id)
             chk_method.assert_called_with(admin_ctx, [router['router']['id']])

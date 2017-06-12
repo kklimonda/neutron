@@ -14,13 +14,15 @@
 
 import mock
 from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
+
 from neutron_lib import constants
 from neutron_lib import context
 
 from neutron.api.rpc.handlers import l3_rpc
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
+from neutron.common import constants as n_const
 from neutron.common import topics
 from neutron.extensions import external_net
 from neutron.extensions import l3
@@ -168,18 +170,31 @@ class L3DvrTestCase(L3DvrTestCaseBase):
             self.l3_plugin._get_agent_gw_ports_exist_for_network(
                 self.context, network_id, "", self.l3_agent['id']))
 
-    def test_get_fip_sync_interfaces(self):
+    def test_get_fip_agent_gw_ports(self):
         self.setup_create_agent_gw_port_for_network()
 
         self.assertEqual(
-            1, len(self.l3_plugin._get_fip_sync_interfaces(
+            1, len(self.l3_plugin._get_fip_agent_gw_ports(
                 self.context, self.l3_agent['id'])))
 
     def test_process_routers(self):
         router = self._create_router()
-        result = self.l3_plugin._process_routers(self.context, [router])
+        if not router.get('gw_port_id'):
+            router['gw_port_id'] = 'fake_gw_id'
+        self.l3_plugin._get_fip_agent_gw_ports = mock.Mock(
+            return_value='fip_interface')
+        self.l3_plugin._get_snat_sync_interfaces = mock.Mock(
+            return_value={router['id']: 'snat_interface'})
+        result = self.l3_plugin._process_routers(self.context, [router],
+                                                 self.l3_agent)
+
         self.assertEqual(
             router['id'], result[router['id']]['id'])
+        self.assertIn(n_const.FLOATINGIP_AGENT_INTF_KEY, result[router['id']])
+        self.l3_plugin._get_fip_agent_gw_ports.assert_called_once_with(
+            self.context, self.l3_agent['id'])
+        self.l3_plugin._get_snat_sync_interfaces.assert_called_once_with(
+            self.context, [router['id']])
 
     def test_agent_gw_port_delete_when_last_gateway_for_ext_net_removed(self):
         kwargs = {'arg_list': (external_net.EXTERNAL,),

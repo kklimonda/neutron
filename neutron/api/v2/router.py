@@ -18,7 +18,6 @@ from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_service import wsgi as base_wsgi
 import routes as routes_mapper
-import six
 import six.moves.urllib.parse as urlparse
 import webob
 import webob.dec
@@ -34,10 +33,7 @@ from neutron.quota import resource_registry
 from neutron import wsgi
 
 
-RESOURCES = {'network': 'networks',
-             'subnet': 'subnets',
-             'subnetpool': 'subnetpools',
-             'port': 'ports'}
+RESOURCES = attributes.CORE_RESOURCES
 SUB_RESOURCES = {}
 COLLECTION_ACTIONS = ['index', 'create']
 MEMBER_ACTIONS = ['show', 'update', 'delete']
@@ -53,7 +49,7 @@ class Index(wsgi.Application):
         metadata = {}
 
         layout = []
-        for name, collection in six.iteritems(self.resources):
+        for name, collection in self.resources.items():
             href = urlparse.urljoin(req.path_url, collection)
             resource = {'name': name,
                         'collection': collection,

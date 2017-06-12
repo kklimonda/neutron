@@ -14,17 +14,16 @@
 # backends
 
 from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
+
+from neutron.db import _model_query as model_query
 
 
 # Common database operation implementations
 def _get_filter_query(context, model, **kwargs):
-    # TODO(jlibosva): decompose _get_collection_query from plugin instance
-    plugin = directory.get_plugin()
     with context.session.begin(subtransactions=True):
         filters = _kwargs_to_filters(**kwargs)
-        query = plugin._get_collection_query(context, model, filters)
+        query = model_query.get_collection_query(context, model, filters)
         return query
 
 
@@ -44,18 +43,16 @@ def _kwargs_to_filters(**kwargs):
 def get_objects(context, model, _pager=None, **kwargs):
     with context.session.begin(subtransactions=True):
         filters = _kwargs_to_filters(**kwargs)
-        # TODO(ihrachys): decompose _get_collection from plugin instance
-        plugin = directory.get_plugin()
-        return plugin._get_collection(
+        return model_query.get_collection(
             context, model,
             dict_func=None,  # return all the data
             filters=filters,
             **(_pager.to_kwargs(context, model) if _pager else {}))
 
 
-def create_object(context, model, values):
+def create_object(context, model, values, populate_id=True):
     with context.session.begin(subtransactions=True):
-        if 'id' not in values and hasattr(model, 'id'):
+        if populate_id and 'id' not in values and hasattr(model, 'id'):
             values['id'] = uuidutils.generate_uuid()
         db_obj = model(**values)
         context.session.add(db_obj)
@@ -84,6 +81,23 @@ def delete_object(context, model, **kwargs):
     with context.session.begin(subtransactions=True):
         db_obj = _safe_get_object(context, model, **kwargs)
         context.session.delete(db_obj)
+
+
+def update_objects(context, model, values, **kwargs):
+    '''Update matching objects, if any. Return number of updated objects.
+
+    This function does not raise exceptions if nothing matches.
+
+    :param model: SQL model
+    :param values: values to update in matching objects
+    :param kwargs: multiple filters defined by key=value pairs
+    :return: Number of entries updated
+    '''
+    with context.session.begin(subtransactions=True):
+        if not values:
+            return count(context, model, **kwargs)
+        q = _get_filter_query(context, model, **kwargs)
+        return q.update(values, synchronize_session=False)
 
 
 def delete_objects(context, model, **kwargs):

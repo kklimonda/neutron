@@ -42,6 +42,7 @@ from neutron.db.models import l3ha as l3ha_model
 from neutron.extensions import l3
 from neutron.extensions import l3agentscheduler as l3agent
 from neutron import manager
+from neutron.objects import l3agent as rb_obj
 from neutron.scheduler import l3_agent_scheduler
 from neutron.tests import base
 from neutron.tests.common import helpers
@@ -284,7 +285,7 @@ class L3SchedulerTestBaseMixin(object):
         self.plugin._unbind_router(self.adminContext,
                             router['router']['id'],
                             agent_id)
-        bindings = self.plugin._get_l3_bindings_hosting_routers(
+        bindings = rb_obj.RouterL3AgentBinding.get_l3_agents_by_router_ids(
             self.adminContext, [router['router']['id']])
         self.assertEqual(0, len(bindings))
 
@@ -493,7 +494,7 @@ class L3SchedulerTestBaseMixin(object):
         # checking that bind_router() is not throwing
         # when supplied with router_id of non-existing router
         scheduler.bind_router(self.plugin, self.adminContext,
-                              "dummyID", self.agent_id1)
+                              uuidutils.generate_uuid(), self.agent_id1)
 
     def test_bind_existing_router(self):
         router = self._make_router(self.fmt,
@@ -672,6 +673,12 @@ class L3SchedulerTestCaseMixin(test_l3.L3NatTestCaseMixin,
 class L3AgentChanceSchedulerTestCase(L3SchedulerTestCaseMixin,
                                      test_db_base_plugin_v2.
                                      NeutronDbPluginV2TestCase):
+    def setUp(self):
+        super(L3AgentChanceSchedulerTestCase, self).setUp()
+        # Removes MissingAuthPlugin exception from logs
+        self.patch_notifier = mock.patch(
+            'neutron.notifiers.batch_notifier.BatchNotifier._notify')
+        self.patch_notifier.start()
 
     def test_random_scheduling(self):
         random_patch = mock.patch('random.choice')
@@ -1059,8 +1066,8 @@ class L3DvrSchedulerTestCase(testlib_api.SqlTestCase):
         directory.add_plugin(constants.L3, l3plugin)
         with mock.patch.object(l3plugin, 'get_dvr_routers_to_remove',
                                return_value=routers_to_remove),\
-                mock.patch.object(l3plugin, '_get_floatingip_on_port',
-                                  return_value=fip):
+                mock.patch.object(l3plugin, '_get_floatingips_by_port_id',
+                                  return_value=[fip] if fip else []):
             l3_dvrscheduler_db._notify_l3_agent_port_update(
                 'port', 'after_update', mock.ANY, **kwargs)
             if routers_to_remove:
@@ -1108,8 +1115,8 @@ class L3DvrSchedulerTestCase(testlib_api.SqlTestCase):
                                return_value=[{'agent_id': 'foo_agent',
                                               'router_id': 'foo_id',
                                               'host': source_host}]),\
-                mock.patch.object(l3plugin, '_get_floatingip_on_port',
-                                  return_value=None):
+                mock.patch.object(l3plugin, '_get_floatingips_by_port_id',
+                                  return_value=[]):
             l3_dvrscheduler_db._notify_l3_agent_port_update(
                 'port', 'after_update', plugin, **kwargs)
 
@@ -1904,6 +1911,10 @@ class L3AgentAZLeastRoutersSchedulerTestCase(L3HATestCaseMixin):
         # Mock scheduling so that the test can control it explicitly
         mock.patch.object(l3_hamode_db.L3_HA_NAT_db_mixin,
                           '_notify_router_updated').start()
+        # Removes MissingAuthPlugin exception from logs
+        self.patch_notifier = mock.patch(
+            'neutron.notifiers.batch_notifier.BatchNotifier._notify')
+        self.patch_notifier.start()
 
     def _register_l3_agents(self):
         self.agent1 = helpers.register_l3_agent(host='az1-host1', az='az1')

@@ -277,15 +277,6 @@ def ip_version_from_int(ip_version_int):
     raise ValueError(_('Illegal IP version number'))
 
 
-def is_port_trusted(port):
-    """Used to determine if port can be trusted not to attack network.
-
-    Trust is currently based on the device_owner field starting with 'network:'
-    since we restrict who can use that in the default policy.json file.
-    """
-    return port['device_owner'].startswith(n_const.DEVICE_OWNER_NETWORK_PREFIX)
-
-
 class DelayedStringRenderer(object):
     """Takes a callable and its args and calls when __str__ is called
 
@@ -684,10 +675,10 @@ def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
                       (default) then WaitTimeout exception is raised.
     """
     try:
-        with eventlet.timeout.Timeout(timeout):
+        with eventlet.Timeout(timeout):
             while not predicate():
                 eventlet.sleep(sleep)
-    except eventlet.TimeoutError:
+    except eventlet.Timeout:
         if exception is not None:
             #pylint: disable=raising-bad-type
             raise exception
@@ -837,3 +828,10 @@ except AttributeError:
 def make_weak_ref(f):
     """Make a weak reference to a function accounting for bound methods."""
     return weak_method(f) if hasattr(f, '__self__') else weakref.ref(f)
+
+
+def resolve_ref(ref):
+    """Handles dereference of weakref."""
+    if isinstance(ref, weakref.ref):
+        ref = ref()
+    return ref

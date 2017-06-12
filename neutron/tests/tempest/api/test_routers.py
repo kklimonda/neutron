@@ -14,7 +14,6 @@
 #    under the License.
 
 import netaddr
-import six
 from tempest.lib.common.utils import data_utils
 from tempest.lib import decorators
 from tempest import test
@@ -91,7 +90,7 @@ class RoutersTest(base_routers.BaseRouterTest):
             self.assertIsNone(actual_ext_gw_info)
             return
         # Verify only keys passed in exp_ext_gw_info
-        for k, v in six.iteritems(exp_ext_gw_info):
+        for k, v in exp_ext_gw_info.items():
             self.assertEqual(v, actual_ext_gw_info[k])
 
     def _verify_gateway_port(self, router_id):
@@ -258,6 +257,26 @@ class DvrRoutersTest(base_routers.BaseRouterTest):
         self.assertTrue(show_body['router']['distributed'])
         show_body = self.client.show_router(router['id'])
         self.assertNotIn('distributed', show_body['router'])
+
+
+class HaRoutersTest(base_routers.BaseRouterTest):
+
+    @classmethod
+    @test.requires_ext(extension="l3-ha", service="network")
+    def skip_checks(cls):
+        super(HaRoutersTest, cls).skip_checks()
+
+    @decorators.idempotent_id('77db8eae-3aa3-4e61-bf2a-e739ce042e53')
+    def test_convert_legacy_router(self):
+        router = self._create_router(data_utils.rand_name('router'))
+        self.assertNotIn('ha', router)
+        update_body = self.admin_client.update_router(router['id'],
+                                                      ha=True)
+        self.assertTrue(update_body['router']['ha'])
+        show_body = self.admin_client.show_router(router['id'])
+        self.assertTrue(show_body['router']['ha'])
+        show_body = self.client.show_router(router['id'])
+        self.assertNotIn('ha', show_body['router'])
 
 
 class RoutersSearchCriteriaTest(base.BaseSearchCriteriaTest):

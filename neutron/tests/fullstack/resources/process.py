@@ -267,7 +267,7 @@ class L3AgentFixture(ServiceFixture):
                 process_name=self.NEUTRON_L3_AGENT,
                 exec_name=spawn.find_executable(
                     'l3_agent.py',
-                    path=os.path.join(base.ROOTDIR, 'common', 'agents')),
+                    path=os.path.join(fullstack_base.ROOTDIR, 'cmd')),
                 config_filenames=config_filenames,
                 namespace=self.namespace
             )
@@ -301,8 +301,9 @@ class DhcpAgentFixture(fixtures.Fixture):
                 test_name=self.test_name,
                 process_name=self.NEUTRON_DHCP_AGENT,
                 exec_name=spawn.find_executable(
-                    'fullstack_dhcp_agent.py',
-                    path=os.path.join(base.ROOTDIR, 'common', 'agents')),
+                    'dhcp_agent.py',
+                    path=os.path.join(
+                        fullstack_base.ROOTDIR, 'cmd')),
                 config_filenames=config_filenames,
                 namespace=self.namespace
             )
