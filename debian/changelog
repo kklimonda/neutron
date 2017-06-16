@@ -1,11 +1,11 @@
-neutron (2:11.0.0~b2-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:11.0.0~b2-0ubuntu1) artful; urgency=medium
 
   * d/control: Add python-ovsdbapp to (Build-)Depends.
   * d/python-neutron.install: Install neutron-api wsgi entry point.
   * New upstream milestone for OpenStack Pike.
   * d/control: Align (Build-)Depends with upstream.
 
- -- James Page <james.page@ubuntu.com>  Mon, 12 Jun 2017 09:41:15 +0100
+ -- James Page <james.page@ubuntu.com>  Fri, 16 Jun 2017 16:32:57 +0100
 
 neutron (2:11.0.0~b1-0ubuntu2) artful; urgency=medium
 
