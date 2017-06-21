@@ -1,3 +1,9 @@
+neutron (2:11.0.0~b2-0ubuntu3) UNRELEASED; urgency=medium
+
+  * d/p/bug1694420.patch: Dropped, included upstream.
+
+ -- James Page <james.page@ubuntu.com>  Wed, 21 Jun 2017 14:23:47 +0100
+
 neutron (2:11.0.0~b2-0ubuntu2) artful; urgency=medium
 
   * d/p/bug1694420.patch: Cherry pick fix to resolve issues in deployments
