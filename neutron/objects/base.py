@@ -285,6 +285,9 @@ class DeclarativeObject(abc.ABCMeta):
             standardattributes.add_standard_attributes(cls)
         # Instantiate extra filters per class
         cls.extra_filter_names = set(cls.extra_filter_names)
+        # add tenant_id filter for objects that have project_id
+        if 'project_id' in cls.fields and 'tenant_id' not in cls.fields:
+            cls.extra_filter_names.add('tenant_id')
 
 
 @six.add_metaclass(DeclarativeObject)
@@ -432,7 +435,7 @@ class NeutronDbObject(NeutronObject):
             raise o_exc.NeutronPrimaryKeyMissing(object_class=cls.__name__,
                                                  missing_keys=missing_keys)
 
-        with db_api.autonested_transaction(context.session):
+        with context.session.begin(subtransactions=True):
             db_obj = obj_db_api.get_object(
                 context, cls.db_model,
                 **cls.modify_fields_to_db(kwargs)
@@ -456,7 +459,7 @@ class NeutronDbObject(NeutronObject):
         """
         if validate_filters:
             cls.validate_filters(**kwargs)
-        with db_api.autonested_transaction(context.session):
+        with context.session.begin(subtransactions=True):
             db_objs = obj_db_api.get_objects(
                 context, cls.db_model, _pager=_pager,
                 **cls.modify_fields_to_db(kwargs)
@@ -503,7 +506,7 @@ class NeutronDbObject(NeutronObject):
         """
         if validate_filters:
             cls.validate_filters(**kwargs)
-        with db_api.autonested_transaction(context.session):
+        with context.session.begin(subtransactions=True):
             return obj_db_api.delete_objects(
                 context, cls.db_model, **cls.modify_fields_to_db(kwargs))
 

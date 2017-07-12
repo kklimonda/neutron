@@ -15,16 +15,15 @@
 
 from tempest.lib.common.utils import data_utils
 from tempest.lib import decorators
-from tempest import test
 
 from neutron.tests.tempest.api import base_routers as base
 
 
 class RoutersTestDVR(base.BaseRouterTest):
 
+    required_extensions = ['router', 'dvr']
+
     @classmethod
-    @test.requires_ext(extension="router", service="network")
-    @test.requires_ext(extension="dvr", service="network")
     def resource_setup(cls):
         # The check above will pass if api_extensions=all, which does
         # not mean DVR extension itself is present.
@@ -91,10 +90,12 @@ class RoutersTestDVR(base.BaseRouterTest):
         name = data_utils.rand_name('router')
         # router needs to be in admin state down in order to be upgraded to DVR
         router = self.admin_client.create_router(name, distributed=False,
+                                                 ha=False,
                                                  admin_state_up=False)
         self.addCleanup(self.admin_client.delete_router,
                         router['router']['id'])
         self.assertFalse(router['router']['distributed'])
+        self.assertFalse(router['router']['ha'])
         router = self.admin_client.update_router(router['router']['id'],
                                                  distributed=True)
         self.assertTrue(router['router']['distributed'])

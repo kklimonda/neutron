@@ -20,6 +20,10 @@ import collections
 import contextlib
 import hashlib
 
+from neutron_lib.api import attributes as lib_attrs
+from neutron_lib.api.definitions import network as net_def
+from neutron_lib.api.definitions import port as port_def
+from neutron_lib.api.definitions import subnet as subnet_def
 from neutron_lib import constants as n_const
 from neutron_lib import exceptions
 from oslo_config import cfg
@@ -150,35 +154,36 @@ def in_pending_status(status):
 
 def _fixup_res_dict(context, attr_name, res_dict, check_allow_post=True):
     attr_info = attributes.RESOURCE_ATTRIBUTE_MAP[attr_name]
+    attr_ops = lib_attrs.AttributeInfo(attr_info)
     try:
-        attributes.populate_tenant_id(context, res_dict, attr_info, True)
-        attributes.verify_attributes(res_dict, attr_info)
+        attr_ops.populate_project_id(context, res_dict, True)
+        lib_attrs.populate_project_info(attr_info)
+        attr_ops.verify_attributes(res_dict)
     except webob.exc.HTTPBadRequest as e:
         # convert webob exception into ValueError as these functions are
         # for internal use. webob exception doesn't make sense.
         raise ValueError(e.detail)
-    attributes.fill_default_value(attr_info, res_dict,
-                                  check_allow_post=check_allow_post)
-    attributes.convert_value(attr_info, res_dict)
+    attr_ops.fill_post_defaults(res_dict, check_allow_post=check_allow_post)
+    attr_ops.convert_values(res_dict)
     return res_dict
 
 
 def create_network(core_plugin, context, net, check_allow_post=True):
-    net_data = _fixup_res_dict(context, attributes.NETWORKS,
+    net_data = _fixup_res_dict(context, net_def.COLLECTION_NAME,
                                net.get('network', {}),
                                check_allow_post=check_allow_post)
     return core_plugin.create_network(context, {'network': net_data})
 
 
 def create_subnet(core_plugin, context, subnet, check_allow_post=True):
-    subnet_data = _fixup_res_dict(context, attributes.SUBNETS,
+    subnet_data = _fixup_res_dict(context, subnet_def.COLLECTION_NAME,
                                   subnet.get('subnet', {}),
                                   check_allow_post=check_allow_post)
     return core_plugin.create_subnet(context, {'subnet': subnet_data})
 
 
 def create_port(core_plugin, context, port, check_allow_post=True):
-    port_data = _fixup_res_dict(context, attributes.PORTS,
+    port_data = _fixup_res_dict(context, port_def.COLLECTION_NAME,
                                 port.get('port', {}),
                                 check_allow_post=check_allow_post)
     return core_plugin.create_port(context, {'port': port_data})

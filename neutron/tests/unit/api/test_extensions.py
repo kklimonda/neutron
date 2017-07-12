@@ -17,7 +17,7 @@ import copy
 
 import fixtures
 import mock
-from neutron_lib import constants as lib_const
+from neutron_lib.plugins import constants as lib_const
 from neutron_lib.plugins import directory
 from neutron_lib.services import base as service_base
 from oslo_config import cfg
@@ -187,7 +187,7 @@ class ResourceExtensionTest(base.BaseTestCase):
         try:
             test_app.get("/tweedles/some_id/notimplemented_function")
             # Shouldn't be reached
-            self.assertTrue(False)
+            self.fail()
         except webtest.AppError as e:
             self.assertIn('501', str(e))
 

@@ -321,15 +321,17 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
                       "VNI %(segmentation_id)s",
                       {'interface': interface,
                        'segmentation_id': segmentation_id})
-            args = {'dev': self.local_int}
+            args = {'dev': self.local_int,
+                    'srcport': (cfg.CONF.VXLAN.udp_srcport_min,
+                                cfg.CONF.VXLAN.udp_srcport_max),
+                    'dstport': cfg.CONF.VXLAN.udp_dstport,
+                    'ttl': cfg.CONF.VXLAN.ttl,
+                    'tos': cfg.CONF.VXLAN.tos}
             if self.vxlan_mode == lconst.VXLAN_MCAST:
                 args['group'] = self.get_vxlan_group(segmentation_id)
-            if cfg.CONF.VXLAN.ttl:
-                args['ttl'] = cfg.CONF.VXLAN.ttl
-            if cfg.CONF.VXLAN.tos:
-                args['tos'] = cfg.CONF.VXLAN.tos
             if cfg.CONF.VXLAN.l2_population:
                 args['proxy'] = cfg.CONF.VXLAN.arp_responder
+
             try:
                 int_vxlan = self.ip.add_vxlan(interface, segmentation_id,
                                               **args)
@@ -355,7 +357,10 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
         # Append IP's to bridge if necessary
         if ips:
             for ip in ips:
-                dst_device.addr.add(cidr=ip['cidr'])
+                # If bridge ip address already exists, then don't add
+                # otherwise will report error
+                if not dst_device.addr.list(to=ip['cidr']):
+                    dst_device.addr.add(cidr=ip['cidr'])
 
         if gateway:
             # Ensure that the gateway can be updated by changing the metric
@@ -523,15 +528,25 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
             # inherit from the bridge its plugged into, which will be 1500
             # at the time. See bug/1684326 for details.
             self._set_tap_mtu(tap_device_name, mtu)
-        # Check if device needs to be added to bridge
-        if not bridge_lib.BridgeDevice.get_interface_bridge(
-            tap_device_name):
+        # Avoid messing with plugging devices into a bridge that the agent
+        # does not own
+        if not device_owner.startswith(constants.DEVICE_OWNER_COMPUTE_PREFIX):
+            # Check if device needs to be added to bridge
+            if not bridge_lib.BridgeDevice.get_interface_bridge(
+                tap_device_name):
+                data = {'tap_device_name': tap_device_name,
+                        'bridge_name': bridge_name}
+                LOG.debug("Adding device %(tap_device_name)s to bridge "
+                          "%(bridge_name)s", data)
+                if bridge_lib.BridgeDevice(bridge_name).addif(tap_device_name):
+                    return False
+        else:
             data = {'tap_device_name': tap_device_name,
+                    'device_owner': device_owner,
                     'bridge_name': bridge_name}
-            LOG.debug("Adding device %(tap_device_name)s to bridge "
-                      "%(bridge_name)s", data)
-            if bridge_lib.BridgeDevice(bridge_name).addif(tap_device_name):
-                return False
+            LOG.debug("Skip adding device %(tap_device_name)s to "
+                      "%(bridge_name)s. It is owned by %(device_owner)s and "
+                      "thus added elsewhere.", data)
         return True
 
     def _set_tap_mtu(self, tap_device_name, mtu):
@@ -768,8 +783,8 @@ class LinuxBridgeManager(amb.CommonAgentManagerBase):
 
     def get_agent_configurations(self):
         configurations = {'bridge_mappings': self.bridge_mappings,
-                          'interface_mappings': self.interface_mappings,
-                          'wires_compute_ports': True}
+                          'interface_mappings': self.interface_mappings
+                          }
         if self.vxlan_mode != lconst.VXLAN_NONE:
             configurations['tunneling_ip'] = self.local_ip
             configurations['tunnel_types'] = [p_const.TYPE_VXLAN]

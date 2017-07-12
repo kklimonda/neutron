@@ -16,6 +16,8 @@
 import functools
 
 import netaddr
+from neutron_lib.api.definitions import port as port_def
+from neutron_lib.api.definitions import subnetpool as subnetpool_def
 from neutron_lib.api import validators
 from neutron_lib.callbacks import events
 from neutron_lib.callbacks import exceptions
@@ -24,6 +26,7 @@ from neutron_lib.callbacks import resources
 from neutron_lib import constants
 from neutron_lib import context as ctx
 from neutron_lib import exceptions as exc
+from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as os_db_exc
@@ -36,7 +39,6 @@ from sqlalchemy import not_
 
 from neutron._i18n import _, _LE, _LI
 from neutron.api.rpc.agentnotifiers import l3_rpc_agent_api
-from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
@@ -58,6 +60,7 @@ from neutron.ipam import exceptions as ipam_exc
 from neutron.ipam import subnet_alloc
 from neutron import neutron_plugin_base_v2
 from neutron.objects import base as base_obj
+from neutron.objects import ports as port_obj
 from neutron.objects import subnetpool as subnetpool_obj
 
 
@@ -552,6 +555,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             # executed concurrently
             if cur_subnet and not ipv6_utils.is_ipv6_pd_enabled(s):
                 with db_api.context_manager.reader.using(context):
+                    # TODO(electrocucaracha): Look a solution for Join in OVO
                     ipal = models_v2.IPAllocation
                     alloc_qry = context.session.query(ipal)
                     alloc_qry = alloc_qry.join("port", "routerport")
@@ -621,7 +625,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             raise exc.BadRequest(resource='subnets', msg=reason)
 
     def _update_router_gw_ports(self, context, network, subnet):
-        l3plugin = directory.get_plugin(constants.L3)
+        l3plugin = directory.get_plugin(plugin_constants.L3)
         if l3plugin:
             gw_ports = self._get_router_gw_ports_by_network(context,
                     network['id'])
@@ -635,7 +639,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                               {'id': id, 's': subnet})
 
     def _update_router_gw_port(self, context, router_id, network, subnet):
-        l3plugin = directory.get_plugin(constants.L3)
+        l3plugin = directory.get_plugin(plugin_constants.L3)
         ctx_admin = context.elevated()
         ext_subnets_dict = {s['id']: s for s in network['subnets']}
         router = l3plugin.get_router(ctx_admin, router_id)
@@ -915,24 +919,16 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
     @db_api.context_manager.reader
     def _subnet_get_user_allocation(self, context, subnet_id):
         """Check if there are any user ports on subnet and return first."""
-        # need to join with ports table as IPAllocation's port
-        # is not joined eagerly and thus producing query which yields
-        # incorrect results
-        return (context.session.query(models_v2.IPAllocation).
-                filter_by(subnet_id=subnet_id).join(models_v2.Port).
-                filter(~models_v2.Port.device_owner.
-                       in_(AUTO_DELETE_PORT_OWNERS)).first())
+        return port_obj.IPAllocation.get_alloc_by_subnet_id(
+            context, subnet_id, AUTO_DELETE_PORT_OWNERS)
 
     @db_api.context_manager.reader
     def _subnet_check_ip_allocations_internal_router_ports(self, context,
                                                            subnet_id):
         # Do not delete the subnet if IP allocations for internal
         # router ports still exist
-        allocs = context.session.query(models_v2.IPAllocation).filter_by(
-                subnet_id=subnet_id).join(models_v2.Port).filter(
-                        models_v2.Port.device_owner.in_(
-                            constants.ROUTER_INTERFACE_OWNERS)
-                ).first()
+        allocs = port_obj.IPAllocation.get_alloc_by_subnet_id(
+            context, subnet_id, constants.ROUTER_INTERFACE_OWNERS, False)
         if allocs:
             LOG.debug("Subnet %s still has internal router ports, "
                       "cannot delete", subnet_id)
@@ -946,7 +942,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
             if auto_subnet:
                 # special flag to avoid re-allocation on auto subnets
                 fixed.append({'subnet_id': sub_id, 'delete_subnet': True})
-            data = {attributes.PORT: {'fixed_ips': fixed}}
+            data = {port_def.RESOURCE_NAME: {'fixed_ips': fixed}}
             self.update_port(context, port_id, data)
         except exc.PortNotFound:
             # port is gone
@@ -1158,7 +1154,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
 
         for key in ['min_prefixlen', 'max_prefixlen', 'default_prefixlen']:
             updated['key'] = str(updated[key])
-        resource_extend.apply_funcs(attributes.SUBNETPOOLS,
+        resource_extend.apply_funcs(subnetpool_def.COLLECTION_NAME,
                                     updated, orig_sp.db_obj)
         return updated
 
@@ -1406,7 +1402,7 @@ class NeutronDbPluginV2(db_base_plugin_common.DbBasePluginCommon,
                     except l3.RouterNotFound:
                         return
                 else:
-                    l3plugin = directory.get_plugin(constants.L3)
+                    l3plugin = directory.get_plugin(plugin_constants.L3)
                     if l3plugin:
                         try:
                             ctx_admin = context.elevated()

@@ -15,6 +15,10 @@
 
 import functools
 
+from neutron_lib.api.definitions import network as net_def
+from neutron_lib.api.definitions import port as port_def
+from neutron_lib.api.definitions import subnet as subnet_def
+from neutron_lib.api.definitions import subnetpool as subnetpool_def
 from neutron_lib.api import validators
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
@@ -23,7 +27,6 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from sqlalchemy.orm import exc
 
-from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
 from neutron.common import exceptions
 from neutron.db import _model_query as model_query
@@ -32,6 +35,7 @@ from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
 from neutron.db import models_v2
+from neutron.objects import ports as port_obj
 from neutron.objects import subnet as subnet_obj
 from neutron.objects import subnetpool as subnetpool_obj
 
@@ -102,12 +106,9 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                   {'ip_address': ip_address,
                    'network_id': network_id,
                    'subnet_id': subnet_id})
-        with db_api.context_manager.writer.using(context):
-            for ipal in (context.session.query(models_v2.IPAllocation).
-                         filter_by(network_id=network_id,
-                                   ip_address=ip_address,
-                                   subnet_id=subnet_id)):
-                context.session.delete(ipal)
+        port_obj.IPAllocation.delete_objects(
+            context, network_id=network_id, ip_address=ip_address,
+            subnet_id=subnet_id)
 
     @staticmethod
     @db_api.context_manager.writer
@@ -119,16 +120,20 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                    'network_id': network_id,
                    'subnet_id': subnet_id,
                    'port_id': port_id})
-        allocated = models_v2.IPAllocation(
-            network_id=network_id,
-            port_id=port_id,
-            ip_address=ip_address,
-            subnet_id=subnet_id
-        )
-        port_db = context.session.query(models_v2.Port).get(port_id)
-        port_db.fixed_ips.append(allocated)
-        port_db.fixed_ips.sort(key=lambda fip: (fip['ip_address'],
-                                                fip['subnet_id']))
+        allocated = port_obj.IPAllocation(
+            context, network_id=network_id, port_id=port_id,
+            ip_address=ip_address, subnet_id=subnet_id)
+        # NOTE(lujinluo): Add IPAllocations obj to the port fixed_ips
+        # in Port OVO integration, i.e. the same way we did in
+        # Ib32509d974c8654131112234bcf19d6eae8f7cca
+        allocated.create()
+
+        # NOTE(kevinbenton): We add this to the session info so the sqlalchemy
+        # object isn't immediately garbage collected. Otherwise when the
+        # fixed_ips relationship is referenced a new persistent object will be
+        # added to the session that will interfere with retry operations.
+        # See bug 1556178 for details.
+        context.session.info.setdefault('allocated_ips', []).append(allocated)
 
     def _make_subnet_dict(self, subnet, fields=None, context=None):
         res = {'id': subnet['id'],
@@ -154,7 +159,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         # The shared attribute for a subnet is the same as its parent network
         res['shared'] = self._is_network_shared(context, subnet.rbac_entries)
         # Call auxiliary extend functions, if any
-        resource_extend.apply_funcs(attributes.SUBNETS, res, subnet)
+        resource_extend.apply_funcs(subnet_def.COLLECTION_NAME, res, subnet)
         return db_utils.resource_fields(res, fields)
 
     def _make_subnetpool_dict(self, subnetpool, fields=None):
@@ -173,7 +178,8 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                'ip_version': subnetpool['ip_version'],
                'default_quota': subnetpool['default_quota'],
                'address_scope_id': subnetpool['address_scope_id']}
-        resource_extend.apply_funcs(attributes.SUBNETPOOLS, res, subnetpool)
+        resource_extend.apply_funcs(
+            subnetpool_def.COLLECTION_NAME, res, subnetpool)
         return db_utils.resource_fields(res, fields)
 
     def _make_port_dict(self, port, fields=None,
@@ -192,7 +198,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                "device_owner": port["device_owner"]}
         # Call auxiliary extend functions, if any
         if process_extensions:
-            resource_extend.apply_funcs(attributes.PORTS, res, port)
+            resource_extend.apply_funcs(port_def.COLLECTION_NAME, res, port)
         return db_utils.resource_fields(res, fields)
 
     def _get_network(self, context, id):
@@ -276,7 +282,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         res['shared'] = self._is_network_shared(context, network.rbac_entries)
         # Call auxiliary extend functions, if any
         if process_extensions:
-            resource_extend.apply_funcs(attributes.NETWORKS, res, network)
+            resource_extend.apply_funcs(net_def.COLLECTION_NAME, res, network)
         return db_utils.resource_fields(res, fields)
 
     def _is_network_shared(self, context, rbac_entries):

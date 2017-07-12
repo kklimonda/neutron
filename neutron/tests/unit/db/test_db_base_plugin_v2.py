@@ -56,6 +56,7 @@ from neutron.db.models import securitygroup as sg_models
 from neutron.db import models_v2
 from neutron.db import rbac_db_models
 from neutron.db import standard_attr
+from neutron.ipam.drivers.neutrondb_ipam import driver as ipam_driver
 from neutron.ipam import exceptions as ipam_exc
 from neutron.tests import base
 from neutron.tests import tools
@@ -177,7 +178,8 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
         super(NeutronDbPluginV2TestCase, self).setup_config(args=args)
 
     def _req(self, method, resource, data=None, fmt=None, id=None, params=None,
-             action=None, subresource=None, sub_id=None, context=None):
+             action=None, subresource=None, sub_id=None, context=None,
+             headers=None):
         fmt = fmt or self.fmt
 
         path = '/%s.%s' % (
@@ -195,7 +197,8 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
         if data is not None:  # empty dict is valid
             body = self.serialize(data)
         return testlib_api.create_request(path, body, content_type, method,
-                                          query_string=params, context=context)
+                                          query_string=params, context=context,
+                                          headers=headers)
 
     def new_create_request(self, resource, data, fmt=None, id=None,
                            subresource=None, context=None):
@@ -218,7 +221,7 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
                          params=params, subresource=subresource, sub_id=sub_id)
 
     def new_delete_request(self, resource, id, fmt=None, subresource=None,
-                           sub_id=None, data=None):
+                           sub_id=None, data=None, headers=None):
         return self._req(
             'DELETE',
             resource,
@@ -226,14 +229,16 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
             fmt,
             id=id,
             subresource=subresource,
-            sub_id=sub_id
+            sub_id=sub_id,
+            headers=headers
         )
 
     def new_update_request(self, resource, data, id, fmt=None,
-                           subresource=None, context=None, sub_id=None):
+                           subresource=None, context=None, sub_id=None,
+                           headers=None):
         return self._req(
             'PUT', resource, data, fmt, id=id, subresource=subresource,
-            sub_id=sub_id, context=context
+            sub_id=sub_id, context=context, headers=headers
         )
 
     def new_action_request(self, resource, data, id, action, fmt=None,
@@ -519,8 +524,8 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
 
     def _delete(self, collection, id,
                 expected_code=webob.exc.HTTPNoContent.code,
-                neutron_context=None):
-        req = self.new_delete_request(collection, id)
+                neutron_context=None, headers=None):
+        req = self.new_delete_request(collection, id, headers=headers)
         if neutron_context:
             # create a specific auth context for this request
             req.environ['neutron.context'] = neutron_context
@@ -544,8 +549,8 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase):
 
     def _update(self, resource, id, new_data,
                 expected_code=webob.exc.HTTPOk.code,
-                neutron_context=None):
-        req = self.new_update_request(resource, new_data, id)
+                neutron_context=None, headers=None):
+        req = self.new_update_request(resource, new_data, id, headers=headers)
         if neutron_context:
             # create a specific auth context for this request
             req.environ['neutron.context'] = neutron_context
@@ -4342,7 +4347,8 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
 
     def _test_create_subnet_ipv6_auto_addr_with_port_on_network(
             self, addr_mode, device_owner=DEVICE_OWNER_COMPUTE,
-            insert_db_reference_error=False, insert_port_not_found=False):
+            insert_db_reference_error=False, insert_port_not_found=False,
+            insert_address_allocated=False):
         # Create a network with one IPv4 subnet and one port
         with self.network() as network,\
             self.subnet(network=network) as v4_subnet,\
@@ -4373,15 +4379,20 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                 if insert_port_not_found:
                     mock_updated_port.side_effect = lib_exc.PortNotFound(
                         port_id=port['port']['id'])
+                if insert_address_allocated:
+                    mock.patch.object(
+                        ipam_driver.NeutronDbSubnet, '_verify_ip',
+                        side_effect=ipam_exc.IpAddressAlreadyAllocated(
+                            subnet_id=mock.ANY, ip=mock.ANY)).start()
                 v6_subnet = self._make_subnet(self.fmt, network, 'fe80::1',
                                               'fe80::/64', ip_version=6,
                                               ipv6_ra_mode=addr_mode,
                                               ipv6_address_mode=addr_mode)
-            if (insert_db_reference_error
+            if (insert_db_reference_error or insert_address_allocated
                 or device_owner == constants.DEVICE_OWNER_ROUTER_SNAT
                 or device_owner in constants.ROUTER_INTERFACE_OWNERS):
-                # DVR SNAT and router interfaces should not have been
-                # updated with addresses from the new auto-address subnet
+                # DVR SNAT, router interfaces and DHCP ports should not have
+                # been updated with addresses from the new auto-address subnet
                 self.assertEqual(1, len(port['port']['fixed_ips']))
             else:
                 # Confirm that the port has been updated with an address
@@ -4410,6 +4421,14 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
         self._test_create_subnet_ipv6_auto_addr_with_port_on_network(
             constants.IPV6_SLAAC,
             device_owner=constants.DEVICE_OWNER_DHCP)
+
+    def test_create_subnet_dhcpv6_stateless_with_ip_already_allocated(self):
+        self._test_create_subnet_ipv6_auto_addr_with_port_on_network(
+            constants.DHCPV6_STATELESS, insert_address_allocated=True)
+
+    def test_create_subnet_ipv6_slaac_with_ip_already_allocated(self):
+        self._test_create_subnet_ipv6_auto_addr_with_port_on_network(
+            constants.IPV6_SLAAC, insert_address_allocated=True)
 
     def test_create_subnet_ipv6_slaac_with_router_intf_on_network(self):
         self._test_create_subnet_ipv6_auto_addr_with_port_on_network(

@@ -15,16 +15,17 @@
 
 import mock
 
+from neutron_lib.api.definitions import port as port_def
 from neutron_lib.api.definitions import portbindings
 from neutron_lib.api.definitions import provider_net as pnet
 from neutron_lib import constants
 from neutron_lib import context
 from neutron_lib import exceptions
+from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
 from oslo_serialization import jsonutils
 import testtools
 
-from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
 from neutron.common import topics
 from neutron.db import agents_db
@@ -37,6 +38,7 @@ from neutron.plugins.ml2.drivers.l2pop import mech_driver as l2pop_mech_driver
 from neutron.plugins.ml2.drivers.l2pop import rpc as l2pop_rpc
 from neutron.plugins.ml2.drivers.l2pop.rpc_manager import l2population_rpc
 from neutron.plugins.ml2 import managers
+from neutron.plugins.ml2 import models
 from neutron.plugins.ml2 import rpc
 from neutron.scheduler import l3_agent_scheduler
 from neutron.tests import base
@@ -235,7 +237,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
             else:
                 port[portbindings.HOST_ID] = self.agent2['host']
             plugin.update_port(self.adminContext, port['id'],
-                               {attributes.PORT: port})
+                               {port_def.RESOURCE_NAME: port})
 
     def _get_first_interface(self, net_id, router_id):
         plugin = directory.get_plugin()
@@ -278,7 +280,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         # is added on HOST4.
         # HOST4 should get flood entries for HOST1 and HOST2
         router = self._create_ha_router()
-        directory.add_plugin(constants.L3, self.plugin)
+        directory.add_plugin(plugin_constants.L3, self.plugin)
         with self.subnet(network=self._network, enable_dhcp=False) as snet:
             subnet = snet['subnet']
             port = self._add_router_interface(subnet, router, HOST)
@@ -311,7 +313,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         # Remove_fdb should carry flood entry of only HOST2 and not HOST
         router = self._create_ha_router()
 
-        directory.add_plugin(constants.L3, self.plugin)
+        directory.add_plugin(plugin_constants.L3, self.plugin)
         with self.subnet(network=self._network, enable_dhcp=False) as snet:
             host_arg = {portbindings.HOST_ID: HOST, 'admin_state_up': True}
             with self.port(subnet=snet,
@@ -344,7 +346,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
         # Both HA agents should be notified to other agents.
         router = self._create_ha_router()
 
-        directory.add_plugin(constants.L3, self.plugin)
+        directory.add_plugin(plugin_constants.L3, self.plugin)
         with self.subnet(network=self._network, enable_dhcp=False) as snet:
             host_arg = {portbindings.HOST_ID: HOST_4, 'admin_state_up': True}
             with self.port(subnet=snet,
@@ -1110,12 +1112,12 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
 
         with self.port() as port:
             port['port'][portbindings.HOST_ID] = host
-            bindings = [mock.Mock()]
+            bindings = [models.PortBindingLevel()]
             port_context = driver_context.PortContext(
                 self.driver, self.context, port['port'],
                 self.driver.get_network(
                     self.context, port['port']['network_id']),
-                None, bindings)
+                models.PortBinding(), bindings)
             mock.patch.object(port_context, '_expand_segment').start()
             # The point is to provide coverage and to assert that no exceptions
             # are raised.
@@ -1139,12 +1141,12 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 self.mock_fanout.reset_mock()
 
                 p['port'][portbindings.HOST_ID] = HOST
-                bindings = [mock.Mock()]
+                bindings = [models.PortBindingLevel()]
                 port_context = driver_context.PortContext(
                     self.driver, self.context, p['port'],
                     self.driver.get_network(
                         self.context, p['port']['network_id']),
-                    None, bindings)
+                    models.PortBinding(), bindings)
                 mock.patch.object(port_context, '_expand_segment').start()
                 # The point is to provide coverage and to assert that
                 # no exceptions are raised.
@@ -1160,7 +1162,7 @@ class TestL2PopulationRpcTestCase(test_plugin.Ml2PluginV2TestCase):
                 self.driver, self.context, port['port'],
                 self.driver.get_network(
                     self.context, port['port']['network_id']),
-                None, None)
+                models.PortBinding(), None)
             l2pop_mech._fixed_ips_changed(
                 port_context, None, port['port'], (set(['10.0.0.1']), set()))
 
@@ -1302,8 +1304,8 @@ class TestL2PopulationMechDriver(base.BaseTestCase):
                                              mock.Mock(),
                                              port,
                                              mock.MagicMock(),
-                                             mock.Mock(),
-                                             None,
+                                             models.PortBinding(),
+                                             [models.PortBindingLevel()],
                                              original_port=original_port)
 
         mech_driver = l2pop_mech_driver.L2populationMechanismDriver()

@@ -565,7 +565,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
         self._initialize_ingress(port)
 
     def _initialize_egress_ipv6_icmp(self, port):
-        for icmp_type in firewall.ICMPV6_ALLOWED_TYPES:
+        for icmp_type in firewall.ICMPV6_ALLOWED_EGRESS_TYPES:
             self._add_flow(
                 table=ovs_consts.BASE_EGRESS_TABLE,
                 priority=95,
@@ -659,6 +659,18 @@ class OVSFirewallDriver(firewall.FirewallDriver):
                 actions='drop'
             )
 
+        # Drop Router Advertisements from instances
+        self._add_flow(
+            table=ovs_consts.BASE_EGRESS_TABLE,
+            priority=70,
+            in_port=port.ofport,
+            reg_port=port.ofport,
+            dl_type=constants.ETHERTYPE_IPV6,
+            nw_proto=lib_const.PROTO_NUM_IPV6_ICMP,
+            icmp_type=lib_const.ICMPV6_TYPE_RA,
+            actions='drop'
+        )
+
         # Drop all remaining not tracked egress connections
         self._add_flow(
             table=ovs_consts.BASE_EGRESS_TABLE,
@@ -748,7 +760,7 @@ class OVSFirewallDriver(firewall.FirewallDriver):
             )
 
     def _initialize_ingress_ipv6_icmp(self, port):
-        for icmp_type in firewall.ICMPV6_ALLOWED_TYPES:
+        for icmp_type in firewall.ICMPV6_ALLOWED_INGRESS_TYPES:
             self._add_flow(
                 table=ovs_consts.BASE_INGRESS_TABLE,
                 priority=100,

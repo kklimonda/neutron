@@ -50,7 +50,7 @@ function load_rc_for_rally {
 
 
 case $VENV in
-"dsvm-functional"|"dsvm-fullstack")
+"dsvm-functional"|"dsvm-fullstack"|"dsvm-functional-python35"|"dsvm-fullstack-python35")
     # The following need to be set before sourcing
     # configure_for_func_testing.
     GATE_STACK_USER=stack
@@ -81,12 +81,6 @@ case $VENV in
 
     # enable monitoring
     load_rc_hook dstat
-
-    # Make the workspace owned by the stack user
-    sudo chown -R $STACK_USER:$STACK_USER $BASE
-
-    # deploy devstack as per local.conf
-    cd $DEVSTACK_PATH && sudo -H -u $GATE_STACK_USER ./stack.sh
     ;;
 
 "api"|"api-pecan"|"full-ovsfw"|"full-pecan"|"dsvm-scenario-ovs"|"dsvm-scenario-linuxbridge")
@@ -120,18 +114,16 @@ case $VENV in
     if [[ "$FLAVOR" = "dvrskip" ]]; then
         load_conf_hook disable_dvr
     fi
-
-    export DEVSTACK_LOCALCONF=$(cat $LOCAL_CONF)
-    $BASE/new/devstack-gate/devstack-vm-gate.sh
     ;;
 
 "rally")
     load_rc_for_rally
-    export DEVSTACK_LOCALCONF=$(cat $LOCAL_CONF)
-    $BASE/new/devstack-gate/devstack-vm-gate.sh
     ;;
 
 *)
     echo "Unrecognized environment $VENV".
     exit 1
 esac
+
+export DEVSTACK_LOCALCONF=$(cat $LOCAL_CONF)
+$BASE/new/devstack-gate/devstack-vm-gate.sh

@@ -13,17 +13,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api.definitions import network as net_def
 from neutron_lib.api import validators
 from neutron_lib.callbacks import events
 from neutron_lib.callbacks import registry
 from neutron_lib.callbacks import resources
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
 from sqlalchemy.sql import expression as expr
 
 from neutron._i18n import _
-from neutron.api.v2 import attributes
 from neutron.db import _model_query as model_query
 from neutron.db import _resource_extend as resource_extend
 from neutron.db import _utils as db_utils
@@ -83,7 +84,7 @@ class External_net_db_mixin(object):
             context, network_id=net_id)
 
     @staticmethod
-    @resource_extend.extends([attributes.NETWORKS])
+    @resource_extend.extends([net_def.COLLECTION_NAME])
     def _extend_network_dict_l3(network_res, network_db):
         # Comparing with None for converting uuid into bool
         network_res[external_net.EXTERNAL] = network_db.external is not None
@@ -139,7 +140,7 @@ class External_net_db_mixin(object):
             net_data[external_net.EXTERNAL] = False
 
     def _process_l3_delete(self, context, network_id):
-        l3plugin = directory.get_plugin(constants.L3)
+        l3plugin = directory.get_plugin(plugin_constants.L3)
         if l3plugin:
             l3plugin.delete_disassociated_floatingips(context, network_id)
 

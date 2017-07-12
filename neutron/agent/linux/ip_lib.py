@@ -237,7 +237,7 @@ class IPWrapper(SubProcessBase):
         return IPDevice(name, namespace=self.namespace)
 
     def add_vxlan(self, name, vni, group=None, dev=None, ttl=None, tos=None,
-                  local=None, port=None, proxy=False):
+                  local=None, srcport=None, dstport=None, proxy=False):
         cmd = ['add', name, 'type', 'vxlan', 'id', vni]
         if group:
             cmd.extend(['group', group])
@@ -252,10 +252,13 @@ class IPWrapper(SubProcessBase):
         if proxy:
             cmd.append('proxy')
         # tuple: min,max
-        if port and len(port) == 2:
-            cmd.extend(['port', port[0], port[1]])
-        elif port:
-            raise n_exc.NetworkVxlanPortRangeError(vxlan_range=port)
+        if srcport:
+            if len(srcport) == 2 and srcport[0] <= srcport[1]:
+                cmd.extend(['srcport', str(srcport[0]), str(srcport[1])])
+            else:
+                raise n_exc.NetworkVxlanPortRangeError(vxlan_range=srcport)
+        if dstport:
+            cmd.extend(['dstport', str(dstport)])
         self._as_root([], 'link', cmd)
         return (IPDevice(name, namespace=self.namespace))
 
@@ -1080,15 +1083,23 @@ def _arping(ns_name, iface_name, address, count, log_exception):
                 # platforms (>=Ubuntu 14.04), arping exit code can be 1.
                 ip_wrapper.netns.execute(arping_cmd, extra_ok_codes=[1])
             except Exception as exc:
+                # Since this is spawned in a thread and executed 2 seconds
+                # apart, the interface may have been deleted while we were
+                # sleeping. Downgrade message to a warning and return early.
+                exists = device_exists(iface_name, namespace=ns_name)
                 msg = _("Failed sending gratuitous ARP to %(addr)s on "
                         "%(iface)s in namespace %(ns)s: %(err)s")
                 logger_method = LOG.exception
-                if not log_exception:
+                if not (log_exception or exists):
                     logger_method = LOG.warning
                 logger_method(msg, {'addr': address,
                                     'iface': iface_name,
                                     'ns': ns_name,
                                     'err': exc})
+                if not exists:
+                    LOG.warning(_LW("Interface %s might have been deleted "
+                                    "concurrently"), iface_name)
+                    return
 
 
 def send_ip_addr_adv_notif(

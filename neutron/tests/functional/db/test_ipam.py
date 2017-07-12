@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import netaddr
 from neutron_lib import constants
 from neutron_lib import context
 from neutron_lib import exceptions as n_exc
@@ -21,7 +22,8 @@ from oslo_utils import uuidutils
 import testtools
 
 from neutron.db import db_base_plugin_v2 as base_plugin
-from neutron.db import models_v2
+from neutron.objects import ports as port_obj
+from neutron.objects import subnet as subnet_obj
 from neutron.tests.unit import testlib_api
 
 
@@ -62,14 +64,14 @@ class IpamTestCase(testlib_api.SqlTestCase):
         return dicts
 
     def assert_ip_alloc_matches(self, expected):
-        result_set = self.cxt.session.query(models_v2.IPAllocation).all()
+        result_set = port_obj.IPAllocation.get_objects(self.cxt)
         keys = ['port_id', 'ip_address', 'subnet_id', 'network_id']
         actual = self.result_set_to_dicts(result_set, keys)
         self.assertEqual(expected, actual)
 
     def assert_ip_alloc_pool_matches(self, expected):
-        result_set = self.cxt.session.query(models_v2.IPAllocationPool).all()
-        keys = ['first_ip', 'last_ip', 'subnet_id']
+        result_set = subnet_obj.IPAllocationPool.get_objects(self.cxt)
+        keys = ['start', 'end', 'subnet_id']
         actual = self.result_set_to_dicts(result_set, keys)
         self.assertEqual(expected, actual)
 
@@ -117,11 +119,12 @@ class IpamTestCase(testlib_api.SqlTestCase):
         self._create_port(self.port_id, fixed_ip)
 
         ip_alloc_expected = [{'port_id': self.port_id,
-                              'ip_address': fixed_ip[0].get('ip_address'),
+                              'ip_address': netaddr.IPAddress(
+                                  fixed_ip[0].get('ip_address')),
                               'subnet_id': self.subnet_id,
                               'network_id': self.network_id}]
-        ip_alloc_pool_expected = [{'first_ip': '10.10.10.2',
-                                   'last_ip': '10.10.10.6',
+        ip_alloc_pool_expected = [{'start': netaddr.IPAddress('10.10.10.2'),
+                                   'end': netaddr.IPAddress('10.10.10.6'),
                                    'subnet_id': self.subnet_id}]
         self.assert_ip_alloc_matches(ip_alloc_expected)
         self.assert_ip_alloc_pool_matches(ip_alloc_pool_expected)
@@ -131,8 +134,8 @@ class IpamTestCase(testlib_api.SqlTestCase):
         for i in range(1, 6):
             self._create_port(uuidutils.generate_uuid())
 
-        ip_alloc_pool_expected = [{'first_ip': '10.10.10.2',
-                                   'last_ip': '10.10.10.6',
+        ip_alloc_pool_expected = [{'start': netaddr.IPAddress('10.10.10.2'),
+                                   'end': netaddr.IPAddress('10.10.10.6'),
                                    'subnet_id': self.subnet_id}]
         self.assert_ip_alloc_pool_matches(ip_alloc_pool_expected)
         with testtools.ExpectedException(n_exc.IpAddressGenerationFailure):

@@ -392,6 +392,10 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                 self.assertEqual("vxlan-" + seg_id, retval)
                 add_vxlan_fn.assert_called_with("vxlan-" + seg_id, seg_id,
                                                 group="224.0.0.1",
+                                                srcport=(0, 0),
+                                                dstport=None,
+                                                ttl=None,
+                                                tos=None,
                                                 dev=self.lbm.local_int)
                 dv6_fn.assert_called_once_with()
                 cfg.CONF.set_override('l2_population', 'True', 'VXLAN')
@@ -399,6 +403,10 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                                  self.lbm.ensure_vxlan(seg_id))
                 add_vxlan_fn.assert_called_with("vxlan-" + seg_id, seg_id,
                                                 group="224.0.0.1",
+                                                srcport=(0, 0),
+                                                dstport=None,
+                                                ttl=None,
+                                                tos=None,
                                                 dev=self.lbm.local_int,
                                                 proxy=expected_proxy)
 
@@ -415,7 +423,19 @@ class TestLinuxBridgeManager(base.BaseTestCase):
                       ip_version=4,
                       dynamic=False)
         with mock.patch.object(ip_lib.IpAddrCommand, 'add') as add_fn,\
-                mock.patch.object(ip_lib.IpAddrCommand, 'delete') as del_fn:
+                mock.patch.object(ip_lib.IpAddrCommand, 'delete') as del_fn,\
+                mock.patch.object(ip_lib.IpAddrCommand, 'list') as list_fn:
+            # 'list' actually returns a dict, but we're only simulating
+            # whether the device exists or not
+            list_fn.side_effect = [True, False]
+
+            self.lbm._update_interface_ip_details("br0", "eth0",
+                                                  [ipdict], None)
+            self.assertFalse(add_fn.called)
+            self.assertTrue(del_fn.called)
+
+            add_fn.reset_mock()
+            del_fn.reset_mock()
             self.lbm._update_interface_ip_details("br0", "eth0",
                                                   [ipdict], None)
             self.assertTrue(add_fn.called)
@@ -526,6 +546,15 @@ class TestLinuxBridgeManager(base.BaseTestCase):
             self.assertRaises(RuntimeError, self.lbm.add_tap_interface, "123",
                               p_const.TYPE_VLAN, "physnet1", None, "tap1",
                               "foo", None)
+
+    def test_add_tap_interface_owner_compute(self):
+        with mock.patch.object(ip_lib, "device_exists"):
+            with mock.patch.object(self.lbm, "ensure_local_bridge"):
+                self.assertTrue(self.lbm.add_tap_interface("123",
+                                                           p_const.TYPE_LOCAL,
+                                                           "physnet1", None,
+                                                           "tap1",
+                                                           "compute:1", None))
 
     def _test_add_tap_interface(self, dev_owner_prefix):
         with mock.patch.object(ip_lib, "device_exists") as de_fn:

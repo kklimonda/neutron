@@ -21,6 +21,7 @@ from neutron_lib.callbacks import registry
 from neutron_lib.callbacks import resources
 from neutron_lib import constants as const
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_log import helpers as log_helper
@@ -70,7 +71,7 @@ class DVRResourceOperationHandler(object):
 
     @property
     def l3plugin(self):
-        return directory.get_plugin(const.L3)
+        return directory.get_plugin(plugin_constants.L3)
 
     @registry.receives(resources.ROUTER, [events.PRECOMMIT_CREATE])
     def _set_distributed_flag(self, resource, event, trigger, context,
@@ -500,7 +501,7 @@ class DVRResourceOperationHandler(object):
         if not router.extra_attributes.distributed:
             return
 
-        plugin = directory.get_plugin(const.L3)
+        plugin = directory.get_plugin(plugin_constants.L3)
 
         # we calculate which hosts to notify by checking the hosts for
         # the removed port's subnets and then subtract out any hosts still
@@ -591,22 +592,18 @@ class _DVRAgentInterfaceMixin(object):
 
     def _build_routers_list(self, context, routers, gw_ports):
         # Perform a single query up front for all routers
+        routers = super(_DVRAgentInterfaceMixin, self)._build_routers_list(
+            context, routers, gw_ports)
         if not routers:
             return []
         router_ids = [r['id'] for r in routers]
         binding_objs = rb_obj.RouterL3AgentBinding.get_objects(
             context, router_id=router_ids)
         bindings = dict((b.router_id, b) for b in binding_objs)
-
         for rtr in routers:
             gw_port_id = rtr['gw_port_id']
             # Collect gw ports only if available
             if gw_port_id and gw_ports.get(gw_port_id):
-                rtr['gw_port'] = gw_ports[gw_port_id]
-                if 'enable_snat' in rtr[l3.EXTERNAL_GW_INFO]:
-                    rtr['enable_snat'] = (
-                        rtr[l3.EXTERNAL_GW_INFO]['enable_snat'])
-
                 binding = bindings.get(rtr['id'])
                 if not binding:
                     rtr['gw_port_host'] = None
@@ -963,10 +960,10 @@ class _DVRAgentInterfaceMixin(object):
             return update_port
 
 
-class L3_NAT_with_dvr_db_mixin(l3_db.L3_NAT_db_mixin,
-                               l3_attrs_db.ExtraAttributesMixin,
+class L3_NAT_with_dvr_db_mixin(_DVRAgentInterfaceMixin,
                                DVRResourceOperationHandler,
-                               _DVRAgentInterfaceMixin):
+                               l3_attrs_db.ExtraAttributesMixin,
+                               l3_db.L3_NAT_db_mixin):
     """Mixin class to enable DVR support."""
     router_device_owners = (
         l3_db.L3_NAT_db_mixin.router_device_owners +

@@ -28,10 +28,7 @@ CONF = config.CONF
 
 class RoutersTest(base_routers.BaseRouterTest):
 
-    @classmethod
-    @test.requires_ext(extension="router", service="network")
-    def skip_checks(cls):
-        super(RoutersTest, cls).skip_checks()
+    required_extensions = ['router']
 
     @classmethod
     def resource_setup(cls):
@@ -231,10 +228,7 @@ class RoutersIpV6Test(RoutersTest):
 
 class DvrRoutersTest(base_routers.BaseRouterTest):
 
-    @classmethod
-    @test.requires_ext(extension="dvr", service="network")
-    def skip_checks(cls):
-        super(DvrRoutersTest, cls).skip_checks()
+    required_extensions = ['dvr']
 
     @decorators.idempotent_id('141297aa-3424-455d-aa8d-f2d95731e00a')
     def test_create_distributed_router(self):
@@ -248,8 +242,15 @@ class DvrRoutersTest(base_routers.BaseRouterTest):
 
     @decorators.idempotent_id('644d7a4a-01a1-4b68-bb8d-0c0042cb1729')
     def test_convert_centralized_router(self):
-        router = self._create_router(data_utils.rand_name('router'))
-        self.assertNotIn('distributed', router)
+        router_args = {'tenant_id': self.client.tenant_id,
+                       'distributed': False, 'ha': False}
+        router = self.admin_client.create_router(
+            data_utils.rand_name('router'), admin_state_up=False,
+            **router_args)['router']
+        self.addCleanup(self.admin_client.delete_router,
+                        router['id'])
+        self.assertFalse(router['distributed'])
+        self.assertFalse(router['ha'])
         update_body = self.admin_client.update_router(router['id'],
                                                       distributed=True)
         self.assertTrue(update_body['router']['distributed'])
@@ -257,14 +258,12 @@ class DvrRoutersTest(base_routers.BaseRouterTest):
         self.assertTrue(show_body['router']['distributed'])
         show_body = self.client.show_router(router['id'])
         self.assertNotIn('distributed', show_body['router'])
+        self.assertNotIn('ha', show_body['router'])
 
 
 class HaRoutersTest(base_routers.BaseRouterTest):
 
-    @classmethod
-    @test.requires_ext(extension="l3-ha", service="network")
-    def skip_checks(cls):
-        super(HaRoutersTest, cls).skip_checks()
+    required_extensions = ['l3-ha']
 
     @decorators.idempotent_id('77db8eae-3aa3-4e61-bf2a-e739ce042e53')
     def test_convert_legacy_router(self):
@@ -281,12 +280,8 @@ class HaRoutersTest(base_routers.BaseRouterTest):
 
 class RoutersSearchCriteriaTest(base.BaseSearchCriteriaTest):
 
+    required_extensions = ['router']
     resource = 'router'
-
-    @classmethod
-    @test.requires_ext(extension="router", service="network")
-    def skip_checks(cls):
-        super(RoutersSearchCriteriaTest, cls).skip_checks()
 
     @classmethod
     def resource_setup(cls):

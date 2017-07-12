@@ -13,8 +13,8 @@
 #    under the License.
 
 import copy
-from keystoneauth1 import exceptions as ks_exc
 
+from keystoneauth1 import exceptions as ks_exc
 import mock
 import netaddr
 from neutron_lib.api.definitions import portbindings
@@ -880,6 +880,19 @@ class TestSegmentAwareIpam(SegmentAwareIpamTestCase):
         # Don't allocate IPs in this case because we didn't give binding info
         self.assertEqual(0, len(res['port']['fixed_ips']))
 
+    def test_port_create_fixed_ips_with_segment_subnets_no_binding_info(self):
+        """Fixed IP provided and no binding info, do not defer IP allocation"""
+        network, segment, subnet = self._create_test_segment_with_subnet()
+        response = self._create_port(self.fmt,
+                                     net_id=network['network']['id'],
+                                     tenant_id=network['network']['tenant_id'],
+                                     fixed_ips=[
+                                         {'subnet_id': subnet['subnet']['id']}
+                                     ])
+        res = self.deserialize(self.fmt, response)
+        # We gave fixed_ips, allocate IPs in this case despite no binding info
+        self._validate_immediate_ip_allocation(res['port']['id'])
+
     def _assert_one_ip_in_subnet(self, response, cidr):
         res = self.deserialize(self.fmt, response)
         self.assertEqual(1, len(res['port']['fixed_ips']))
@@ -1411,12 +1424,32 @@ class TestSegmentAwareIpam(SegmentAwareIpamTestCase):
 
 
 class TestSegmentAwareIpamML2(TestSegmentAwareIpam):
+
+    VLAN_MIN = 200
+    VLAN_MAX = 209
+
     def setUp(self):
-        config.cfg.CONF.set_override('network_vlan_ranges',
-                                     ['physnet:200:209', 'physnet0:200:209',
-                                      'physnet1:200:209', 'physnet2:200:209'],
-                                     group='ml2_type_vlan')
+        # NOTE(mlavalle): ml2_type_vlan requires to be registered before used.
+        # This piece was refactored and removed from .config, so it causes
+        # a problem, when tests are executed with pdb.
+        # There is no problem when tests are running without debugger.
+        driver_type.register_ml2_drivers_vlan_opts()
+        config.cfg.CONF.set_override(
+            'network_vlan_ranges',
+            ['physnet:%s:%s' % (self.VLAN_MIN, self.VLAN_MAX),
+             'physnet0:%s:%s' % (self.VLAN_MIN, self.VLAN_MAX),
+             'physnet1:%s:%s' % (self.VLAN_MIN, self.VLAN_MAX),
+             'physnet2:%s:%s' % (self.VLAN_MIN, self.VLAN_MAX)],
+            group='ml2_type_vlan')
         super(TestSegmentAwareIpamML2, self).setUp(plugin='ml2')
+
+    def test_segmentation_id_stored_in_db(self):
+        network, segment, subnet = self._create_test_segment_with_subnet()
+        self.assertTrue(self.VLAN_MIN <=
+                        segment['segment']['segmentation_id'] <= self.VLAN_MAX)
+        retrieved_segment = self._show('segments', segment['segment']['id'])
+        self.assertEqual(segment['segment']['segmentation_id'],
+                         retrieved_segment['segment']['segmentation_id'])
 
 
 class TestNovaSegmentNotifier(SegmentAwareIpamTestCase):
@@ -2097,7 +2130,10 @@ class PlacementAPIClientTestCase(base.DietTestCase):
         placement_client.PlacementAPIClient()
 
         load_auth_mock.assert_called_once_with(cfg.CONF, 'placement')
-        ks_sess_mock.assert_called_once_with(auth=load_auth_mock.return_value)
+        ks_sess_mock.assert_called_once_with(auth=load_auth_mock.return_value,
+                                             cert=None,
+                                             timeout=None,
+                                             verify=True)
 
     def test_create_resource_provider(self):
         expected_payload = 'fake_resource_provider'
