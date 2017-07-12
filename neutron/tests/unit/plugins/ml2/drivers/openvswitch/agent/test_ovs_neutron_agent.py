@@ -634,10 +634,15 @@ class TestOvsNeutronAgent(object):
             added=set([3]), current=vif_port_set,
             removed=set([2]), updated=set([1])
         )
-        with mock.patch.object(self.agent, 'tun_br', autospec=True):
+        with mock.patch.object(self.agent, 'tun_br', autospec=True), \
+                mock.patch.object(self.agent.plugin_rpc,
+                                  'update_device_list') as upd_l:
             actual = self.mock_scan_ports(
                 vif_port_set, registered_ports, port_tags_dict=port_tags_dict)
         self.assertEqual(expected, actual)
+        upd_l.assert_called_once_with(mock.ANY, [], set([1]),
+                                      self.agent.agent_id,
+                                      self.agent.conf.host)
 
     def test_update_retries_map_and_remove_devs_not_to_retry(self):
         failed_devices_retries_map = {
@@ -3042,8 +3047,6 @@ class TestOvsDvrNeutronAgent(object):
                                        priority=1),
                 mock.call.install_drop(table_id=constants.DVR_TO_SRC_MAC_VLAN,
                                        priority=1),
-                mock.call.install_normal(table_id=constants.LOCAL_SWITCHING,
-                                         priority=1),
                 mock.call.install_drop(table_id=constants.LOCAL_SWITCHING,
                                        priority=2,
                                        in_port=ioport),

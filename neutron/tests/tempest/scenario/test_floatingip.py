@@ -19,6 +19,7 @@ from tempest.lib.common.utils import data_utils
 from tempest.lib import decorators
 from tempest import test
 import testscenarios
+from testscenarios.scenarios import multiply_scenarios
 
 from neutron.tests.tempest.common import ssh
 from neutron.tests.tempest import config
@@ -45,7 +46,7 @@ class FloatingIpTestCasesMixin(object):
         cls.create_router_interface(cls.router['id'], cls.subnet['id'])
         cls.keypair = cls.create_keypair()
 
-        cls.secgroup = cls.manager.network_client.create_security_group(
+        cls.secgroup = cls.os_primary.network_client.create_security_group(
             name=data_utils.rand_name('secgroup-'))['security_group']
         cls.security_groups.append(cls.secgroup)
         cls.create_loginable_secgroup_rule(secgroup_id=cls.secgroup['id'])
@@ -77,18 +78,34 @@ class FloatingIpTestCasesMixin(object):
             image_ref=CONF.compute.image_ref,
             key_name=self.keypair['name'],
             networks=[{'port': port['id']}])['server']
-        waiters.wait_for_server_status(self.manager.servers_client,
+        waiters.wait_for_server_status(self.os_primary.servers_client,
                                        server['id'],
                                        constants.SERVER_STATUS_ACTIVE)
         return {'port': port, 'fip': fip, 'server': server}
 
     def _test_east_west(self):
+        # The proxy VM is used to control the source VM when it doesn't
+        # have a floating-ip.
+        if self.src_has_fip:
+            proxy = None
+            proxy_client = None
+        else:
+            proxy = self._create_server()
+            proxy_client = ssh.Client(proxy['fip']['floating_ip_address'],
+                                      CONF.validation.image_ssh_user,
+                                      pkey=self.keypair['private_key'])
+
         # Source VM
-        server1 = self._create_server()
-        server1_ip = server1['fip']['floating_ip_address']
-        ssh_client = ssh.Client(server1_ip,
+        if self.src_has_fip:
+            src_server = self._create_server()
+            src_server_ip = src_server['fip']['floating_ip_address']
+        else:
+            src_server = self._create_server(create_floating_ip=False)
+            src_server_ip = src_server['port']['fixed_ips'][0]['ip_address']
+        ssh_client = ssh.Client(src_server_ip,
                                 CONF.validation.image_ssh_user,
-                                pkey=self.keypair['private_key'])
+                                pkey=self.keypair['private_key'],
+                                proxy_client=proxy_client)
 
         # Destination VM
         if self.dest_has_fip:
@@ -107,11 +124,13 @@ class FloatingIpTestCasesMixin(object):
 
 class FloatingIpSameNetwork(FloatingIpTestCasesMixin,
                             base.BaseTempestTestCase):
-    # REVISIT(yamamoto): 'SRC without FIP' case is possible?
-    scenarios = [
+    scenarios = multiply_scenarios([
+        ('SRC with FIP', dict(src_has_fip=True)),
+        ('SRC without FIP', dict(src_has_fip=False)),
+    ], [
         ('DEST with FIP', dict(dest_has_fip=True)),
         ('DEST without FIP', dict(dest_has_fip=False)),
-    ]
+    ])
 
     same_network = True
 
@@ -122,11 +141,13 @@ class FloatingIpSameNetwork(FloatingIpTestCasesMixin,
 
 class FloatingIpSeparateNetwork(FloatingIpTestCasesMixin,
                                 base.BaseTempestTestCase):
-    # REVISIT(yamamoto): 'SRC without FIP' case is possible?
-    scenarios = [
+    scenarios = multiply_scenarios([
+        ('SRC with FIP', dict(src_has_fip=True)),
+        ('SRC without FIP', dict(src_has_fip=False)),
+    ], [
         ('DEST with FIP', dict(dest_has_fip=True)),
         ('DEST without FIP', dict(dest_has_fip=False)),
-    ]
+    ])
 
     same_network = False
 

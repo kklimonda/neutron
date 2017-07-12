@@ -16,14 +16,15 @@ NOTE: This module shall not be used by external projects. It will be moved
       to neutron-lib in due course, and then it can be used from there.
 """
 
+from neutron_lib.api import attributes
 from neutron_lib.db import utils as db_utils
 from oslo_db.sqlalchemy import utils as sa_utils
 from sqlalchemy import sql, or_, and_
 from sqlalchemy.ext import associationproxy
 
-from neutron.api.v2 import attributes
 from neutron.common import utils
 from neutron.db import _utils as ndb_utils
+from neutron.objects import utils as obj_utils
 
 # Classes implementing extensions will register hooks into this dictionary
 # for "augmenting" the "core way" of building a query for retrieving objects
@@ -190,6 +191,16 @@ def apply_filters(query, model, filters, context=None):
                     # do multiple equals matches
                     query = query.filter(
                         or_(*[column == v for v in value]))
+                elif isinstance(value, obj_utils.StringMatchingFilterObj):
+                    if value.is_contains:
+                        query = query.filter(
+                            column.contains(value.contains))
+                    elif value.is_starts:
+                        query = query.filter(
+                            column.startswith(value.starts))
+                    elif value.is_ends:
+                        query = query.filter(
+                            column.endswith(value.ends))
                 else:
                     query = query.filter(column.in_(value))
             elif key == 'shared' and hasattr(model, 'rbac_entries'):

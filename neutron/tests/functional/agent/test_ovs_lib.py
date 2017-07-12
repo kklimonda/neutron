@@ -206,8 +206,8 @@ class OVSBridgeTestCase(OVSBridgeTestBase):
 
     def test_add_tunnel_port_ipv4(self):
         attrs = {
-            'remote_ip': '192.0.2.1',  # RFC 5737 TEST-NET-1
-            'local_ip': '198.51.100.1',  # RFC 5737 TEST-NET-2
+            'remote_ip': self.get_test_net_address(1),
+            'local_ip': self.get_test_net_address(2),
         }
         self._test_add_tunnel_port(attrs)
 
@@ -378,6 +378,23 @@ class OVSBridgeTestCase(OVSBridgeTestBase):
         self.assertEqual(70, burst)
         self.br.delete_egress_bw_limit_for_port(port_name)
         max_rate, burst = self.br.get_egress_bw_limit_for_port(port_name)
+        self.assertIsNone(max_rate)
+        self.assertIsNone(burst)
+
+    def test_ingress_bw_limit(self):
+        port_name, _ = self.create_ovs_port()
+        self.br.update_ingress_bw_limit_for_port(port_name, 700, 70)
+        max_rate, burst = self.br.get_ingress_bw_limit_for_port(port_name)
+        self.assertEqual(700, max_rate)
+        self.assertEqual(70, burst)
+
+        self.br.update_ingress_bw_limit_for_port(port_name, 750, 100)
+        max_rate, burst = self.br.get_ingress_bw_limit_for_port(port_name)
+        self.assertEqual(750, max_rate)
+        self.assertEqual(100, burst)
+
+        self.br.delete_ingress_bw_limit_for_port(port_name)
+        max_rate, burst = self.br.get_ingress_bw_limit_for_port(port_name)
         self.assertIsNone(max_rate)
         self.assertIsNone(burst)
 

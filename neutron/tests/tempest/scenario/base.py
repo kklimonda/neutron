@@ -41,7 +41,7 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
     @classmethod
     def resource_cleanup(cls):
         for keypair in cls.keypairs:
-            cls.manager.keypairs_client.delete_keypair(
+            cls.os_primary.keypairs_client.delete_keypair(
                 keypair_name=keypair['name'])
 
         super(BaseTempestTestCase, cls).resource_cleanup()
@@ -71,7 +71,7 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
         if not security_groups:
             security_groups = [{'name': 'default'}]
 
-        server = self.manager.servers_client.create_server(
+        server = self.os_primary.servers_client.create_server(
             name=name,
             flavorRef=flavor_ref,
             imageRef=image_ref,
@@ -81,15 +81,15 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
 
         self.addCleanup(test_utils.call_and_ignore_notfound_exc,
             waiters.wait_for_server_termination,
-            self.manager.servers_client, server['server']['id'])
+            self.os_primary.servers_client, server['server']['id'])
         self.addCleanup(test_utils.call_and_ignore_notfound_exc,
-                        self.manager.servers_client.delete_server,
+                        self.os_primary.servers_client.delete_server,
                         server['server']['id'])
         return server
 
     @classmethod
     def create_keypair(cls, client=None):
-        client = client or cls.manager.keypairs_client
+        client = client or cls.os_primary.keypairs_client
         name = data_utils.rand_name('keypair-test')
         body = client.create_keypair(name=name)
         cls.keypairs.append(body['keypair'])
@@ -97,7 +97,7 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
 
     @classmethod
     def create_secgroup_rules(cls, rule_list, secgroup_id=None):
-        client = cls.manager.network_client
+        client = cls.os_primary.network_client
         if not secgroup_id:
             sgs = client.list_security_groups()['security_groups']
             for sg in sgs:
@@ -155,7 +155,7 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
         return router
 
     def create_and_associate_floatingip(self, port_id):
-        fip = self.manager.network_client.create_floatingip(
+        fip = self.os_primary.network_client.create_floatingip(
             CONF.network.public_network_id,
             port_id=port_id)['floatingip']
         self.floating_ips.append(fip)
@@ -172,7 +172,7 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
         self.subnet = self.create_subnet(self.network)
         LOG.debug("Created subnet %s", self.subnet['id'])
 
-        secgroup = self.manager.network_client.create_security_group(
+        secgroup = self.os_primary.network_client.create_security_group(
             name=data_utils.rand_name('secgroup-'))
         LOG.debug("Created security group %s",
                   secgroup['security_group']['name'])
@@ -189,7 +189,7 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
             key_name=self.keypair['name'],
             networks=[{'uuid': self.network['id']}],
             security_groups=[{'name': secgroup['security_group']['name']}])
-        waiters.wait_for_server_status(self.manager.servers_client,
+        waiters.wait_for_server_status(self.os_primary.servers_client,
                                        self.server['server']['id'],
                                        constants.SERVER_STATUS_ACTIVE)
         port = self.client.list_ports(network_id=self.network['id'],
@@ -211,12 +211,12 @@ class BaseTempestTestCase(base_api.BaseNetworkTest):
             LOG.debug('Console output not supported, cannot log')
             return
         if not servers:
-            servers = self.manager.servers_client.list_servers()
+            servers = self.os_primary.servers_client.list_servers()
             servers = servers['servers']
         for server in servers:
             try:
                 console_output = (
-                    self.manager.servers_client.get_console_output(
+                    self.os_primary.servers_client.get_console_output(
                         server['id'])['output'])
                 LOG.debug('Console output for %s\nbody=\n%s',
                           server['id'], console_output)

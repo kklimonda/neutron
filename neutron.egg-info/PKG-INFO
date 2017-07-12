@@ -1,6 +1,6 @@
 Metadata-Version: 1.1
 Name: neutron
-Version: 11.0.0.0b2
+Version: 11.0.0.0b3.dev292
 Summary: OpenStack Networking
 Home-page: http://docs.openstack.org/developer/neutron/
 Author: OpenStack

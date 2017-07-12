@@ -26,11 +26,11 @@ from neutron.tests import base as test_base
 # corresponding version bump in the affected objects. Please keep the list in
 # alphabetic order.
 object_data = {
-    '_DefaultSecurityGroup': '1.0-971520cb2e0ec06d747885a0cf78347f',
     'AddressScope': '1.0-dd0dfdb67775892d3adc090e28e43bd8',
     'Agent': '1.0-7106cb40117a8d1f042545796ed8787d',
     'AllowedAddressPair': '1.0-9f9186b6f952fbf31d257b0458b852c0',
     'AutoAllocatedTopology': '1.0-74642e58c53bf3610dc224c59f81b242',
+    'DefaultSecurityGroup': '1.0-971520cb2e0ec06d747885a0cf78347f',
     'DistributedPortBinding': '1.0-39c0d17b281991dcb66716fee5a8bef2',
     'DNSNameServer': '1.0-bf87a85327e2d812d1666ede99d9918b',
     'ExternalNetwork': '1.0-53d885e033cb931f9bb3bdd6bbe3f0ce',
@@ -50,6 +50,7 @@ object_data = {
     'IpamSubnet': '1.0-713de401682a70f34891e13af645fa08',
     'MeteringLabel': '1.0-cc4b620a3425222447cbe459f62de533',
     'MeteringLabelRule': '1.0-b5c5717e7bab8d1af1623156012a5842',
+    'Log': '1.0-6391351c0f34ed34375a19202f361d24',
     'Network': '1.0-f2f6308f79731a767b92b26b0f4f3849',
     'NetworkDNSDomain': '1.0-420db7910294608534c1e2e30d6d8319',
     'NetworkPortSecurity': '1.0-b30802391a87945ee9c07582b4ff95e3',
@@ -68,6 +69,8 @@ object_data = {
     'QosRuleType': '1.2-e6fd08fcca152c339cbd5e9b94b1b8e7',
     'QosPolicy': '1.6-4adb0cde3102c10d8970ec9487fd7fe7',
     'QosPolicyDefault': '1.0-59e5060eedb1f06dd0935a244d27d11c',
+    'QosPolicyNetworkBinding': '1.0-df53a1e0f675aab8d27a1ccfed38dc42',
+    'QosPolicyPortBinding': '1.0-66cb364ac99aa64523ade07f9f868ea6',
     'Quota': '1.0-6bb6a0f1bd5d66a2134ffa1a61873097',
     'QuotaUsage': '1.0-6fbf820368681aac7c5d664662605cf9',
     'Reservation': '1.0-49929fef8e82051660342eed51b48f2a',
@@ -75,6 +78,7 @@ object_data = {
     'Route': '1.0-a9883a63b416126f9e345523ec09483b',
     'RouterExtraAttributes': '1.0-ef8d61ae2864f0ec9af0ab7939cab318',
     'RouterL3AgentBinding': '1.0-c5ba6c95e3a4c1236a55f490cd67da82',
+    'RouterPort': '1.0-c8c8f499bcdd59186fcd83f323106908',
     'RouterRoute': '1.0-07fc5337c801fb8c6ccfbcc5afb45907',
     'SecurityGroup': '1.0-e26b90c409b31fd2e3c6fcec402ac0b9',
     'SecurityGroupRule': '1.0-e9b8dace9d48b936c62ad40fe1f339d5',

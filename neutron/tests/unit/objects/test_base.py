@@ -40,11 +40,14 @@ from neutron.objects import common_types
 from neutron.objects.db import api as obj_db_api
 from neutron.objects import exceptions as o_exc
 from neutron.objects import flavor
+from neutron.objects.logapi import event_types
 from neutron.objects import network as net_obj
 from neutron.objects import ports
+from neutron.objects.qos import policy as qos_policy
 from neutron.objects import rbac_db
 from neutron.objects import securitygroup
 from neutron.objects import subnet
+from neutron.objects import utils as obj_utils
 from neutron.tests import base as test_base
 from neutron.tests import tools
 from neutron.tests.unit.db import test_db_base_plugin_v2
@@ -373,6 +376,19 @@ class FakeNeutronObjectDictOfMiscValues(base.NeutronDbObject):
     }
 
 
+@obj_base.VersionedObjectRegistry.register_if(False)
+class FakeNeutronObjectListOfDictOfMiscValues(base.NeutronDbObject):
+    # Version 1.0: Initial version
+    VERSION = '1.0'
+
+    db_model = FakeModel
+
+    fields = {
+        'id': common_types.UUIDField(),
+        'list_of_dicts_field': common_types.ListOfDictOfMiscValuesField(),
+    }
+
+
 def get_random_dscp_mark():
     return random.choice(constants.VALID_DSCP_MARKS)
 
@@ -416,6 +432,10 @@ def get_random_dict():
     }
 
 
+def get_random_dicts_list():
+    return [get_random_dict() for _ in range(5)]
+
+
 def get_set_of_random_uuids():
     return {
         uuidutils.generate_uuid()
@@ -426,6 +446,7 @@ def get_set_of_random_uuids():
 # NOTE: The keys in this dictionary have alphabetic order.
 FIELD_TYPE_VALUE_GENERATOR_MAP = {
     common_types.DictOfMiscValuesField: get_random_dict,
+    common_types.ListOfDictOfMiscValuesField: get_random_dicts_list,
     common_types.DomainNameField: get_random_domain_name,
     common_types.DscpMarkField: get_random_dscp_mark,
     common_types.EtherTypeEnumField: tools.get_random_ether_type,
@@ -445,6 +466,7 @@ FIELD_TYPE_VALUE_GENERATOR_MAP = {
     common_types.SetOfUUIDsField: get_set_of_random_uuids,
     common_types.UUIDField: uuidutils.generate_uuid,
     common_types.VlanIdRangeField: tools.get_random_vlan,
+    event_types.SecurityEventField: tools.get_random_security_event,
     obj_fields.BooleanField: tools.get_random_boolean,
     obj_fields.DateTimeField: tools.get_random_datetime,
     obj_fields.DictOfStringsField: get_random_dict_of_strings,
@@ -834,6 +856,61 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
                 self.context, {'unknown_filter': 'new_value'},
                 validate_filters=False, unknown_filter='value')
 
+    def _prep_string_field(self):
+        self.filter_string_field = None
+        # find the first string field to use as string matching filter
+        for field in self.obj_fields[0]:
+            if isinstance(field, obj_fields.StringField):
+                self.filter_string_field = field
+                break
+
+        if self.filter_string_field is None:
+            self.skipTest('There is no string field in this object')
+
+    def test_get_objects_with_string_matching_filters_contains(self):
+        self._prep_string_field()
+
+        filter_dict_contains = {
+            self.filter_string_field: obj_utils.StringContains(
+                "random_thing")}
+
+        with mock.patch.object(
+                obj_db_api, 'get_objects',
+                side_effect=self.fake_get_objects):
+            res = self._test_class.get_objects(self.context,
+                                               **filter_dict_contains)
+            self.assertEqual([], res)
+
+    def test_get_objects_with_string_matching_filters_starts(self):
+        self._prep_string_field()
+
+        filter_dict_starts = {
+            self.filter_string_field: obj_utils.StringStarts(
+                "random_thing")
+        }
+
+        with mock.patch.object(
+                obj_db_api, 'get_objects',
+                side_effect=self.fake_get_objects):
+            res = self._test_class.get_objects(self.context,
+                                               **filter_dict_starts)
+            self.assertEqual([], res)
+
+    def test_get_objects_with_string_matching_filters_ends(self):
+        self._prep_string_field()
+
+        filter_dict_ends = {
+            self.filter_string_field: obj_utils.StringEnds(
+                "random_thing")
+        }
+
+        with mock.patch.object(
+                obj_db_api, 'get_objects',
+                side_effect=self.fake_get_objects):
+            res = self._test_class.get_objects(self.context,
+                                               **filter_dict_ends)
+            self.assertEqual([], res)
+
     def test_delete_objects(self):
         '''Test that delete_objects calls to underlying db_api.'''
         with mock.patch.object(
@@ -1202,6 +1279,10 @@ class BaseObjectIfaceWithProjectIdTestCase(BaseObjectIfaceTestCase):
         self.assertEqual(set(['field2']), obj.obj_what_changed())
         self.assertEqual(tenant_id, obj.project_id)
 
+    def test_tenant_id_filter_added_when_project_id_present(self):
+        self._test_class.get_objects(
+            self.context, tenant_id=self.obj_fields[0]['project_id'])
+
 
 class BaseDbObjectMultipleForeignKeysTestCase(_BaseObjectTestCase,
                                               test_base.BaseTestCase):
@@ -1270,6 +1351,28 @@ class BaseObjectIfaceDictMiscValuesTestCase(_BaseObjectTestCase,
         self.assertEqual(misc_list, obj.dict_field['misc_list'])
 
 
+class BaseObjectIfaceListDictMiscValuesTestCase(_BaseObjectTestCase,
+                                                test_base.BaseTestCase):
+
+    _test_class = FakeNeutronObjectListOfDictOfMiscValues
+
+    def test_list_of_dict_of_misc_values(self):
+        obj_id = uuidutils.generate_uuid()
+        float_value = 1.23
+        misc_list = [True, float_value]
+        obj_dict = {
+            'bool': True,
+            'float': float_value,
+            'misc_list': misc_list
+        }
+        obj = self._test_class(
+            self.context, id=obj_id, list_of_dicts_field=[obj_dict])
+        self.assertEqual(1, len(obj.list_of_dicts_field))
+        self.assertTrue(obj.list_of_dicts_field[0]['bool'])
+        self.assertEqual(float_value, obj.list_of_dicts_field[0]['float'])
+        self.assertEqual(misc_list, obj.list_of_dicts_field[0]['misc_list'])
+
+
 class BaseDbObjectTestCase(_BaseObjectTestCase,
                            test_db_base_plugin_v2.DbOperationBoundMixin):
     def setUp(self):
@@ -1290,8 +1393,10 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
                         objclass.db_model(**objclass_fields)
                     ]
 
-    def _create_test_network(self, name='test-network1'):
-        _network = net_obj.Network(self.context, name=name)
+    def _create_test_network(self, name='test-network1', network_id=None):
+        network_id = (uuidutils.generate_uuid() if network_id is None
+                      else network_id)
+        _network = net_obj.Network(self.context, name=name, id=network_id)
         _network.create()
         return _network
 
@@ -1419,6 +1524,11 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
         service_profile_obj = flavor.ServiceProfile(self.context, **attrs)
         service_profile_obj.create()
         return service_profile_obj.id
+
+    def _create_test_qos_policy(self, **qos_policy_attrs):
+        _qos_policy = qos_policy.QosPolicy(self.context, **qos_policy_attrs)
+        _qos_policy.create()
+        return _qos_policy
 
     def test_get_standard_attr_id(self):
 

@@ -171,8 +171,8 @@ class QosPolicyDbObjectTestCase(test_base.BaseDbObjectTestCase,
     def test_attach_network_nonexistent_network(self):
 
         obj = self._create_test_policy()
-        self.assertRaises(n_exc.NetworkQosBindingNotFound,
-                          obj.attach_network, 'non-existent-network')
+        self.assertRaises(n_exc.NetworkQosBindingError,
+                          obj.attach_network, uuidutils.generate_uuid())
 
     def test_attach_network_get_policy_network(self):
 
@@ -203,19 +203,19 @@ class QosPolicyDbObjectTestCase(test_base.BaseDbObjectTestCase,
     def test_attach_port_nonexistent_port(self):
 
         obj = self._create_test_policy()
-        self.assertRaises(n_exc.PortQosBindingNotFound,
-                          obj.attach_port, 'non-existent-port')
+        self.assertRaises(n_exc.PortQosBindingError,
+                          obj.attach_port, uuidutils.generate_uuid())
 
     def test_attach_network_nonexistent_policy(self):
 
         policy_obj = self._make_object(self.obj_fields[0])
-        self.assertRaises(n_exc.NetworkQosBindingNotFound,
+        self.assertRaises(n_exc.NetworkQosBindingError,
                           policy_obj.attach_network, self._network_id)
 
     def test_attach_port_nonexistent_policy(self):
 
         policy_obj = self._make_object(self.obj_fields[0])
-        self.assertRaises(n_exc.PortQosBindingNotFound,
+        self.assertRaises(n_exc.PortQosBindingError,
                           policy_obj.attach_port, self._port['id'])
 
     def test_attach_port_get_port_policy(self):

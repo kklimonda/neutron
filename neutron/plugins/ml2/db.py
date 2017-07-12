@@ -82,7 +82,7 @@ def get_locked_port_and_binding(context, port_id):
 def set_binding_levels(context, levels):
     if levels:
         for level in levels:
-            context.session.add(level)
+            level.persist_state_to_session(context.session)
         LOG.debug("For port %(port_id)s, host %(host)s, "
                   "set binding levels %(levels)s",
                   {'port_id': levels[0].port_id,
@@ -110,9 +110,9 @@ def get_binding_levels(context, port_id, host):
 @db_api.context_manager.writer
 def clear_binding_levels(context, port_id, host):
     if host:
-        (context.session.query(models.PortBindingLevel).
-         filter_by(port_id=port_id, host=host).
-         delete())
+        for l in (context.session.query(models.PortBindingLevel).
+                  filter_by(port_id=port_id, host=host)):
+            context.session.delete(l)
         LOG.debug("For port %(port_id)s, host %(host)s, "
                   "cleared binding levels",
                   {'port_id': port_id,

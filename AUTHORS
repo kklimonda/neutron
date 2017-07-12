@@ -44,6 +44,7 @@ Andre Pech <apech@aristanetworks.com>
 Andreas Jaeger <aj@suse.com>
 Andreas Jaeger <aj@suse.de>
 Andreas Scheuring <andreas.scheuring@de.ibm.com>
+Andrew Austin <aaustin@redhat.com>
 Andrew Boik <dboik@cisco.com>
 Andrew Boik <drew.boik@gmail.com>
 Andrey Epifanov <aepifanov@mirantis.com>
@@ -57,12 +58,14 @@ Anindita Das <anindita.das@intel.com>
 Ankur Gupta <ankur.gupta@intel.com>
 Ann <akamyshnikova@mirantis.com>
 Ann Kamyshnikova <akamyshnikova@mirantis.com>
+Ann Taraday <akamyshnikova@mirantis.com>
 Anna Khmelnitsky <akhmelnitsky@vmware.com>
 Ante Karamatic <ante.karamatic@canonical.com>
 Anthony Chow <vCloudernBeer@gmail.com>
 Anthony Veiga <anthony_veiga@cable.comcast.com>
 Anton Frolov <anfrolov@mirantis.com>
 Aparupa <apdasgup@cisco.com>
+Aqsa <aqsamm@gmail.com>
 Aradhana Singh <aradhana1.singh@intel.com>
 Arata Notsu <notsu@virtualtech.jp>
 Arie Bregman <abregman@redhat.com>
@@ -152,6 +155,7 @@ Dane LeBlanc <leblancd@cisco.com>
 Daniel Alvarez <dalvarez@redhat.com>
 Daniel Gollub <d.gollub@telekom.de>
 Daniel Mellado <dmellado@redhat.com>
+Daniel Russell <danielr@hostworks.com.au>
 Darek Smigiel (dasm) <smigiel.dariusz@gmail.com>
 Darek Smigiel <smigiel.dariusz@gmail.com>
 Dariusz Smigiel (dasm) <dariusz.smigiel@intel.com>
@@ -710,6 +714,7 @@ Sumit Naiksatam <snaiksat@cisco.com>
 Sumit Naiksatam <sumitnaiksatam@gmail.com>
 Sushil Kumar <sushil.kumar2@globallogic.com>
 Sven Anderson <sven@redhat.com>
+Swaminathan Vasudevan <SVasudevan@suse.com>
 Swaminathan Vasudevan <swaminathan.vasudevan@hp.com>
 Swaminathan Vasudevan <swaminathan.vasudevan@hpe.com>
 Swapnil Kulkarni (coolsvap) <me@coolsvap.net>
@@ -746,11 +751,13 @@ TrinathSomanchi <trinath.somanchi@freescale.com>
 Tu Hong Jun <tuhongj@cn.ibm.com>
 Tyler Smith <tylesmit@cisco.com>
 Vadivel Poonathan <vadivel.poonathan@alcatel-lucent.com>
+Van Hung Pham <hungpv@vn.fujitsu.com>
 Vasiliy Khomenko <vasiliyk@yahoo-inc.com>
 Vasyl Saienko <vsaienko@mirantis.com>
 Victor Laza <vlaza@cloudbasesolutions.com>
 Victor Morales <victor.morales@intel.com>
 Victor Stinner <vstinner@redhat.com>
+Viktor Varga <vvarga@inf.u-szeged.hu>
 Vincent Legoll <vincent.legoll@iphc.cnrs.fr>
 Vincent Untz <vuntz@suse.com>
 Vishal Agarwal <vishala@hp.com>
@@ -759,6 +766,7 @@ Vivekanandan Narasimhan <vivekanandan.narasimhan@hp.com>
 Vlad Gridin <vladyslav.gridin@nuagenetworks.net>
 Vladimir Eremin <veremin@mirantis.com>
 Vladislav Belogrudov <vladislav.belogrudov@oracle.com>
+Vu Cong Tuan <tuanvc@vn.fujitsu.com>
 Waldemar Znoinski <waldemar.znoinski@intel.com>
 Wanlong Gao <wanlong.gao@easystack.cn>
 Wei Hu <hwhu@cn.ibm.com>
@@ -835,6 +843,7 @@ changzhi1990 <changzhi@unitedstack.com>
 chen, hao <hao.chen@emc.com>
 chen-li <chen.li@intel.com>
 chen-li <shchenli@cn.ibm.com>
+chenxing <chen.xing@99cloud.net>
 chnm-kulkarni <chnm.kulkarni@gmail.com>
 da52700 <li.jingjing3@zte.com.cn>
 daz <dazzachan@yahoo.com.au>
@@ -890,6 +899,8 @@ lianghao <lianghao@cmss.chinamobile.com>
 lijianlj <lijianlj@cn.ibm.com>
 lilintan <lintan.li@easystack.cn>
 linb <linb@vmware.com>
+lingyongxu <lyxu@fiberhome.com>
+lioplhp <hpliu5898@fiberhome.com>
 liu-sheng <liusheng@huawei.com>
 liudong <liudong78@huawei.com>
 liuqing <jing.liuqing@99cloud.net>
@@ -918,6 +929,7 @@ nmagnezi <nmagnezi@redhat.com>
 openstack <sylvain.afchain@enovance.com>
 pawnesh.kumar <pawnesh.kumar@nectechnologies.in>
 qinchunhua <qin.chunhua@zte.com.cn>
+rajat29 <rajat.sharma@nectechnologies.in>
 rajeev <rajeev.grover@hp.com>
 rajeev <rajeev_grover@hp.com>
 reedip <reedip.banerjee@nectechnologies.in>
@@ -971,7 +983,9 @@ wangbo <wbwangbo@cn.ibm.com>
 watanabe isao <watanabe_isao@jp.fujitsu.com>
 watanabe.isao <zou.yun@jp.fujitsu.com>
 whitekid <whitekid@gmail.com>
+wlfightup <wlfightup@gmail.com>
 xchenum <xchenum@gmail.com>
+xiaoli <xiaoli@sinorail.com>
 xiexs <xiexs@cn.fujitsu.com>
 yan.haifeng <yanheven@qq.com>
 yangxurong <yangxurong@huawei.com>
