@@ -1,8 +1,12 @@
-neutron (2:11.0.0~b2-0ubuntu3) UNRELEASED; urgency=medium
+neutron (2:11.0.0~b3~dev292-0ubuntu1) UNRELEASED; urgency=medium
 
+  [ James Page ]
   * d/p/bug1694420.patch: Dropped, included upstream.
 
- -- James Page <james.page@ubuntu.com>  Wed, 21 Jun 2017 14:23:47 +0100
+  [ Corey Bryant ]
+  * New upstream version.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Wed, 12 Jul 2017 14:54:34 -0400
 
 neutron (2:11.0.0~b2-0ubuntu2) artful; urgency=medium
 
