@@ -5,6 +5,7 @@ neutron (2:11.0.0~b3~dev292-0ubuntu1) UNRELEASED; urgency=medium
 
   [ Corey Bryant ]
   * New upstream version.
+  * d/p/flake8-legacy.patch: Rebased.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Wed, 12 Jul 2017 14:54:34 -0400
 
