@@ -4,3 +4,4 @@ skip-iptest.patch
 drop-ryu-dep.patch
 add-check-for-ha-state.patch
 avoid-router-ri.process-if-initialize-fails.patch
+Update-the-host_id-for-network-router_gateway-interf.patch
