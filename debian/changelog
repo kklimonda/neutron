@@ -4,7 +4,7 @@ neutron (2:8.4.0-0ubuntu4) xenial; urgency=medium
     keep the router's gateway interface updated when keepalived
     fails over (LP: #1694337).
 
- -- Felipe Reyes <felipe.reyes@canonical.com>  Wed, 21 Jun 2017 18:52:26 -0400
+ -- Felipe Reyes <felipe.reyes@canonical.com>  Tue, 25 Jul 2017 17:50:16 +0100
 
 neutron (2:8.4.0-0ubuntu3) xenial; urgency=medium
 
