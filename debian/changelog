@@ -1,4 +1,4 @@
-neutron (2:8.4.0-0ubuntu2.2) xenial; urgency=medium
+neutron (2:8.4.0-0ubuntu4) xenial; urgency=medium
 
   * d/p/Update-the-host_id-for-network-router_gateway-interf.patch:
     keep the router's gateway interface updated when keepalived
@@ -6,7 +6,7 @@ neutron (2:8.4.0-0ubuntu2.2) xenial; urgency=medium
 
  -- Felipe Reyes <felipe.reyes@canonical.com>  Wed, 21 Jun 2017 18:52:26 -0400
 
-neutron (2:8.4.0-0ubuntu2.1) xenial; urgency=medium
+neutron (2:8.4.0-0ubuntu3) xenial; urgency=medium
 
   * d/p/avoid-router-ri.process-if-initialize-fails: Backport fix for
     avoid router ri process if initialize fails (LP: #1662804).
