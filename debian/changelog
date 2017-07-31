@@ -7,6 +7,7 @@ neutron (2:11.0.0~b3-0ubuntu1) UNRELEASED; urgency=medium
   * New upstream version.
   * d/p/flake8-legacy.patch: Rebased.
   * New upstream milestone for OpenStack Pike.
+  * d/control: Align (Build-)Depends with upstream.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Mon, 31 Jul 2017 10:45:52 -0400
 
