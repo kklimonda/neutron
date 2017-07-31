@@ -1,4 +1,4 @@
-neutron (2:11.0.0~b3-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:11.0.0~b3-0ubuntu1) artful; urgency=medium
 
   [ James Page ]
   * d/p/bug1694420.patch: Dropped, included upstream.
