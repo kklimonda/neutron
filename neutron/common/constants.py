@@ -28,6 +28,7 @@ HA_ROUTER_STATE_KEY = '_ha_state'
 METERING_LABEL_KEY = '_metering_labels'
 FLOATINGIP_AGENT_INTF_KEY = '_floatingip_agent_interfaces'
 SNAT_ROUTER_INTF_KEY = '_snat_router_interfaces'
+DVR_SNAT_BOUND = 'dvr_snat_bound'
 
 HA_NETWORK_NAME = 'HA network tenant %s'
 HA_SUBNET_NAME = 'HA subnet tenant %s'
@@ -165,3 +166,11 @@ PORT_BINDING_STATUS_ACTIVE = 'ACTIVE'
 PORT_BINDING_STATUS_INACTIVE = 'INACTIVE'
 PORT_BINDING_STATUSES = (PORT_BINDING_STATUS_ACTIVE,
                          PORT_BINDING_STATUS_INACTIVE)
+
+VALID_FLOATINGIP_STATUS = (lib_constants.FLOATINGIP_STATUS_ACTIVE,
+                           lib_constants.FLOATINGIP_STATUS_DOWN,
+                           lib_constants.FLOATINGIP_STATUS_ERROR)
+
+# Possible types of values (e.g. in QoS rule types)
+VALUES_TYPE_CHOICES = "choices"
+VALUES_TYPE_RANGE = "range"

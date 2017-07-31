@@ -54,6 +54,7 @@ internal = neutron.ipam.drivers.neutrondb_ipam.driver:NeutronDbPool
 [neutron.ml2.extension_drivers]
 data_plane_status = neutron.plugins.ml2.extensions.data_plane_status:DataPlaneStatusExtensionDriver
 dns = neutron.plugins.ml2.extensions.dns_integration:DNSExtensionDriverML2
+dns_domain_ports = neutron.plugins.ml2.extensions.dns_integration:DNSDomainPortsExtensionDriver
 port_security = neutron.plugins.ml2.extensions.port_security:PortSecurityExtensionDriver
 qos = neutron.plugins.ml2.extensions.qos:QosExtensionDriver
 test = neutron.tests.unit.plugins.ml2.drivers.ext_test:TestExtensionDriver
@@ -87,6 +88,7 @@ sriov = neutron.plugins.ml2.drivers.mech_sriov.agent.extension_drivers.qos_drive
 auto_allocate = neutron.services.auto_allocate.plugin:Plugin
 dummy = neutron.tests.unit.dummy_plugin:DummyServicePlugin
 flavors = neutron.services.flavors.flavors_plugin:FlavorsPlugin
+logapi = neutron.services.logapi.logging_plugin:LoggingPlugin
 loki = neutron.services.loki.loki_plugin:LokiPlugin
 metering = neutron.services.metering.metering_plugin:MeteringPlugin
 network_ip_availability = neutron.services.network_ip_availability.plugin:NetworkIPAvailabilityPlugin

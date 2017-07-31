@@ -17,6 +17,7 @@ from oslo_versionedobjects import fields as obj_fields
 from sqlalchemy import func
 
 from neutron.common import utils
+from neutron.db.models import dvr as dvr_models
 from neutron.db.models import l3
 from neutron.db.models import l3_attrs
 from neutron.db.models import l3agent as rb_model
@@ -134,3 +135,79 @@ class RouterPort(base.NeutronDbObject):
         'port_id': common_types.UUIDField(),
         'port_type': obj_fields.StringField(nullable=True),
     }
+
+
+@obj_base.VersionedObjectRegistry.register
+class DVRMacAddress(base.NeutronDbObject):
+    # Version 1.0: Initial version
+    VERSION = '1.0'
+
+    db_model = dvr_models.DistributedVirtualRouterMacAddress
+
+    primary_keys = ['host']
+
+    fields = {
+        'host': obj_fields.StringField(),
+        'mac_address': common_types.MACAddressField()
+    }
+
+    @classmethod
+    def modify_fields_from_db(cls, db_obj):
+        fields = super(DVRMacAddress, cls).modify_fields_from_db(db_obj)
+        if 'mac_address' in fields:
+            # NOTE(tonytan4ever): Here uses AuthenticEUI to retain the format
+            # passed from API.
+            fields['mac_address'] = utils.AuthenticEUI(fields['mac_address'])
+        return fields
+
+    @classmethod
+    def modify_fields_to_db(cls, fields):
+        result = super(DVRMacAddress, cls).modify_fields_to_db(fields)
+        if 'mac_address' in fields:
+            result['mac_address'] = cls.filter_to_str(result['mac_address'])
+        return result
+
+
+@obj_base.VersionedObjectRegistry.register
+class FloatingIP(base.NeutronDbObject):
+    # Version 1.0: Initial version
+    VERSION = '1.0'
+
+    db_model = l3.FloatingIP
+
+    fields = {
+        'id': common_types.UUIDField(),
+        'project_id': obj_fields.StringField(nullable=True),
+        'floating_ip_address': obj_fields.IPAddressField(),
+        'floating_network_id': common_types.UUIDField(),
+        'floating_port_id': common_types.UUIDField(),
+        'fixed_port_id': common_types.UUIDField(nullable=True),
+        'fixed_ip_address': obj_fields.IPAddressField(nullable=True),
+        'router_id': common_types.UUIDField(nullable=True),
+        'last_known_router_id': common_types.UUIDField(nullable=True),
+        'status': common_types.FloatingIPStatusEnumField(nullable=True),
+    }
+    fields_no_update = ['project_id', 'floating_ip_address',
+                        'floating_network_id', 'floating_port_id']
+
+    @classmethod
+    def modify_fields_from_db(cls, db_obj):
+        result = super(FloatingIP, cls).modify_fields_from_db(db_obj)
+        if 'fixed_ip_address' in result:
+            result['fixed_ip_address'] = netaddr.IPAddress(
+                result['fixed_ip_address'])
+        if 'floating_ip_address' in result:
+            result['floating_ip_address'] = netaddr.IPAddress(
+                result['floating_ip_address'])
+        return result
+
+    @classmethod
+    def modify_fields_to_db(cls, fields):
+        result = super(FloatingIP, cls).modify_fields_to_db(fields)
+        if 'fixed_ip_address' in result:
+            result['fixed_ip_address'] = cls.filter_to_str(
+                result['fixed_ip_address'])
+        if 'floating_ip_address' in result:
+            result['floating_ip_address'] = cls.filter_to_str(
+                result['floating_ip_address'])
+        return result

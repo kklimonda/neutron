@@ -90,7 +90,7 @@ class BaseNetworkTest(test.BaseTestCase):
     @classmethod
     def setup_clients(cls):
         super(BaseNetworkTest, cls).setup_clients()
-        cls.client = cls.os.network_client
+        cls.client = cls.os_primary.network_client
 
     @classmethod
     def resource_setup(cls):
@@ -217,11 +217,12 @@ class BaseNetworkTest(test.BaseTestCase):
             pass
 
     @classmethod
-    def create_network(cls, network_name=None, **kwargs):
+    def create_network(cls, network_name=None, client=None, **kwargs):
         """Wrapper utility that returns a test network."""
         network_name = network_name or data_utils.rand_name('test-network-')
 
-        body = cls.client.create_network(name=network_name, **kwargs)
+        client = client or cls.client
+        body = client.create_network(name=network_name, **kwargs)
         network = body['network']
         cls.networks.append(network)
         return network
@@ -428,8 +429,9 @@ class BaseAdminNetworkTest(BaseNetworkTest):
     @classmethod
     def setup_clients(cls):
         super(BaseAdminNetworkTest, cls).setup_clients()
-        cls.admin_client = cls.os_adm.network_client
-        cls.identity_admin_client = cls.os_adm.tenants_client
+        cls.admin_client = cls.os_admin.network_client
+        cls.identity_admin_client = cls.os_admin.tenants_client
+        cls.identity_admin_clientv3 = cls.os_admin.projects_client
 
     @classmethod
     def create_metering_label(cls, name, description):

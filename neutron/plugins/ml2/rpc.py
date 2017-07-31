@@ -22,6 +22,7 @@ from neutron_lib.plugins import directory
 from neutron_lib.plugins.ml2 import api
 from oslo_log import log
 import oslo_messaging
+import six
 from sqlalchemy.orm import exc
 
 from neutron._i18n import _LE, _LW
@@ -302,6 +303,13 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                 'l2population')
         if not l2pop_driver:
             return
+        port = ml2_db.get_port(rpc_context, port_id)
+        if not port:
+            return
+        # NOTE: DVR ports are already handled and updated through l2pop
+        # and so we don't need to update it again here
+        if port['device_owner'] == n_const.DEVICE_OWNER_DVR_INTERFACE:
+            return
         port_context = plugin.get_bound_port_context(
                 rpc_context, port_id)
         if not port_context:
@@ -363,6 +371,19 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                 'failed_devices_down': failed_devices_down}
 
 
+def _suppress_cast_exceptions(f):
+    """Decorator to ignore exchange not found exceptions."""
+    @six.wraps(f)
+    def wrapped(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception:
+            # TODO(kevinbenton): make catch specific to missing exchange once
+            # bug/1705351 is resolved on the oslo.messaging side.
+            LOG.exception("Ignored exception during cast")
+    return wrapped
+
+
 class AgentNotifierApi(dvr_rpc.DVRAgentRpcApiMixin,
                        sg_rpc.SecurityGroupAgentRpcApiMixin,
                        type_tunnel.TunnelAgentRpcApiMixin):
@@ -393,11 +414,13 @@ class AgentNotifierApi(dvr_rpc.DVRAgentRpcApiMixin,
         target = oslo_messaging.Target(topic=topic, version='1.0')
         self.client = n_rpc.get_client(target)
 
+    @_suppress_cast_exceptions
     def network_delete(self, context, network_id):
         cctxt = self.client.prepare(topic=self.topic_network_delete,
                                     fanout=True)
         cctxt.cast(context, 'network_delete', network_id=network_id)
 
+    @_suppress_cast_exceptions
     def port_update(self, context, port, network_type, segmentation_id,
                     physical_network):
         cctxt = self.client.prepare(topic=self.topic_port_update,
@@ -406,11 +429,13 @@ class AgentNotifierApi(dvr_rpc.DVRAgentRpcApiMixin,
                    network_type=network_type, segmentation_id=segmentation_id,
                    physical_network=physical_network)
 
+    @_suppress_cast_exceptions
     def port_delete(self, context, port_id):
         cctxt = self.client.prepare(topic=self.topic_port_delete,
                                     fanout=True)
         cctxt.cast(context, 'port_delete', port_id=port_id)
 
+    @_suppress_cast_exceptions
     def network_update(self, context, network):
         cctxt = self.client.prepare(topic=self.topic_network_update,
                                     fanout=True, version='1.4')

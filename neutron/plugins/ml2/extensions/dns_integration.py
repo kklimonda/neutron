@@ -101,7 +101,8 @@ class DNSExtensionDriver(api.ExtensionDriver):
                          current_dns_domain=current_dns_domain,
                          previous_dns_name='',
                          previous_dns_domain='',
-                         dns_name=dns_name).create()
+                         dns_name=dns_name,
+                         dns_domain='').create()
 
     def _update_dns_db(self, dns_name, dns_domain, db_data,
                       plugin_context, has_fixed_ips):
@@ -135,7 +136,8 @@ class DNSExtensionDriver(api.ExtensionDriver):
                                            current_dns_domain=dns_domain,
                                            previous_dns_name='',
                                            previous_dns_domain='',
-                                           dns_name=dns_name)
+                                           dns_name=dns_name,
+                                           dns_domain='')
             dns_data_db.create()
         return dns_data_db
 
@@ -182,7 +184,8 @@ class DNSExtensionDriver(api.ExtensionDriver):
                                            current_dns_domain='',
                                            previous_dns_name='',
                                            previous_dns_domain='',
-                                           dns_name=dns_name)
+                                           dns_name=dns_name,
+                                           dns_domain='')
             dns_data_db.create()
         return dns_data_db
 
@@ -318,6 +321,17 @@ class DNSExtensionDriverML2(DNSExtensionDriver):
         if provider_net['network_type'] in ['gre', 'vxlan', 'geneve']:
             return self._is_tunnel_tenant_network(provider_net)
         return True
+
+
+class DNSDomainPortsExtensionDriver(DNSExtensionDriverML2):
+    _supported_extension_alias = 'dns-domain-ports'
+
+    @property
+    def extension_alias(self):
+        return self._supported_extension_alias
+
+    def initialize(self):
+        LOG.info(_LI("DNSDomainPortsExtensionDriver initialization complete"))
 
 
 DNS_DRIVER = None

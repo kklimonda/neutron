@@ -124,7 +124,13 @@ class NetworkClientJSON(service_client.RestClient):
             # list of field's name. An example:
             # {'fields': ['id', 'name']}
             plural = self.pluralize(resource_name)
-            uri = '%s/%s' % (self.get_uri(plural), resource_id)
+            if 'details_quotas' in plural:
+                details, plural = plural.split('_')
+                uri = '%s/%s/%s' % (self.get_uri(plural),
+                                    resource_id, details)
+            else:
+                uri = '%s/%s' % (self.get_uri(plural), resource_id)
+
             if fields:
                 uri += '?' + urlparse.urlencode(fields, doseq=1)
             resp, body = self.get(uri)
@@ -723,6 +729,14 @@ class NetworkClientJSON(service_client.RestClient):
 
     def list_qos_rule_types(self):
         uri = '%s/qos/rule-types' % self.uri_prefix
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def show_qos_rule_type(self, rule_type_name):
+        uri = '%s/qos/rule-types/%s' % (
+            self.uri_prefix, rule_type_name)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
         body = jsonutils.loads(body)
