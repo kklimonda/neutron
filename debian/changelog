@@ -1,4 +1,4 @@
-neutron (2:11.0.0~b3~dev292-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:11.0.0~b3-0ubuntu1) UNRELEASED; urgency=medium
 
   [ James Page ]
   * d/p/bug1694420.patch: Dropped, included upstream.
@@ -6,8 +6,9 @@ neutron (2:11.0.0~b3~dev292-0ubuntu1) UNRELEASED; urgency=medium
   [ Corey Bryant ]
   * New upstream version.
   * d/p/flake8-legacy.patch: Rebased.
+  * New upstream milestone for OpenStack Pike.
 
- -- Corey Bryant <corey.bryant@canonical.com>  Wed, 12 Jul 2017 14:54:34 -0400
+ -- Corey Bryant <corey.bryant@canonical.com>  Mon, 31 Jul 2017 10:45:52 -0400
 
 neutron (2:11.0.0~b2-0ubuntu2) artful; urgency=medium
 
