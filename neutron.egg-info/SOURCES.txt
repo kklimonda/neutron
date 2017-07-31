@@ -94,6 +94,24 @@ doc/source/admin/ops-ip-availability.rst
 doc/source/admin/ops-resource-purge.rst
 doc/source/admin/ops-resource-tags.rst
 doc/source/admin/ops.rst
+doc/source/admin/archives/adv-config.rst
+doc/source/admin/archives/adv-features.rst
+doc/source/admin/archives/adv-operational-features.rst
+doc/source/admin/archives/arch.rst
+doc/source/admin/archives/auth.rst
+doc/source/admin/archives/config-agents.rst
+doc/source/admin/archives/config-identity.rst
+doc/source/admin/archives/config-plugins.rst
+doc/source/admin/archives/index.rst
+doc/source/admin/archives/introduction.rst
+doc/source/admin/archives/multi-dhcp-agents.rst
+doc/source/admin/archives/use.rst
+doc/source/admin/archives/figures/vmware_nsx_ex1.graffle
+doc/source/admin/archives/figures/vmware_nsx_ex1.png
+doc/source/admin/archives/figures/vmware_nsx_ex1.svg
+doc/source/admin/archives/figures/vmware_nsx_ex2.graffle
+doc/source/admin/archives/figures/vmware_nsx_ex2.png
+doc/source/admin/archives/figures/vmware_nsx_ex2.svg
 doc/source/admin/figures/NetworkTypes.png
 doc/source/admin/figures/NetworkTypes.svg
 doc/source/admin/figures/bgp-dynamic-routing-example1.graffle
@@ -240,6 +258,9 @@ doc/source/admin/shared/deploy-selfservice-initialnetworks.txt
 doc/source/admin/shared/deploy-selfservice-networktrafficflow.txt
 doc/source/admin/shared/deploy-selfservice-verifynetworkoperation.txt
 doc/source/admin/shared/keepalived-vrrp-healthcheck.txt
+doc/source/cli/index.rst
+doc/source/cli/neutron-debug.rst
+doc/source/cli/neutron-sanity-check.rst
 doc/source/contributor/alembic_migrations.rst
 doc/source/contributor/client_command_extensions.rst
 doc/source/contributor/contribute.rst
@@ -281,6 +302,7 @@ doc/source/contributor/internals/retries.rst
 doc/source/contributor/internals/rpc_api.rst
 doc/source/contributor/internals/rpc_callbacks.rst
 doc/source/contributor/internals/security_group_api.rst
+doc/source/contributor/internals/segments.rst
 doc/source/contributor/internals/service_extensions.rst
 doc/source/contributor/internals/services_and_agents.rst
 doc/source/contributor/internals/sriov_nic_agent.rst
@@ -805,6 +827,7 @@ neutron/db/migration/alembic_migrations/versions/newton/expand/d3435b514502_add_
 neutron/db/migration/alembic_migrations/versions/ocata/expand/929c968efe70_add_pk_version_table.py
 neutron/db/migration/alembic_migrations/versions/ocata/expand/a9c43481023c_extend_ml2_port_bindings.py
 neutron/db/migration/alembic_migrations/versions/pike/expand/2b42d90729da_qos_add_direction_to_bw_limit_rule_table.py
+neutron/db/migration/alembic_migrations/versions/pike/expand/349b6fd605a6_add_dns_domain_to_portdnses.py
 neutron/db/migration/alembic_migrations/versions/pike/expand/62c781cb6192_add_qos_policies_default_table.py
 neutron/db/migration/alembic_migrations/versions/pike/expand/804a3c76314c_add_data_plane_status_to_port.py
 neutron/db/migration/alembic_migrations/versions/pike/expand/c8c222d42aa9_logging_api.py
@@ -865,6 +888,7 @@ neutron/extensions/data_plane_status.py
 neutron/extensions/default_subnetpools.py
 neutron/extensions/dhcpagentscheduler.py
 neutron/extensions/dns.py
+neutron/extensions/dns_domain_ports.py
 neutron/extensions/dvr.py
 neutron/extensions/external_net.py
 neutron/extensions/extra_dhcp_opt.py
@@ -877,6 +901,7 @@ neutron/extensions/l3_ext_gw_mode.py
 neutron/extensions/l3_ext_ha_mode.py
 neutron/extensions/l3_flavors.py
 neutron/extensions/l3agentscheduler.py
+neutron/extensions/logging.py
 neutron/extensions/metering.py
 neutron/extensions/multiprovidernet.py
 neutron/extensions/netmtu.py
@@ -890,7 +915,9 @@ neutron/extensions/providernet.py
 neutron/extensions/qos.py
 neutron/extensions/qos_bw_limit_direction.py
 neutron/extensions/qos_default.py
+neutron/extensions/qos_rule_type_details.py
 neutron/extensions/quotasv2.py
+neutron/extensions/quotasv2_detail.py
 neutron/extensions/rbac.py
 neutron/extensions/revisionifmatch.py
 neutron/extensions/revisions.py
@@ -905,6 +932,7 @@ neutron/extensions/subnet_service_types.py
 neutron/extensions/subnetallocation.py
 neutron/extensions/tag.py
 neutron/extensions/tag_ext.py
+neutron/extensions/tagging.py
 neutron/extensions/timestamp.py
 neutron/extensions/trunk.py
 neutron/extensions/trunk_details.py
@@ -927,15 +955,9 @@ neutron/locale/es/LC_MESSAGES/neutron.po
 neutron/locale/fr/LC_MESSAGES/neutron.po
 neutron/locale/it/LC_MESSAGES/neutron.po
 neutron/locale/ja/LC_MESSAGES/neutron.po
-neutron/locale/ko_KR/LC_MESSAGES/neutron-log-error.po
-neutron/locale/ko_KR/LC_MESSAGES/neutron-log-info.po
-neutron/locale/ko_KR/LC_MESSAGES/neutron-log-warning.po
 neutron/locale/ko_KR/LC_MESSAGES/neutron.po
 neutron/locale/pt_BR/LC_MESSAGES/neutron.po
 neutron/locale/ru/LC_MESSAGES/neutron.po
-neutron/locale/tr_TR/LC_MESSAGES/neutron-log-error.po
-neutron/locale/tr_TR/LC_MESSAGES/neutron-log-info.po
-neutron/locale/tr_TR/LC_MESSAGES/neutron-log-warning.po
 neutron/locale/tr_TR/LC_MESSAGES/neutron.po
 neutron/locale/zh_CN/LC_MESSAGES/neutron.po
 neutron/locale/zh_TW/LC_MESSAGES/neutron.po
@@ -1167,6 +1189,7 @@ neutron/services/l3_router/service_providers/dvrha.py
 neutron/services/l3_router/service_providers/ha.py
 neutron/services/l3_router/service_providers/single_node.py
 neutron/services/logapi/__init__.py
+neutron/services/logapi/logging_plugin.py
 neutron/services/logapi/common/__init__.py
 neutron/services/logapi/common/constants.py
 neutron/services/logapi/common/exceptions.py
@@ -1489,6 +1512,7 @@ neutron/tests/tempest/scenario/test_basic.py
 neutron/tests/tempest/scenario/test_dvr.py
 neutron/tests/tempest/scenario/test_floatingip.py
 neutron/tests/tempest/scenario/test_migration.py
+neutron/tests/tempest/scenario/test_portsecurity.py
 neutron/tests/tempest/scenario/test_qos.py
 neutron/tests/tempest/scenario/test_trunk.py
 neutron/tests/tempest/services/__init__.py
@@ -1668,6 +1692,7 @@ neutron/tests/unit/extensions/test_network_ip_availability.py
 neutron/tests/unit/extensions/test_portsecurity.py
 neutron/tests/unit/extensions/test_providernet.py
 neutron/tests/unit/extensions/test_quotasv2.py
+neutron/tests/unit/extensions/test_quotasv2_detail.py
 neutron/tests/unit/extensions/test_router_availability_zone.py
 neutron/tests/unit/extensions/test_securitygroup.py
 neutron/tests/unit/extensions/test_segment.py
@@ -1851,6 +1876,9 @@ neutron/tests/unit/services/l3_router/__init__.py
 neutron/tests/unit/services/l3_router/test_l3_router_plugin.py
 neutron/tests/unit/services/l3_router/service_providers/__init__.py
 neutron/tests/unit/services/l3_router/service_providers/test_driver_controller.py
+neutron/tests/unit/services/logapi/__init__.py
+neutron/tests/unit/services/logapi/base.py
+neutron/tests/unit/services/logapi/test_logging_plugin.py
 neutron/tests/unit/services/metering/__init__.py
 neutron/tests/unit/services/metering/test_metering_plugin.py
 neutron/tests/unit/services/metering/agents/__init__.py
@@ -1937,10 +1965,12 @@ releasenotes/notes/add-port-rebinding-chance-33178b9abacf5804.yaml
 releasenotes/notes/add-rbac-qos-8b1154ee756c66df.yaml
 releasenotes/notes/add-standard-attr-descriptions-1ba0d7a454c3fd8f.yaml
 releasenotes/notes/add-subnet-service-types-bc81f6df9834f96e.yaml
+releasenotes/notes/add-tag-all-standardattr-resources-6f757cb39cc1dcfe.yaml
 releasenotes/notes/add-tags-to-core-resources-b05330a129900609.yaml
 releasenotes/notes/add-timestamp-fields-f9ab949fc88f05f6.yaml
 releasenotes/notes/add-wsgi-script-support-e611fa5b5c2043a5.yaml
 releasenotes/notes/add_is_default_to_qos_policies-f7c6bbac08d474d5.yaml
+releasenotes/notes/advanced_image-8abff2ca91de7f6c.yaml
 releasenotes/notes/advertise_mtu_by_default-d8b0b056a74517b8.yaml
 releasenotes/notes/advertisement-intervals-for-radvd-configurable-6d85b5fdd97a2742.yaml
 releasenotes/notes/allow-non-admins-to-define-external-extra-routes-0d541fc356a5c546.yaml
@@ -1986,6 +2016,7 @@ releasenotes/notes/dvr-support-live-migration-b818b12bd9cbb518.yaml
 releasenotes/notes/enable-sorting-pagination-754390289d3311fa.yaml
 releasenotes/notes/end-to-end-mtu-00345fc4282cb8fb.yaml
 releasenotes/notes/enhance-tags-1f8915fe3e074069.yaml
+releasenotes/notes/extend-quota-api-2df3b84309664234.yaml
 releasenotes/notes/fail-on-missing-extensions-bc332124b780875b.yaml
 releasenotes/notes/fdb_population-70d751c8c2e4395f.yaml
 releasenotes/notes/fip-janitor-53f0d42a7471c5ed.yaml
@@ -2017,6 +2048,7 @@ releasenotes/notes/oslo.messaging.notify.drivers-abb0d17b9e1bd470.yaml
 releasenotes/notes/overlay_ip_version-ml2-e6438b570844ef5c.yaml
 releasenotes/notes/ovs-ct-firewall-driver-52a70a6a16d06f59.yaml
 releasenotes/notes/ovs-ipv6-tunnel-endpoints-f41b4954a04c43f6.yaml
+releasenotes/notes/ovs_hardware_offload_support-798d3896ab2c4b1d.yaml
 releasenotes/notes/ovsdb-native-by-default-38835d6963592396.yaml
 releasenotes/notes/path-mtu-back-to-zero-e4f9e8bdd8317ad4.yaml
 releasenotes/notes/physical_network-aware-dhcp-scheduling-94e9fadc7c7c5fec.yaml
@@ -2025,6 +2057,7 @@ releasenotes/notes/project_id-d5ea7a42be428230.yaml
 releasenotes/notes/qos-drivers-refactor-16ece9984958f8a4.yaml
 releasenotes/notes/qos-for-router-gateway-02340f7aa8be3b0d.yaml
 releasenotes/notes/qos-min-egress-bw-rule-b1c80f5675a4c1c3.yaml
+releasenotes/notes/qos-rule-type-details-api-call-27d792980235aec4.yaml
 releasenotes/notes/remove-advertise_mtu-28933264714453c4.yaml
 releasenotes/notes/remove-allow-pagination-allow-sorting-ff23ca5ccb3007b9.yaml
 releasenotes/notes/remove-driver-60eb7e26d95f7322.yaml
@@ -2035,6 +2068,7 @@ releasenotes/notes/remove-quota_items-d50b4672dd31ea3e.yaml
 releasenotes/notes/remove-router_id-b3732089f8f1faa1.yaml
 releasenotes/notes/remove-send-arp-for-ha-c1b4a926b8e52b8e.yaml
 releasenotes/notes/remove-subnetpool-config-b15dbe59237aee7e.yaml
+releasenotes/notes/removed_prevent_arp_spoofing-b49e91a92a93e3e1.yaml
 releasenotes/notes/rename-tenant-to-project-b19a4068f8625969.yaml
 releasenotes/notes/rename-to-nova-metadata-ip-685fd81618c16d9d.yaml
 releasenotes/notes/rm-notify-entry-points-aa442134a780469a.yaml

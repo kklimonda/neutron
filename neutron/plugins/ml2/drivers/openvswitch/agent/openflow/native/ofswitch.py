@@ -22,6 +22,9 @@ from oslo_utils import excutils
 from oslo_utils import timeutils
 import ryu.app.ofctl.api as ofctl_api
 import ryu.exception as ryu_exc
+from ryu.lib import ofctl_string
+from ryu.ofproto import ofproto_parser
+import six
 
 from neutron._i18n import _, _LW
 from neutron.agent.common import ovs_lib
@@ -150,6 +153,8 @@ class OpenFlowSwitchMixin(object):
     def cleanup_flows(self):
         cookies = set([f.cookie for f in self.dump_flows()]) - \
                   self.reserved_cookies
+        LOG.debug("Reserved cookies for %s: %s", self.br_name,
+                  self.reserved_cookies)
         for c in cookies:
             LOG.warning(_LW("Deleting flow with cookie 0x%(cookie)x"),
                         {'cookie': c})
@@ -192,6 +197,14 @@ class OpenFlowSwitchMixin(object):
                              match=None, **match_kwargs):
         (dp, ofp, ofpp) = self._get_dp()
         match = self._match(ofp, ofpp, match, **match_kwargs)
+        if isinstance(instructions, six.string_types):
+            # NOTE: instructions must be str for the ofctl of_interface.
+            # After the ofctl driver is removed, a deprecation warning
+            # could be added here.
+            jsonlist = ofctl_string.ofp_instruction_from_str(
+                ofp, instructions)
+            instructions = ofproto_parser.ofp_instruction_from_jsondict(
+                dp, jsonlist)
         msg = ofpp.OFPFlowMod(dp,
                               table_id=table_id,
                               cookie=self.default_cookie,

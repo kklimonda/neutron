@@ -103,8 +103,11 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
     @property
     def _is_dns_integration_supported(self):
         if self._dns_integration is None:
-            self._dns_integration = utils.is_extension_supported(
-                self._core_plugin, 'dns-integration')
+            self._dns_integration = (
+                utils.is_extension_supported(self._core_plugin,
+                    'dns-integration') or
+                utils.is_extension_supported(self._core_plugin,
+                    'dns-domain-ports'))
         return self._dns_integration
 
     @property
@@ -534,7 +537,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase,
 
     @db_api.retry_if_session_inactive()
     def delete_router(self, context, id):
-
+        registry.notify(resources.ROUTER, events.BEFORE_DELETE,
+                        self, context=context, router_id=id)
         #TODO(nati) Refactor here when we have router insertion model
         router = self._ensure_router_not_in_use(context, id)
         original = self._make_router_dict(router)

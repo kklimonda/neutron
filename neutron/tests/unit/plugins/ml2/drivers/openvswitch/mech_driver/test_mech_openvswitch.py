@@ -29,7 +29,8 @@ from neutron.tests.unit.plugins.ml2 import _test_mech_agent as base
 
 class OpenvswitchMechanismBaseTestCase(base.AgentMechanismBaseTestCase):
     VIF_TYPE = portbindings.VIF_TYPE_OVS
-    VIF_DETAILS = {portbindings.CAP_PORT_FILTER: True,
+    VIF_DETAILS = {portbindings.OVS_DATAPATH_TYPE: 'system',
+                   portbindings.CAP_PORT_FILTER: True,
                    portbindings.OVS_HYBRID_PLUG: True}
     AGENT_TYPE = constants.AGENT_TYPE_OVS
 
@@ -79,7 +80,8 @@ class OpenvswitchMechanismBaseTestCase(base.AgentMechanismBaseTestCase):
 
 class OpenvswitchMechanismSGDisabledBaseTestCase(
     OpenvswitchMechanismBaseTestCase):
-    VIF_DETAILS = {portbindings.CAP_PORT_FILTER: False,
+    VIF_DETAILS = {portbindings.OVS_DATAPATH_TYPE: 'system',
+                   portbindings.CAP_PORT_FILTER: False,
                    portbindings.OVS_HYBRID_PLUG: False}
 
     def setUp(self):
@@ -166,7 +168,8 @@ class OpenvswitchMechanismSGDisabledLocalTestCase(
 class OpenvswitchMechanismFirewallUndefinedTestCase(
     OpenvswitchMechanismBaseTestCase, base.AgentMechanismLocalTestCase):
 
-    VIF_DETAILS = {portbindings.CAP_PORT_FILTER: True,
+    VIF_DETAILS = {portbindings.OVS_DATAPATH_TYPE: 'system',
+                   portbindings.CAP_PORT_FILTER: True,
                    portbindings.OVS_HYBRID_PLUG: True}
 
     def setUp(self):
@@ -236,3 +239,16 @@ class OpenvswitchMechanismDPDKTestCase(OpenvswitchMechanismBaseTestCase):
 
         result = self.driver.get_vif_type(None, self.AGENT_SYSTEM, None)
         self.assertEqual(portbindings.VIF_TYPE_OVS, result)
+
+
+class OpenvswitchMechanismSRIOVTestCase(OpenvswitchMechanismBaseTestCase):
+
+    def _make_port_ctx(self, agents):
+        segments = [{api.ID: 'local_segment_id', api.NETWORK_TYPE: 'local'}]
+        return base.FakePortContext(self.AGENT_TYPE, agents, segments,
+                                    vnic_type=portbindings.VNIC_DIRECT)
+
+    def test_get_vif_type(self):
+        context = self._make_port_ctx(self.AGENTS)
+        result = self.driver.get_vif_type(context, self.AGENTS[0], None)
+        self.assertEqual(self.VIF_TYPE, result)
