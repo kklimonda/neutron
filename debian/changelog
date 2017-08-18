@@ -1,3 +1,9 @@
+neutron (2:11.0.0~rc1-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream release candidate for OpenStack Pike.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 17 Aug 2017 21:30:49 -0400
+
 neutron (2:11.0.0~b3-0ubuntu1) artful; urgency=medium
 
   [ James Page ]
