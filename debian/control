@@ -105,6 +105,7 @@ Description: Neutron is a virtual network service for Openstack - server
 Package: neutron-common
 Architecture: all
 Depends: adduser,
+         iproute2,
          ipset,
          python-neutron (= ${source:Version}),
          python-neutron-fwaas (>= 1:9.0.0~b3),

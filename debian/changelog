@@ -1,3 +1,10 @@
+neutron (2:11.0.0~rc1-0ubuntu2) UNRELEASED; urgency=medium
+
+  * d/control: Add iproute2 to neutron-common Depends as ip commands
+    are issued in neutron/agent/linux/ip_lib.py.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Fri, 18 Aug 2017 14:33:16 -0400
+
 neutron (2:11.0.0~rc1-0ubuntu1) artful; urgency=medium
 
   * New upstream release candidate for OpenStack Pike.
