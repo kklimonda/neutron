@@ -1,13 +1,56 @@
 CHANGES
 =======
 
+11.0.0.0rc1
+-----------
+
+* Deprecate web\_framework option
+* Allow to set/modify network mtu
+* Reduce rally sub-port count
+* functional: disable netlink tests
+* Allow extension driver to provide multiple aliases
+* Fill device\_info with port\_security\_enabled data
+* DVR: Configure centralized floatingips to snat\_namespace
+* Don't check full subnet body in test\_filtering\_shared\_subnets
+* [log]: Add validator to logging api
+* [log]: add driver manager to LoggingPlugin
+* tests: apply latest release milestone alembic scripts first
+* doc: Fix non-existing URLs
+* Do not use prelude section for individual release notes
+* Exclude relnote from past releases from Pike relnotes
+* Remove configuration options max\_fixed\_ips\_per\_port
+* Sinkhole workaround for old topics
+* Updated from global requirements
+* Degrade log message for missing fanout exchange to debug
+* Bump network rev on RBAC change
+* devstack: fix ovs install on fedora like OS
+* docs: clarify wording about how to use advanced glance image
+* Enable QoS scenario tests
+* ovsfw: fix allowed\_address\_pairs MAC issue
+* Change ovsdbapp vlog to INFO
+* Don't log 'Exit code: 0'
+* Check if record is stale after bulk pull
+* Fix some pep8 errors under l3 unit tests
+* Add auto-generated config reference
+* Remove compat checks for psutil 1.x
+* docs: Fix in TESTING.rst
+* Add bandit target to tox
+* Use push notification for security groups
+* Log revision number in resource updated message
+
 11.0.0.0b3
 ----------
 
 * Add segments service plug-in devref
+* use neutron-lib auto allocated topology apidef
+* DVR: Fix router\_update failure when agent restarts
 * Updated from global requirements
+* Catch exceptions for all rpc casts
+* RouterPort OVO integration
 * DVR: Fix binding info for DVR port not found error
+* Add netlink-lib to manage conntrack entries
 * use neutron-lib.callback.events.AFTER\_SPAWN
+* Fixed FlushError on subnet creation retry
 * Add project links to feature classification matrix
 * [Tempest] Running Trunk test with advanced image only
 * Enforce ethertype with IPv6 integer protocols
@@ -16,6 +59,7 @@ CHANGES
 * Add specific values to specific fields in get\_random\_object\_fields()
 * ml2 plugin: add (PORT, BEFORE\_UPDATE) callback
 * Tag mechanism supports resources with standard attribute
+* ovs-fw: Update internal docs with TRANSIENT table
 * Update the documentation link for doc migration
 * Only ensure default security group exists if necessary
 * Ignore duplicate record\_resource\_delete calls
@@ -62,6 +106,7 @@ CHANGES
 * New API call to get details of supported QoS rule type
 * Remove unused exceptions
 * import content from cli-reference in openstack-manuals
+* ovo\_rpc: Avoid flooding logs with semantic violation warning
 * RouterPort to OVO
 * Rearrange existing documentation to fit the new standard layout
 * Updated from global requirements

@@ -89,8 +89,7 @@ def has_zero_prefixlen_address(ip_addresses):
 
 
 @profiler.trace_cls("rpc")
-class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
-                      l2population_rpc.L2populationRpcCallBackTunnelMixin,
+class OVSNeutronAgent(l2population_rpc.L2populationRpcCallBackTunnelMixin,
                       dvr_rpc.DVRAgentRpcCallbackMixin):
     '''Implements OVS-based tunneling, VLANs and flat networks.
 
@@ -236,6 +235,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.sg_agent = agent_sg_rpc.SecurityGroupAgentRpc(
             self.context, self.sg_plugin_rpc, defer_refresh_firewall=True,
             integration_bridge=self.int_br)
+        self.sg_plugin_rpc.register_legacy_sg_notification_callbacks(
+            self.sg_agent)
 
         # we default to False to provide backward compat with out of tree
         # firewall drivers that expect the logic that existed on the Neutron
@@ -287,6 +288,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
 
         # The initialization is complete; we can start receiving messages
         self.connection.consume_in_threads()
+        self.dead_topics.consume_in_threads()
 
         self.quitting_rpc_timeout = agent_conf.quitting_rpc_timeout
 
@@ -361,7 +363,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.plugin_rpc = OVSPluginApi(topics.PLUGIN)
         # allow us to receive port_update/delete callbacks from the cache
         self.plugin_rpc.register_legacy_notification_callbacks(self)
-        self.sg_plugin_rpc = sg_rpc.SecurityGroupServerRpcApi(topics.PLUGIN)
+        self.sg_plugin_rpc = sg_rpc.SecurityGroupServerAPIShim(
+            self.plugin_rpc.remote_resource_cache)
         self.dvr_plugin_rpc = dvr_rpc.DVRServerRpcApi(topics.PLUGIN)
         self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
 
@@ -370,7 +373,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         # Define the listening consumers for the agent
         consumers = [[constants.TUNNEL, topics.UPDATE],
                      [constants.TUNNEL, topics.DELETE],
-                     [topics.SECURITY_GROUP, topics.UPDATE],
                      [topics.DVR, topics.UPDATE]]
         if self.l2_pop:
             consumers.append([topics.L2POPULATION, topics.UPDATE])
@@ -378,6 +380,27 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                                                      topics.AGENT,
                                                      consumers,
                                                      start_listening=False)
+        self.setup_old_topic_sinkhole()
+
+    def setup_old_topic_sinkhole(self):
+        class SinkHole(object):
+            def __getattr__(self, attr):
+                return self._receiver
+
+            def _receiver(self, *args, **kwargs):
+                pass
+
+        # TODO(kevinbenton): remove this once oslo.messaging solves
+        # bug/1705351 so we can stop subscribing to these old topics
+        old_consumers = [[topics.PORT, topics.UPDATE],
+                         [topics.PORT, topics.DELETE],
+                         [topics.SECURITY_GROUP, topics.UPDATE],
+                         [topics.NETWORK, topics.UPDATE]]
+        self._sinkhole = SinkHole()
+        self.dead_topics = agent_rpc.create_consumers(
+            [self._sinkhole], topics.AGENT, old_consumers,
+            start_listening=False
+        )
 
     def init_extension_manager(self, connection):
         ext_manager.register_opts(self.conf)

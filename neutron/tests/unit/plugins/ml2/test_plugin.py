@@ -39,13 +39,14 @@ from neutron._i18n import _
 from neutron.common import utils
 from neutron.db import agents_db
 from neutron.db import api as db_api
-from neutron.db.models import l3 as l3_models
 from neutron.db import models_v2
 from neutron.db import provisioning_blocks
 from neutron.db import segments_db
 from neutron.extensions import availability_zone as az_ext
 from neutron.extensions import external_net
 from neutron.extensions import multiprovidernet as mpnet
+from neutron.objects import base as base_obj
+from neutron.objects import router as l3_obj
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import config
@@ -1366,8 +1367,8 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
         plugin.type_manager.drivers['driver1'].obj = mock_type_driver
         net = {
             'name': 'net1',
-            pnet.NETWORK_TYPE: 'driver1',
-            pnet.PHYSICAL_NETWORK: 'physnet1',
+            'network_type': 'driver1',
+            'physical_network': 'physnet1',
         }
         plugin._get_network_mtu(net)
         mock_type_driver.get_mtu.assert_called_once_with('physnet1')
@@ -1378,6 +1379,12 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
         class FakeDriver(object):
             def get_mtu(self, physical_network=None):
                 return mtu
+
+            def validate_provider_segment(self, segment):
+                pass
+
+            def is_partial_segment(self, segment):
+                return False
 
         driver_mock = mock.Mock()
         driver_mock.obj = FakeDriver()
@@ -1391,8 +1398,8 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
             'name': 'net1',
             mpnet.SEGMENTS: [
                 {
-                    pnet.NETWORK_TYPE: 'driver1',
-                    pnet.PHYSICAL_NETWORK: 'physnet1'
+                    'network_type': 'driver1',
+                    'physical_network': 'physnet1'
                 },
             ]
         }
@@ -1407,12 +1414,12 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
             'name': 'net1',
             mpnet.SEGMENTS: [
                 {
-                    pnet.NETWORK_TYPE: 'driver1',
-                    pnet.PHYSICAL_NETWORK: 'physnet1'
+                    'network_type': 'driver1',
+                    'physical_network': 'physnet1'
                 },
                 {
-                    pnet.NETWORK_TYPE: 'driver2',
-                    pnet.PHYSICAL_NETWORK: 'physnet2'
+                    'network_type': 'driver2',
+                    'physical_network': 'physnet2'
                 },
             ]
         }
@@ -1424,8 +1431,8 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
 
         net = {
             'name': 'net1',
-            pnet.NETWORK_TYPE: 'driver1',
-            pnet.PHYSICAL_NETWORK: 'physnet1',
+            'network_type': 'driver1',
+            'physical_network': 'physnet1',
         }
         self.assertEqual(1400, plugin._get_network_mtu(net))
 
@@ -1435,10 +1442,10 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
 
         net = {
             'name': 'net1',
-            pnet.NETWORK_TYPE: 'driver1',
-            pnet.PHYSICAL_NETWORK: 'physnet1',
+            'network_type': 'driver1',
+            'physical_network': 'physnet1',
         }
-        self.assertEqual(0, plugin._get_network_mtu(net))
+        self.assertEqual(1500, plugin._get_network_mtu(net))
 
     def test_unknown_segment_type_ignored(self):
         plugin = directory.get_plugin()
@@ -1449,12 +1456,12 @@ class Test_GetNetworkMtu(Ml2PluginV2TestCase):
             'name': 'net1',
             mpnet.SEGMENTS: [
                 {
-                    pnet.NETWORK_TYPE: 'driver1',
-                    pnet.PHYSICAL_NETWORK: 'physnet1'
+                    'network_type': 'driver1',
+                    'physical_network': 'physnet1'
                 },
                 {
-                    pnet.NETWORK_TYPE: 'driver2',
-                    pnet.PHYSICAL_NETWORK: 'physnet2'
+                    'network_type': 'driver2',
+                    'physical_network': 'physnet2'
                 },
             ]
         }
@@ -1514,9 +1521,11 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
 
         # lie to turn the port into an SNAT interface
         with db_api.context_manager.reader.using(self.context):
-            rp = self.context.session.query(l3_models.RouterPort).filter_by(
-                port_id=p['port_id']).first()
-            rp.port_type = constants.DEVICE_OWNER_ROUTER_SNAT
+            pager = base_obj.Pager(limit=1)
+            rp = l3_obj.RouterPort.get_objects(
+                self.context, _pager=pager, port_id=p['port_id'])
+            rp[0].port_type = constants.DEVICE_OWNER_ROUTER_SNAT
+            rp[0].update()
 
         # take the port away before csnat gets a chance to delete it
         # to simulate a concurrent delete

@@ -280,7 +280,6 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                         not is_auto_addr_subnet):
                     fixed_ip_list.append({'subnet_id': subnet['id']})
 
-        self._validate_max_ips_per_port(fixed_ip_list, device_owner)
         return fixed_ip_list
 
     def _update_ips_for_port(self, context, port, host,
@@ -382,7 +381,6 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                     ip['subnet_id'], db_port.id)
             self._update_db_port(context, db_port, new_port, network_id,
                                  new_mac)
-            getattr(db_port, 'fixed_ips')  # refresh relationship before return
 
             if auto_assign_subnets:
                 port_copy = copy.deepcopy(original)
@@ -390,7 +388,8 @@ class IpamPluggableBackend(ipam_backend_mixin.IpamBackendMixin):
                 port_copy['fixed_ips'] = auto_assign_subnets
                 self.allocate_ips_for_port_and_store(context,
                             {'port': port_copy}, port_copy['id'])
-                context.session.refresh(db_port)
+
+            getattr(db_port, 'fixed_ips')  # refresh relationship before return
 
         except Exception:
             with excutils.save_and_reraise_exception():
