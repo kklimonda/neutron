@@ -1,4 +1,4 @@
-neutron (2:11.0.0~rc1-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:11.0.0~rc1-0ubuntu1) artful; urgency=medium
 
   * New upstream release candidate for OpenStack Pike.
 
