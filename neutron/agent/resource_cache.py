@@ -75,6 +75,11 @@ class RemoteResourceCache(object):
         resources = self._puller.bulk_pull(context, rtype,
                                            filter_kwargs=filter_kwargs)
         for resource in resources:
+            if self._is_stale(rtype, resource):
+                # if the server was slow enough to respond the object may have
+                # been updated already and pushed to us in another thread.
+                LOG.debug("Ignoring stale update for %s: %s", rtype, resource)
+                continue
             self._type_cache(rtype)[resource.id] = resource
         LOG.debug("%s resources returned for queries %s", len(resources),
                   query_ids)
@@ -172,8 +177,10 @@ class RemoteResourceCache(object):
                       rtype, resource.id)
             return
         if existing:
-            LOG.debug("Resource %s %s updated. Old fields: %s New fields: %s",
-                      rtype, existing.id,
+            LOG.debug("Resource %s %s updated (revision_number %s->%s). "
+                      "Old fields: %s New fields: %s",
+                      rtype, existing.id, existing.revision_number,
+                      resource.revision_number,
                       {f: existing.get(f) for f in changed_fields},
                       {f: resource.get(f) for f in changed_fields})
         else:
