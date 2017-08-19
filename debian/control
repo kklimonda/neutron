@@ -105,7 +105,6 @@ Description: Neutron is a virtual network service for Openstack - server
 Package: neutron-common
 Architecture: all
 Depends: adduser,
-         iproute2,
          ipset,
          python-neutron (= ${source:Version}),
          python-neutron-fwaas (>= 1:9.0.0~b3),
@@ -194,7 +193,8 @@ Description: Neutron is a virtual network service for Openstack - metadata agent
 Package: python-neutron
 Architecture: all
 Section: python
-Depends: python-alembic (>= 0.8.4),
+Depends: iproute2,
+         python-alembic (>= 0.8.4),
          python-debtcollector (>= 1.2.0),
          python-designateclient (>= 1.5.0),
          python-eventlet (>= 0.18.2),
