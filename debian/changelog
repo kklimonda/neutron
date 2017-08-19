@@ -1,4 +1,4 @@
-neutron (2:11.0.0~rc1-0ubuntu3) UNRELEASED; urgency=medium
+neutron (2:11.0.0~rc1-0ubuntu3) artful; urgency=medium
 
   * d/control: Move iproute2 Depends to python-neutron.
 
