@@ -1,6 +1,27 @@
 CHANGES
 =======
 
+11.0.0.0rc2
+-----------
+
+* Fixes input for netlink-lib functional tests
+* add doc section for ml2 extension drivers
+* Add unit tests for dns\_domain for ports
+* Treat Filter as Dict in get\_policies
+* Stop using v2 identity API
+* Fixing test\_convert\_default\_subnetpool\_to\_non\_default
+* Add port dns\_domain processing logic
+* DVR: Provide options for DVR North/South routing centralized
+* Hook bandit security linter to pep8 target
+* Add a target to Sinkhole so it's compatible
+* DB migration checklist task for Pike
+* Update UPPER\_CONSTRAINTS\_FILE for stable/pike
+* Make code follow log translation guideline
+* Apply network MTU changes to l3 ports
+* Apply network MTU changes to dhcp ports
+* Allow unprivileged users to get their quota usage
+* Update .gitreview for stable/pike
+
 11.0.0.0rc1
 -----------
 

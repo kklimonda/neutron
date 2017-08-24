@@ -1990,6 +1990,7 @@ releasenotes/notes/access_as_external_rbac-455dc74b9fa22761.yaml
 releasenotes/notes/add-availability-zone-4440cf00be7c54ba.yaml
 releasenotes/notes/add-designate-driver-ssl-options-169c299c96f2aff0.yaml
 releasenotes/notes/add-dhcp_release6-ff1b8d62fd7fe76d.yaml
+releasenotes/notes/add-dns-domain-to-ports-f71359d75909a2d5.yaml
 releasenotes/notes/add-enable-dvr-knob-636268f775bb4569.yaml
 releasenotes/notes/add-get-me-a-network-56321aeef5389001.yaml
 releasenotes/notes/add-integration-with-external-dns-f56ec8a4993b1fc4.yaml
@@ -2049,6 +2050,7 @@ releasenotes/notes/dhcp-lease-time-5c504c3730a4f9ea.yaml
 releasenotes/notes/direct-physical-vnic-878d15bdb758b70e.yaml
 releasenotes/notes/dnsmasq_dns_servers-d729c04887ce67b4.yaml
 releasenotes/notes/dscp-qos-77ea9b27d3762e48.yaml
+releasenotes/notes/dvr-configure-centralized-floatingip-with-new-agent-type-05361f1f78853cf7.yaml
 releasenotes/notes/dvr-fip-namespace-on-all-nodes-c4da7ccd60ee62f5.yaml
 releasenotes/notes/dvr-ha-support-cc67e84d9380cd0b.yaml
 releasenotes/notes/dvr-ovs-agent-6052a8d60fddde22.yaml
