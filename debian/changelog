@@ -1,3 +1,9 @@
+neutron (2:11.0.0~rc2-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream release candidate for OpenStack Pike.
+
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 24 Aug 2017 12:27:30 -0400
+
 neutron (2:11.0.0~rc1-0ubuntu3) artful; urgency=medium
 
   * d/control: Move iproute2 Depends to python-neutron.
