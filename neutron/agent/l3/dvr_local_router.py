@@ -22,7 +22,6 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 import six
 
-from neutron._i18n import _LE, _LW
 from neutron.agent.l3 import dvr_fip_ns
 from neutron.agent.l3 import dvr_router_base
 from neutron.agent.linux import ip_lib
@@ -95,7 +94,7 @@ class DvrLocalRouter(dvr_router_base.DvrRouterBase):
         """
 
     def floating_ip_added_dist(self, fip, fip_cidr):
-        """Add floating IP to FIP namespace."""
+        """Add floating IP to respective namespace based on agent mode."""
         if fip.get(n_const.DVR_SNAT_BOUND):
             floating_ip_status = self.add_centralized_floatingip(fip, fip_cidr)
             if floating_ip_status == lib_constants.FLOATINGIP_STATUS_ACTIVE:
@@ -239,16 +238,16 @@ class DvrLocalRouter(dvr_router_base.DvrRouterBase):
                 return True
             else:
                 if operation == 'add':
-                    LOG.warning(_LW("Device %s does not exist so ARP entry "
-                                    "cannot be updated, will cache "
-                                    "information to be applied later "
-                                    "when the device exists"),
+                    LOG.warning("Device %s does not exist so ARP entry "
+                                "cannot be updated, will cache "
+                                "information to be applied later "
+                                "when the device exists",
                                 device)
                     self._cache_arp_entry(ip, mac, subnet_id, operation)
                 return False
         except Exception:
             with excutils.save_and_reraise_exception():
-                LOG.exception(_LE("DVR: Failed updating arp entry"))
+                LOG.exception("DVR: Failed updating arp entry")
 
     def _set_subnet_arp_info(self, subnet_id):
         """Set ARP info retrieved from Plugin for existing ports."""
@@ -356,10 +355,10 @@ class DvrLocalRouter(dvr_router_base.DvrRouterBase):
                                                priority=snat_idx)
         except Exception:
             if is_add:
-                exc = _LE('DVR: error adding redirection logic')
+                exc = 'DVR: error adding redirection logic'
             else:
-                exc = _LE('DVR: snat remove failed to clear the rule '
-                          'and device')
+                exc = ('DVR: snat remove failed to clear the rule '
+                       'and device')
             LOG.exception(exc)
 
     def _snat_redirect_add(self, gateway, sn_port, sn_int):
@@ -552,10 +551,12 @@ class DvrLocalRouter(dvr_router_base.DvrRouterBase):
                     i.get('dest_host') == self.host)]
 
     def process_external(self):
-        ex_gw_port = self.get_ex_gw_port()
-        if ex_gw_port:
-            self.create_dvr_external_gateway_on_agent(ex_gw_port)
-            self.connect_rtr_2_fip()
+        if self.agent_conf.agent_mode != (
+            n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL):
+            ex_gw_port = self.get_ex_gw_port()
+            if ex_gw_port:
+                self.create_dvr_external_gateway_on_agent(ex_gw_port)
+                self.connect_rtr_2_fip()
         super(DvrLocalRouter, self).process_external()
 
     def connect_rtr_2_fip(self):

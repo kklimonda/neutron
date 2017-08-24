@@ -22,8 +22,9 @@ from oslo_log import log as logging
 import oslo_messaging
 from sqlalchemy import or_
 
-from neutron._i18n import _, _LI
+from neutron._i18n import _
 from neutron.agent.common import utils as agent_utils
+from neutron.common import constants as l_consts
 from neutron.common import utils as n_utils
 from neutron.db import agentschedulers_db
 from neutron.db.models import agent as agent_model
@@ -65,8 +66,8 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
 
     def add_periodic_l3_agent_status_check(self):
         if not cfg.CONF.allow_automatic_l3agent_failover:
-            LOG.info(_LI("Skipping period L3 agent status check because "
-                         "automatic router rescheduling is disabled."))
+            LOG.info("Skipping period L3 agent status check because "
+                     "automatic router rescheduling is disabled.")
             return
 
         self.add_agent_status_check_worker(
@@ -108,7 +109,8 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
 
         agent_mode = self._get_agent_mode(agent)
 
-        if agent_mode == constants.L3_AGENT_MODE_DVR:
+        if agent_mode in [constants.L3_AGENT_MODE_DVR,
+                          l_consts.L3_AGENT_MODE_DVR_NO_EXTERNAL]:
             raise l3agentscheduler.DVRL3CannotAssignToDvrAgent()
 
         if (agent_mode == constants.L3_AGENT_MODE_LEGACY and
@@ -194,11 +196,11 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         """
         agent = self._get_agent(context, agent_id)
         agent_mode = self._get_agent_mode(agent)
-        if agent_mode == constants.L3_AGENT_MODE_DVR:
+        if agent_mode in [constants.L3_AGENT_MODE_DVR,
+                          l_consts.L3_AGENT_MODE_DVR_NO_EXTERNAL]:
             raise l3agentscheduler.DVRL3CannotRemoveFromDvrAgent()
 
         self._unbind_router(context, router_id, agent_id)
-
         router = self.get_router(context, router_id)
         plugin = directory.get_plugin(plugin_constants.L3)
         if router.get('ha'):
@@ -320,8 +322,8 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
         agent = self._get_agent_by_type_and_host(
             context, constants.AGENT_TYPE_L3, host)
         if not agentschedulers_db.services_available(agent.admin_state_up):
-            LOG.info(_LI("Agent has its services disabled. Returning "
-                         "no active routers. Agent: %s"), agent)
+            LOG.info("Agent has its services disabled. Returning "
+                     "no active routers. Agent: %s", agent)
             return []
         scheduled_router_ids = self._get_router_ids_for_agent(
             context, agent, router_ids)
@@ -416,8 +418,9 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
                                 ignore_admin_state=False):
         """Get the valid l3 agents for the router from a list of l3_agents.
 
-        It will not return agents in 'dvr' mode for a dvr router as dvr
-        routers are not explicitly scheduled to l3 agents on compute nodes
+        It will not return agents in 'dvr' mode or in 'dvr_no_external' mode
+        for a dvr router as dvr routers are not explicitly scheduled to l3
+        agents on compute nodes
         """
         candidates = []
         is_router_distributed = sync_router.get('distributed', False)
@@ -431,6 +434,7 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
             agent_mode = agent_conf.get(constants.L3_AGENT_MODE,
                                         constants.L3_AGENT_MODE_LEGACY)
             if (agent_mode == constants.L3_AGENT_MODE_DVR or
+                agent_mode == l_consts.L3_AGENT_MODE_DVR_NO_EXTERNAL or
                     (agent_mode == constants.L3_AGENT_MODE_LEGACY and
                      is_router_distributed)):
                 continue

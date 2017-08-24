@@ -19,7 +19,7 @@ from neutron_lib import constants as lib_constants
 from neutron_lib.utils import helpers
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LE, _LW
+from neutron._i18n import _
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
@@ -298,8 +298,8 @@ class RouterInfo(object):
         except RuntimeError:
             # any exception occurred here should cause the floating IP
             # to be set in error state
-            LOG.warning(_LW("Unable to configure IP address for "
-                            "floating IP: %s"), fip['id'])
+            LOG.warning("Unable to configure IP address for "
+                        "floating IP: %s", fip['id'])
 
     def add_floating_ip(self, fip, interface_name, device):
         raise NotImplementedError()
@@ -476,10 +476,13 @@ class RouterInfo(object):
         for existing_port in existing_ports:
             current_port = current_ports_dict.get(existing_port['id'])
             if current_port:
-                if (sorted(existing_port['fixed_ips'],
+                fixed_ips_changed = (
+                    sorted(existing_port['fixed_ips'],
                            key=helpers.safe_sort_key) !=
-                        sorted(current_port['fixed_ips'],
-                               key=helpers.safe_sort_key)):
+                    sorted(current_port['fixed_ips'],
+                           key=helpers.safe_sort_key))
+                mtu_changed = existing_port['mtu'] != current_port['mtu']
+                if fixed_ips_changed or mtu_changed:
                     updated_ports[current_port['id']] = current_port
         return updated_ports
 
@@ -502,7 +505,9 @@ class RouterInfo(object):
                   self.router_id)
         self.radvd.disable()
 
-    def internal_network_updated(self, interface_name, ip_cidrs):
+    def internal_network_updated(self, interface_name, ip_cidrs, mtu):
+        self.driver.set_mtu(interface_name, mtu, namespace=self.ns_name,
+                            prefix=INTERNAL_DEV_PREFIX)
         self.driver.init_router_port(
             interface_name,
             ip_cidrs=ip_cidrs,
@@ -562,7 +567,8 @@ class RouterInfo(object):
                 ip_cidrs = common_utils.fixed_ip_cidrs(p['fixed_ips'])
                 LOG.debug("updating internal network for port %s", p)
                 updated_cidrs += ip_cidrs
-                self.internal_network_updated(interface_name, ip_cidrs)
+                self.internal_network_updated(
+                    interface_name, ip_cidrs, p['mtu'])
                 enable_ra = enable_ra or self._port_has_ipv6_subnet(p)
 
         # Check if there is any pd prefix update
@@ -876,7 +882,7 @@ class RouterInfo(object):
 
         except n_exc.FloatingIpSetupException:
             # All floating IPs must be put in error state
-            LOG.exception(_LE("Failed to process floating IPs."))
+            LOG.exception("Failed to process floating IPs.")
             fip_statuses = self.put_fips_in_error_state()
         finally:
             self.update_fip_statuses(fip_statuses)
@@ -902,7 +908,7 @@ class RouterInfo(object):
         except (n_exc.FloatingIpSetupException,
                 n_exc.IpTablesApplyException):
                 # All floating IPs must be put in error state
-                LOG.exception(_LE("Failed to process floating IPs."))
+                LOG.exception("Failed to process floating IPs.")
                 fip_statuses = self.put_fips_in_error_state()
         finally:
             self.update_fip_statuses(fip_statuses)
@@ -1096,8 +1102,8 @@ class RouterInfo(object):
             self.agent.pd.sync_router(self.router['id'])
             self._process_external_on_delete()
         else:
-            LOG.warning(_LW("Can't gracefully delete the router %s: "
-                            "no router namespace found."), self.router['id'])
+            LOG.warning("Can't gracefully delete the router %s: "
+                        "no router namespace found.", self.router['id'])
 
     @common_utils.exception_logger()
     def process(self):

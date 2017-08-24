@@ -35,7 +35,7 @@ import sqlalchemy as sa
 from sqlalchemy import exc as sql_exc
 from sqlalchemy import orm
 
-from neutron._i18n import _, _LE, _LI, _LW
+from neutron._i18n import _
 from neutron.common import constants as n_const
 from neutron.common import utils as n_utils
 from neutron.db import _utils as db_utils
@@ -166,8 +166,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
                     return allocation.vr_id
 
             except db_exc.DBDuplicateEntry:
-                LOG.info(_LI("Attempt %(count)s to allocate a VRID in the "
-                             "network %(network)s for the router %(router)s"),
+                LOG.info("Attempt %(count)s to allocate a VRID in the "
+                         "network %(network)s for the router %(router)s",
                          {'count': count, 'network': network_id,
                           'router': router_id})
 
@@ -255,9 +255,9 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
         max_agents = cfg.CONF.max_l3_agents_per_router
         if max_agents:
             if max_agents > num_agents:
-                LOG.info(_LI("Number of active agents lower than "
-                             "max_l3_agents_per_router. L3 agents "
-                             "available: %s"), num_agents)
+                LOG.info("Number of active agents lower than "
+                         "max_l3_agents_per_router. L3 agents "
+                         "available: %s", num_agents)
             else:
                 num_agents = max_agents
 
@@ -414,9 +414,9 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             with excutils.save_and_reraise_exception() as ctx:
                 if isinstance(e, l3_ha.NoVRIDAvailable):
                     ctx.reraise = False
-                    LOG.warning(_LW("No more VRIDs for router: %s"), e)
+                    LOG.warning("No more VRIDs for router: %s", e)
                 else:
-                    LOG.exception(_LE("Failed to schedule HA router %s."),
+                    LOG.exception("Failed to schedule HA router %s.",
                                   router_id)
                 router['status'] = self._update_router_db(
                     context, router_id,
@@ -502,15 +502,15 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             LOG.debug(
                 "HA network for tenant %s was already deleted.", tenant_id)
         except sa.exc.InvalidRequestError:
-            LOG.info(_LI("HA network %s can not be deleted."), net_id)
+            LOG.info("HA network %s can not be deleted.", net_id)
         except n_exc.NetworkInUse:
             # network is still in use, this is normal so we don't
             # log anything
             pass
         else:
-            LOG.info(_LI("HA network %(network)s was deleted as "
-                         "no HA routers are present in tenant "
-                         "%(tenant)s."),
+            LOG.info("HA network %(network)s was deleted as "
+                     "no HA routers are present in tenant "
+                     "%(tenant)s.",
                      {'network': net_id, 'tenant': tenant_id})
 
     @registry.receives(resources.ROUTER, [events.PRECOMMIT_DELETE])
@@ -622,8 +622,8 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
             port = binding.port
             if not port:
                 # Filter the HA router has no ha port here
-                LOG.info(_LI("HA router %s is missing HA router port "
-                             "bindings. Skipping it."),
+                LOG.info("HA router %s is missing HA router port "
+                         "bindings. Skipping it.",
                          binding.router_id)
                 routers_dict.pop(binding.router_id)
                 continue
@@ -641,19 +641,22 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NAT_with_dvr_db_mixin,
 
         self._populate_mtu_and_subnets_for_ports(context, interfaces)
 
-        # If this is a DVR+HA router, but the agent is question is in 'dvr'
-        # mode (as opposed to 'dvr_snat'), then we want to always return it
-        # even though it's missing the '_ha_interface' key.
+        # If this is a DVR+HA router, but the agent in question is in 'dvr'
+        # or 'dvr_no_external' mode (as opposed to 'dvr_snat'), then we want to
+        # always return it even though it's missing the '_ha_interface' key.
         return [r for r in list(routers_dict.values())
                 if (agent_mode == constants.L3_AGENT_MODE_DVR or
+                    agent_mode == n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL or
                     not r.get('ha') or r.get(constants.HA_INTERFACE_KEY))]
 
     @log_helpers.log_method_call
     def get_ha_sync_data_for_host(self, context, host, agent,
                                   router_ids=None, active=None):
         agent_mode = self._get_agent_mode(agent)
-        dvr_agent_mode = (agent_mode in [constants.L3_AGENT_MODE_DVR_SNAT,
-                                         constants.L3_AGENT_MODE_DVR])
+        dvr_agent_mode = (
+            agent_mode in [constants.L3_AGENT_MODE_DVR_SNAT,
+                           constants.L3_AGENT_MODE_DVR,
+                           n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL])
         if (dvr_agent_mode and n_utils.is_extension_supported(
                 self, constants.L3_DISTRIBUTED_EXT_ALIAS)):
             # DVR has to be handled differently
