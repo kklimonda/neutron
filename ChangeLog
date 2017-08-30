@@ -1,6 +1,11 @@
 CHANGES
 =======
 
+11.0.0
+------
+
+* DVR: \_get\_floatingips\_bound\_to\_host throws KeyError
+
 11.0.0.0rc2
 -----------
 
