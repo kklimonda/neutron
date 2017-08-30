@@ -1,3 +1,9 @@
+neutron (2:11.0.0-0ubuntu1) artful; urgency=medium
+
+  * New upstream release for OpenStack Pike.
+
+ -- James Page <james.page@ubuntu.com>  Wed, 30 Aug 2017 14:59:39 +0100
+
 neutron (2:11.0.0~rc2-0ubuntu1) artful; urgency=medium
 
   * New upstream release candidate for OpenStack Pike.
