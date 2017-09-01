@@ -1,0 +1,103 @@
+Description: l3 ha: don't send routers without '_ha_interface'
+
+Change I22ff5a5a74527366da8f82982232d4e70e455570 changed
+get_ha_sync_data_for_host such that if an agent requests a router's
+details, then it is always returned, even when it doesn't have the key
+'_ha_interface'. Further changes to this change tried to put this check
+back in (Ie38baf061d678fc5d768195b25241efbad74e42f), but this patch
+failed to do so for the case where no bindings were returned (possible
+when the router has been concurrently deleted). This patch puts this
+check back in.
+
+Author: John Schwarz <jschwarz@redhat.com>
+Origin: https://review.openstack.org/gitweb?p=openstack/neutron.git; \
+    a=commitdiff;h=8c77ee6b20dd38cc0246e854711cb91cffe3a069
+Bug: https://bugs.launchpad.net/neutron/+bug/1668410
+---
+ neutron/db/l3_hamode_db.py                 | 13 ++++++++-----
+ neutron/tests/unit/db/test_l3_hamode_db.py | 27 ++++++++++++++++++++++++++-
+ 2 files changed, 34 insertions(+), 6 deletions(-)
+
+Index: neutron-8.4.0/neutron/db/l3_hamode_db.py
+===================================================================
+--- neutron-8.4.0.orig/neutron/db/l3_hamode_db.py
++++ neutron-8.4.0/neutron/db/l3_hamode_db.py
+@@ -687,7 +687,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NA
+             None)
+ 
+     @log_helpers.log_method_call
+-    def _process_sync_ha_data(self, context, routers, host):
++    def _process_sync_ha_data(self, context, routers, host, agent_mode):
+         routers_dict = dict((router['id'], router) for router in routers)
+ 
+         bindings = self.get_ha_router_port_bindings(context,
+@@ -713,9 +713,12 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NA
+             if interface:
+                 self._populate_mtu_and_subnets_for_ports(context, [interface])
+ 
+-        # Could not filter the HA_INTERFACE_KEY here, because a DVR router
+-        # with SNAT HA in DVR compute host also does not have that attribute.
+-        return list(routers_dict.values())
++        # If this is a DVR+HA router, but the agent is question is in 'dvr'
++        # mode (as opposed to 'dvr_snat'), then we want to always return it
++        # even though it's missing the '_ha_interface' key.
++        return [r for r in list(routers_dict.values())
++                if (agent_mode == constants.L3_AGENT_MODE_DVR or
++                    not r.get('ha') or r.get(constants.HA_INTERFACE_KEY))]
+ 
+     @log_helpers.log_method_call
+     def get_ha_sync_data_for_host(self, context, host, agent,
+@@ -731,7 +734,7 @@ class L3_HA_NAT_db_mixin(l3_dvr_db.L3_NA
+         else:
+             sync_data = super(L3_HA_NAT_db_mixin, self).get_sync_data(context,
+                                                             router_ids, active)
+-        return self._process_sync_ha_data(context, sync_data, host)
++        return self._process_sync_ha_data(context, sync_data, host, agent_mode)
+ 
+     @classmethod
+     def _set_router_states(cls, context, bindings, states):
+Index: neutron-8.4.0/neutron/tests/unit/db/test_l3_hamode_db.py
+===================================================================
+--- neutron-8.4.0.orig/neutron/tests/unit/db/test_l3_hamode_db.py
++++ neutron-8.4.0/neutron/tests/unit/db/test_l3_hamode_db.py
+@@ -809,7 +809,7 @@ class L3HATestCase(L3HATestFramework):
+         self.assertEqual(2, len(bindings))
+ 
+         fake_binding = mock.Mock()
+-        fake_binding.router_id = router2['id']
++        fake_binding.router_id = bindings[1].router_id
+         fake_binding.port = None
+         with mock.patch.object(
+                 self.plugin, "get_ha_router_port_bindings",
+@@ -817,6 +817,31 @@ class L3HATestCase(L3HATestFramework):
+             routers = self.plugin.get_ha_sync_data_for_host(
+                 self.admin_ctx, self.agent1['host'], self.agent1)
+             self.assertEqual(1, len(routers))
++            self.assertIsNotNone(routers[0].get(constants.HA_INTERFACE_KEY))
++
++    def test_sync_ha_router_info_router_concurrently_deleted(self):
++        self._create_router()
++
++        with mock.patch.object(
++                self.plugin, "get_ha_router_port_bindings",
++                return_value=[]):
++            routers = self.plugin.get_ha_sync_data_for_host(
++                self.admin_ctx, self.agent1['host'], self.agent1)
++            self.assertEqual(0, len(routers))
++
++    def test_sync_ha_router_info_router_concurrently_deleted_agent_dvr(self):
++        self._create_router()
++        orig_func = self.plugin._process_sync_ha_data
++
++        def process_sync_ha_data(context, routers, host, agent_mode):
++            return orig_func(context, routers, host,
++                             agent_mode=constants.L3_AGENT_MODE_DVR)
++
++        with mock.patch.object(self.plugin, '_process_sync_ha_data',
++                               side_effect=process_sync_ha_data):
++            routers = self.plugin.get_ha_sync_data_for_host(
++                self.admin_ctx, self.agent1['host'], self.agent1)
++            self.assertEqual(1, len(routers))
+ 
+     def test_set_router_states_handles_concurrently_deleted_router(self):
+         router1 = self._create_router()
