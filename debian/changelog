@@ -1,4 +1,4 @@
-neutron (2:8.4.0-0ubuntu5) UNRELEASED; urgency=medium
+neutron (2:8.4.0-0ubuntu5) xenial; urgency=medium
 
   * d/p/l3-ha-don-t-send-routers-without-_ha_interface.patch: Backport fix for
     l3 ha: don't send routers without '_ha_interface' (LP: #1668410)
