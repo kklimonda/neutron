@@ -118,14 +118,6 @@ class BaseNetworkTest(test.BaseTestCase):
     @classmethod
     def resource_cleanup(cls):
         if CONF.service_available.neutron:
-            # Clean up QoS rules
-            for qos_rule in cls.qos_rules:
-                cls._try_delete_resource(cls.admin_client.delete_qos_rule,
-                                         qos_rule['id'])
-            # Clean up QoS policies
-            for qos_policy in cls.qos_policies:
-                cls._try_delete_resource(cls.admin_client.delete_qos_policy,
-                                         qos_policy['id'])
             # Clean up floating IPs
             for floating_ip in cls.floating_ips:
                 cls._try_delete_resource(cls.client.delete_floatingip,
@@ -194,6 +186,17 @@ class BaseNetworkTest(test.BaseTestCase):
                     cls.admin_client.delete_address_scope,
                     address_scope['id'])
 
+            # Clean up QoS rules
+            for qos_rule in cls.qos_rules:
+                cls._try_delete_resource(cls.admin_client.delete_qos_rule,
+                                         qos_rule['id'])
+            # Clean up QoS policies
+            # as all networks and ports are already removed, QoS policies
+            # shouldn't be "in use"
+            for qos_policy in cls.qos_policies:
+                cls._try_delete_resource(cls.admin_client.delete_qos_policy,
+                                         qos_policy['id'])
+
         super(BaseNetworkTest, cls).resource_cleanup()
 
     @classmethod
@@ -224,7 +227,10 @@ class BaseNetworkTest(test.BaseTestCase):
         client = client or cls.client
         body = client.create_network(name=network_name, **kwargs)
         network = body['network']
-        cls.networks.append(network)
+        if client is cls.client:
+            cls.networks.append(network)
+        else:
+            cls.admin_networks.append(network)
         return network
 
     @classmethod
@@ -370,10 +376,10 @@ class BaseNetworkTest(test.BaseTestCase):
 
     @classmethod
     def create_qos_policy(cls, name, description=None, shared=False,
-                          tenant_id=None):
+                          tenant_id=None, is_default=False):
         """Wrapper utility that returns a test QoS policy."""
         body = cls.admin_client.create_qos_policy(
-            name, description, shared, tenant_id)
+            name, description, shared, tenant_id, is_default)
         qos_policy = body['policy']
         cls.qos_policies.append(qos_policy)
         return qos_policy

@@ -1409,10 +1409,6 @@ neutron/tests/functional/agent/linux/bin/__init__.py
 neutron/tests/functional/agent/linux/bin/ipt_binname.py
 neutron/tests/functional/agent/linux/openvswitch_firewall/__init__.py
 neutron/tests/functional/agent/linux/openvswitch_firewall/test_firewall.py
-neutron/tests/functional/agent/ovsdb/__init__.py
-neutron/tests/functional/agent/ovsdb/test_impl_idl.py
-neutron/tests/functional/agent/ovsdb/native/__init__.py
-neutron/tests/functional/agent/ovsdb/native/test_connection.py
 neutron/tests/functional/agent/windows/__init__.py
 neutron/tests/functional/agent/windows/test_ip_lib.py
 neutron/tests/functional/api/__init__.py
