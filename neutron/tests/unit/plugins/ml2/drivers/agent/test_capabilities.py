@@ -12,34 +12,29 @@
 # under the License.
 
 import mock
-from neutron_lib.callbacks import events
-from neutron_lib import fixture
 
+from neutron.callbacks import events
 from neutron.plugins.ml2.drivers.agent import capabilities
 from neutron.tests import base
 
 
 class CapabilitiesTest(base.BaseTestCase):
 
-    def setUp(self):
-        super(CapabilitiesTest, self).setUp()
-        self._mgr = mock.Mock()
-        self.useFixture(fixture.CallbackRegistryFixture(
-            callback_manager=self._mgr))
-
-    def test_notify_init_event(self):
+    @mock.patch("neutron.callbacks.manager.CallbacksManager.notify")
+    def test_notify_init_event(self, mocked_manager):
         mock_agent_type = mock.Mock()
         mock_agent = mock.Mock()
         capabilities.notify_init_event(mock_agent_type, mock_agent)
-        self._mgr.notify.assert_called_with(mock_agent_type,
-                                            events.AFTER_INIT,
-                                            mock_agent,
-                                            agent=mock_agent)
+        mocked_manager.assert_called_with(mock_agent_type,
+                                          events.AFTER_INIT,
+                                          mock_agent,
+                                          agent=mock_agent)
 
-    def test_register(self):
+    @mock.patch("neutron.callbacks.manager.CallbacksManager.subscribe")
+    def test_register(self, mocked_subscribe):
         mock_callback = mock.Mock()
         mock_agent_type = mock.Mock()
         capabilities.register(mock_callback, mock_agent_type)
-        self._mgr.subscribe.assert_called_with(mock_callback,
-                                               mock_agent_type,
-                                               events.AFTER_INIT)
+        mocked_subscribe.assert_called_with(mock_callback,
+                                            mock_agent_type,
+                                            events.AFTER_INIT)

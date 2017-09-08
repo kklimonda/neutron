@@ -15,6 +15,7 @@
 import errno
 import itertools
 import os
+import six
 
 import netaddr
 from neutron_lib import exceptions
@@ -23,7 +24,7 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import fileutils
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE
 from neutron.agent.linux import external_process
 from neutron.common import constants
 from neutron.common import utils
@@ -406,8 +407,8 @@ class KeepalivedManager(object):
             os.remove(pid_file)
         except OSError as e:
             if e.errno != errno.ENOENT:
-                LOG.error("Could not delete file %s, keepalived can "
-                          "refuse to start.", pid_file)
+                LOG.error(_LE("Could not delete file %s, keepalived can "
+                              "refuse to start."), pid_file)
 
     def get_vrrp_pid_file_name(self, base_pid_file):
         return '%s-vrrp' % base_pid_file
@@ -424,10 +425,6 @@ class KeepalivedManager(object):
     def spawn(self):
         config_path = self._output_config_file()
 
-        for key, instance in self.config.instances.items():
-            if instance.track_script:
-                instance.track_script.write_check_script()
-
         keepalived_pm = self.get_process()
         vrrp_pm = self._get_vrrp_process(
             self.get_vrrp_pid_file_name(keepalived_pm.get_pid_file_name()))
@@ -436,6 +433,10 @@ class KeepalivedManager(object):
             self._get_keepalived_process_callback(vrrp_pm, config_path))
 
         keepalived_pm.enable(reload_cfg=True)
+
+        for key, instance in six.iteritems(self.config.instances):
+            if instance.track_script:
+                instance.track_script.write_check_script()
 
         self.process_monitor.register(uuid=self.resource_id,
                                       service_name=KEEPALIVED_SERVICE_NAME,
@@ -481,7 +482,7 @@ class KeepalivedManager(object):
                    '-f', config_path,
                    '-p', pid_file,
                    '-r', self.get_vrrp_pid_file_name(pid_file)]
-            if logging.is_debug_enabled(cfg.CONF):
+            if cfg.CONF.debug:
                 cmd.append('-D')
             return cmd
 

@@ -59,7 +59,7 @@ class TestNetnsCleanup(base.BaseTestCase):
     def setUp(self):
         super(TestNetnsCleanup, self).setUp()
         conn_patcher = mock.patch(
-            'neutron.agent.ovsdb.impl_idl._connection')
+            'neutron.agent.ovsdb.native.connection.Connection.start')
         conn_patcher.start()
         self.addCleanup(conn_patcher.stop)
 
@@ -335,7 +335,9 @@ class TestNetnsCleanup(base.BaseTestCase):
                         if force:
                             expected.extend([
                                 mock.call().netns.exists(ns),
-                                mock.call().get_devices()])
+                                mock.call().get_devices(
+                                    exclude_loopback=True,
+                                    exclude_gre_devices=True)])
                             self.assertTrue(kill_dhcp.called)
                             unplug.assert_has_calls(
                                 [mock.call(conf, d) for d in

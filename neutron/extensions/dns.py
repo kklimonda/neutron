@@ -15,7 +15,6 @@
 
 import re
 
-from neutron_lib.api.definitions import network as net_def
 from neutron_lib.api import extensions
 from neutron_lib.api import validators
 from neutron_lib import exceptions as n_exc
@@ -23,6 +22,7 @@ from oslo_config import cfg
 import six
 
 from neutron._i18n import _
+from neutron.api.v2 import attributes as attr
 from neutron.extensions import l3
 
 DNS_LABEL_MAX_LEN = 63
@@ -114,10 +114,9 @@ def _validate_dns_format(data, max_len=FQDN_MAX_LEN):
         # Trailing periods are allowed to indicate that a name is fully
         # qualified per RFC 1034 (page 7).
         trimmed = data if not data.endswith('.') else data[:-1]
-        if len(trimmed) > max_len:
+        if len(trimmed) > 255:
             raise TypeError(
-                _("'%(trimmed)s' exceeds the %(maxlen)s character FQDN "
-                  "limit") % {'trimmed': trimmed, 'maxlen': max_len})
+                _("'%s' exceeds the 255 character FQDN limit") % trimmed)
         names = trimmed.split('.')
         for name in names:
             if not name:
@@ -226,7 +225,7 @@ EXTENDED_ATTRIBUTES_2_0 = {
                     'validate': {'type:dns_domain': FQDN_MAX_LEN},
                     'is_visible': True},
     },
-    net_def.COLLECTION_NAME: {
+    attr.NETWORKS: {
         DNSDOMAIN: {'allow_post': True, 'allow_put': True,
                     'default': '',
                     'convert_to': convert_to_lowercase,

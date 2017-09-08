@@ -22,16 +22,10 @@ from oslo_utils import excutils
 from oslo_utils import timeutils
 import ryu.app.ofctl.api as ofctl_api
 import ryu.exception as ryu_exc
-from ryu.lib import ofctl_string
-from ryu.ofproto import ofproto_parser
-import six
 
-from neutron._i18n import _
-from neutron.agent.common import ovs_lib
+from neutron._i18n import _, _LW
 
 LOG = logging.getLogger(__name__)
-
-COOKIE_DEFAULT = object()
 
 
 class OpenFlowSwitchMixin(object):
@@ -72,7 +66,7 @@ class OpenFlowSwitchMixin(object):
 
     def _send_msg(self, msg, reply_cls=None, reply_multi=False):
         timeout_sec = cfg.CONF.OVS.of_request_timeout
-        timeout = eventlet.Timeout(seconds=timeout_sec)
+        timeout = eventlet.timeout.Timeout(seconds=timeout_sec)
         try:
             result = ofctl_api.send_msg(self._app, msg, reply_cls, reply_multi)
         except ryu_exc.RyuException as e:
@@ -83,7 +77,7 @@ class OpenFlowSwitchMixin(object):
             LOG.error(m)
             # NOTE(yamamoto): use RuntimeError for compat with ovs_lib
             raise RuntimeError(m)
-        except eventlet.Timeout as e:
+        except eventlet.timeout.Timeout as e:
             with excutils.save_and_reraise_exception() as ctx:
                 if e is timeout:
                     ctx.reraise = False
@@ -105,22 +99,12 @@ class OpenFlowSwitchMixin(object):
             return match
         return ofpp.OFPMatch(**match_kwargs)
 
-    def uninstall_flows(self, table_id=None, strict=False, priority=0,
-                        cookie=COOKIE_DEFAULT, cookie_mask=0,
-                        match=None, **match_kwargs):
+    def delete_flows(self, table_id=None, strict=False, priority=0,
+                     cookie=0, cookie_mask=0,
+                     match=None, **match_kwargs):
         (dp, ofp, ofpp) = self._get_dp()
         if table_id is None:
             table_id = ofp.OFPTT_ALL
-
-        if cookie == ovs_lib.COOKIE_ANY:
-            cookie = 0
-            if cookie_mask != 0:
-                raise Exception("cookie=COOKIE_ANY but cookie_mask set to %s" %
-                                cookie_mask)
-        elif cookie == COOKIE_DEFAULT:
-            cookie = self._default_cookie
-            cookie_mask = ovs_lib.UINT64_BITMASK
-
         match = self._match(ofp, ofpp, match, **match_kwargs)
         if strict:
             cmd = ofp.OFPFC_DELETE_STRICT
@@ -156,9 +140,9 @@ class OpenFlowSwitchMixin(object):
         LOG.debug("Reserved cookies for %s: %s", self.br_name,
                   self.reserved_cookies)
         for c in cookies:
-            LOG.warning("Deleting flow with cookie 0x%(cookie)x",
+            LOG.warning(_LW("Deleting flow with cookie 0x%(cookie)x"),
                         {'cookie': c})
-            self.uninstall_flows(cookie=c, cookie_mask=ovs_lib.UINT64_BITMASK)
+            self.delete_flows(cookie=c, cookie_mask=((1 << 64) - 1))
 
     def install_goto_next(self, table_id):
         self.install_goto(table_id=table_id, dest_table_id=table_id + 1)
@@ -197,14 +181,6 @@ class OpenFlowSwitchMixin(object):
                              match=None, **match_kwargs):
         (dp, ofp, ofpp) = self._get_dp()
         match = self._match(ofp, ofpp, match, **match_kwargs)
-        if isinstance(instructions, six.string_types):
-            # NOTE: instructions must be str for the ofctl of_interface.
-            # After the ofctl driver is removed, a deprecation warning
-            # could be added here.
-            jsonlist = ofctl_string.ofp_instruction_from_str(
-                ofp, instructions)
-            instructions = ofproto_parser.ofp_instruction_from_jsondict(
-                dp, jsonlist)
         msg = ofpp.OFPFlowMod(dp,
                               table_id=table_id,
                               cookie=self.default_cookie,

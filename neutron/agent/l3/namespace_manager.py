@@ -12,6 +12,7 @@
 
 from oslo_log import log as logging
 
+from neutron._i18n import _LE
 from neutron.agent.l3 import dvr_fip_ns
 from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import namespaces
@@ -118,8 +119,8 @@ class NamespaceManager(object):
             namespaces = root_ip.get_namespaces()
             return set(ns for ns in namespaces if self.is_managed(ns))
         except RuntimeError:
-            LOG.exception('RuntimeError in obtaining namespace list for '
-                          'namespace cleanup.')
+            LOG.exception(_LE('RuntimeError in obtaining namespace list for '
+                              'namespace cleanup.'))
             return set()
 
     def ensure_router_cleanup(self, router_id):
@@ -140,7 +141,7 @@ class NamespaceManager(object):
             if self.metadata_driver:
                 # cleanup stale metadata proxy processes first
                 self.metadata_driver.destroy_monitored_metadata_proxy(
-                    self.process_monitor, ns_id, self.agent_conf, ns.name)
+                    self.process_monitor, ns_id, self.agent_conf)
             ns.delete()
         except RuntimeError:
-            LOG.exception('Failed to destroy stale namespace %s', ns)
+            LOG.exception(_LE('Failed to destroy stale namespace %s'), ns)

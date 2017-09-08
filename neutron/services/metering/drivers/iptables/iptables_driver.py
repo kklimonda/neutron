@@ -16,8 +16,10 @@ from oslo_config import cfg
 from oslo_log import helpers as log_helpers
 from oslo_log import log as logging
 from oslo_utils import importutils
+import six
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE, _LI
+from neutron.agent.common import config
 from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import interface
@@ -25,7 +27,6 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
 from neutron.common import constants
 from neutron.common import ipv6_utils
-from neutron.conf.agent import common as config
 from neutron.services.metering.drivers import abstract_driver
 
 
@@ -111,7 +112,8 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
 
         if not self.conf.interface_driver:
             raise SystemExit(_('An interface driver must be specified'))
-        LOG.info("Loading interface driver %s", self.conf.interface_driver)
+        LOG.info(_LI("Loading interface driver %s"),
+                 self.conf.interface_driver)
         self.driver = importutils.import_object(self.conf.interface_driver,
                                                 self.conf)
 
@@ -127,7 +129,7 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
     def update_routers(self, context, routers):
         # disassociate removed routers
         router_ids = set(router['id'] for router in routers)
-        for router_id, rm in self.routers.items():
+        for router_id, rm in six.iteritems(self.routers):
             if router_id not in router_ids:
                 self._process_disassociate_metering_label(rm.router)
 
@@ -408,7 +410,7 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
             if not rm:
                 continue
 
-            for label_id in rm.metering_labels:
+            for label_id, label in rm.metering_labels.items():
                 try:
                     chain = iptables_manager.get_chain_name(WRAP_NAME +
                                                             LABEL +
@@ -418,8 +420,8 @@ class IptablesMeteringDriver(abstract_driver.MeteringAbstractDriver):
                     chain_acc = rm.iptables_manager.get_traffic_counters(
                         chain, wrap=False, zero=True)
                 except RuntimeError:
-                    LOG.exception('Failed to get traffic counters, '
-                                  'router: %s', router)
+                    LOG.exception(_LE('Failed to get traffic counters, '
+                                      'router: %s'), router)
                     routers_to_reconfigure.add(router['id'])
                     continue
 

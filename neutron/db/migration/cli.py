@@ -38,13 +38,12 @@ HEADS_FILENAME = 'HEADS'
 CONTRACT_HEAD_FILENAME = 'CONTRACT_HEAD'
 EXPAND_HEAD_FILENAME = 'EXPAND_HEAD'
 
-CURRENT_RELEASE = migration.PIKE
+CURRENT_RELEASE = migration.OCATA
 RELEASES = (
     migration.LIBERTY,
     migration.MITAKA,
     migration.NEWTON,
     migration.OCATA,
-    migration.PIKE,
 )
 
 EXPAND_BRANCH = 'expand'
@@ -623,7 +622,7 @@ def get_alembic_configs():
         script_location = _get_subproject_script_location(CONF.subproject)
         script_locations[CONF.subproject] = script_location
     else:
-        for subproject in migration_entrypoints:
+        for subproject, ep in migration_entrypoints.items():
             script_locations[subproject] = _get_subproject_script_location(
                 subproject)
 

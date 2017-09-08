@@ -20,8 +20,9 @@ import httplib2
 import netaddr
 from oslo_config import cfg
 from oslo_log import log as logging
+import requests
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE
 from neutron.agent.l3 import ha
 from neutron.agent.linux import daemon
 from neutron.agent.linux import ip_lib
@@ -86,8 +87,8 @@ class MonitorDaemon(daemon.Daemon):
                 # Remove this code once new keepalived versions are available.
                 self.send_garp(event)
         except Exception:
-            LOG.exception('Failed to process or handle event for line %s',
-                          iterable)
+            LOG.exception(_LE(
+                'Failed to process or handle event for line %s'), iterable)
 
     def write_state_change(self, state):
         with open(os.path.join(
@@ -104,7 +105,7 @@ class MonitorDaemon(daemon.Daemon):
                      'X-Neutron-State': state},
             connection_type=KeepalivedUnixDomainConnection)
 
-        if resp.status != 200:
+        if resp.status != requests.codes.ok:
             raise Exception(_('Unexpected response: %s') % resp)
 
         LOG.debug('Notified agent router %s, state %s', self.router_id, state)

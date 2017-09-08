@@ -14,10 +14,8 @@
 #    under the License.
 
 import mock
-from neutron_lib import context
-from neutron_lib.plugins import constants
-from neutron_lib.plugins import directory
 
+from neutron import context
 from neutron.db import common_db_mixin
 from neutron.db import extraroute_db
 from neutron.tests.unit import testlib_api
@@ -32,7 +30,9 @@ class TestExtraRouteDb(testlib_api.SqlTestCase):
     def setUp(self):
         super(TestExtraRouteDb, self).setUp()
         self._plugin = _Plugin()
-        directory.add_plugin(constants.CORE, self._plugin)
+        get_plugin = mock.patch('neutron_lib.plugins.directory.get_plugin',
+                                return_value=self._plugin)
+        get_plugin.start()
 
     def test_update(self):
         ctx = context.get_admin_context()

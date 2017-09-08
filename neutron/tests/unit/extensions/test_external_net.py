@@ -15,14 +15,12 @@
 
 import mock
 from neutron_lib import constants
-from neutron_lib import context
-from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
 import testtools
 from webob import exc
 
-from neutron.db import external_net_db
+from neutron import context
 from neutron.db import models_v2
 from neutron.extensions import external_net as external_net
 from neutron.tests.unit.api.v2 import test_base
@@ -133,25 +131,26 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             self.assertFalse(result[0]['shared'])
 
     def test_network_filter_hook_admin_context(self):
+        plugin = directory.get_plugin()
         ctx = context.Context(None, None, is_admin=True)
         model = models_v2.Network
-        conditions = external_net_db._network_filter_hook(ctx, model, [])
+        conditions = plugin._network_filter_hook(ctx, model, [])
         self.assertEqual([], conditions)
 
     def test_network_filter_hook_nonadmin_context(self):
+        plugin = directory.get_plugin()
         ctx = context.Context('edinson', 'cavani')
         model = models_v2.Network
         txt = ("networkrbacs.action = :action_1 AND "
                "networkrbacs.target_tenant = :target_tenant_1 OR "
                "networkrbacs.target_tenant = :target_tenant_2")
-        conditions = external_net_db._network_filter_hook(ctx, model, [])
+        conditions = plugin._network_filter_hook(ctx, model, [])
         self.assertEqual(conditions.__str__(), txt)
         # Try to concatenate conditions
         txt2 = (txt.replace('tenant_1', 'tenant_3').
                 replace('tenant_2', 'tenant_4').
                 replace('action_1', 'action_2'))
-        conditions = external_net_db._network_filter_hook(ctx, model,
-                                                          conditions)
+        conditions = plugin._network_filter_hook(ctx, model, conditions)
         self.assertEqual(conditions.__str__(), "%s OR %s" % (txt, txt2))
 
     def test_create_port_external_network_non_admin_fails(self):
@@ -186,7 +185,7 @@ class ExtNetDBTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
     def test_delete_network_check_disassociated_floatingips(self):
         l3_mock = mock.Mock()
-        directory.add_plugin(plugin_constants.L3, l3_mock)
+        directory.add_plugin(constants.L3, l3_mock)
         with self.network() as net:
             req = self.new_delete_request('networks', net['network']['id'])
             res = req.get_response(self.api)

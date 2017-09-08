@@ -11,50 +11,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
-
 import mock
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import exceptions
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources
 from neutron_lib import constants
-from neutron_lib import context
 import sqlalchemy
 import testtools
 
+from neutron.callbacks import events
+from neutron.callbacks import exceptions
+from neutron.callbacks import registry
+from neutron.callbacks import resources
+from neutron import context
 from neutron.db import common_db_mixin
 from neutron.db import securitygroups_db
 from neutron.extensions import securitygroup
-from neutron.services.revisions import revision_plugin
 from neutron.tests.unit import testlib_api
 
 
-FAKE_SECGROUP = {
-    'security_group': {
-        "tenant_id": 'fake',
-        'description': 'fake',
-        'name': 'fake'
-    }
-}
+FAKE_SECGROUP = {'security_group': {"tenant_id": 'fake', 'description':
+                 'fake', 'name': 'fake'}}
 
-FAKE_SECGROUP_RULE = {
-    'security_group_rule': {
-        "tenant_id": 'fake',
-        'description': 'fake',
-        'name': 'fake',
-        'port_range_min': '21',
-        'protocol': 'tcp',
-        'port_range_max': '23',
-        'remote_ip_prefix': '10.0.0.1',
-        'ethertype': 'IPv4',
-        'remote_group_id': None,
-        'security_group_id': 'None',
-        'direction': 'ingress'
-    }
-}
-
-DB_PLUGIN_KLASS = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
+FAKE_SECGROUP_RULE = {'security_group_rule': {"tenant_id": 'fake',
+    'description': 'fake', 'name': 'fake', 'port_range_min':
+    '21', 'protocol': 'tcp', 'port_range_max': '23',
+    'remote_ip_prefix': '10.0.0.1', 'ethertype': 'IPv4',
+    'remote_group_id': None, 'security_group_id': 'None',
+    'direction': 'ingress'}}
 
 
 def fake_callback(resource, event, *args, **kwargs):
@@ -70,7 +51,6 @@ class SecurityGroupDbMixinTestCase(testlib_api.SqlTestCase):
 
     def setUp(self):
         super(SecurityGroupDbMixinTestCase, self).setUp()
-        self.setup_coreplugin(core_plugin=DB_PLUGIN_KLASS)
         self.ctx = context.get_admin_context()
         self.mixin = SecurityGroupDbMixinImpl()
 
@@ -268,83 +248,29 @@ class SecurityGroupDbMixinTestCase(testlib_api.SqlTestCase):
                               self.ctx, sg_dict['id'])
             self.assertTrue(mock_rollback.called)
 
-    def _test_security_group_precommit_create_event(self,
-                                                    with_revisions=False):
-        DEFAULT_SECGROUP = {
-            'tenant_id': FAKE_SECGROUP['security_group']['tenant_id'],
-            'name': 'default',
-            'description': 'Default security group',
-        }
-        DEFAULT_SECGROUP_DICT = {
-            'id': mock.ANY,
-            'tenant_id': FAKE_SECGROUP['security_group']['tenant_id'],
-            'project_id': FAKE_SECGROUP['security_group']['tenant_id'],
-            'name': 'default',
-            'description': 'Default security group',
-            'security_group_rules': [
-                # Four rules for egress/ingress and ipv4/ipv6
-                mock.ANY, mock.ANY, mock.ANY, mock.ANY,
-            ],
-        }
-        if with_revisions:
-            DEFAULT_SECGROUP_DICT.update({
-                'revision_number': mock.ANY,
-            })
-        with mock.patch.object(registry, "notify") as mock_notify:
-            sg_dict = self.mixin.create_security_group(self.ctx, FAKE_SECGROUP)
-            mock_notify.assert_has_calls([
-                mock.call('security_group', 'before_create', mock.ANY,
-                          context=mock.ANY, is_default=False,
-                          security_group=FAKE_SECGROUP['security_group']),
-
-                mock.call('security_group', 'before_create', mock.ANY,
-                          context=mock.ANY, is_default=True,
-                          security_group=DEFAULT_SECGROUP),
-                mock.call('security_group', 'precommit_create', mock.ANY,
-                          context=mock.ANY, is_default=True,
-                          security_group=DEFAULT_SECGROUP_DICT),
-                mock.call('security_group', 'after_create', mock.ANY,
-                          context=mock.ANY, is_default=True,
-                          security_group=DEFAULT_SECGROUP_DICT),
-
-                mock.call('security_group', 'precommit_create', mock.ANY,
-                          context=mock.ANY, is_default=False,
-                          security_group=sg_dict),
-                mock.call('security_group', 'after_create', mock.ANY,
-                          context=mock.ANY, is_default=False,
-                          security_group=sg_dict)])
-
-    def test_security_group_precommit_create_event_with_revisions(self):
-        revision = revision_plugin.RevisionPlugin()
-        self._test_security_group_precommit_create_event(True)
-        del revision  # appease pep8
-
     def test_security_group_precommit_create_event(self):
-        self._test_security_group_precommit_create_event()
+        with mock.patch.object(registry, "notify") as mock_notify:
+            self.mixin.create_security_group(self.ctx, FAKE_SECGROUP)
+            mock_notify.assert_has_calls([mock.call('security_group',
+                'precommit_create', mock.ANY, context=mock.ANY,
+                is_default=mock.ANY, security_group=mock.ANY)])
 
     def test_security_group_precommit_update_event(self):
-        original_sg_dict = self.mixin.create_security_group(self.ctx,
-                                                            FAKE_SECGROUP)
-        sg_id = original_sg_dict['id']
+        sg_dict = self.mixin.create_security_group(self.ctx, FAKE_SECGROUP)
         with mock.patch.object(registry, "notify") as mock_notify:
-            fake_secgroup = copy.deepcopy(FAKE_SECGROUP)
-            fake_secgroup['security_group']['name'] = 'updated_fake'
-            sg_dict = self.mixin.update_security_group(
-                    self.ctx, sg_id, fake_secgroup)
+            self.mixin.update_security_group(self.ctx, sg_dict['id'],
+                                             FAKE_SECGROUP)
             mock_notify.assert_has_calls([mock.call('security_group',
                 'precommit_update', mock.ANY, context=mock.ANY,
-                original_security_group=original_sg_dict,
-                security_group=sg_dict,
-                security_group_id=sg_id)])
+                security_group=mock.ANY, security_group_id=sg_dict['id'])])
 
     def test_security_group_precommit_and_after_delete_event(self):
         sg_dict = self.mixin.create_security_group(self.ctx, FAKE_SECGROUP)
         with mock.patch.object(registry, "notify") as mock_notify:
             self.mixin.delete_security_group(self.ctx, sg_dict['id'])
-            sg_dict['security_group_rules'] = mock.ANY
             mock_notify.assert_has_calls(
                 [mock.call('security_group', 'precommit_delete',
-                           mock.ANY, context=mock.ANY, security_group=sg_dict,
+                           mock.ANY, context=mock.ANY, security_group=mock.ANY,
                            security_group_id=sg_dict['id'],
                            security_group_rule_ids=[mock.ANY, mock.ANY]),
                  mock.call('security_group', 'after_delete',
@@ -388,10 +314,11 @@ class SecurityGroupDbMixinTestCase(testlib_api.SqlTestCase):
         fake_rule['security_group_rule']['security_group_id'] = sg_dict['id']
         with mock.patch.object(registry, "notify") as mock_notify, \
             mock.patch.object(self.mixin, '_get_security_group'):
+            self.mixin.create_security_group_rule(self.ctx,
+                   fake_rule)
             mock_notify.assert_has_calls([mock.call('security_group_rule',
                 'precommit_create', mock.ANY, context=mock.ANY,
-                security_group_rule=self.mixin.create_security_group_rule(
-                    self.ctx, fake_rule))])
+                security_group_rule=mock.ANY)])
 
     def test_sg_rule_before_precommit_and_after_delete_event(self):
         sg_dict = self.mixin.create_security_group(self.ctx, FAKE_SECGROUP)
@@ -408,7 +335,6 @@ class SecurityGroupDbMixinTestCase(testlib_api.SqlTestCase):
                 security_group_rule_id=sg_rule_dict['id'])])
             mock_notify.assert_has_calls([mock.call('security_group_rule',
                 'precommit_delete', mock.ANY, context=mock.ANY,
-                security_group_id=sg_dict['id'],
                 security_group_rule_id=sg_rule_dict['id'])])
             mock_notify.assert_has_calls([mock.call('security_group_rule',
                 'after_delete', mock.ANY, context=mock.ANY,

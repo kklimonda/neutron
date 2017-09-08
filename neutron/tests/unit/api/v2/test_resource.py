@@ -14,7 +14,6 @@
 #    under the License.
 
 import mock
-from neutron_lib import context
 from neutron_lib import exceptions as n_exc
 import oslo_i18n
 from webob import exc
@@ -23,6 +22,7 @@ import webtest
 from neutron._i18n import _
 from neutron.api.v2 import resource as wsgi_resource
 from neutron.common import utils
+from neutron import context
 from neutron.tests import base
 from neutron import wsgi
 

@@ -18,7 +18,6 @@ import os
 
 import eventlet
 from neutron_lib import constants
-from neutron_lib import context
 from neutron_lib import exceptions
 from oslo_concurrency import lockutils
 from oslo_config import cfg
@@ -29,7 +28,7 @@ from oslo_utils import fileutils
 from oslo_utils import importutils
 import six
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import external_process
 from neutron.agent.metadata import driver as metadata_driver
@@ -38,6 +37,7 @@ from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils
+from neutron import context
 from neutron import manager
 
 LOG = logging.getLogger(__name__)
@@ -109,8 +109,7 @@ class DhcpAgent(manager.Manager):
                 self.conf
             )
             for net_id in existing_networks:
-                net = dhcp.NetModel({"id": net_id, "subnets": [],
-                                     "non_local_subnets": [], "ports": []})
+                net = dhcp.NetModel({"id": net_id, "subnets": [], "ports": []})
                 self.cache.put(net)
         except NotImplementedError:
             # just go ahead with an empty networks cache
@@ -120,7 +119,7 @@ class DhcpAgent(manager.Manager):
 
     def after_start(self):
         self.run()
-        LOG.info("DHCP agent started")
+        LOG.info(_LI("DHCP agent started"))
 
     def run(self):
         """Activate the DHCP agent."""
@@ -164,7 +163,7 @@ class DhcpAgent(manager.Manager):
                 or isinstance(e, exceptions.NetworkNotFound)):
                 LOG.debug("Network %s has been deleted.", network.id)
             else:
-                LOG.exception('Unable to %(action)s dhcp for %(net_id)s.',
+                LOG.exception(_LE('Unable to %(action)s dhcp for %(net_id)s.'),
                               {'net_id': network.id, 'action': action})
 
     def schedule_resync(self, reason, network_id=None):
@@ -179,21 +178,21 @@ class DhcpAgent(manager.Manager):
         or 'None' is one of the networks, sync all of the networks.
         """
         only_nets = set([] if (not networks or None in networks) else networks)
-        LOG.info('Synchronizing state')
+        LOG.info(_LI('Synchronizing state'))
         pool = eventlet.GreenPool(self.conf.num_sync_threads)
         known_network_ids = set(self.cache.get_network_ids())
 
         try:
             active_networks = self.plugin_rpc.get_active_networks_info()
-            LOG.info('All active networks have been fetched through RPC.')
+            LOG.info(_LI('All active networks have been fetched through RPC.'))
             active_network_ids = set(network.id for network in active_networks)
             for deleted_id in known_network_ids - active_network_ids:
                 try:
                     self.disable_dhcp_helper(deleted_id)
                 except Exception as e:
                     self.schedule_resync(e, deleted_id)
-                    LOG.exception('Unable to sync network state on '
-                                  'deleted network %s', deleted_id)
+                    LOG.exception(_LE('Unable to sync network state on '
+                                      'deleted network %s'), deleted_id)
 
             for network in active_networks:
                 if (not only_nets or  # specifically resync all
@@ -204,7 +203,7 @@ class DhcpAgent(manager.Manager):
             # we notify all ports in case some were created while the agent
             # was down
             self.dhcp_ready_ports |= set(self.cache.get_port_ids(only_nets))
-            LOG.info('Synchronizing state complete')
+            LOG.info(_LI('Synchronizing state complete'))
 
         except Exception as e:
             if only_nets:
@@ -212,7 +211,7 @@ class DhcpAgent(manager.Manager):
                     self.schedule_resync(e, network_id)
             else:
                 self.schedule_resync(e)
-            LOG.exception('Unable to sync network state.')
+            LOG.exception(_LE('Unable to sync network state.'))
 
     def _dhcp_ready_ports_loop(self):
         """Notifies the server of any ports that had reservations setup."""
@@ -226,12 +225,19 @@ class DhcpAgent(manager.Manager):
                     self.plugin_rpc.dhcp_ready_on_ports(ports_to_send)
                     continue
                 except oslo_messaging.MessagingTimeout:
-                    LOG.error("Timeout notifying server of ports ready. "
-                              "Retrying...")
-                except Exception:
-                    LOG.exception("Failure notifying DHCP server of "
-                                  "ready DHCP ports. Will retry on next "
-                                  "iteration.")
+                    LOG.error(_LE("Timeout notifying server of ports ready. "
+                                  "Retrying..."))
+                except Exception as e:
+                    if (isinstance(e, oslo_messaging.RemoteError)
+                            and e.exc_type == 'NoSuchMethod'):
+                        LOG.info(_LI("Server does not support port ready "
+                                     "notifications. Waiting for 5 minutes "
+                                     "before retrying."))
+                        eventlet.sleep(300)
+                        continue
+                    LOG.exception(_LE("Failure notifying DHCP server of "
+                                      "ready DHCP ports. Will retry on next "
+                                      "iteration."))
                 self.dhcp_ready_ports |= ports_to_send
 
     def start_ready_ports_loop(self):
@@ -267,7 +273,7 @@ class DhcpAgent(manager.Manager):
             return network
         except Exception as e:
             self.schedule_resync(e, network_id)
-            LOG.exception('Network %s info call failed.', network_id)
+            LOG.exception(_LE('Network %s info call failed.'), network_id)
 
     def enable_dhcp_helper(self, network_id):
         """Enable DHCP for a network that meets enabling criteria."""
@@ -279,12 +285,12 @@ class DhcpAgent(manager.Manager):
     def safe_configure_dhcp_for_network(self, network):
         try:
             network_id = network.get('id')
-            LOG.info('Starting network %s dhcp configuration', network_id)
+            LOG.info(_LI('Starting network %s dhcp configuration'), network_id)
             self.configure_dhcp_for_network(network)
-            LOG.info('Finished network %s dhcp configuration', network_id)
+            LOG.info(_LI('Finished network %s dhcp configuration'), network_id)
         except (exceptions.NetworkNotFound, RuntimeError):
-            LOG.warning('Network %s may have been deleted and '
-                        'its resources may have already been disposed.',
+            LOG.warning(_LW('Network %s may have been deleted and '
+                            'its resources may have already been disposed.'),
                         network.id)
 
     def configure_dhcp_for_network(self, network):
@@ -335,12 +341,8 @@ class DhcpAgent(manager.Manager):
             return
         # NOTE(kevinbenton): we don't exclude dhcp disabled subnets because
         # they still change the indexes used for tags
-        old_non_local_subnets = getattr(old_network, 'non_local_subnets', [])
-        new_non_local_subnets = getattr(network, 'non_local_subnets', [])
-        old_cidrs = [s.cidr for s in (old_network.subnets +
-                                      old_non_local_subnets)]
-        new_cidrs = [s.cidr for s in (network.subnets +
-                                      new_non_local_subnets)]
+        old_cidrs = [s.cidr for s in old_network.subnets]
+        new_cidrs = [s.cidr for s in network.subnets]
         if old_cidrs == new_cidrs:
             self.call_driver('reload_allocations', network)
             self.cache.put(network)
@@ -411,7 +413,7 @@ class DhcpAgent(manager.Manager):
             network = self.cache.get_network_by_id(updated_port.network_id)
             if not network:
                 return
-            LOG.info("Trigger reload_allocations for port %s",
+            LOG.info(_LI("Trigger reload_allocations for port %s"),
                      updated_port)
             driver_action = 'reload_allocations'
             if self._is_port_on_this_agent(updated_port):
@@ -498,10 +500,10 @@ class DhcpAgent(manager.Manager):
             if router_ports:
                 # Multiple router ports should not be allowed
                 if len(router_ports) > 1:
-                    LOG.warning("%(port_num)d router ports found on the "
-                                "metadata access network. Only the port "
-                                "%(port_id)s, for router %(router_id)s "
-                                "will be considered",
+                    LOG.warning(_LW("%(port_num)d router ports found on the "
+                                    "metadata access network. Only the port "
+                                    "%(port_id)s, for router %(router_id)s "
+                                    "will be considered"),
                                 {'port_num': len(router_ports),
                                  'port_id': router_ports[0].id,
                                  'router_id': router_ports[0].device_id})
@@ -521,7 +523,7 @@ class DhcpAgent(manager.Manager):
             uuid = network.id
             is_router_id = False
         metadata_driver.MetadataDriver.destroy_monitored_metadata_proxy(
-            self._process_monitor, uuid, self.conf, network.namespace)
+            self._process_monitor, uuid, self.conf)
         if is_router_id:
             del self._metadata_routers[network.id]
 
@@ -644,8 +646,7 @@ class NetworkCache(object):
 
         self.cache[network.id] = network
 
-        non_local_subnets = getattr(network, 'non_local_subnets', [])
-        for subnet in (network.subnets + non_local_subnets):
+        for subnet in network.subnets:
             self.subnet_lookup[subnet.id] = network.id
 
         for port in network.ports:
@@ -654,8 +655,7 @@ class NetworkCache(object):
     def remove(self, network):
         del self.cache[network.id]
 
-        non_local_subnets = getattr(network, 'non_local_subnets', [])
-        for subnet in (network.subnets + non_local_subnets):
+        for subnet in network.subnets:
             del self.subnet_lookup[subnet.id]
 
         for port in network.ports:
@@ -695,9 +695,7 @@ class NetworkCache(object):
         num_ports = 0
         for net_id in net_ids:
             network = self.get_network_by_id(net_id)
-            non_local_subnets = getattr(network, 'non_local_subnets', [])
             num_subnets += len(network.subnets)
-            num_subnets += len(non_local_subnets)
             num_ports += len(network.ports)
         return {'networks': num_nets,
                 'subnets': num_subnets,
@@ -714,6 +712,7 @@ class DhcpAgentWithStateReport(DhcpAgent):
             'availability_zone': self.conf.AGENT.availability_zone,
             'topic': topics.DHCP_AGENT,
             'configurations': {
+                'notifies_port_ready': True,
                 'dhcp_driver': self.conf.dhcp_driver,
                 'dhcp_lease_duration': self.conf.dhcp_lease_duration,
                 'log_agent_heartbeats': self.conf.AGENT.log_agent_heartbeats},
@@ -733,18 +732,18 @@ class DhcpAgentWithStateReport(DhcpAgent):
             agent_status = self.state_rpc.report_state(
                 ctx, self.agent_state, True)
             if agent_status == n_const.AGENT_REVIVED:
-                LOG.info("Agent has just been revived. "
-                         "Scheduling full sync")
+                LOG.info(_LI("Agent has just been revived. "
+                             "Scheduling full sync"))
                 self.schedule_resync("Agent has just been revived")
         except AttributeError:
             # This means the server does not support report_state
-            LOG.warning("Neutron server does not support state report. "
-                        "State report for this agent will be disabled.")
+            LOG.warning(_LW("Neutron server does not support state report. "
+                            "State report for this agent will be disabled."))
             self.heartbeat.stop()
             self.run()
             return
         except Exception:
-            LOG.exception("Failed reporting state!")
+            LOG.exception(_LE("Failed reporting state!"))
             return
         if self.agent_state.pop('start_flag', None):
             self.run()
@@ -753,7 +752,7 @@ class DhcpAgentWithStateReport(DhcpAgent):
         """Handle the agent_updated notification event."""
         self.schedule_resync(_("Agent updated: %(payload)s") %
                              {"payload": payload})
-        LOG.info("agent_updated by server side %s!", payload)
+        LOG.info(_LI("agent_updated by server side %s!"), payload)
 
     def after_start(self):
-        LOG.info("DHCP agent started")
+        LOG.info(_LI("DHCP agent started"))

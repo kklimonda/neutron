@@ -17,6 +17,8 @@ from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
 
+from neutron._i18n import _LW
+
 LOG = logging.getLogger(__name__)
 
 
@@ -40,8 +42,8 @@ def _call_with_retry(max_attempts):
                     with excutils.save_and_reraise_exception(
                             reraise=False) as ctxt:
                         LOG.warning(
-                            'Failed to execute %(action)s. %(attempt)d out'
-                            ' of %(max_attempts)d',
+                            _LW('Failed to execute %(action)s. %(attempt)d out'
+                                ' of %(max_attempts)d'),
                             {'attempt': attempt,
                              'max_attempts': max_attempts,
                              'action': action})

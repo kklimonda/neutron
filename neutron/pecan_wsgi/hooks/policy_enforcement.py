@@ -124,7 +124,7 @@ class PolicyHook(hooks.PecanHook):
                 resources_copy.append(obj)
         # TODO(salv-orlando): as other hooks might need to prefetch resources,
         # store them in the request context. However, this should be done in a
-        # separate hook which is conveniently called before all other hooks
+        # separate hook which is conventietly called before all other hooks
         state.request.context['original_resources'] = original_resources
         for item in resources_copy:
             try:
@@ -184,14 +184,11 @@ class PolicyHook(hooks.PecanHook):
                         policy_method(neutron_context, action, item,
                                       plugin=plugin,
                                       pluralized=collection))]
-        except oslo_policy.PolicyNotAuthorized:
+        except oslo_policy.PolicyNotAuthorized as e:
             # This exception must be explicitly caught as the exception
             # translation hook won't be called if an error occurs in the
-            # 'after' handler.  Instead of raising an HTTPForbidden exception,
-            # we have to set the status_code here to prevent the catch_errors
-            # middleware from turning this into a 500.
-            state.response.status_code = 403
-            return
+            # 'after' handler.
+            raise webob.exc.HTTPForbidden(str(e))
 
         if is_single:
             resp = resp[0]

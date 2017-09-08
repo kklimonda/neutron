@@ -17,9 +17,9 @@ import abc
 
 from neutron_lib.api import converters
 from neutron_lib.api import extensions
+from neutron_lib import constants
 from neutron_lib.db import constants as db_const
 from neutron_lib import exceptions as nexception
-from neutron_lib.plugins import constants
 import six
 
 from neutron._i18n import _
@@ -236,7 +236,7 @@ class RouterPluginBase(object):
         pass
 
     @abc.abstractmethod
-    def add_router_interface(self, context, router_id, interface_info=None):
+    def add_router_interface(self, context, router_id, interface_info):
         pass
 
     @abc.abstractmethod

@@ -14,12 +14,11 @@
 #    under the License.
 
 import mock
-from neutron_lib import context
 
 from neutron.common import exceptions as n_exc
+from neutron import context
 from neutron.core_extensions import base as base_core
 from neutron.core_extensions import qos as qos_core
-from neutron.objects.qos import policy
 from neutron.plugins.common import constants as plugin_constants
 from neutron.services.qos import qos_consts
 from neutron.tests import base
@@ -42,7 +41,7 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
 
     def test_process_fields_no_qos_policy_id(self):
         self.core_extension.process_fields(
-            self.context, base_core.PORT, mock.ANY, {}, None)
+            self.context, base_core.PORT, {}, None)
         self.assertFalse(self.policy_m.called)
 
     def _mock_plugin_loaded(self, plugin_loaded):
@@ -55,7 +54,7 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
     def test_process_fields_no_qos_plugin_loaded(self):
         with self._mock_plugin_loaded(False):
             self.core_extension.process_fields(
-                self.context, base_core.PORT, mock.ANY,
+                self.context, base_core.PORT,
                 {qos_consts.QOS_POLICY_ID: None}, None)
             self.assertFalse(self.policy_m.called)
 
@@ -67,7 +66,7 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
             qos_policy = mock.MagicMock()
             self.policy_m.get_object = mock.Mock(return_value=qos_policy)
             self.core_extension.process_fields(
-                self.context, base_core.PORT, base_core.EVENT_UPDATE,
+                self.context, base_core.PORT,
                 {qos_consts.QOS_POLICY_ID: qos_policy_id},
                 actual_port)
 
@@ -86,7 +85,7 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
             new_qos_policy = mock.MagicMock()
             self.policy_m.get_object = mock.Mock(return_value=new_qos_policy)
             self.core_extension.process_fields(
-                self.context, base_core.PORT, base_core.EVENT_UPDATE,
+                self.context, base_core.PORT,
                 {qos_consts.QOS_POLICY_ID: qos_policy2_id},
                 actual_port)
 
@@ -106,7 +105,7 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
             new_qos_policy = mock.MagicMock()
             self.policy_m.get_object = mock.Mock(return_value=new_qos_policy)
             self.core_extension.process_fields(
-                self.context, base_core.PORT, base_core.EVENT_UPDATE,
+                self.context, base_core.PORT,
                 {qos_consts.QOS_POLICY_ID: None},
                 actual_port)
 
@@ -126,7 +125,7 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
             self.policy_m.get_port_policy = mock.Mock(
                 return_value=old_qos_policy)
             self.core_extension.process_fields(
-                context, base_core.PORT, base_core.EVENT_UPDATE,
+                context, base_core.PORT,
                 {qos_consts.QOS_POLICY_ID: None},
                 actual_port)
 
@@ -158,7 +157,7 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
                           shared=False,
                           policy_tenant_id=self.context.tenant_id)
 
-    def test_process_resource_update_network_updated_no_policy(self):
+    def test_process_resource_network_updated_no_policy(self):
         with self._mock_plugin_loaded(True):
             network_id = mock.Mock()
             qos_policy_id = mock.Mock()
@@ -170,14 +169,14 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
             new_qos_policy = mock.MagicMock()
             self.policy_m.get_object = mock.Mock(return_value=new_qos_policy)
             self.core_extension.process_fields(
-                self.context, base_core.NETWORK, base_core.EVENT_UPDATE,
+                self.context, base_core.NETWORK,
                 {qos_consts.QOS_POLICY_ID: None},
                 actual_network)
 
             old_qos_policy.detach_network.assert_called_once_with(network_id)
             self.assertIsNone(actual_network['qos_policy_id'])
 
-    def test_process_fields_update_network_new_policy(self):
+    def test_process_fields_network_new_policy(self):
         with self._mock_plugin_loaded(True):
             qos_policy_id = mock.Mock()
             actual_network = {'id': mock.Mock(),
@@ -185,13 +184,13 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
             qos_policy = mock.MagicMock()
             self.policy_m.get_object = mock.Mock(return_value=qos_policy)
             self.core_extension.process_fields(
-                self.context, base_core.NETWORK, base_core.EVENT_UPDATE,
+                self.context, base_core.NETWORK,
                 {qos_consts.QOS_POLICY_ID: qos_policy_id}, actual_network)
 
             qos_policy.attach_network.assert_called_once_with(
                 actual_network['id'])
 
-    def test_process_fields_update_network_updated_policy(self):
+    def test_process_fields_network_updated_policy(self):
         with self._mock_plugin_loaded(True):
             qos_policy_id = mock.Mock()
             network_id = mock.Mock()
@@ -203,7 +202,7 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
             new_qos_policy = mock.MagicMock()
             self.policy_m.get_object = mock.Mock(return_value=new_qos_policy)
             self.core_extension.process_fields(
-                self.context, base_core.NETWORK, base_core.EVENT_UPDATE,
+                self.context, base_core.NETWORK,
                 {qos_consts.QOS_POLICY_ID: qos_policy_id}, actual_network)
 
             old_qos_policy.detach_network.assert_called_once_with(network_id)
@@ -221,12 +220,12 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
             old_qos_policy.tenant_id = policy_tenant_id
             self.policy_m.get_network_policy.return_value = old_qos_policy
             self.core_extension.process_fields(
-                context, base_core.NETWORK, base_core.EVENT_UPDATE,
+                context, base_core.NETWORK,
                 {qos_consts.QOS_POLICY_ID: None}, actual_network)
 
             old_qos_policy.detach_network.assert_called_once_with(network_id)
 
-    def test_process_fields_update_network_updated_remove_shared_policy(self):
+    def test_process_fields_network_updated_remove_shared_policy(self):
         self._process_network_updated_policy(
             context=self.non_admin_context,
             shared=True,
@@ -238,71 +237,19 @@ class QosCoreResourceExtensionTestCase(base.BaseTestCase):
             shared=True,
             policy_tenant_id=self.non_admin_context.tenant_id)
 
-    def test_process_fields_update_network_admin_remove_provided_policy(self):
+    def test_process_fields_network_updated_admin_remove_provided_policy(self):
         self._process_network_updated_policy(
             context=self.context,
             shared=True,
             policy_tenant_id=self.non_admin_context.tenant_id)
 
-    def test_process_fields_update_network_remove_provided_policy(self):
+    def test_process_fields_network_updated_remove_provided_policy(self):
         self.policy_m.is_accessible.return_value = False
         self.assertRaises(n_exc.PolicyRemoveAuthorizationError,
                           self._process_network_updated_policy,
                           context=self.non_admin_context,
                           shared=False,
                           policy_tenant_id=self.context.tenant_id)
-
-    def test_process_fields_create_network(self):
-        with self._mock_plugin_loaded(True):
-            qos_policy_id = mock.Mock()
-            network_id = mock.Mock()
-            actual_network = {'id': network_id,
-                              qos_consts.QOS_POLICY_ID: qos_policy_id}
-            self.policy_m.get_network_policy = mock.Mock(
-                return_value=qos_policy_id)
-            qos_policy = mock.MagicMock()
-            self.policy_m.get_object = mock.Mock(return_value=qos_policy)
-            self.core_extension.process_fields(
-                self.context, base_core.NETWORK, base_core.EVENT_CREATE,
-                actual_network, actual_network)
-            qos_policy.attach_network.assert_called_once_with(network_id)
-
-    def test_process_fields_create_network_no_policy(self):
-        with self._mock_plugin_loaded(True):
-            project_id = mock.Mock()
-            network_id = mock.Mock()
-            actual_network = {'project_id': project_id,
-                              'id': network_id,
-                              qos_consts.QOS_POLICY_ID: None}
-            qos_policy_id = mock.Mock()
-            qos_policy = mock.MagicMock()
-            with mock.patch.object(policy.QosPolicyDefault, "get_object",
-                    return_value=qos_policy_id) as mock_get_default_policy_id:
-                self.policy_m.get_object = mock.Mock(return_value=qos_policy)
-                self.core_extension.process_fields(
-                    self.context, base_core.NETWORK, base_core.EVENT_CREATE,
-                    actual_network, actual_network)
-                qos_policy.attach_network.assert_called_once_with(network_id)
-                mock_get_default_policy_id.assert_called_once_with(
-                    self.context, project_id=project_id)
-
-    def test_process_fields_create_network_no_default_policy(self):
-        with self._mock_plugin_loaded(True):
-            project_id = mock.Mock()
-            network_id = mock.Mock()
-            actual_network = {'project_id': project_id,
-                              'id': network_id,
-                              qos_consts.QOS_POLICY_ID: None}
-            qos_policy = mock.MagicMock()
-            with mock.patch.object(policy.QosPolicyDefault, "get_object",
-                    return_value=None) as mock_get_default_policy_id:
-                self.policy_m.get_object = mock.Mock(return_value=qos_policy)
-                self.core_extension.process_fields(
-                    self.context, base_core.NETWORK, base_core.EVENT_CREATE,
-                    actual_network, actual_network)
-                qos_policy.attach_network.assert_not_called()
-                mock_get_default_policy_id.assert_called_once_with(
-                    self.context, project_id=project_id)
 
     def test_extract_fields_plugin_not_loaded(self):
         with self._mock_plugin_loaded(False):

@@ -13,19 +13,17 @@
 #    under the License.
 
 import mock
-from neutron_lib.api.definitions import portbindings
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources
-
 from neutron_lib import constants
-from neutron_lib import context
 
 from neutron.api.rpc.handlers import l3_rpc
-from neutron.common import constants as n_const
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
 from neutron.common import topics
+from neutron import context
 from neutron.extensions import external_net
 from neutron.extensions import l3
+from neutron.extensions import portbindings
 from neutron.tests.common import helpers
 from neutron.tests.unit.plugins.ml2 import base as ml2_test_base
 
@@ -37,7 +35,6 @@ class L3DvrTestCaseBase(ml2_test_base.ML2TestFramework):
     def setUp(self):
         super(L3DvrTestCaseBase, self).setUp()
         self.l3_agent = helpers.register_l3_agent(
-            host="host0",
             agent_mode=constants.L3_AGENT_MODE_DVR_SNAT)
         # register OVS agents to avoid time wasted on committing
         # port binding failures on every port update
@@ -171,31 +168,18 @@ class L3DvrTestCase(L3DvrTestCaseBase):
             self.l3_plugin._get_agent_gw_ports_exist_for_network(
                 self.context, network_id, "", self.l3_agent['id']))
 
-    def test_get_fip_agent_gw_ports(self):
+    def test_get_fip_sync_interfaces(self):
         self.setup_create_agent_gw_port_for_network()
 
         self.assertEqual(
-            1, len(self.l3_plugin._get_fip_agent_gw_ports(
+            1, len(self.l3_plugin._get_fip_sync_interfaces(
                 self.context, self.l3_agent['id'])))
 
     def test_process_routers(self):
         router = self._create_router()
-        if not router.get('gw_port_id'):
-            router['gw_port_id'] = 'fake_gw_id'
-        self.l3_plugin._get_fip_agent_gw_ports = mock.Mock(
-            return_value='fip_interface')
-        self.l3_plugin._get_snat_sync_interfaces = mock.Mock(
-            return_value={router['id']: 'snat_interface'})
-        result = self.l3_plugin._process_routers(self.context, [router],
-                                                 self.l3_agent)
-
+        result = self.l3_plugin._process_routers(self.context, [router])
         self.assertEqual(
             router['id'], result[router['id']]['id'])
-        self.assertIn(n_const.FLOATINGIP_AGENT_INTF_KEY, result[router['id']])
-        self.l3_plugin._get_fip_agent_gw_ports.assert_called_once_with(
-            self.context, self.l3_agent['id'])
-        self.l3_plugin._get_snat_sync_interfaces.assert_called_once_with(
-            self.context, [router['id']])
 
     def test_agent_gw_port_delete_when_last_gateway_for_ext_net_removed(self):
         kwargs = {'arg_list': (external_net.EXTERNAL,),
@@ -248,19 +232,11 @@ class L3DvrTestCase(L3DvrTestCaseBase):
             self.l3_plugin._get_agent_gw_ports_exist_for_network(
                 self.context, ext_net_id, "", self.l3_agent['id']))
 
-    def _test_create_floating_ip_agent_notification(
-        self, dvr=True, test_agent_mode=constants.L3_AGENT_MODE_DVR):
+    def _test_create_floating_ip_agent_notification(self, dvr=True):
         with self.subnet() as ext_subnet,\
                 self.subnet(cidr='20.0.0.0/24') as int_subnet,\
                 self.port(subnet=int_subnet,
                           device_owner=DEVICE_OWNER_COMPUTE) as int_port:
-            self.core_plugin.update_port(
-                self.context, int_port['port']['id'],
-                {'port': {portbindings.HOST_ID: 'host1'}})
-            # and create l3 agents on corresponding hosts
-            helpers.register_l3_agent(host='host1',
-                agent_mode=test_agent_mode)
-
             # make net external
             ext_net_id = ext_subnet['subnet']['network_id']
             self._update('networks', ext_net_id,
@@ -274,6 +250,7 @@ class L3DvrTestCase(L3DvrTestCaseBase):
             self.l3_plugin.add_router_interface(
                 self.context, router['id'],
                 {'subnet_id': int_subnet['subnet']['id']})
+
             floating_ip = {'floating_network_id': ext_net_id,
                            'router_id': router['id'],
                            'port_id': int_port['port']['id'],
@@ -284,27 +261,10 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                 self.l3_plugin.create_floatingip(
                     self.context, {'floatingip': floating_ip})
                 if dvr:
-                    if test_agent_mode == (
-                        n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL):
-                        if router['ha']:
-                            expected_calls = [
-                                mock.call(self.context,
-                                          [router['id']], 'host0'),
-                                mock.call(self.context,
-                                          [router['id']], 'standby')]
-                            l3_notif.routers_updated_on_host.assert_has_calls(
-                                expected_calls, any_order=True)
-                            self.assertFalse(l3_notif.routers_updated.called)
-                        if not router['ha']:
-                            l3_notif.routers_updated_on_host.\
-                                assert_called_once_with(
-                                    self.context, [router['id']], 'host0')
-                            self.assertFalse(l3_notif.routers_updated.called)
-                    else:
-                        l3_notif.routers_updated_on_host.\
-                            assert_called_once_with(
-                                self.context, [router['id']], 'host1')
-                        self.assertFalse(l3_notif.routers_updated.called)
+                    l3_notif.routers_updated_on_host.assert_called_once_with(
+                        self.context, [router['id']],
+                        int_port['port'][portbindings.HOST_ID])
+                    self.assertFalse(l3_notif.routers_updated.called)
                 else:
                     l3_notif.routers_updated.assert_called_once_with(
                         self.context, [router['id']], None)
@@ -314,17 +274,10 @@ class L3DvrTestCase(L3DvrTestCaseBase):
     def test_create_floating_ip_agent_notification(self):
         self._test_create_floating_ip_agent_notification()
 
-    def test_create_floating_ip_agent_notification_for_dvr_no_external_agent(
-        self):
-        agent_mode = n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL
-        self._test_create_floating_ip_agent_notification(
-            test_agent_mode=agent_mode)
-
     def test_create_floating_ip_agent_notification_non_dvr(self):
         self._test_create_floating_ip_agent_notification(dvr=False)
 
-    def _test_update_floating_ip_agent_notification(
-        self, dvr=True, test_agent_mode=constants.L3_AGENT_MODE_DVR):
+    def _test_update_floating_ip_agent_notification(self, dvr=True):
         with self.subnet() as ext_subnet,\
                 self.subnet(cidr='20.0.0.0/24') as int_subnet1,\
                 self.subnet(cidr='30.0.0.0/24') as int_subnet2,\
@@ -341,9 +294,9 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                 {'port': {portbindings.HOST_ID: 'host2'}})
             # and create l3 agents on corresponding hosts
             helpers.register_l3_agent(host='host1',
-                agent_mode=test_agent_mode)
+                agent_mode=constants.L3_AGENT_MODE_DVR)
             helpers.register_l3_agent(host='host2',
-                agent_mode=test_agent_mode)
+                agent_mode=constants.L3_AGENT_MODE_DVR)
 
             # make net external
             ext_net_id = ext_subnet['subnet']['network_id']
@@ -380,45 +333,14 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                     self.context, floating_ip['id'],
                     {'floatingip': updated_floating_ip})
                 if dvr:
-                    if test_agent_mode == (
-                        n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL):
-                        if router1['ha'] and router2['ha']:
-                            self.assertEqual(
-                                4,
-                                l3_notif.routers_updated_on_host.call_count)
-                            expected_calls = [
-                                mock.call(self.context,
-                                          [router1['id']], 'host0'),
-                                mock.call(self.context,
-                                          [router1['id']], 'standby'),
-                                mock.call(self.context,
-                                          [router2['id']], 'host0'),
-                                mock.call(self.context,
-                                          [router2['id']], 'standby')]
-                            l3_notif.routers_updated_on_host.assert_has_calls(
-                                expected_calls, any_order=True)
-                            self.assertFalse(l3_notif.routers_updated.called)
-                        else:
-                            self.assertEqual(
-                                2,
-                                l3_notif.routers_updated_on_host.call_count)
-                            expected_calls = [
-                                mock.call(self.context,
-                                          [router1['id']], 'host0'),
-                                mock.call(self.context,
-                                          [router2['id']], 'host0')]
-                            l3_notif.routers_updated_on_host.assert_has_calls(
-                                expected_calls)
-                            self.assertFalse(l3_notif.routers_updated.called)
-                    else:
-                        self.assertEqual(
-                            2, l3_notif.routers_updated_on_host.call_count)
-                        expected_calls = [
-                            mock.call(self.context, [router1['id']], 'host1'),
-                            mock.call(self.context, [router2['id']], 'host2')]
-                        l3_notif.routers_updated_on_host.assert_has_calls(
-                            expected_calls)
-                        self.assertFalse(l3_notif.routers_updated.called)
+                    self.assertEqual(
+                        2, l3_notif.routers_updated_on_host.call_count)
+                    expected_calls = [
+                        mock.call(self.context, [router1['id']], 'host1'),
+                        mock.call(self.context, [router2['id']], 'host2')]
+                    l3_notif.routers_updated_on_host.assert_has_calls(
+                        expected_calls)
+                    self.assertFalse(l3_notif.routers_updated.called)
                 else:
                     self.assertEqual(
                         2, l3_notif.routers_updated.call_count)
@@ -432,27 +354,14 @@ class L3DvrTestCase(L3DvrTestCaseBase):
     def test_update_floating_ip_agent_notification(self):
         self._test_update_floating_ip_agent_notification()
 
-    def test_update_floating_ip_agent_notification_with_dvr_no_external_agents(
-        self):
-        agent_mode = n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL
-        self._test_update_floating_ip_agent_notification(
-            test_agent_mode=agent_mode)
-
     def test_update_floating_ip_agent_notification_non_dvr(self):
         self._test_update_floating_ip_agent_notification(dvr=False)
 
-    def _test_delete_floating_ip_agent_notification(
-        self, dvr=True, test_agent_mode=constants.L3_AGENT_MODE_DVR):
+    def _test_delete_floating_ip_agent_notification(self, dvr=True):
         with self.subnet() as ext_subnet,\
                 self.subnet(cidr='20.0.0.0/24') as int_subnet,\
                 self.port(subnet=int_subnet,
                           device_owner=DEVICE_OWNER_COMPUTE) as int_port:
-            self.core_plugin.update_port(
-                self.context, int_port['port']['id'],
-                {'port': {portbindings.HOST_ID: 'host1'}})
-            # and create l3 agents on corresponding hosts
-            helpers.register_l3_agent(host='host1',
-                agent_mode=test_agent_mode)
             # make net external
             ext_net_id = ext_subnet['subnet']['network_id']
             self._update('networks', ext_net_id,
@@ -479,27 +388,10 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                 self.l3_plugin.delete_floatingip(
                     self.context, floating_ip['id'])
                 if dvr:
-                    if test_agent_mode == (
-                        n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL):
-                        if router['ha']:
-                            expected_calls = [
-                                mock.call(self.context,
-                                          [router['id']], 'host0'),
-                                mock.call(self.context,
-                                          [router['id']], 'standby')]
-                            l3_notif.routers_updated_on_host.assert_has_calls(
-                                expected_calls, any_order=True)
-                            self.assertFalse(l3_notif.routers_updated.called)
-                        else:
-                            l3_notif.routers_updated_on_host.\
-                                assert_called_once_with(
-                                    self.context, [router['id']], 'host0')
-                            self.assertFalse(l3_notif.routers_updated.called)
-                    else:
-                        l3_notif.routers_updated_on_host.\
-                            assert_called_once_with(
-                                self.context, [router['id']], 'host1')
-                        self.assertFalse(l3_notif.routers_updated.called)
+                    l3_notif.routers_updated_on_host.assert_called_once_with(
+                        self.context, [router['id']],
+                        int_port['port'][portbindings.HOST_ID])
+                    self.assertFalse(l3_notif.routers_updated.called)
                 else:
                     l3_notif.routers_updated.assert_called_once_with(
                         self.context, [router['id']], None)
@@ -508,12 +400,6 @@ class L3DvrTestCase(L3DvrTestCaseBase):
 
     def test_delete_floating_ip_agent_notification(self):
         self._test_delete_floating_ip_agent_notification()
-
-    def test_delete_floating_ip_agent_notification_with_dvr_no_external_agents(
-        self):
-        agent_mode = n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL
-        self._test_delete_floating_ip_agent_notification(
-            test_agent_mode=agent_mode)
 
     def test_delete_floating_ip_agent_notification_non_dvr(self):
         self._test_delete_floating_ip_agent_notification(dvr=False)
@@ -578,14 +464,11 @@ class L3DvrTestCase(L3DvrTestCaseBase):
         self.assertEqual(1, len(snat_router_intfs[router1['id']]))
         self.assertEqual(1, len(fixed_ips))
 
-    def test_unbound_allowed_addr_pairs_fip_with_multiple_active_vms(self):
+    def test_allowed_addr_pairs_arp_update_for_port_with_original_owner(self):
         HOST1 = 'host1'
         helpers.register_l3_agent(
             host=HOST1, agent_mode=constants.L3_AGENT_MODE_DVR)
-        HOST2 = 'host2'
-        helpers.register_l3_agent(
-            host=HOST2, agent_mode=constants.L3_AGENT_MODE_DVR)
-        router = self._create_router(ha=False)
+        router = self._create_router()
         private_net1 = self._make_network(self.fmt, 'net1', True)
         test_allocation_pools = [{'start': '10.1.0.2',
                                   'end': '10.1.0.20'}]
@@ -596,10 +479,6 @@ class L3DvrTestCase(L3DvrTestCaseBase):
         self._make_subnet(
             self.fmt, ext_net, '10.20.0.1', '10.20.0.0/24',
             ip_version=4, enable_dhcp=True)
-        self.l3_plugin.schedule_router(self.context,
-                                       router['id'],
-                                       candidates=[self.l3_agent])
-
         # Set gateway to router
         self.l3_plugin._update_router_gw_info(
             self.context, router['id'],
@@ -615,147 +494,70 @@ class L3DvrTestCase(L3DvrTestCaseBase):
         vrrp_port = self._make_port(
             self.fmt,
             private_net1['network']['id'],
-            device_owner='',
+            device_owner=constants.DEVICE_OWNER_LOADBALANCER,
             fixed_ips=fixed_vrrp_ip)
         allowed_address_pairs = [
             {'ip_address': '10.1.0.201',
              'mac_address': vrrp_port['port']['mac_address']}]
         with self.port(
                 subnet=private_subnet1,
-                device_owner=DEVICE_OWNER_COMPUTE) as int_port1,\
-                self.port(
-                    subnet=private_subnet1,
-                    device_owner=DEVICE_OWNER_COMPUTE) as int_port2:
+                device_owner=DEVICE_OWNER_COMPUTE) as int_port:
             self.l3_plugin.add_router_interface(
                 self.context, router['id'],
                 {'subnet_id': private_subnet1['subnet']['id']})
-            router_handle = (
-                self.l3_plugin.list_active_sync_routers_on_active_l3_agent(
-                    self.context, self.l3_agent['host'], [router['id']]))
-            self.assertEqual(self.l3_agent['host'],
-                             router_handle[0]['gw_port_host'])
             with mock.patch.object(self.l3_plugin,
                                    '_l3_rpc_notifier') as l3_notifier:
-                vm_port1 = self.core_plugin.update_port(
-                    self.context, int_port1['port']['id'],
+                vm_port = self.core_plugin.update_port(
+                    self.context, int_port['port']['id'],
                     {'port': {portbindings.HOST_ID: HOST1}})
-                vm_port2 = self.core_plugin.update_port(
-                    self.context, int_port2['port']['id'],
-                    {'port': {portbindings.HOST_ID: HOST2}})
-                vrrp_port_db = self.core_plugin.get_port(
-                    self.context, vrrp_port['port']['id'])
-                # Make sure that the VRRP port is not bound to any host
-                self.assertNotEqual(vrrp_port_db[portbindings.HOST_ID], HOST1)
-                self.assertNotEqual(vrrp_port_db[portbindings.HOST_ID], HOST2)
-                self.assertNotEqual(
-                    vrrp_port_db[portbindings.HOST_ID], self.l3_agent['host'])
-                # Now update both the VM ports with the allowed_address_pair ip
-                self.core_plugin.update_port(
-                     self.context, vm_port1['id'],
-                     {'port': {
-                         'allowed_address_pairs': allowed_address_pairs}})
-                updated_vm_port1 = self.core_plugin.get_port(
-                    self.context, vm_port1['id'])
-                expected_allowed_address_pairs1 = updated_vm_port1.get(
-                    'allowed_address_pairs')
-                self.assertEqual(expected_allowed_address_pairs1,
-                                 allowed_address_pairs)
-                self.core_plugin.update_port(
-                    self.context, vm_port2['id'],
-                    {'port': {
-                        'allowed_address_pairs': allowed_address_pairs}})
-                updated_vm_port2 = self.core_plugin.get_port(
-                    self.context, vm_port2['id'])
-                expected_allowed_address_pairs2 = updated_vm_port2.get(
-                    'allowed_address_pairs')
-                self.assertEqual(expected_allowed_address_pairs2,
-                                 allowed_address_pairs)
-                # Now let us assign the floatingip to the vrrp port that is
-                # unbound to any host.
+                l3_notifier.routers_updated_on_host.assert_called_once_with(
+                    self.context, {router['id']}, HOST1)
+                self.assertEqual(1, l3_notifier.add_arp_entry.call_count)
+                l3_notifier.reset_mock()
                 floating_ip = {'floating_network_id': ext_net['network']['id'],
                                'router_id': router['id'],
                                'port_id': vrrp_port['port']['id'],
                                'tenant_id': vrrp_port['port']['tenant_id']}
                 floating_ip = self.l3_plugin.create_floatingip(
                     self.context, {'floatingip': floating_ip})
-                expected_routers_updated_calls = [
-                        mock.call(self.context, mock.ANY, HOST1),
-                        mock.call(self.context, mock.ANY, HOST2),
-                        mock.call(self.context, mock.ANY, 'host0')]
-                l3_notifier.routers_updated_on_host.assert_has_calls(
-                        expected_routers_updated_calls)
-                self.assertFalse(l3_notifier.routers_updated.called)
-                router_info = (
-                    self.l3_plugin.list_active_sync_routers_on_active_l3_agent(
-                        self.context, self.l3_agent['host'], [router['id']]))
-                floatingips = router_info[0][constants.FLOATINGIP_KEY]
-                self.assertTrue(floatingips[0][n_const.DVR_SNAT_BOUND])
-
-    def test_dvr_router_centralized_floating_ip(self):
-        HOST1 = 'host1'
-        helpers.register_l3_agent(
-            host=HOST1, agent_mode=n_const.L3_AGENT_MODE_DVR_NO_EXTERNAL)
-        router = self._create_router(ha=False)
-        private_net1 = self._make_network(self.fmt, 'net1', True)
-        kwargs = {'arg_list': (external_net.EXTERNAL,),
-                  external_net.EXTERNAL: True}
-        ext_net = self._make_network(self.fmt, '', True, **kwargs)
-        self._make_subnet(
-            self.fmt, ext_net, '10.20.0.1', '10.20.0.0/24',
-            ip_version=4, enable_dhcp=True)
-        self.l3_plugin.schedule_router(self.context,
-                                       router['id'],
-                                       candidates=[self.l3_agent])
-
-        # Set gateway to router
-        self.l3_plugin._update_router_gw_info(
-            self.context, router['id'],
-            {'network_id': ext_net['network']['id']})
-        private_subnet1 = self._make_subnet(
-            self.fmt,
-            private_net1,
-            '10.1.0.1',
-            cidr='10.1.0.0/24',
-            ip_version=4,
-            enable_dhcp=True)
-        with self.port(
-                subnet=private_subnet1,
-                device_owner=DEVICE_OWNER_COMPUTE) as int_port1:
-            self.l3_plugin.add_router_interface(
-                self.context, router['id'],
-                {'subnet_id': private_subnet1['subnet']['id']})
-            router_handle = (
-                self.l3_plugin.list_active_sync_routers_on_active_l3_agent(
-                    self.context, self.l3_agent['host'], [router['id']]))
-            self.assertEqual(self.l3_agent['host'],
-                             router_handle[0]['gw_port_host'])
-            with mock.patch.object(self.l3_plugin,
-                                   '_l3_rpc_notifier') as l3_notifier:
-                vm_port = self.core_plugin.update_port(
-                    self.context, int_port1['port']['id'],
-                    {'port': {portbindings.HOST_ID: HOST1}})
+                vrrp_port_db = self.core_plugin.get_port(
+                    self.context, vrrp_port['port']['id'])
+                self.assertNotEqual(vrrp_port_db[portbindings.HOST_ID], HOST1)
+                # Now update the VM port with the allowed_address_pair
+                l3_notifier.reset_mock()
+                self.core_plugin.update_port(
+                     self.context, vm_port['id'],
+                     {'port': {
+                         'allowed_address_pairs': allowed_address_pairs}})
+                updated_vm_port = self.core_plugin.get_port(
+                    self.context, vm_port['id'])
+                expected_allowed_address_pairs = updated_vm_port.get(
+                    'allowed_address_pairs')
+                self.assertEqual(expected_allowed_address_pairs,
+                                 allowed_address_pairs)
+                cur_vrrp_port_db = self.core_plugin.get_port(
+                    self.context, vrrp_port['port']['id'])
+                self.assertEqual(cur_vrrp_port_db[portbindings.HOST_ID], HOST1)
+                self.assertTrue(cur_vrrp_port_db.get(portbindings.PROFILE))
+                port_profile = cur_vrrp_port_db.get(portbindings.PROFILE)
+                self.assertTrue(port_profile)
+                self.assertEqual(port_profile['original_owner'],
+                                 constants.DEVICE_OWNER_LOADBALANCER)
+                l3_notifier.reset_mock()
+                port_profile['new_owner'] = 'test_owner'
+                self.core_plugin.update_port(
+                    self.context, cur_vrrp_port_db['id'],
+                    {'port': {portbindings.PROFILE: port_profile}})
+                # Now the vrrp port should have an 'original_owner'
+                # and gets updated with a new profile. In this case
+                # the update triggers a notification to the neutron
+                # server, but this should not trigger another arp
+                # update of this port or router_updated event to the
+                # agent, otherwise this will mess up with the arp
+                # table in the router namespace.
+                self.assertEqual(0, l3_notifier.add_arp_entry.call_count)
                 self.assertEqual(
-                    1, l3_notifier.routers_updated_on_host.call_count)
-                # Next we can try to associate the floatingip to the
-                # VM port
-                floating_ip = {'floating_network_id': ext_net['network']['id'],
-                               'router_id': router['id'],
-                               'port_id': vm_port['id'],
-                               'tenant_id': vm_port['tenant_id']}
-                floating_ip = self.l3_plugin.create_floatingip(
-                    self.context, {'floatingip': floating_ip})
-
-                expected_routers_updated_calls = [
-                        mock.call(self.context, mock.ANY, HOST1),
-                        mock.call(self.context, mock.ANY, 'host0')]
-                l3_notifier.routers_updated_on_host.assert_has_calls(
-                        expected_routers_updated_calls)
-                self.assertFalse(l3_notifier.routers_updated.called)
-                router_info = (
-                    self.l3_plugin.list_active_sync_routers_on_active_l3_agent(
-                        self.context, self.l3_agent['host'], [router['id']]))
-                floatingips = router_info[0][constants.FLOATINGIP_KEY]
-                self.assertTrue(floatingips[0][n_const.DVR_SNAT_BOUND])
+                    0, l3_notifier.routers_updated_on_host.call_count)
 
     def test_allowed_addr_pairs_delayed_fip_and_update_arp_entry(self):
         HOST1 = 'host1'
@@ -764,7 +566,7 @@ class L3DvrTestCase(L3DvrTestCaseBase):
         HOST2 = 'host2'
         helpers.register_l3_agent(
             host=HOST2, agent_mode=constants.L3_AGENT_MODE_DVR)
-        router = self._create_router(ha=False)
+        router = self._create_router()
         private_net1 = self._make_network(self.fmt, 'net1', True)
         test_allocation_pools = [{'start': '10.1.0.2',
                                   'end': '10.1.0.20'}]
@@ -775,10 +577,6 @@ class L3DvrTestCase(L3DvrTestCaseBase):
         self._make_subnet(
             self.fmt, ext_net, '10.20.0.1', '10.20.0.0/24',
             ip_version=4, enable_dhcp=True)
-        self.l3_plugin.schedule_router(self.context,
-                                       router['id'],
-                                       candidates=[self.l3_agent])
-
         # Set gateway to router
         self.l3_plugin._update_router_gw_info(
             self.context, router['id'],
@@ -806,11 +604,6 @@ class L3DvrTestCase(L3DvrTestCaseBase):
             self.l3_plugin.add_router_interface(
                 self.context, router['id'],
                 {'subnet_id': private_subnet1['subnet']['id']})
-            router_handle = (
-                self.l3_plugin.list_active_sync_routers_on_active_l3_agent(
-                    self.context, self.l3_agent['host'], [router['id']]))
-            self.assertEqual(self.l3_agent['host'],
-                             router_handle[0]['gw_port_host'])
             with mock.patch.object(self.l3_plugin,
                                    '_l3_rpc_notifier') as l3_notifier:
                 vm_port = self.core_plugin.update_port(
@@ -826,6 +619,7 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                 vm_port2 = self.core_plugin.update_port(
                     self.context, int_port2['port']['id'],
                     {'port': {portbindings.HOST_ID: HOST2}})
+                l3_notifier.reset_mock()
                 # Now update the VM port with the allowed_address_pair
                 self.core_plugin.update_port(
                      self.context, vm_port['id'],
@@ -836,11 +630,12 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                      {'port': {
                          'allowed_address_pairs': allowed_address_pairs}})
                 self.assertEqual(
-                    2, l3_notifier.routers_updated_on_host.call_count)
+                    0, l3_notifier.routers_updated_on_host.call_count)
                 updated_vm_port1 = self.core_plugin.get_port(
                     self.context, vm_port['id'])
                 updated_vm_port2 = self.core_plugin.get_port(
                     self.context, vm_port2['id'])
+                self.assertEqual(4, l3_notifier.add_arp_entry.call_count)
                 expected_allowed_address_pairs = updated_vm_port1.get(
                     'allowed_address_pairs')
                 self.assertEqual(expected_allowed_address_pairs,
@@ -858,83 +653,58 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                     cur_vrrp_port_db[portbindings.HOST_ID], HOST1)
                 self.assertNotEqual(
                     cur_vrrp_port_db[portbindings.HOST_ID], HOST2)
+                # Before we try to associate a floatingip make sure that
+                # only one of the Service port associated with the
+                # allowed_address_pair port is active and the other one
+                # is DOWN
+                mod_vm_port2 = self.core_plugin.update_port(
+                    self.context, updated_vm_port2['id'],
+                    {'port': {
+                        'admin_state_up': False}})
+                self.assertFalse(mod_vm_port2['admin_state_up'])
                 # Next we can try to associate the floatingip to the
                 # VRRP port that is already attached to the VM port
+                l3_notifier.reset_mock()
                 floating_ip = {'floating_network_id': ext_net['network']['id'],
                                'router_id': router['id'],
                                'port_id': vrrp_port['port']['id'],
                                'tenant_id': vrrp_port['port']['tenant_id']}
                 floating_ip = self.l3_plugin.create_floatingip(
                     self.context, {'floatingip': floating_ip})
+                self.assertEqual(
+                    2, l3_notifier.routers_updated_on_host.call_count)
+                self.assertEqual(3, l3_notifier.add_arp_entry.call_count)
 
                 post_update_vrrp_port_db = self.core_plugin.get_port(
                     self.context, vrrp_port['port']['id'])
                 vrrp_port_fixed_ips = post_update_vrrp_port_db['fixed_ips']
                 vrrp_port_subnet_id = vrrp_port_fixed_ips[0]['subnet_id']
-                vrrp_arp_table1 = {
+                vrrp_arp_table = {
                     'ip_address': vrrp_port_fixed_ips[0]['ip_address'],
                     'mac_address': vm_port_mac,
                     'subnet_id': vrrp_port_subnet_id}
+                vrrp_arp_table1 = {
+                    'ip_address': vrrp_port_fixed_ips[0]['ip_address'],
+                    'mac_address': vrrp_port['port']['mac_address'],
+                    'subnet_id': vrrp_port_subnet_id}
 
+                self.assertEqual(
+                    post_update_vrrp_port_db[portbindings.HOST_ID], HOST1)
                 expected_calls = [
+                        mock.call(self.context,
+                                  router['id'], vrrp_arp_table1),
                         mock.call(self.context,
                                   router['id'], vm_arp_table),
                         mock.call(self.context,
-                                  router['id'], vrrp_arp_table1)]
+                                  router['id'], vrrp_arp_table)]
                 l3_notifier.add_arp_entry.assert_has_calls(
                         expected_calls)
-                expected_routers_updated_calls = [
-                        mock.call(self.context, mock.ANY, HOST1),
-                        mock.call(self.context, mock.ANY, HOST2),
-                        mock.call(self.context, mock.ANY, 'host0')]
-                l3_notifier.routers_updated_on_host.assert_has_calls(
-                        expected_routers_updated_calls)
-                self.assertFalse(l3_notifier.routers_updated.called)
-                router_info = (
-                    self.l3_plugin.list_active_sync_routers_on_active_l3_agent(
-                        self.context, self.l3_agent['host'], [router['id']]))
-                floatingips = router_info[0][constants.FLOATINGIP_KEY]
-                self.assertTrue(floatingips[0][n_const.DVR_SNAT_BOUND])
-
-    def test_dvr_gateway_host_binding_is_set(self):
-        router = self._create_router(ha=False)
-        private_net1 = self._make_network(self.fmt, 'net1', True)
-        kwargs = {'arg_list': (external_net.EXTERNAL,),
-                  external_net.EXTERNAL: True}
-        ext_net = self._make_network(self.fmt, '', True, **kwargs)
-        self._make_subnet(
-            self.fmt, ext_net, '10.20.0.1', '10.20.0.0/24',
-            ip_version=4, enable_dhcp=True)
-        self.l3_plugin.schedule_router(self.context,
-                                       router['id'],
-                                       candidates=[self.l3_agent])
-        # Set gateway to router
-        self.l3_plugin._update_router_gw_info(
-            self.context, router['id'],
-            {'network_id': ext_net['network']['id']})
-        private_subnet1 = self._make_subnet(
-            self.fmt,
-            private_net1,
-            '10.1.0.1',
-            cidr='10.1.0.0/24',
-            ip_version=4,
-            enable_dhcp=True)
-        self.l3_plugin.add_router_interface(
-            self.context, router['id'],
-            {'subnet_id': private_subnet1['subnet']['id']})
-        # Check for the gw_port_host in the router dict to make
-        # sure that the _build_routers_list in l3_dvr_db is called.
-        router_handle = (
-            self.l3_plugin.list_active_sync_routers_on_active_l3_agent(
-                self.context, self.l3_agent['host'], [router['id']]))
-        self.assertEqual(self.l3_agent['host'],
-                         router_handle[0]['gw_port_host'])
 
     def test_allowed_address_pairs_update_arp_entry(self):
         HOST1 = 'host1'
         helpers.register_l3_agent(
             host=HOST1, agent_mode=constants.L3_AGENT_MODE_DVR)
-        router = self._create_router(ha=False)
+        router = self._create_router()
         private_net1 = self._make_network(self.fmt, 'net1', True)
         test_allocation_pools = [{'start': '10.1.0.2',
                                   'end': '10.1.0.20'}]
@@ -945,9 +715,6 @@ class L3DvrTestCase(L3DvrTestCaseBase):
         self._make_subnet(
             self.fmt, ext_net, '10.20.0.1', '10.20.0.0/24',
             ip_version=4, enable_dhcp=True)
-        self.l3_plugin.schedule_router(self.context,
-                                       router['id'],
-                                       candidates=[self.l3_agent])
         # Set gateway to router
         self.l3_plugin._update_router_gw_info(
             self.context, router['id'],
@@ -973,11 +740,6 @@ class L3DvrTestCase(L3DvrTestCaseBase):
             self.l3_plugin.add_router_interface(
                 self.context, router['id'],
                 {'subnet_id': private_subnet1['subnet']['id']})
-            router_handle = (
-                self.l3_plugin.list_active_sync_routers_on_active_l3_agent(
-                    self.context, self.l3_agent['host'], [router['id']]))
-            self.assertEqual(self.l3_agent['host'],
-                             router_handle[0]['gw_port_host'])
             with mock.patch.object(self.l3_plugin,
                                    '_l3_rpc_notifier') as l3_notifier:
                 vm_port = self.core_plugin.update_port(
@@ -990,7 +752,12 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                     'ip_address': vm_port_fixed_ips[0]['ip_address'],
                     'mac_address': vm_port_mac,
                     'subnet_id': vm_port_subnet_id}
+
+                l3_notifier.routers_updated_on_host.assert_called_once_with(
+                    self.context, {router['id']}, HOST1)
+
                 self.assertEqual(1, l3_notifier.add_arp_entry.call_count)
+                l3_notifier.reset_mock()
                 floating_ip = {'floating_network_id': ext_net['network']['id'],
                                'router_id': router['id'],
                                'port_id': vrrp_port['port']['id'],
@@ -1001,12 +768,16 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                     self.context, vrrp_port['port']['id'])
                 self.assertNotEqual(vrrp_port_db[portbindings.HOST_ID], HOST1)
                 # Now update the VM port with the allowed_address_pair
+                l3_notifier.reset_mock()
                 self.core_plugin.update_port(
                      self.context, vm_port['id'],
                      {'port': {
                          'allowed_address_pairs': allowed_address_pairs}})
+                self.assertEqual(
+                    2, l3_notifier.routers_updated_on_host.call_count)
                 updated_vm_port = self.core_plugin.get_port(
                     self.context, vm_port['id'])
+                self.assertEqual(3, l3_notifier.add_arp_entry.call_count)
                 expected_allowed_address_pairs = updated_vm_port.get(
                     'allowed_address_pairs')
                 self.assertEqual(expected_allowed_address_pairs,
@@ -1015,24 +786,163 @@ class L3DvrTestCase(L3DvrTestCaseBase):
                     self.context, vrrp_port['port']['id'])
                 vrrp_port_fixed_ips = cur_vrrp_port_db['fixed_ips']
                 vrrp_port_subnet_id = vrrp_port_fixed_ips[0]['subnet_id']
-                vrrp_arp_table1 = {
+                vrrp_arp_table = {
                     'ip_address': vrrp_port_fixed_ips[0]['ip_address'],
                     'mac_address': vm_port_mac,
                     'subnet_id': vrrp_port_subnet_id}
+                vrrp_arp_table1 = {
+                    'ip_address': vrrp_port_fixed_ips[0]['ip_address'],
+                    'mac_address': vrrp_port['port']['mac_address'],
+                    'subnet_id': vrrp_port_subnet_id}
 
+                self.assertEqual(cur_vrrp_port_db[portbindings.HOST_ID], HOST1)
                 expected_calls = [
+                        mock.call(self.context,
+                                  router['id'], vrrp_arp_table1),
                         mock.call(self.context,
                                   router['id'], vm_arp_table),
                         mock.call(self.context,
-                                  router['id'], vrrp_arp_table1)]
+                                  router['id'], vrrp_arp_table)]
                 l3_notifier.add_arp_entry.assert_has_calls(
                         expected_calls)
-                expected_routers_updated_calls = [
-                        mock.call(self.context, mock.ANY, HOST1),
-                        mock.call(self.context, mock.ANY, 'host0')]
-                l3_notifier.routers_updated_on_host.assert_has_calls(
-                        expected_routers_updated_calls)
-                self.assertFalse(l3_notifier.routers_updated.called)
+
+    def test_update_service_port_with_allowed_address_pairs(self):
+        HOST1 = 'host1'
+        helpers.register_l3_agent(
+            host=HOST1, agent_mode=constants.L3_AGENT_MODE_DVR)
+        router = self._create_router()
+        private_net1 = self._make_network(self.fmt, 'net1', True)
+        test_allocation_pools = [{'start': '10.1.0.2',
+                                  'end': '10.1.0.20'}]
+        fixed_vrrp_ip = [{'ip_address': '10.1.0.201'}]
+        kwargs = {'arg_list': (external_net.EXTERNAL,),
+                  external_net.EXTERNAL: True}
+        ext_net = self._make_network(self.fmt, '', True, **kwargs)
+        self._make_subnet(
+            self.fmt, ext_net, '10.20.0.1', '10.20.0.0/24',
+            ip_version=4, enable_dhcp=True)
+        # Set gateway to router
+        self.l3_plugin._update_router_gw_info(
+            self.context, router['id'],
+            {'network_id': ext_net['network']['id']})
+        private_subnet1 = self._make_subnet(
+            self.fmt,
+            private_net1,
+            '10.1.0.1',
+            cidr='10.1.0.0/24',
+            ip_version=4,
+            allocation_pools=test_allocation_pools,
+            enable_dhcp=True)
+        vrrp_port = self._make_port(
+            self.fmt,
+            private_net1['network']['id'],
+            device_owner=constants.DEVICE_OWNER_LOADBALANCER,
+            fixed_ips=fixed_vrrp_ip)
+        allowed_address_pairs = [
+            {'ip_address': '10.1.0.201',
+             'mac_address': vrrp_port['port']['mac_address']}]
+        with self.port(
+                subnet=private_subnet1,
+                device_owner=DEVICE_OWNER_COMPUTE) as int_port:
+            self.l3_plugin.add_router_interface(
+                self.context, router['id'],
+                {'subnet_id': private_subnet1['subnet']['id']})
+            with mock.patch.object(self.l3_plugin,
+                                   '_l3_rpc_notifier') as l3_notifier:
+                self.core_plugin.update_port(
+                    self.context, int_port['port']['id'],
+                    {'port': {portbindings.HOST_ID: HOST1}})
+
+                l3_notifier.routers_updated_on_host.assert_called_once_with(
+                    self.context, {router['id']}, HOST1)
+
+                floating_ip = {'floating_network_id': ext_net['network']['id'],
+                               'router_id': router['id'],
+                               'port_id': vrrp_port['port']['id'],
+                               'tenant_id': vrrp_port['port']['tenant_id']}
+                floating_ip = self.l3_plugin.create_floatingip(
+                    self.context, {'floatingip': floating_ip})
+
+                vrrp_port_db = self.core_plugin.get_port(
+                    self.context, vrrp_port['port']['id'])
+                self.assertNotEqual(vrrp_port_db[portbindings.HOST_ID], HOST1)
+                # Now update the VM port with the allowed_address_pair
+                cur_int_port = self.core_plugin.update_port(
+                     self.context, int_port['port']['id'],
+                     {'port': {
+                         'allowed_address_pairs': allowed_address_pairs}})
+                cur_vrrp_port_db = self.core_plugin.get_port(
+                    self.context, vrrp_port['port']['id'])
+                # Check to make sure that we are not chaning the existing
+                # device_owner for the allowed_address_pair port.
+                self.assertEqual(
+                    cur_vrrp_port_db['device_owner'],
+                    constants.DEVICE_OWNER_LOADBALANCER)
+                self.assertEqual(cur_vrrp_port_db[portbindings.HOST_ID], HOST1)
+                self.assertTrue(cur_vrrp_port_db.get(portbindings.PROFILE))
+                port_profile = cur_vrrp_port_db.get(portbindings.PROFILE)
+                self.assertTrue(port_profile)
+                self.assertEqual(port_profile['original_owner'],
+                                 constants.DEVICE_OWNER_LOADBALANCER)
+                # Now change the compute port admin_state_up from True to
+                # False, and see if the vrrp ports device_owner and binding
+                # inheritance reverts back to normal
+                mod_int_port = self.core_plugin.update_port(
+                    self.context, cur_int_port['id'],
+                    {'port': {
+                        'admin_state_up': False}})
+                self.assertFalse(mod_int_port['admin_state_up'])
+                new_vrrp_port_db = self.core_plugin.get_port(
+                    self.context, cur_vrrp_port_db['id'])
+                new_port_profile = new_vrrp_port_db.get(portbindings.PROFILE)
+                self.assertEqual({}, new_port_profile)
+                self.assertNotEqual(
+                    new_vrrp_port_db[portbindings.HOST_ID], HOST1)
+                # Now change the compute port admin_state_up from False to
+                # True, and see if the vrrp ports device_owner and binding
+                # inherits from the associated parent compute port.
+                new_mod_int_port = self.core_plugin.update_port(
+                    self.context, mod_int_port['id'],
+                    {'port': {
+                        'admin_state_up': True}})
+                self.assertTrue(new_mod_int_port['admin_state_up'])
+                cur_new_vrrp_port_db = self.core_plugin.get_port(
+                    self.context, new_vrrp_port_db['id'])
+                self.assertNotEqual(
+                    cur_new_vrrp_port_db['device_owner'], DEVICE_OWNER_COMPUTE)
+                self.assertEqual(
+                    cur_new_vrrp_port_db[portbindings.HOST_ID], HOST1)
+                # Now let us try to remove vrrp_port device_owner and see
+                # how it inherits from the compute port.
+                updated_vrrp_port = self.core_plugin.update_port(
+                    self.context, cur_new_vrrp_port_db['id'],
+                    {'port': {'device_owner': "",
+                              portbindings.PROFILE: {'original_owner': ""}}})
+                updated_vm_port = self.core_plugin.update_port(
+                    self.context, new_mod_int_port['id'],
+                    {'port': {
+                        'admin_state_up': False}})
+                self.assertFalse(updated_vm_port['admin_state_up'])
+                # This port admin_state down should not cause any issue
+                # with the existing vrrp port device_owner, but should
+                # only change the port_binding HOST_ID.
+                cur_new_vrrp_port_db = self.core_plugin.get_port(
+                    self.context, updated_vrrp_port['id'])
+                self.assertEqual(
+                    "", cur_new_vrrp_port_db['device_owner'])
+                self.assertEqual(
+                    "", cur_new_vrrp_port_db[portbindings.HOST_ID])
+                updated_vm_port = self.core_plugin.update_port(
+                    self.context, new_mod_int_port['id'],
+                    {'port': {
+                        'admin_state_up': True}})
+                self.assertTrue(updated_vm_port['admin_state_up'])
+                updated_vrrp_port_db = self.core_plugin.get_port(
+                    self.context, new_vrrp_port_db['id'])
+                self.assertEqual(
+                    updated_vrrp_port_db['device_owner'], DEVICE_OWNER_COMPUTE)
+                self.assertEqual(
+                    updated_vrrp_port_db[portbindings.HOST_ID], HOST1)
 
     def test_update_vm_port_host_router_update(self):
         # register l3 agents in dvr mode in addition to existing dvr_snat agent

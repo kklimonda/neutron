@@ -17,12 +17,7 @@ import inspect
 import os
 import random
 
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources
-from neutron_lib import context
 from neutron_lib.plugins import directory
-from neutron_lib import worker as neutron_worker
 from oslo_concurrency import processutils
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -32,11 +27,17 @@ from oslo_service import service as common_service
 from oslo_utils import excutils
 from oslo_utils import importutils
 
+from neutron._i18n import _LE, _LI
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
 from neutron.common import config
 from neutron.common import profiler
 from neutron.common import rpc as n_rpc
 from neutron.conf import service
+from neutron import context
 from neutron.db import api as session
+from neutron import worker as neutron_worker
 from neutron import wsgi
 
 
@@ -86,14 +87,14 @@ def serve_wsgi(cls):
         service.start()
     except Exception:
         with excutils.save_and_reraise_exception():
-            LOG.exception('Unrecoverable error: please check log '
-                          'for details.')
+            LOG.exception(_LE('Unrecoverable error: please check log '
+                              'for details.'))
 
     registry.notify(resources.PROCESS, events.BEFORE_SPAWN, service)
     return service
 
 
-class RpcWorker(neutron_worker.BaseWorker):
+class RpcWorker(neutron_worker.NeutronWorker):
     """Wraps a worker to be handled by ProcessLauncher"""
     start_listeners_method = 'start_rpc_listeners'
 
@@ -119,7 +120,7 @@ class RpcWorker(neutron_worker.BaseWorker):
         try:
             self._wait()
         except Exception:
-            LOG.exception('done with wait')
+            LOG.exception(_LE('done with wait'))
             raise
 
     def _wait(self):
@@ -162,8 +163,8 @@ def _get_rpc_workers():
     if not plugin.rpc_workers_supported():
         LOG.debug("Active plugin doesn't implement start_rpc_listeners")
         if 0 < cfg.CONF.rpc_workers:
-            LOG.error("'rpc_workers = %d' ignored because "
-                      "start_rpc_listeners is not implemented.",
+            LOG.error(_LE("'rpc_workers = %d' ignored because "
+                          "start_rpc_listeners is not implemented."),
                       cfg.CONF.rpc_workers)
         raise NotImplementedError()
 
@@ -196,7 +197,7 @@ def _get_plugins_workers():
     ]
 
 
-class AllServicesNeutronWorker(neutron_worker.BaseWorker):
+class AllServicesNeutronWorker(neutron_worker.NeutronWorker):
     def __init__(self, services, worker_process_count=1):
         super(AllServicesNeutronWorker, self).__init__(worker_process_count)
         self._services = services
@@ -255,15 +256,13 @@ def _start_workers(workers):
         return worker_launcher
     except Exception:
         with excutils.save_and_reraise_exception():
-            LOG.exception('Unrecoverable error: please check log for '
-                          'details.')
+            LOG.exception(_LE('Unrecoverable error: please check log for '
+                              'details.'))
 
 
 def start_all_workers():
     workers = _get_rpc_workers() + _get_plugins_workers()
-    launcher = _start_workers(workers)
-    registry.notify(resources.PROCESS, events.AFTER_SPAWN, None)
-    return launcher
+    return _start_workers(workers)
 
 
 def start_rpc_workers():
@@ -288,7 +287,7 @@ def _get_api_workers():
 def _run_wsgi(app_name):
     app = config.load_paste_app(app_name)
     if not app:
-        LOG.error('No known API applications configured.')
+        LOG.error(_LE('No known API applications configured.'))
         return
     return run_wsgi_app(app)
 
@@ -297,7 +296,7 @@ def run_wsgi_app(app):
     server = wsgi.Server("Neutron")
     server.start(app, cfg.CONF.bind_port, cfg.CONF.bind_host,
                  workers=_get_api_workers())
-    LOG.info("Neutron service started, listening on %(host)s:%(port)s",
+    LOG.info(_LI("Neutron service started, listening on %(host)s:%(port)s"),
              {'host': cfg.CONF.bind_host, 'port': cfg.CONF.bind_port})
     return server
 
@@ -398,7 +397,7 @@ class Service(n_rpc.Service):
             try:
                 x.stop()
             except Exception:
-                LOG.exception("Exception occurs when timer stops")
+                LOG.exception(_LE("Exception occurs when timer stops"))
         self.timers = []
 
     def wait(self):
@@ -407,7 +406,7 @@ class Service(n_rpc.Service):
             try:
                 x.wait()
             except Exception:
-                LOG.exception("Exception occurs when waiting for timer")
+                LOG.exception(_LE("Exception occurs when waiting for timer"))
 
     def reset(self):
         config.reset_service()

@@ -14,22 +14,22 @@
 # limitations under the License.
 
 import mock
-from neutron_lib.api.definitions import portbindings
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources
 from neutron_lib import constants as const
-from neutron_lib import context
 from neutron_lib import exceptions
-from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
 
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
+from neutron.common import constants as n_const
+from neutron import context
 from neutron.db import agents_db
 from neutron.db import common_db_mixin
+from neutron.db import l3_agentschedulers_db
 from neutron.db import l3_dvr_db
-from neutron.db import l3_dvrscheduler_db
 from neutron.extensions import l3
+from neutron.extensions import portbindings
 from neutron.tests.unit.db import test_db_base_plugin_v2
 
 _uuid = uuidutils.generate_uuid
@@ -37,7 +37,7 @@ _uuid = uuidutils.generate_uuid
 
 class FakeL3Plugin(common_db_mixin.CommonDbMixin,
                    l3_dvr_db.L3_NAT_with_dvr_db_mixin,
-                   l3_dvrscheduler_db.L3_DVRsch_db_mixin,
+                   l3_agentschedulers_db.L3AgentSchedulerDbMixin,
                    agents_db.AgentDbMixin):
     pass
 
@@ -49,7 +49,6 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         self.core_plugin = directory.get_plugin()
         self.ctx = context.get_admin_context()
         self.mixin = FakeL3Plugin()
-        directory.add_plugin(plugin_constants.L3, self.mixin)
 
     def _create_router(self, router):
         with self.ctx.session.begin(subtransactions=True):
@@ -174,7 +173,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
     def test__get_agent_gw_ports_exist_for_network(self):
         plugin = mock.Mock()
-        directory.add_plugin(plugin_constants.CORE, plugin)
+        directory.add_plugin(const.CORE, plugin)
         plugin.get_ports.return_value = []
         self.mixin._get_agent_gw_ports_exist_for_network(
             self.ctx, 'network_id', 'host', 'agent_id')
@@ -185,7 +184,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
 
     def _test_prepare_direct_delete_dvr_internal_ports(self, port):
         plugin = mock.Mock()
-        directory.add_plugin(plugin_constants.CORE, plugin)
+        directory.add_plugin(const.CORE, plugin)
         plugin.get_port.return_value = port
         self.mixin._router_exists = mock.Mock(return_value=True)
         self.assertRaises(exceptions.ServicePortInUse,
@@ -250,7 +249,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             'device_owner': const.DEVICE_OWNER_ROUTER_GW
         }]
         plugin = mock.Mock()
-        directory.add_plugin(plugin_constants.CORE, plugin)
+        directory.add_plugin(const.CORE, plugin)
         plugin.get_ports.return_value = ports
         self.mixin.delete_floatingip_agent_gateway_port(
             self.ctx, port_host, 'ext_network_id')
@@ -287,7 +286,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             router.gw_port = None
 
         plugin = mock.Mock()
-        directory.add_plugin(plugin_constants.CORE, plugin)
+        directory.add_plugin(const.CORE, plugin)
         with mock.patch.object(l3_dvr_db.l3_db.L3_NAT_db_mixin,
                                'router_gw_port_has_floating_ips',
                                return_value=False),\
@@ -380,10 +379,11 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
             return_value=hostid)
         self.mixin._get_agent_by_type_and_host = mock.Mock(
             return_value=fipagent)
-        self.mixin._get_fip_agent_gw_ports = mock.Mock(
+        self.mixin._get_fip_sync_interfaces = mock.Mock(
             return_value='fip_interface')
         agent = mock.Mock()
         agent.id = fipagent['id']
+
         self.mixin._process_floating_ips_dvr(self.ctx, routers, [floatingip],
                                              hostid, agent)
         return (router, floatingip)
@@ -392,12 +392,18 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         router, fip = self._floatingip_on_port_test_setup(None)
 
         self.assertNotIn(const.FLOATINGIP_KEY, router)
+        self.assertNotIn(n_const.FLOATINGIP_AGENT_INTF_KEY, router)
 
     def test_floatingip_on_port_with_host(self):
         router, fip = self._floatingip_on_port_test_setup(_uuid())
 
+        self.assertTrue(self.mixin._get_fip_sync_interfaces.called)
+
         self.assertIn(const.FLOATINGIP_KEY, router)
+        self.assertIn(n_const.FLOATINGIP_AGENT_INTF_KEY, router)
         self.assertIn(fip, router[const.FLOATINGIP_KEY])
+        self.assertIn('fip_interface',
+            router[n_const.FLOATINGIP_AGENT_INTF_KEY])
 
     def _setup_test_create_floatingip(
         self, fip, floatingip_db, router_db):
@@ -497,6 +503,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         router_dict = {'name': 'test_router', 'admin_state_up': True,
                        'distributed': True}
         router = self._create_router(router_dict)
+        plugin = mock.MagicMock()
         with self.network() as net_ext,\
                 self.subnet() as subnet1,\
                 self.subnet(cidr='20.0.0.0/24') as subnet2:
@@ -525,6 +532,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                 self.ctx, filters=dvr_filters)
             self.assertEqual(2, len(dvr_ports))
 
+            directory.add_plugin(const.L3, plugin)
             self.mixin.remove_router_interface(
                 self.ctx, router['id'], {'port_id': dvr_ports[0]['id']})
 
@@ -542,6 +550,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         router_dict = {'name': 'test_router', 'admin_state_up': True,
                        'distributed': True}
         router = self._create_router(router_dict)
+        plugin = mock.MagicMock()
         with self.network() as net_ext, self.network() as net_int:
             ext_net_id = net_ext['network']['id']
             self.core_plugin.update_network(
@@ -560,6 +569,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                     {'subnet_id': subnet_v4['subnet']['id']})
                 self.mixin.add_router_interface(self.ctx, router['id'],
                     {'subnet_id': subnet_v6['subnet']['id']})
+                directory.add_plugin(const.L3, plugin)
                 return router, subnet_v4, subnet_v6
 
     def test_undo_router_interface_change_on_csnat_error(self):
@@ -693,7 +703,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                        'distributed': True}
         router = self._create_router(router_dict)
         plugin = mock.Mock()
-        directory.add_plugin(plugin_constants.CORE, plugin)
+        directory.add_plugin(const.CORE, plugin)
         l3_notify = self.mixin.l3_rpc_notifier = mock.Mock()
         port = {
             'id': 'my_port_id',
@@ -800,9 +810,7 @@ class L3DvrTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
                     RuntimeError,
                     self.mixin.add_router_interface,
                     self.ctx, router['id'], {'port_id': port['port']['id']})
-            # expire since we are re-using the session which might have stale
-            # ports in it
-            self.ctx.session.expire_all()
+
             port_info = self.core_plugin.get_port(self.ctx, port['port']['id'])
             self.assertEqual(port_dict['device_id'], port_info['device_id'])
             self.assertEqual(port_dict['device_owner'],

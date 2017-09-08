@@ -18,6 +18,7 @@ from oslo_utils import excutils
 from sqlalchemy import exc as sql_exc
 from sqlalchemy.orm import session as se
 
+from neutron._i18n import _LE, _LW
 from neutron.db import api as db_api
 from neutron.db.quota import api as quota_api
 
@@ -176,7 +177,7 @@ class TrackedResource(BaseResource):
     def mark_dirty(self, context):
         if not self._dirty_tenants:
             return
-        with db_api.context_manager.writer.using(context):
+        with db_api.autonested_transaction(context.session):
             # It is not necessary to protect this operation with a lock.
             # Indeed when this method is called the request has been processed
             # and therefore all resources created or deleted.
@@ -198,8 +199,8 @@ class TrackedResource(BaseResource):
             tenant_id = target['tenant_id']
         except AttributeError:
             with excutils.save_and_reraise_exception():
-                LOG.error("Model class %s does not have a tenant_id "
-                          "attribute", target)
+                LOG.error(_LE("Model class %s does not have a tenant_id "
+                              "attribute"), target)
         self._dirty_tenants.add(tenant_id)
 
     # Retry the operation if a duplicate entry exception is raised. This
@@ -233,17 +234,27 @@ class TrackedResource(BaseResource):
         # Update quota usage
         return self._resync(context, tenant_id, in_use)
 
-    def count_used(self, context, tenant_id, resync_usage=True):
-        """Returns the current usage count for the resource.
+    def count(self, context, _plugin, tenant_id, resync_usage=True):
+        """Return the current usage count for the resource.
 
-        :param context: The request context.
-        :param tenant_id: The ID of the tenant
-        :param resync_usage: Default value is set to True. Syncs
-            with in_use usage.
+        This method will fetch aggregate information for resource usage
+        data, unless usage data are marked as "dirty".
+        In the latter case resource usage will be calculated counting
+        rows for tenant_id in the resource's database model.
+        Active reserved amount are instead always calculated by summing
+        amounts for matching records in the 'reservations' database model.
+
+        The _plugin and _resource parameters are unused but kept for
+        compatibility with the signature of the count method for
+        CountableResource instances.
         """
         # Load current usage data, setting a row-level lock on the DB
         usage_info = quota_api.get_quota_usage_by_resource_and_tenant(
-            context, self.name, tenant_id)
+            context, self.name, tenant_id, lock_for_update=True)
+        # Always fetch reservations, as they are not tracked by usage counters
+        reservations = quota_api.get_reservations_for_resources(
+            context, tenant_id, [self.name])
+        reserved = reservations.get(self.name, 0)
 
         # If dirty or missing, calculate actual resource usage querying
         # the database and set/create usage info data
@@ -276,33 +287,14 @@ class TrackedResource(BaseResource):
                        "Used quota:%(used)d."),
                       {'resource': self.name,
                        'used': usage_info.used})
-        return usage_info.used
-
-    def count_reserved(self, context, tenant_id):
-        """Return the current reservation count for the resource."""
-        # NOTE(princenana) Current implementation of reservations
-        # is ephemeral and returns the default value
-        reservations = quota_api.get_reservations_for_resources(
-            context, tenant_id, [self.name])
-        reserved = reservations.get(self.name, 0)
-        return reserved
-
-    def count(self, context, _plugin, tenant_id, resync_usage=True):
-        """Return the count of the resource.
-
-        The _plugin parameter is unused but kept for
-        compatibility with the signature of the count method for
-        CountableResource instances.
-        """
-        return (self.count_used(context, tenant_id, resync_usage) +
-                self.count_reserved(context, tenant_id))
+        return usage_info.used + reserved
 
     def _except_bulk_delete(self, delete_context):
         if delete_context.mapper.class_ == self._model_class:
-            raise RuntimeError("%s may not be deleted in bulk because "
-                               "it is tracked by the quota engine via "
-                               "SQLAlchemy event handlers, which are not "
-                               "compatible with bulk deletes." %
+            raise RuntimeError(_LE("%s may not be deleted in bulk because "
+                                   "it is tracked by the quota engine via "
+                                   "SQLAlchemy event handlers, which are not "
+                                   "compatible with bulk deletes.") %
                                self._model_class)
 
     def register_events(self):
@@ -320,5 +312,5 @@ class TrackedResource(BaseResource):
             db_api.sqla_remove(se.Session, 'after_bulk_delete',
                                self._except_bulk_delete)
         except sql_exc.InvalidRequestError:
-            LOG.warning("No sqlalchemy event for resource %s found",
+            LOG.warning(_LW("No sqlalchemy event for resource %s found"),
                         self.name)

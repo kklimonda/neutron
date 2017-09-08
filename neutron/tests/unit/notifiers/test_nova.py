@@ -17,9 +17,7 @@
 import mock
 from neutron_lib import constants as n_const
 from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
-from novaclient import api_versions
 from novaclient import exceptions as nova_exceptions
 from oslo_config import cfg
 from oslo_utils import uuidutils
@@ -41,11 +39,10 @@ class TestNovaNotify(base.BaseTestCase):
             def get_port(self, context, port_id):
                 device_id = '32102d7b-1cf4-404d-b50a-97aae1f55f87'
                 return {'device_id': device_id,
-                        'device_owner': DEVICE_OWNER_COMPUTE,
-                        'id': port_id}
+                        'device_owner': DEVICE_OWNER_COMPUTE}
 
         self.nova_notifier = nova.Notifier()
-        directory.add_plugin(plugin_constants.CORE, FakePlugin())
+        directory.add_plugin(n_const.CORE, FakePlugin())
 
     def test_notify_port_status_all_values(self):
         states = [n_const.PORT_STATUS_ACTIVE, n_const.PORT_STATUS_DOWN,
@@ -146,8 +143,7 @@ class TestNovaNotify(base.BaseTestCase):
                          'device_id': device_id}}
 
         expected_event = {'server_uuid': device_id,
-                          'name': 'network-changed',
-                          'tag': returned_obj['port']['id']}
+                          'name': 'network-changed'}
         event = self.nova_notifier.create_port_changed_event('update_port',
                                                              {}, returned_obj)
         self.assertEqual(event, expected_event)
@@ -158,8 +154,7 @@ class TestNovaNotify(base.BaseTestCase):
                         {'port_id': u'bee50827-bcee-4cc8-91c1-a27b0ce54222'}}
 
         expected_event = {'server_uuid': device_id,
-                          'name': 'network-changed',
-                          'tag': returned_obj['floatingip']['port_id']}
+                          'name': 'network-changed'}
         event = self.nova_notifier.create_port_changed_event(
             'create_floatingip', {}, returned_obj)
         self.assertEqual(event, expected_event)
@@ -178,8 +173,7 @@ class TestNovaNotify(base.BaseTestCase):
                         {'port_id': u'bee50827-bcee-4cc8-91c1-a27b0ce54222'}}
 
         expected_event = {'server_uuid': device_id,
-                          'name': 'network-changed',
-                          'tag': returned_obj['floatingip']['port_id']}
+                          'name': 'network-changed'}
         event = self.nova_notifier.create_port_changed_event(
             'delete_floatingip', {}, returned_obj)
         self.assertEqual(expected_event, event)
@@ -210,8 +204,7 @@ class TestNovaNotify(base.BaseTestCase):
         original_obj = {'port_id': None}
 
         expected_event = {'server_uuid': device_id,
-                          'name': 'network-changed',
-                          'tag': returned_obj['floatingip']['port_id']}
+                          'name': 'network-changed'}
         event = self.nova_notifier.create_port_changed_event(
             'update_floatingip', original_obj, returned_obj)
         self.assertEqual(expected_event, event)
@@ -222,8 +215,7 @@ class TestNovaNotify(base.BaseTestCase):
         original_obj = {'port_id': '5a39def4-3d3f-473d-9ff4-8e90064b9cc1'}
 
         expected_event = {'server_uuid': device_id,
-                          'name': 'network-changed',
-                          'tag': original_obj['port_id']}
+                          'name': 'network-changed'}
 
         event = self.nova_notifier.create_port_changed_event(
             'update_floatingip', original_obj, returned_obj)
@@ -331,25 +323,40 @@ class TestNovaNotify(base.BaseTestCase):
                                                              {}, returned_obj)
         self.assertEqual(expected_event, event)
 
+    def test_delete_baremetal_port_notify(self):
+        device_id = '32102d7b-1cf4-404d-b50a-97aae1f55f87'
+        port_id = 'bee50827-bcee-4cc8-91c1-a27b0ce54222'
+        returned_obj = {'port':
+                        {'device_owner': DEVICE_OWNER_BAREMETAL,
+                         'id': port_id,
+                         'device_id': device_id}}
+
+        expected_event = {'server_uuid': device_id,
+                          'name': nova.VIF_DELETED,
+                          'tag': port_id}
+        event = self.nova_notifier.create_port_changed_event('delete_port',
+                                                             {}, returned_obj)
+        self.assertEqual(expected_event, event)
+
     @mock.patch('novaclient.client.Client')
     def test_endpoint_types(self, mock_client):
         nova.Notifier()
         mock_client.assert_called_once_with(
-                                api_versions.APIVersion(nova.NOVA_API_VERSION),
-                                session=mock.ANY,
-                                region_name=cfg.CONF.nova.region_name,
-                                endpoint_type='public',
-                                extensions=mock.ANY)
+                                        nova.NOVA_API_VERSION,
+                                        session=mock.ANY,
+                                        region_name=cfg.CONF.nova.region_name,
+                                        endpoint_type='public',
+                                        extensions=mock.ANY)
 
         mock_client.reset_mock()
         cfg.CONF.set_override('endpoint_type', 'internal', 'nova')
         nova.Notifier()
         mock_client.assert_called_once_with(
-                                api_versions.APIVersion(nova.NOVA_API_VERSION),
-                                session=mock.ANY,
-                                region_name=cfg.CONF.nova.region_name,
-                                endpoint_type='internal',
-                                extensions=mock.ANY)
+                                        nova.NOVA_API_VERSION,
+                                        session=mock.ANY,
+                                        region_name=cfg.CONF.nova.region_name,
+                                        endpoint_type='internal',
+                                        extensions=mock.ANY)
 
     def test_notify_port_active_direct(self):
         device_id = '32102d7b-1cf4-404d-b50a-97aae1f55f87'

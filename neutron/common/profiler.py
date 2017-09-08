@@ -10,12 +10,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import context
 from oslo_config import cfg
 from oslo_log import log as logging
 import osprofiler.initializer
 from osprofiler import opts as profiler_opts
 import osprofiler.web
+
+from neutron._i18n import _LI
+from neutron import context
 
 
 CONF = cfg.CONF
@@ -39,11 +41,11 @@ def setup(name, host='0.0.0.0'):  # nosec
             service=name,
             host=host
         )
-        LOG.info("OSProfiler is enabled.\n"
-                 "Traces provided from the profiler "
-                 "can only be subscribed to using the same HMAC keys that "
-                 "are configured in Neutron's configuration file "
-                 "under the [profiler] section.\n To disable OSprofiler "
-                 "set in /etc/neutron/neutron.conf:\n"
-                 "[profiler]\n"
-                 "enabled=false")
+        LOG.info(_LI("OSProfiler is enabled.\n"
+                     "Traces provided from the profiler "
+                     "can only be subscribed to using the same HMAC keys that "
+                     "are configured in Neutron's configuration file "
+                     "under the [profiler] section.\n To disable OSprofiler "
+                     "set in /etc/neutron/neutron.conf:\n"
+                     "[profiler]\n"
+                     "enabled=false"))

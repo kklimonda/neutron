@@ -13,18 +13,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import abc
 import copy
 
 import fixtures
 import mock
-from neutron_lib.plugins import constants as lib_const
+from neutron_lib import constants as lib_const
 from neutron_lib.plugins import directory
-from neutron_lib.services import base as service_base
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from oslo_service import wsgi as base_wsgi
 import routes
+import six
 import testtools
 import webob
 import webob.exc as webexc
@@ -84,19 +85,13 @@ class ExtensionsTestApp(base_wsgi.Router):
         super(ExtensionsTestApp, self).__init__(mapper)
 
 
-class FakePluginWithExtension(service_base.ServicePluginBase):
+class FakePluginWithExtension(object):
     """A fake plugin used only for extension testing in this file."""
 
     supported_extension_aliases = ["FOXNSOX"]
 
     def method_to_support_foxnsox_extension(self, context):
         self._log("method_to_support_foxnsox_extension", context)
-
-    def get_plugin_type(self):
-        pass
-
-    def get_plugin_description(self):
-        pass
 
 
 class ExtensionPathTest(base.BaseTestCase):
@@ -106,8 +101,6 @@ class ExtensionPathTest(base.BaseTestCase):
         super(ExtensionPathTest, self).setUp()
 
     def test_get_extensions_path_with_plugins(self):
-        cfg.CONF.set_override('api_extensions_path',
-                              'neutron/tests/unit/extensions')
         path = extensions.get_extensions_path(
             {lib_const.CORE: FakePluginWithExtension()})
         self.assertEqual(path,
@@ -133,6 +126,47 @@ class ExtensionPathTest(base.BaseTestCase):
         cfg.CONF.set_override('api_extensions_path', 'path1:path1')
         path = extensions.get_extensions_path()
         self.assertEqual(path, '%s:path1' % self.base_path)
+
+
+class PluginInterfaceTest(base.BaseTestCase):
+    def test_issubclass_hook(self):
+        class A(object):
+            def f(self):
+                pass
+
+        class B(extensions.PluginInterface):
+            @abc.abstractmethod
+            def f(self):
+                pass
+
+        self.assertTrue(issubclass(A, B))
+
+    def test_issubclass_hook_class_without_abstract_methods(self):
+        class A(object):
+            def f(self):
+                pass
+
+        class B(extensions.PluginInterface):
+            def f(self):
+                pass
+
+        self.assertFalse(issubclass(A, B))
+
+    def test_issubclass_hook_not_all_methods_implemented(self):
+        class A(object):
+            def f(self):
+                pass
+
+        class B(extensions.PluginInterface):
+            @abc.abstractmethod
+            def f(self):
+                pass
+
+            @abc.abstractmethod
+            def g(self):
+                pass
+
+        self.assertFalse(issubclass(A, B))
 
 
 class ResourceExtensionTest(base.BaseTestCase):
@@ -187,7 +221,7 @@ class ResourceExtensionTest(base.BaseTestCase):
         try:
             test_app.get("/tweedles/some_id/notimplemented_function")
             # Shouldn't be reached
-            self.fail()
+            self.assertTrue(False)
         except webtest.AppError as e:
             self.assertIn('501', str(e))
 
@@ -718,17 +752,11 @@ class PluginAwareExtensionManagerTest(base.BaseTestCase):
 
     def test_extensions_are_loaded_for_plugin_with_expected_interface(self):
 
-        class PluginWithExpectedInterface(service_base.ServicePluginBase):
+        class PluginWithExpectedInterface(object):
             """Implements get_foo method as expected by extension."""
             supported_extension_aliases = ["supported_extension"]
 
             def get_foo(self, bar=None):
-                pass
-
-            def get_plugin_type(self):
-                pass
-
-            def get_plugin_description(self):
                 pass
 
         plugin_info = {lib_const.CORE: PluginWithExpectedInterface()}
@@ -969,7 +997,7 @@ class ExtensionExtendedAttributeTestCase(base.BaseTestCase):
         self._tenant_id = "8c70909f-b081-452d-872b-df48e6c355d1"
         # Save the global RESOURCE_ATTRIBUTE_MAP
         self.saved_attr_map = {}
-        for res, attrs in attributes.RESOURCE_ATTRIBUTE_MAP.items():
+        for res, attrs in six.iteritems(attributes.RESOURCE_ATTRIBUTE_MAP):
             self.saved_attr_map[res] = attrs.copy()
         # Add the resources to the global attribute map
         # This is done here as the setup process won't

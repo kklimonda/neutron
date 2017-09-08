@@ -14,7 +14,6 @@
 #    under the License.
 
 import errno
-import socket
 
 import mock
 import netaddr
@@ -22,6 +21,7 @@ from neutron_lib import exceptions
 import pyroute2
 from pyroute2.netlink.rtnl import ndmsg
 from pyroute2 import NetlinkError
+import socket
 import testtools
 
 from neutron.agent.common import utils  # noqa
@@ -275,7 +275,7 @@ class TestIpWrapper(base.BaseTestCase):
     def test_get_devices(self, mocked_listdir, mocked_islink):
         retval = ip_lib.IPWrapper().get_devices()
         mocked_islink.assert_called_once_with('/sys/class/net/lo')
-        self.assertEqual([], retval)
+        self.assertEqual(retval, [ip_lib.IPDevice('lo')])
 
     @mock.patch('neutron.agent.common.utils.execute')
     def test_get_devices_namespaces(self, mocked_execute):
@@ -288,7 +288,7 @@ class TestIpWrapper(base.BaseTestCase):
                  '-maxdepth', '1', '-type', 'l', '-printf', '%f '],
                 run_as_root=True, log_fail_as_error=True)
         self.assertTrue(fake_str.split.called)
-        self.assertEqual([], retval)
+        self.assertEqual(retval, [ip_lib.IPDevice('lo', namespace='foo')])
 
     @mock.patch('neutron.agent.common.utils.execute')
     def test_get_devices_namespaces_ns_not_exists(self, mocked_execute):
@@ -496,13 +496,13 @@ class TestIpWrapper(base.BaseTestCase):
                                              run_as_root=True, namespace=None,
                                              log_fail_as_error=True)
 
-    def test_add_vxlan_valid_srcport_length(self):
+    def test_add_vxlan_valid_port_length(self):
         retval = ip_lib.IPWrapper().add_vxlan('vxlan0', 'vni0',
                                               group='group0',
                                               dev='dev0', ttl='ttl0',
                                               tos='tos0',
                                               local='local0', proxy=True,
-                                              srcport=(1, 2))
+                                              port=('1', '2'))
         self.assertIsInstance(retval, ip_lib.IPDevice)
         self.assertEqual(retval.name, 'vxlan0')
         self.execute.assert_called_once_with([], 'link',
@@ -511,47 +511,17 @@ class TestIpWrapper(base.BaseTestCase):
                                               'group0', 'dev', 'dev0',
                                               'ttl', 'ttl0', 'tos', 'tos0',
                                               'local', 'local0', 'proxy',
-                                              'srcport', '1', '2'],
+                                              'port', '1', '2'],
                                              run_as_root=True, namespace=None,
                                              log_fail_as_error=True)
 
-    def test_add_vxlan_invalid_srcport_length(self):
+    def test_add_vxlan_invalid_port_length(self):
         wrapper = ip_lib.IPWrapper()
         self.assertRaises(n_exc.NetworkVxlanPortRangeError,
                           wrapper.add_vxlan, 'vxlan0', 'vni0', group='group0',
                           dev='dev0', ttl='ttl0', tos='tos0',
                           local='local0', proxy=True,
-                          srcport=('1', '2', '3'))
-
-    def test_add_vxlan_invalid_srcport_range(self):
-        wrapper = ip_lib.IPWrapper()
-        self.assertRaises(n_exc.NetworkVxlanPortRangeError,
-                          wrapper.add_vxlan, 'vxlan0', 'vni0', group='group0',
-                          dev='dev0', ttl='ttl0', tos='tos0',
-                          local='local0', proxy=True,
-                          srcport=(2000, 1000))
-
-    def test_add_vxlan_dstport(self):
-        retval = ip_lib.IPWrapper().add_vxlan('vxlan0', 'vni0',
-                                              group='group0',
-                                              dev='dev0', ttl='ttl0',
-                                              tos='tos0',
-                                              local='local0', proxy=True,
-                                              srcport=(1, 2),
-                                              dstport=4789)
-
-        self.assertIsInstance(retval, ip_lib.IPDevice)
-        self.assertEqual(retval.name, 'vxlan0')
-        self.execute.assert_called_once_with([], 'link',
-                                             ['add', 'vxlan0', 'type',
-                                              'vxlan', 'id', 'vni0', 'group',
-                                              'group0', 'dev', 'dev0',
-                                              'ttl', 'ttl0', 'tos', 'tos0',
-                                              'local', 'local0', 'proxy',
-                                              'srcport', '1', '2',
-                                              'dstport', '4789'],
-                                             run_as_root=True, namespace=None,
-                                             log_fail_as_error=True)
+                          port=('1', '2', '3'))
 
     def test_add_device_to_namespace(self):
         dev = mock.Mock()

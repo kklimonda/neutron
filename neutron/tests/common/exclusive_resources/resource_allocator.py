@@ -89,7 +89,7 @@ class ResourceAllocator(object):
     @utils.synchronized('resource_allocator', external=True, lock_path='/tmp')
     def release(self, resource):
         allocations = self._get_allocations()
-        allocations.remove(resource)
+        allocations.discard(resource)
         if allocations:
             self._write_allocations(allocations)
         else:  # Clean up the file if we're releasing the last allocation

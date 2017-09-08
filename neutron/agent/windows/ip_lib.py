@@ -17,6 +17,8 @@ import netifaces
 
 from oslo_log import log as logging
 
+from neutron._i18n import _LE
+
 LOG = logging.getLogger(__name__)
 
 OPTS = []
@@ -36,7 +38,7 @@ class IPWrapper(object):
         try:
             return [IPDevice(iface) for iface in netifaces.interfaces()]
         except (OSError, MemoryError):
-            LOG.error("Failed to get network interfaces.")
+            LOG.error(_LE("Failed to get network interfaces."))
             return []
 
 
@@ -50,11 +52,11 @@ class IPDevice(object):
         try:
             device_addresses = netifaces.ifaddresses(self.name)
         except ValueError:
-            LOG.error("The device does not exist on the system: %s.",
+            LOG.error(_LE("The device does not exist on the system: %s."),
                       self.name)
             return
         except OSError:
-            LOG.error("Failed to get interface addresses: %s.",
+            LOG.error(_LE("Failed to get interface addresses: %s."),
                       self.name)
             return
         return device_addresses

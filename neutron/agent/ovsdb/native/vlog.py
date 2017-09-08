@@ -12,8 +12,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from ovsdbapp.backend.ovs_idl import vlog
+from oslo_log import log as logging
+from ovs import vlog
 
-from neutron.common import _deprecate
+LOG = logging.getLogger(__name__)
 
-_deprecate._MovedGlobals(vlog)
+
+def use_oslo_logger():
+    """Replace the OVS IDL logger functions with our logger"""
+
+    # NOTE(twilson) Replace functions directly instead of subclassing so that
+    # debug messages contain the correct function/filename/line information
+    vlog.Vlog.emer = LOG.critical
+    vlog.Vlog.err = LOG.error
+    vlog.Vlog.warn = LOG.warning
+    vlog.Vlog.info = LOG.info
+    vlog.Vlog.dbg = LOG.debug

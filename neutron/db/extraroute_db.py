@@ -19,14 +19,17 @@ from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron._i18n import _
+from neutron.common import _deprecate
 from neutron.common import utils
-from neutron.db import _resource_extend as resource_extend
+from neutron.db import db_base_plugin_v2
 from neutron.db import l3_db
+from neutron.db.models import l3 as l3_models
 from neutron.db import models_v2
 from neutron.extensions import extraroute
 from neutron.extensions import l3
 from neutron.objects import router as l3_obj
 
+_deprecate._moved_global('RouterRoute', new_module=l3_models)
 
 LOG = logging.getLogger(__name__)
 
@@ -39,30 +42,31 @@ extra_route_opts = [
 cfg.CONF.register_opts(extra_route_opts)
 
 
-@resource_extend.has_resource_extenders
 class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
     """Mixin class to support extra route configuration on router."""
 
-    @staticmethod
-    @resource_extend.extends([l3.ROUTERS])
-    def _extend_router_dict_extraroute(router_res, router_db):
+    def _extend_router_dict_extraroute(self, router_res, router_db):
         router_res['routes'] = (ExtraRoute_dbonly_mixin.
                                 _make_extra_route_list(
                                     router_db['route_list']
                                 ))
 
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+        l3.ROUTERS, ['_extend_router_dict_extraroute'])
+
     def update_router(self, context, id, router):
         r = router['router']
-        if 'routes' in r:
-            with context.session.begin(subtransactions=True):
-                #check if route exists and have permission to access
-                router_db = self._get_router(context, id)
+        with context.session.begin(subtransactions=True):
+            #check if route exists and have permission to access
+            router_db = self._get_router(context, id)
+            if 'routes' in r:
                 self._update_extra_routes(context, router_db, r['routes'])
-            # NOTE(yamamoto): expire to ensure the following update_router
-            # see the effects of the above _update_extra_routes.
-            context.session.expire(router_db, attribute_names=['route_list'])
-        return super(ExtraRoute_dbonly_mixin, self).update_router(
+            routes = self._get_extra_routes_by_router_id(context, id)
+        router_updated = super(ExtraRoute_dbonly_mixin, self).update_router(
             context, id, router)
+        router_updated['routes'] = routes
+
+        return router_updated
 
     def _get_subnets_by_cidr(self, context, cidr):
         query_subnets = context.session.query(models_v2.Subnet)
@@ -104,9 +108,12 @@ class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
                 cidrs, ips, routes, route['nexthop'])
 
     def _update_extra_routes(self, context, router, routes):
-        self._validate_routes(context, router['id'], routes)
-        old_routes = self._get_extra_routes_by_router_id(context, router['id'])
-        added, removed = helpers.diff_list_of_dict(old_routes, routes)
+        self._validate_routes(context, router['id'],
+                              routes)
+        old_routes, routes_dict = self._get_extra_routes_dict_by_router_id(
+            context, router['id'])
+        added, removed = helpers.diff_list_of_dict(old_routes,
+                                                   routes)
         LOG.debug('Added routes are %s', added)
         for route in added:
             l3_obj.RouterRoute(
@@ -134,6 +141,16 @@ class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
         router_objs = l3_obj.RouterRoute.get_objects(context, router_id=id)
         return self._make_extra_route_list(router_objs)
 
+    def _get_extra_routes_dict_by_router_id(self, context, id):
+        router_objs = l3_obj.RouterRoute.get_objects(context, router_id=id)
+        routes = []
+        routes_dict = {}
+        for route in router_objs:
+            routes.append({'destination': route.destination,
+                           'nexthop': route.nexthop})
+            routes_dict[(route.destination, route.nexthop)] = route
+        return routes, routes_dict
+
     def _confirm_router_interface_not_in_use(self, context, router_id,
                                              subnet_id):
         super(ExtraRoute_dbonly_mixin,
@@ -151,3 +168,6 @@ class ExtraRoute_dbonly_mixin(l3_db.L3_NAT_dbonly_mixin):
 class ExtraRoute_db_mixin(ExtraRoute_dbonly_mixin, l3_db.L3_NAT_db_mixin):
     """Mixin class to support extra route configuration on router with rpc."""
     pass
+
+
+_deprecate._MovedGlobals()

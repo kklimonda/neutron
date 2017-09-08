@@ -21,7 +21,6 @@ import traceback
 
 import httplib2
 import mock
-from neutron_lib import worker as neutron_worker
 from oslo_config import cfg
 import psutil
 
@@ -29,6 +28,7 @@ from neutron.common import utils
 from neutron import manager
 from neutron import service
 from neutron.tests import base
+from neutron import worker as neutron_worker
 from neutron import wsgi
 
 
@@ -110,7 +110,10 @@ class TestNeutronServer(base.BaseTestCase):
 
         def safe_ppid(proc):
             try:
-                return proc.ppid()
+                if psutil.version_info[0] == 1:
+                    return proc.ppid
+                else:
+                    return proc.ppid()
             except psutil.NoSuchProcess:
                 return None
 
@@ -127,7 +130,7 @@ class TestNeutronServer(base.BaseTestCase):
         return True
 
     def _fake_start(self):
-        with open(self.temp_file, 'ab') as f:
+        with open(self.temp_file, 'a') as f:
             f.write(FAKE_START_MSG)
 
     def _test_restart_service_on_sighup(self, service, workers=1):
@@ -161,7 +164,7 @@ class TestNeutronServer(base.BaseTestCase):
         # Verify that start has been called twice for each worker (one for
         # initial start, and the second one on SIGHUP after children were
         # terminated).
-        with open(self.temp_file, 'rb') as f:
+        with open(self.temp_file, 'r') as f:
             res = f.readline()
             self.assertEqual(expected_msg, res)
 
@@ -210,7 +213,7 @@ class TestWsgiServer(TestNeutronServer):
 
             # Memorize a port that was chosen for the service
             self.port = server.port
-            os.write(self.pipeout, bytes(self.port))
+            os.write(self.pipeout, str(self.port))
 
             server.wait()
 
@@ -270,7 +273,7 @@ class TestPluginWorker(TestNeutronServer):
             plugin_workers_launcher.wait()
 
     def test_start(self):
-        class FakeWorker(neutron_worker.BaseWorker):
+        class FakeWorker(neutron_worker.NeutronWorker):
             def start(self):
                 pass
 

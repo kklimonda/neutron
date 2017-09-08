@@ -28,8 +28,6 @@ class ProvisioningBlockDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(ProvisioningBlockDbObjectTestCase, self).setUp()
+        self._create_test_standard_attribute()
         self.update_obj_fields(
-            {
-                'standard_attr_id':
-                    lambda: self._create_test_standard_attribute_id()
-            })
+            {'standard_attr_id': self._standard_attribute['id']})

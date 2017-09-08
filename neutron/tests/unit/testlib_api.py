@@ -48,8 +48,7 @@ class ExpectedException(testtools.ExpectedException):
 
 
 def create_request(path, body, content_type, method='GET',
-                   query_string=None, context=None, headers=None):
-    headers = headers or {}
+                   query_string=None, context=None):
     if query_string:
         url = "%s?%s" % (path, query_string)
     else:
@@ -58,7 +57,6 @@ def create_request(path, body, content_type, method='GET',
     req.method = method
     req.headers = {}
     req.headers['Accept'] = content_type
-    req.headers.update(headers)
     if isinstance(body, six.text_type):
         req.body = body.encode()
     else:
@@ -101,11 +99,11 @@ class SqlFixture(fixtures.Fixture):
 
         self.sessionmaker = session.get_maker(engine)
 
-        _restore_factory = db_api.context_manager._root_factory
-
         self.enginefacade_factory = enginefacade._TestTransactionFactory(
-            self.engine, self.sessionmaker, from_factory=_restore_factory,
-            apply_global=False)
+            self.engine, self.sessionmaker, apply_global=False,
+            synchronous_reader=True)
+
+        _restore_factory = db_api.context_manager._root_factory
 
         db_api.context_manager._root_factory = self.enginefacade_factory
 
@@ -163,7 +161,7 @@ class StaticSqlFixture(SqlFixture):
         else:
             cls._GLOBAL_RESOURCES = True
             cls.schema_resource = provision.SchemaResource(
-                provision.DatabaseResource("sqlite", db_api.context_manager),
+                provision.DatabaseResource("sqlite"),
                 cls._generate_schema, teardown=False)
             dependency_resources = {}
             for name, resource in cls.schema_resource.resources:
@@ -186,8 +184,7 @@ class StaticSqlFixtureNoSchema(SqlFixture):
             return
         else:
             cls._GLOBAL_RESOURCES = True
-            cls.database_resource = provision.DatabaseResource(
-                "sqlite", db_api.context_manager)
+            cls.database_resource = provision.DatabaseResource("sqlite")
             dependency_resources = {}
             for name, resource in cls.database_resource.resources:
                 dependency_resources[name] = resource.getResource()

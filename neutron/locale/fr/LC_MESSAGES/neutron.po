@@ -10,9 +10,9 @@
 # Andreas Jaeger <jaegerandi@gmail.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: neutron 11.0.0.0b3.dev326\n"
+"Project-Id-Version: neutron 10.0.2.dev10\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
-"POT-Creation-Date: 2017-07-18 03:24+0000\n"
+"POT-Creation-Date: 2017-04-16 05:24+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -157,6 +157,10 @@ msgid "'%s' cannot be converted to lowercase string"
 msgstr "'%s' ne peut pas être converti en une chaîne minuscule "
 
 #, python-format
+msgid "'%s' exceeds the 255 character FQDN limit"
+msgstr "'%s' dépasse la limite de nom de domaine complet (255 caractères)"
+
+#, python-format
 msgid "'%s' is a FQDN. It should be a relative domain name"
 msgstr ""
 "'%s' est un nom de domaine complet. Cela devrait être un nom de domaine "
@@ -169,6 +173,10 @@ msgstr "'%s' n'est pas un nom de domaine complet"
 #, python-format
 msgid "'%s' is not a valid RBAC object type"
 msgstr "'%s' n'est pas un type d'objet RBAC valide"
+
+#, python-format
+msgid "'%s' is not an integer or uuid"
+msgstr "'%s' n'est pas un entier ou un identificateur unique universel."
 
 #, python-format
 msgid "'%s' is not supported for filtering"
@@ -370,6 +378,10 @@ msgstr "Une erreur inconnue s'est produite. Renouvelez votre demande."
 msgid "Async process didn't respawn"
 msgstr "Le processus Async n'a pas été relancé"
 
+#, python-format
+msgid "Attribute '%s' not allowed in POST"
+msgstr "Attribut '%s non autorisé dans l'autotest à la mise sous tension"
+
 msgid "Authorization URL for connecting to designate in admin context"
 msgstr ""
 "URL d'autorisation pour la connexion au réseau désigné dans un contexte admin"
@@ -422,6 +434,10 @@ msgstr ""
 msgid "Bridge %(bridge)s does not exist."
 msgstr "Le pont %(bridge)s n'existe pas."
 
+#, python-format
+msgid "Bridge %s does not exist"
+msgstr "Le pont %s est inexistant."
+
 msgid "Bulk operation not supported"
 msgstr "Opération globale non prise en charge"
 
@@ -442,6 +458,12 @@ msgid "Cannot add floating IP to port %s that has no fixed IPv4 addresses"
 msgstr ""
 "Impossible d'ajouter une adresse IP flottante au port %s qui n'a pas "
 "d'adresse IPv4 fixe"
+
+#, python-format
+msgid "Cannot add floating IP to port on subnet %s which has no gateway_ip"
+msgstr ""
+"Impossible d'ajouter une adresse IP flottante au port sur le sous-réseau %s "
+"qui n'a pas d'adresse IP passerelle"
 
 #, python-format
 msgid "Cannot add multiple callbacks for %(resource_type)s"
@@ -473,6 +495,10 @@ msgid "Cannot disable enable_dhcp with ipv6 attributes set"
 msgstr "Impossible de désactiver enable_dhcp avec des attributs ipv6 définis"
 
 #, python-format
+msgid "Cannot find %(table)s with %(col)s=%(match)s"
+msgstr "Impossible de trouver %(table)s avec %(col)s=%(match)s"
+
+#, python-format
 msgid "Cannot handle subnet of type %(subnet_type)s"
 msgstr "Impossible de traiter le sous-réseau de type %(subnet_type)s"
 
@@ -494,6 +520,11 @@ msgid ""
 msgstr ""
 "Impossible d'héberger un routeur distribué %(router_id)s sur l'agent L3 "
 "existant %(agent_id)s."
+
+msgid "Cannot match priority on flow deletion or modification"
+msgstr ""
+"Impossible de mettre en correspondance la priorité lors de la suppression ou "
+"de la modification de flux"
 
 msgid "Cannot mix IPv4 and IPv6 prefixes in a subnet pool."
 msgstr ""
@@ -689,8 +720,16 @@ msgstr ""
 "Echec lors de la liaison à %(host)s:%(port)s après attente de %(time)d "
 "secondes"
 
+#, python-format
+msgid "Could not connect to %s"
+msgstr "Impossible de se connecter à %s"
+
 msgid "Could not deserialize data"
 msgstr "Impossible de désérialiser des données"
+
+#, python-format
+msgid "Could not retrieve schema from %(conn)s: %(err)s"
+msgstr "Impossible d'extraire le schéma de %(conn)s : %(err)s"
 
 #, python-format
 msgid ""
@@ -790,6 +829,13 @@ msgid ""
 msgstr ""
 "Définit des fournisseurs pour les services avancés utilisant le format : "
 "<service_type>:<name>:<driver>[:default]"
+
+msgid ""
+"Delay within which agent is expected to update existing ports whent it "
+"restarts"
+msgstr ""
+"Temps d'attente durant lequel l'agent doit mettre à jour les ports existants "
+"lors de son redémarrage"
 
 msgid "Delete the namespace by removing all devices."
 msgstr "Supprimez l'espace de nom en supprimant toutes les unités."
@@ -958,6 +1004,23 @@ msgstr ""
 "planification manuelle pour ces agents si cette option a pour valeur True."
 
 msgid ""
+"Enable/Disable log watch by metadata proxy. It should be disabled when "
+"metadata_proxy_user/group is not allowed to read/write its log file and "
+"copytruncate logrotate option must be used if logrotate is enabled on "
+"metadata proxy log files. Option default value is deduced from "
+"metadata_proxy_user: watch log is enabled if metadata_proxy_user is agent "
+"effective user id/name."
+msgstr ""
+"Activer/Désactiver la surveillance de journaux par proxy de métadonnées. "
+"Elle doit être désactivée lorsque metadata_proxy_user/group n'est pas "
+"autorisé à lire/écrire son fichier journal et l'option copytruncate "
+"logrotate doit être utilisée si logrotate est activée sur les fichiers "
+"journaux de proxy de métadonnées. La valeur par défaut de l'option est "
+"déduite de metadata_proxy_user : la surveillance des journaux est activée si "
+"metadata_proxy_user correspondà l'ID/au nom de l'utilisateur effectif de "
+"l'agent."
+
+msgid ""
 "Enables IPv6 Prefix Delegation for automatic subnet CIDR allocation. Set to "
 "True to enable IPv6 Prefix Delegation for subnet allocation in a PD-capable "
 "environment. Users making subnet creation requests for IPv6 subnets without "
@@ -1083,6 +1146,10 @@ msgstr ""
 "externe car il a des ports de passerelle existants"
 
 #, python-format
+msgid "ExtraDhcpOpt %(id)s could not be found"
+msgstr "ExtraDhcpOpt %(id)s introuvable"
+
+#, python-format
 msgid "Failed rescheduling router %(router_id)s: no eligible l3 agent found."
 msgstr ""
 "Echec de la replanification du routeur %(router_id)s : aucun agent l3 "
@@ -1131,6 +1198,11 @@ msgstr ""
 #, python-format
 msgid "Failed to locate source for %s."
 msgstr "Échec pour localiser la source de %s."
+
+#, python-format
+msgid "Failed to parse request. Required attribute '%s' not specified"
+msgstr ""
+"Echec de l'analyse de la demande. Attribut obligatoire '%s' non spécifié"
 
 msgid "Failed to remove supplemental groups"
 msgstr "Echec de la suppression des groupes supplémentaires"
@@ -1237,6 +1309,11 @@ msgstr ""
 "par défaut pour ce champ est de 50, taille de l'en-tête Geneve sans aucun en-"
 "tête d'option supplémentaire."
 
+msgid "Group (gid or name) running metadata proxy after its initialization"
+msgstr ""
+"Groupe (UID ou nom) exécutant le proxy de métadonnées après son "
+"initialisation"
+
 msgid ""
 "Group (gid or name) running metadata proxy after its initialization (if "
 "empty: agent effective group)."
@@ -1287,6 +1364,9 @@ msgstr "L'adresse IP %(ip)s est déjà dans le sous-réseaux %(subnet_id)s"
 msgid "IP address %(ip)s does not belong to subnet %(subnet_id)s"
 msgstr "L'adresse IP %(ip)s n'appartient pas au sous-réseau %(subnet_id)s"
 
+msgid "IP address used by Nova metadata server."
+msgstr "Adresse IP utilisée par le serveur de métadonnées Nova"
+
 msgid "IP allocation failed. Try again later."
 msgstr "Échec de l'allocation IP. Réessayez ultérieurement."
 
@@ -1315,6 +1395,15 @@ msgstr ""
 msgid "IPv6 RA Mode must be SLAAC or Stateless for Prefix Delegation."
 msgstr ""
 "Le mode RA IPv6 doit être SLAAC ou Sans état pour la délégation de préfixe. "
+
+#, python-format
+msgid ""
+"IPv6 address %(address)s can not be directly assigned to a port on subnet "
+"%(id)s since the subnet is configured for automatic addresses"
+msgstr ""
+"L'adresse IPv6 %(address)s ne peut pas être directement affectée à un port "
+"du sous-réseau %(id)s car celui-ci est configuré pour l'obtention "
+"automatique d'adresses"
 
 #, python-format
 msgid ""
@@ -1470,8 +1559,16 @@ msgstr ""
 "%(valid_auth_types)s"
 
 #, python-format
+msgid "Invalid data format for extra-dhcp-opt: %(data)s"
+msgstr "Format de données non valide pour extra-dhcp-opt : %(data)s"
+
+#, python-format
 msgid "Invalid ethertype %(ethertype)s for protocol %(protocol)s."
 msgstr "ethertype %(ethertype)s non valide pour le protocole %(protocol)s."
+
+#, python-format
+msgid "Invalid extension environment: %(reason)s."
+msgstr "Environnement d'extensions non valide : %(reason)s."
 
 #, python-format
 msgid "Invalid format for routes: %(routes)s, %(reason)s"
@@ -1480,6 +1577,10 @@ msgstr "Format de routes non valide : %(routes)s, %(reason)s"
 #, python-format
 msgid "Invalid format: %s"
 msgstr "Format non valide : %s"
+
+#, python-format
+msgid "Invalid input for %(attr)s. Reason: %(reason)s."
+msgstr "Entrée non valide pour %(attr)s. Cause : %(reason)s."
 
 #, python-format
 msgid "Invalid instance state: %(state)s, valid states are: %(valid_states)s"
@@ -1852,6 +1953,9 @@ msgstr ""
 "Le réseau de taille %(size)s, de plage IP %(parent_range)s (hors plages IP "
 "%(excluded_ranges)s) est introuvable."
 
+msgid "Network that will have instance metadata proxied."
+msgstr "Réseau dont les métadonnées d'instance seront mandatées."
+
 #, python-format
 msgid "Network type value '%s' not supported"
 msgstr "Valeur de type de réseau '%s' non prise en charge"
@@ -2037,6 +2141,10 @@ msgid "OVS vhost-user socket directory."
 msgstr "Répertoire de socket OVS vhost-user."
 
 #, python-format
+msgid "OVSDB Error: %s"
+msgstr "Erreur OVSDB: %s "
+
+#, python-format
 msgid "Object action %(action)s failed because: %(reason)s."
 msgstr "L'action de l'objet %(action)s a échoué car : %(reason)s"
 
@@ -2140,8 +2248,16 @@ msgid "Port %(id)s does not have fixed ip %(address)s"
 msgstr "Le port %(id)s ne dispose pas de l'adresse IP fixe %(address)s."
 
 #, python-format
+msgid "Port %(port)s does not exist on %(bridge)s!"
+msgstr "Le port %(port)s au sein du pont %(bridge)s"
+
+#, python-format
 msgid "Port %(port_id)s is already acquired by another DHCP agent"
 msgstr "Le port %(port_id)s est déjà acquis par un autre agent DHCP"
+
+#, python-format
+msgid "Port %s does not exist"
+msgstr "Le port %s est inexistant."
 
 #, python-format
 msgid ""
@@ -2158,6 +2274,20 @@ msgid ""
 msgstr ""
 "La sécurité du port doit être activée pour avoir les paires d'adresse "
 "autorisées sur un port."
+
+msgid ""
+"Port has security group associated. Cannot disable port security or ip "
+"address until security group is removed"
+msgstr ""
+"Un groupe de sécurité est associé au port. Impossible de désactiver la "
+"sécurité ou l'adresse IP du port tant que le groupe de sécurité est supprimé"
+
+msgid ""
+"Port security must be enabled and port must have an IP address in order to "
+"use security groups."
+msgstr ""
+"La sécurité du port doit être activée et le port doit avoir une adresse IP "
+"pour utiliser les groupes de sécurité."
 
 msgid ""
 "Port to listen on for OpenFlow connections. Used only for 'native' driver."
@@ -2405,6 +2535,10 @@ msgstr ""
 "%(subnet_id)s."
 
 #, python-format
+msgid "Router '%(router_id)s' cannot be both DVR and HA."
+msgstr "Le routeur '%(router_id)s' ne peut pas être à la fois DVR et HA."
+
+#, python-format
 msgid "Router '%(router_id)s' is not compatible with this agent."
 msgstr "Le routeur '%(router_id)s' n'est pas compatible avec cet agent."
 
@@ -2433,6 +2567,20 @@ msgstr ""
 msgid "Router port must have at least one fixed IP"
 msgstr "Le port de routeur doit avoir au moins une IP fixe"
 
+msgid "Router that will have connected instances' metadata proxied."
+msgstr "Routeur dont les métadonnées d'instance connectées seront mandatées."
+
+#, python-format
+msgid ""
+"Row doesn't exist in the DB. Request info: Table=%(table)s. Columns="
+"%(columns)s. Records=%(records)s."
+msgstr ""
+"La ligne n'existe pas dans la base de données. Info demande : Table="
+"%(table)s. Colonnes=%(columns)s. Enregistrements=%(records)s."
+
+msgid "Run as daemon."
+msgstr "Exécuter en tant que démon."
+
 #, python-format
 msgid "Running %(cmd)s (%(desc)s) for %(project)s ..."
 msgstr "Exécution de %(cmd)s (%(desc)s) pour %(project)s... "
@@ -2440,6 +2588,9 @@ msgstr "Exécution de %(cmd)s (%(desc)s) pour %(project)s... "
 #, python-format
 msgid "Running %(cmd)s for %(project)s ..."
 msgstr "Exécution de %(cmd)s pour %(project)s... "
+
+msgid "Running without keystone AuthN requires that tenant_id is specified"
+msgstr "L'exécution sans keystone AuthN nécessite que tenant_id soit spécifié"
 
 msgid ""
 "Seconds between nodes reporting state to server; should be less than "
@@ -2513,6 +2664,14 @@ msgstr ""
 msgid "Send notification to nova when port status changes"
 msgstr ""
 "Envoyer une notification à nova lors de la modification du statut de port"
+
+msgid ""
+"Send this many gratuitous ARPs for HA setup, if less than or equal to 0, the "
+"feature is disabled"
+msgstr ""
+"Envoyez ces nombreux protocoles de résolution d'adresse gratuits pour la "
+"configuration haute disponibilité (HA), si la valeur est inférieure ou égale "
+"à 0, la fonction est désactivée"
 
 #, python-format
 msgid "Service Profile %(sp_id)s could not be found."
@@ -2641,6 +2800,10 @@ msgstr "TOS pour les paquets du protocole d'interface vxlan."
 
 msgid "TTL for vxlan interface protocol packets."
 msgstr "Durée de vie pour les paquets du protocole d'interface vxlan."
+
+#, python-format
+msgid "Table %s can only be queried by UUID"
+msgstr "La table %s ne peut être interrogée que par UUID"
 
 #, python-format
 msgid "Tag %(tag)s could not be found."
@@ -2803,6 +2966,9 @@ msgstr ""
 "Le device_id %(device_id)s suivant n'appartient pas à votre locataire ou "
 "correspond au routeur d'un autre locataire."
 
+msgid "The host IP to bind to"
+msgstr "Protocole IP hôte à connecter"
+
 msgid "The interface for interacting with the OVSDB"
 msgstr "Interface d'interaction avec OVSDB"
 
@@ -2921,6 +3087,10 @@ msgstr ""
 msgid "The type of authentication to use"
 msgstr "Type d'authentification à utiliser"
 
+#, python-format
+msgid "The value '%(value)s' for %(element)s is not valid."
+msgstr "La valeur '%(value)s' pour %(element)s n'est pas valide."
+
 msgid ""
 "The working mode for the agent. Allowed modes are: 'legacy' - this preserves "
 "the existing behavior where the L3 agent is deployed on a centralized "
@@ -2948,6 +3118,9 @@ msgid ""
 msgstr ""
 "Certains routeurs connectés à ce réseau dépendent de cette stratégie pour "
 "l'accès."
+
+msgid "Timeout"
+msgstr "Délai d'expiration"
 
 msgid ""
 "Timeout in seconds for ovs-vsctl commands. If the timeout expires, ovs "
@@ -3217,6 +3390,9 @@ msgstr "Attribut(s) non reconnu(s) '%s'"
 msgid "Unrecognized field"
 msgstr "Champ non reconnu"
 
+msgid "Unspecified minimum subnet pool prefix."
+msgstr "Préfixe de pool de sous-réseau minimum non spécifié."
+
 msgid "Unsupported Content-Type"
 msgstr "Type de contenu non pris en charge"
 
@@ -3275,6 +3451,11 @@ msgstr ""
 "d'intégration avec des réseaux physiques. Le noyau sans port de correctif "
 "Open vSwitch est pris en charge si le paramètre est défini sur True."
 
+msgid "User (uid or name) running metadata proxy after its initialization"
+msgstr ""
+"Utilisateur (UID ou nom) exécutant le proxy de métadonnées après son "
+"initialisation"
+
 msgid ""
 "User (uid or name) running metadata proxy after its initialization (if "
 "empty: agent effective user)."
@@ -3330,6 +3511,14 @@ msgid ""
 msgstr ""
 "Valeur de latence (ms) pour le calcul de la taille de file d'attente d'un "
 "port avec QoS. Consultez le manuel tc-tbf pour plus d'informations."
+
+msgid ""
+"Watch file log. Log watch should be disabled when metadata_proxy_user/group "
+"has no read/write permissions on metadata proxy log file."
+msgstr ""
+"Surveillance des fichiers journaux. La surveillance des journaux doit être "
+"désactivée lorsque metadata_proxy_user/group ne dispose pas des droits de "
+"lecture/d'écriture sur le fichier journal du proxy de métadonnées."
 
 msgid ""
 "When external_network_bridge is set, each L3 agent can be associated with no "
@@ -3509,6 +3698,12 @@ msgid "new subnet"
 msgstr "nouveau sous-réseau"
 
 #, python-format
+msgid "physical_network '%s' unknown  for VLAN provider network"
+msgstr ""
+"physical_network '%s' inconnu pour le réseau de fournisseurs de réseau local "
+"virtuel"
+
+#, python-format
 msgid "physical_network '%s' unknown for flat provider network"
 msgstr ""
 "physical_network '%s' inconnu pour le réseau de fournisseurs non hiérarchique"
@@ -3524,6 +3719,9 @@ msgstr "provider:physical_network spécifié pour le réseau %s"
 #, python-format
 msgid "rbac_db_model not found in %s"
 msgstr "rbac_db_model non trouvé dans %s"
+
+msgid "record"
+msgstr "enregistrement "
 
 msgid "respawn_interval must be >= 0 if provided."
 msgstr "respawn_interval doit être >= 0 si fourni."
@@ -3558,6 +3756,10 @@ msgstr "nexthop n'est pas connecté au routeur"
 
 msgid "the nexthop is used by router"
 msgstr "nexthop est utilisé par le routeur"
+
+#, python-format
+msgid "unable to load %s"
+msgstr "impossible de charger %s"
 
 msgid ""
 "uuid provided from the command line so external_process can track us via /"

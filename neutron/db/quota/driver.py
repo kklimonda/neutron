@@ -13,17 +13,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api import attributes
 from neutron_lib import exceptions
-from neutron_lib.plugins import constants
-from neutron_lib.plugins import directory
 from oslo_log import log
 
 from neutron.common import exceptions as n_exc
+from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
 from neutron.db.quota import api as quota_api
-from neutron.objects import quota as quota_obj
-from neutron.quota import resource as res
+from neutron.db.quota import models as quota_models
 
 LOG = log.getLogger(__name__)
 
@@ -43,7 +40,7 @@ class DbQuotaDriver(object):
         :param context: The request context, for access checks.
         :param resources: A dictionary of the registered resource keys.
         :param tenant_id: The ID of the tenant to return default quotas for.
-        :return: dict from resource name to dict of name and limit
+        :return dict: from resource name to dict of name and limit
         """
         # Currently the tenant_id parameter is unused, since all tenants
         # share the same default values. This may change in the future so
@@ -61,7 +58,7 @@ class DbQuotaDriver(object):
         :param context: The request context, for access checks.
         :param resources: A dictionary of the registered resource keys.
         :param tenant_id: The ID of the tenant to return quotas for.
-        :return: dict from resource name to dict of name and limit
+        :return dict: from resource name to dict of name and limit
         """
 
         # init with defaults
@@ -69,44 +66,12 @@ class DbQuotaDriver(object):
                             for key, resource in resources.items())
 
         # update with tenant specific limits
-        quota_objs = quota_obj.Quota.get_objects(context, project_id=tenant_id)
-        for item in quota_objs:
+        q_qry = db_utils.model_query(context, quota_models.Quota).filter_by(
+            tenant_id=tenant_id)
+        for item in q_qry:
             tenant_quota[item['resource']] = item['limit']
 
         return tenant_quota
-
-    @staticmethod
-    @db_api.retry_if_session_inactive()
-    def get_detailed_tenant_quotas(context, resources, tenant_id):
-        """Given a list of resources and a sepecific tenant, retrieve
-        the detailed quotas (limit, used, reserved).
-        :param context: The request context, for access checks.
-        :param resources: A dictionary of the registered resource keys.
-        :return dict: mapping resource name in dict to its correponding limit
-            used and reserved. Reserved currently returns default value of 0
-        """
-        res_reserve_info = quota_api.get_reservations_for_resources(
-            context, tenant_id, resources.keys())
-        tenant_quota_ext = {}
-        for key, resource in resources.items():
-            if isinstance(resource, res.TrackedResource):
-                used = resource.count_used(context, tenant_id,
-                                           resync_usage=False)
-            else:
-                plugins = directory.get_plugins()
-                plugin = plugins.get(key, plugins[constants.CORE])
-                used = resource.count(context, plugin, tenant_id)
-
-            tenant_quota_ext[key] = {
-                'limit': resource.default,
-                'used': used,
-                'reserved': res_reserve_info.get(key, 0),
-            }
-        #update with specific tenant limits
-        quota_objs = quota_obj.Quota.get_objects(context, project_id=tenant_id)
-        for item in quota_objs:
-            tenant_quota_ext[item['resource']]['limit'] = item['limit']
-        return tenant_quota_ext
 
     @staticmethod
     @db_api.retry_if_session_inactive()
@@ -117,10 +82,12 @@ class DbQuotaDriver(object):
         Raise a "not found" error if the quota for the given tenant was
         never defined.
         """
-        if quota_obj.Quota.delete_objects(
-            context, project_id=tenant_id) < 1:
-            # No record deleted means the quota was not found
-            raise n_exc.TenantQuotaNotFound(tenant_id=tenant_id)
+        with context.session.begin():
+            tenant_quotas = context.session.query(quota_models.Quota)
+            tenant_quotas = tenant_quotas.filter_by(tenant_id=tenant_id)
+            if not tenant_quotas.delete():
+                # No record deleted means the quota was not found
+                raise n_exc.TenantQuotaNotFound(tenant_id=tenant_id)
 
     @staticmethod
     @db_api.retry_if_session_inactive()
@@ -129,7 +96,7 @@ class DbQuotaDriver(object):
 
         :param context: The request context, for access checks.
         :param resources: A dictionary of the registered resource keys.
-        :return: quotas list of dict of tenant_id:, resourcekey1:
+        :return quotas: list of dict of tenant_id:, resourcekey1:
         resourcekey2: ...
         """
         tenant_default = dict((key, resource.default)
@@ -137,8 +104,8 @@ class DbQuotaDriver(object):
 
         all_tenant_quotas = {}
 
-        for quota in quota_obj.Quota.get_objects(context):
-            tenant_id = quota['project_id']
+        for quota in context.session.query(quota_models.Quota):
+            tenant_id = quota['tenant_id']
 
             # avoid setdefault() because only want to copy when actually
             # required
@@ -146,7 +113,6 @@ class DbQuotaDriver(object):
             if tenant_quota is None:
                 tenant_quota = tenant_default.copy()
                 tenant_quota['tenant_id'] = tenant_id
-                attributes.populate_project_info(tenant_quota)
                 all_tenant_quotas[tenant_id] = tenant_quota
 
             tenant_quota[quota['resource']] = quota['limit']
@@ -158,14 +124,17 @@ class DbQuotaDriver(object):
     @staticmethod
     @db_api.retry_if_session_inactive()
     def update_quota_limit(context, tenant_id, resource, limit):
-        tenant_quotas = quota_obj.Quota.get_objects(
-            context, project_id=tenant_id, resource=resource)
-        if tenant_quotas:
-            tenant_quotas[0].limit = limit
-            tenant_quotas[0].update()
-        else:
-            quota_obj.Quota(context, project_id=tenant_id, resource=resource,
-                            limit=limit).create()
+        with context.session.begin():
+            tenant_quota = context.session.query(quota_models.Quota).filter_by(
+                tenant_id=tenant_id, resource=resource).first()
+
+            if tenant_quota:
+                tenant_quota.update({'limit': limit})
+            else:
+                tenant_quota = quota_models.Quota(tenant_id=tenant_id,
+                                                  resource=resource,
+                                                  limit=limit)
+                context.session.add(tenant_quota)
 
     def _get_quotas(self, context, tenant_id, resources):
         """Retrieves the quotas for specific resources.
@@ -206,7 +175,7 @@ class DbQuotaDriver(object):
         # locks should be ok to use when support for sending "hotspot" writes
         # to a single node will be available.
         requested_resources = deltas.keys()
-        with db_api.context_manager.writer.using(context):
+        with db_api.autonested_transaction(context.session):
             # get_tenant_quotes needs in input a dictionary mapping resource
             # name to BaseResosurce instances so that the default quota can be
             # retrieved

@@ -1,4 +1,0 @@
----
-features:
-  - Neutron API can now be managed by a ``mod_wsgi`` compatible web server (e.g.
-    ``apache2`` (``httpd``), ``nginx``, etc.)

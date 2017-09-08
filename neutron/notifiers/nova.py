@@ -14,14 +14,9 @@
 #    under the License.
 
 from keystoneauth1 import loading as ks_loading
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources
 from neutron_lib import constants
-from neutron_lib import context
 from neutron_lib import exceptions as exc
 from neutron_lib.plugins import directory
-from novaclient import api_versions
 from novaclient import client as nova_client
 from novaclient import exceptions as nova_exceptions
 from oslo_config import cfg
@@ -29,6 +24,11 @@ from oslo_log import log as logging
 from oslo_utils import uuidutils
 from sqlalchemy.orm import attributes as sql_attr
 
+from neutron._i18n import _LE, _LI, _LW
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
+from neutron import context
 from neutron.notifiers import batch_notifier
 
 
@@ -40,10 +40,9 @@ VIF_DELETED = 'network-vif-deleted'
 NEUTRON_NOVA_EVENT_STATUS_MAP = {constants.PORT_STATUS_ACTIVE: 'completed',
                                  constants.PORT_STATUS_ERROR: 'failed',
                                  constants.PORT_STATUS_DOWN: 'completed'}
-NOVA_API_VERSION = "2.1"
+NOVA_API_VERSION = "2"
 
 
-@registry.has_registry_receivers
 class Notifier(object):
 
     _instance = None
@@ -63,10 +62,11 @@ class Notifier(object):
             auth=auth)
 
         extensions = [
-            ext for ext in nova_client.discover_extensions(NOVA_API_VERSION)
+            ext for ext in nova_client.discover_extensions(NOVA_API_VERSION,
+                                                           only_contrib=True)
             if ext.name == "server_external_events"]
         self.nclient = nova_client.Client(
-            api_versions.APIVersion(NOVA_API_VERSION),
+            NOVA_API_VERSION,
             session=session,
             region_name=cfg.CONF.nova.region_name,
             endpoint_type=cfg.CONF.nova.endpoint_type,
@@ -74,28 +74,35 @@ class Notifier(object):
         self.batch_notifier = batch_notifier.BatchNotifier(
             cfg.CONF.send_events_interval, self.send_events)
 
+        # register callbacks for events pertaining resources affecting Nova
+        callback_resources = (
+            resources.FLOATING_IP,
+            resources.PORT,
+        )
+        for resource in callback_resources:
+            registry.subscribe(self._send_nova_notification,
+                               resource, events.BEFORE_RESPONSE)
+
     def _is_compute_port(self, port):
         try:
             if (port['device_id'] and uuidutils.is_uuid_like(port['device_id'])
-                    and port['device_owner'].startswith(
-                        constants.DEVICE_OWNER_COMPUTE_PREFIX)):
+                    and port['device_owner'].startswith((
+                        constants.DEVICE_OWNER_COMPUTE_PREFIX,
+                        constants.DEVICE_OWNER_BAREMETAL_PREFIX))):
                 return True
         except (KeyError, AttributeError):
             pass
         return False
 
-    def _get_network_changed_event(self, port):
+    def _get_network_changed_event(self, device_id):
         return {'name': 'network-changed',
-                'server_uuid': port['device_id'],
-                'tag': port['id']}
+                'server_uuid': device_id}
 
     def _get_port_delete_event(self, port):
         return {'server_uuid': port['device_id'],
                 'name': VIF_DELETED,
                 'tag': port['id']}
 
-    @registry.receives(resources.PORT, [events.BEFORE_RESPONSE])
-    @registry.receives(resources.FLOATING_IP, [events.BEFORE_RESPONSE])
     def _send_nova_notification(self, resource, event, trigger,
                                 action=None, original=None, data=None,
                                 **kwargs):
@@ -157,12 +164,12 @@ class Notifier(object):
             if action == 'delete_port':
                 return self._get_port_delete_event(port)
             else:
-                return self._get_network_changed_event(port)
+                return self._get_network_changed_event(port['device_id'])
 
     def _can_notify(self, port):
         if not port.id:
-            LOG.warning("Port ID not set! Nova will not be notified of "
-                        "port status change.")
+            LOG.warning(_LW("Port ID not set! Nova will not be notified of "
+                            "port status change."))
             return False
 
         # If there is no device_id set there is nothing we can do here.
@@ -247,11 +254,11 @@ class Notifier(object):
             LOG.debug("Nova returned NotFound for event: %s",
                       batched_events)
         except Exception:
-            LOG.exception("Failed to notify nova on events: %s",
+            LOG.exception(_LE("Failed to notify nova on events: %s"),
                           batched_events)
         else:
             if not isinstance(response, list):
-                LOG.error("Error response returned from nova: %s",
+                LOG.error(_LE("Error response returned from nova: %s"),
                           response)
                 return
             response_error = False
@@ -262,10 +269,10 @@ class Notifier(object):
                     response_error = True
                     continue
                 if code != 200:
-                    LOG.warning("Nova event: %s returned with failed "
-                                "status", event)
+                    LOG.warning(_LW("Nova event: %s returned with failed "
+                                    "status"), event)
                 else:
-                    LOG.info("Nova event response: %s", event)
+                    LOG.info(_LI("Nova event response: %s"), event)
             if response_error:
-                LOG.error("Error response returned from nova: %s",
+                LOG.error(_LE("Error response returned from nova: %s"),
                           response)

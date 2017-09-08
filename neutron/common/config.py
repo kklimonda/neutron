@@ -22,12 +22,13 @@ import sys
 from keystoneauth1 import loading as ks_loading
 from neutron_lib.api import validators
 from oslo_config import cfg
+from oslo_db import options as db_options
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_middleware import cors
 from oslo_service import wsgi
 
-from neutron._i18n import _
+from neutron._i18n import _, _LI
 from neutron.conf import common as common_config
 from neutron import policy
 from neutron import version
@@ -42,7 +43,6 @@ EXTRA_LOG_LEVEL_DEFAULTS = [
     'OfctlService=INFO',
     'ryu.base.app_manager=INFO',
     'ryu.controller.controller=INFO',
-    'ovsdbapp.backend.ovs_idl.vlog=INFO'
 ]
 
 # Register the configuration options
@@ -51,6 +51,17 @@ common_config.register_core_common_config_opts()
 # Ensure that the control exchange is set correctly
 oslo_messaging.set_transport_defaults(control_exchange='neutron')
 
+
+def set_db_defaults():
+    # Update the default QueuePool parameters. These can be tweaked by the
+    # conf variables - max_pool_size, max_overflow and pool_timeout
+    db_options.set_defaults(
+        cfg.CONF,
+        connection='sqlite://',
+        max_pool_size=10,
+        max_overflow=20, pool_timeout=10)
+
+set_db_defaults()
 
 NOVA_CONF_SECTION = 'nova'
 
@@ -97,8 +108,8 @@ def setup_logging():
     logging.set_defaults(default_log_levels=logging.get_default_log_levels() +
                          EXTRA_LOG_LEVEL_DEFAULTS)
     logging.setup(cfg.CONF, product_name)
-    LOG.info("Logging enabled!")
-    LOG.info("%(prog)s version %(version)s",
+    LOG.info(_LI("Logging enabled!"))
+    LOG.info(_LI("%(prog)s version %(version)s"),
              {'prog': sys.argv[0],
               'version': version.version_info.release_string()})
     LOG.debug("command line: %s", " ".join(sys.argv))

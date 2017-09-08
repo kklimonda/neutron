@@ -15,6 +15,7 @@ import eventlet
 
 from oslo_log import log
 
+from neutron._i18n import _LI
 from neutron import service
 
 LOG = log.getLogger(__name__)
@@ -40,7 +41,7 @@ def start_api_and_rpc_workers(neutron_api):
 
         pool.waitall()
     except NotImplementedError:
-        LOG.info("RPC was already started in parent process by "
-                 "plugin.")
+        LOG.info(_LI("RPC was already started in parent process by "
+                     "plugin."))
 
         neutron_api.wait()

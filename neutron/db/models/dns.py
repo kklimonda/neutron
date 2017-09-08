@@ -16,7 +16,6 @@ from sqlalchemy import orm
 
 from neutron.db.models import l3 as l3_models
 from neutron.db import models_v2
-from neutron.extensions import dns
 
 
 class NetworkDNSDomain(model_base.BASEV2):
@@ -30,7 +29,6 @@ class NetworkDNSDomain(model_base.BASEV2):
     # Add a relationship to the Network model in order to instruct
     # SQLAlchemy to eagerly load this association
     network = orm.relationship(models_v2.Network,
-                               load_on_pending=True,
                                backref=orm.backref("dns_domain",
                                                    lazy='joined',
                                                    uselist=False,
@@ -59,7 +57,6 @@ class FloatingIPDNS(model_base.BASEV2):
     # Add a relationship to the FloatingIP model in order to instruct
     # SQLAlchemy to eagerly load this association
     floatingip = orm.relationship(l3_models.FloatingIP,
-                                  load_on_pending=True,
                                   backref=orm.backref("dns",
                                                       lazy='joined',
                                                       uselist=False,
@@ -85,13 +82,9 @@ class PortDNS(model_base.BASEV2):
     previous_dns_domain = sa.Column(sa.String(255),
                                     nullable=False)
     dns_name = sa.Column(sa.String(255), nullable=False)
-    dns_domain = sa.Column(sa.String(dns.FQDN_MAX_LEN),
-                           nullable=False,
-                           server_default='')
     # Add a relationship to the Port model in order to instruct
     # SQLAlchemy to eagerly load this association
     port = orm.relationship(models_v2.Port,
-                            load_on_pending=True,
                             backref=orm.backref("dns",
                                                 lazy='joined',
                                                 uselist=False,

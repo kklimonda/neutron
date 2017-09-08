@@ -11,9 +11,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.plugins import constants
-from tempest.lib import decorators
+from neutron_lib import constants
 from tempest.lib import exceptions as lib_exc
+from tempest import test
 import testtools
 
 from neutron.tests.tempest.api import base_routers as base
@@ -21,7 +21,12 @@ from neutron.tests.tempest.api import base_routers as base
 
 class RoutersFlavorTestCase(base.BaseRouterTest):
 
-    required_extensions = ['router', 'flavors', 'l3-flavors']
+    @classmethod
+    @test.requires_ext(extension="router", service="network")
+    @test.requires_ext(extension="flavors", service="network")
+    @test.requires_ext(extension="l3-flavors", service="network")
+    def skip_checks(cls):
+        super(RoutersFlavorTestCase, cls).skip_checks()
 
     @classmethod
     def resource_setup(cls):
@@ -75,7 +80,7 @@ class RoutersFlavorTestCase(base.BaseRouterTest):
                 service_profile['id'])
         super(RoutersFlavorTestCase, cls).resource_cleanup()
 
-    @decorators.idempotent_id('a4d01977-e968-4983-b4d9-824ea6c33f4b')
+    @test.idempotent_id('a4d01977-e968-4983-b4d9-824ea6c33f4b')
     def test_create_router_with_flavor(self):
         # ensure regular client can see flavor
         flavors = self.client.list_flavors(id=self.flavor['id'])
@@ -91,13 +96,13 @@ class RoutersFlavorTestCase(base.BaseRouterTest):
         router = self.create_router('name', flavor_id=prem_flavor['id'])
         self.assertEqual(prem_flavor['id'], router['flavor_id'])
 
-    @decorators.idempotent_id('30e73858-a0fc-409c-a2e0-e9cd2826f6a2')
+    @test.idempotent_id('30e73858-a0fc-409c-a2e0-e9cd2826f6a2')
     def test_delete_router_flavor_in_use(self):
         self.create_router('name', flavor_id=self.flavor['id'])
         with testtools.ExpectedException(lib_exc.Conflict):
             self.admin_client.delete_flavor(self.flavor['id'])
 
-    @decorators.idempotent_id('83939cf7-5070-41bc-9a3e-cd9f22df2186')
+    @test.idempotent_id('83939cf7-5070-41bc-9a3e-cd9f22df2186')
     def test_badrequest_on_requesting_flags_and_flavor(self):
         with testtools.ExpectedException(lib_exc.BadRequest):
             self.admin_client.create_router(

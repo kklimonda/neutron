@@ -14,14 +14,13 @@
 
 import mock
 import netaddr
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as lib_constants
 from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import uuidutils
 
+from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import agent as l3_agent
-from neutron.agent.l3 import dvr_edge_router as dvr_edge_rtr
 from neutron.agent.l3 import dvr_local_router as dvr_router
 from neutron.agent.l3 import link_local_allocator as lla
 from neutron.agent.l3 import router_info
@@ -30,10 +29,10 @@ from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.common import constants as n_const
 from neutron.common import utils as common_utils
-from neutron.conf.agent import common as agent_config
 from neutron.conf.agent.l3 import config as l3_config
 from neutron.conf.agent.l3 import ha as ha_conf
 from neutron.conf import common as base_config
+from neutron.extensions import portbindings
 from neutron.tests import base
 from neutron.tests.common import l3_test_common
 
@@ -59,6 +58,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.conf.register_opts(external_process.OPTS)
         self.conf.set_override('interface_driver',
                                'neutron.agent.linux.interface.NullDriver')
+        self.conf.set_override('send_arp_for_ha', 1)
         self.conf.set_override('state_path', cfg.CONF.state_path)
 
         self.device_exists_p = mock.patch(
@@ -124,25 +124,25 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self.snat_ports = [{'subnets': [{'cidr': '152.2.0.0/16',
                                          'gateway_ip': '152.2.0.1',
                                          'id': subnet_id_1}],
-                            'network_id': _uuid(),
-                            'device_owner':
-                            lib_constants.DEVICE_OWNER_ROUTER_SNAT,
-                            'mac_address': 'fa:16:3e:80:8d:80',
-                            'fixed_ips': [{'subnet_id': subnet_id_1,
-                                           'ip_address': '152.2.0.13',
-                                           'prefixlen': 16}],
-                            'id': _uuid(), 'device_id': _uuid()},
-                           {'subnets': [{'cidr': '152.10.0.0/16',
-                                         'gateway_ip': '152.10.0.1',
-                                         'id': subnet_id_2}],
-                            'network_id': _uuid(),
-                            'device_owner':
-                            lib_constants.DEVICE_OWNER_ROUTER_SNAT,
-                            'mac_address': 'fa:16:3e:80:8d:80',
-                            'fixed_ips': [{'subnet_id': subnet_id_2,
-                                           'ip_address': '152.10.0.13',
-                                           'prefixlen': 16}],
-                            'id': _uuid(), 'device_id': _uuid()}]
+                           'network_id': _uuid(),
+                           'device_owner':
+                           lib_constants.DEVICE_OWNER_ROUTER_SNAT,
+                           'mac_address': 'fa:16:3e:80:8d:80',
+                           'fixed_ips': [{'subnet_id': subnet_id_1,
+                                          'ip_address': '152.2.0.13',
+                                          'prefixlen': 16}],
+                           'id': _uuid(), 'device_id': _uuid()},
+                          {'subnets': [{'cidr': '152.10.0.0/16',
+                                        'gateway_ip': '152.10.0.1',
+                                        'id': subnet_id_2}],
+                           'network_id': _uuid(),
+                           'device_owner':
+                           lib_constants.DEVICE_OWNER_ROUTER_SNAT,
+                           'mac_address': 'fa:16:3e:80:8d:80',
+                           'fixed_ips': [{'subnet_id': subnet_id_2,
+                                         'ip_address': '152.10.0.13',
+                                         'prefixlen': 16}],
+                           'id': _uuid(), 'device_id': _uuid()}]
 
         self.ri_kwargs = {'agent_conf': self.conf,
                           'interface_driver': self.mock_driver}
@@ -176,53 +176,10 @@ class TestDvrRouterOperations(base.BaseTestCase):
         ri.get_floating_ips = mock.Mock(return_value=True)
         ri.fip_ns = mock.Mock()
         ri.fip_ns.subscribe.return_value = False
-        ri.rtr_fip_connect = True
         ex_gw_port = {'network_id': 'fake_net_id'}
-        ri.create_dvr_external_gateway_on_agent(ex_gw_port)
+        ri.create_dvr_fip_interfaces(ex_gw_port)
         ri.fip_ns.create_or_update_gateway_port.assert_called_once_with(
             fip_agent_port)
-
-    def test_create_dvr_fip_interfaces_with_matching_address_scope(self):
-        self._setup_create_dvr_fip_interfaces_for_setting_routing_rules(
-            address_scopes_match=True)
-
-    def test_create_dvr_fip_interfaces_with_address_scope_mismatch(self):
-        self._setup_create_dvr_fip_interfaces_for_setting_routing_rules()
-
-    def _setup_create_dvr_fip_interfaces_for_setting_routing_rules(
-        self, address_scopes_match=False):
-        ri = self._create_router()
-        ri.get_floating_agent_gw_interface = mock.Mock()
-        ri.fip_ns = mock.Mock()
-        ri._add_interface_routing_rule_to_router_ns = mock.Mock()
-        ri._add_interface_route_to_fip_ns = mock.Mock()
-        ri.fip_ns._create_rtr_2_fip_link = mock.Mock()
-        ri.internal_ports = ['moke_port_1', 'moke_port_2']
-        if address_scopes_match:
-            ri._check_if_address_scopes_match = mock.Mock(
-                return_value=True)
-        else:
-            ri._check_if_address_scopes_match = mock.Mock(
-                return_value=False)
-        ri.rtr_fip_connect = False
-        ex_gw_port = {'network_id': 'fake_net_id'}
-        ri.create_dvr_external_gateway_on_agent(ex_gw_port)
-        ri.connect_rtr_2_fip()
-        self.assertTrue(ri._check_if_address_scopes_match.called)
-        if address_scopes_match:
-            self.assertTrue(
-                ri.fip_ns.create_rtr_2_fip_link.called)
-            self.assertTrue(
-                ri._add_interface_routing_rule_to_router_ns.called)
-            self.assertTrue(
-                ri._add_interface_route_to_fip_ns.called)
-        else:
-            self.assertFalse(
-                ri._add_interface_routing_rule_to_router_ns.called)
-            self.assertFalse(
-                ri._add_interface_route_to_fip_ns.called)
-            self.assertTrue(
-                ri.fip_ns.create_rtr_2_fip_link.called)
 
     def test_get_floating_ips_dvr(self):
         router = mock.MagicMock()
@@ -232,75 +189,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
 
         fips = ri.get_floating_ips()
 
-        self.assertEqual(
-            [{'host': HOSTNAME}, {'host': mock.sentinel.otherhost}], fips)
-
-    def test_floating_forward_rules_no_fip_ns(self):
-        router = mock.MagicMock()
-        router.get.return_value = [{'host': HOSTNAME},
-                                   {'host': mock.sentinel.otherhost}]
-        fip = {'id': _uuid()}
-        ri = self._create_router(router)
-        self.assertFalse(ri.floating_forward_rules(fip))
-
-    def test_floating_forward_rules(self):
-        router = mock.MagicMock()
-        router.get.return_value = [{'host': HOSTNAME},
-                                   {'host': mock.sentinel.otherhost}]
-        ri = self._create_router(router)
-        floating_ip = '15.1.2.3'
-        rtr_2_fip_name = 'fake_router'
-        fixed_ip = '192.168.0.1'
-        fip = {'id': _uuid(),
-               'fixed_ip_address': '192.168.0.1',
-               'floating_ip_address': '15.1.2.3'}
-        instance = mock.Mock()
-        instance.get_rtr_ext_device_name = mock.Mock(
-                                               return_value=rtr_2_fip_name)
-        ri.fip_ns = instance
-        dnat_from_floatingip_to_fixedip = (
-            'PREROUTING', '-d %s/32 -i %s -j DNAT --to-destination %s' % (
-                floating_ip, rtr_2_fip_name, fixed_ip))
-        snat_from_fixedip_to_floatingip = (
-            'float-snat', '-s %s/32 -j SNAT --to-source %s' % (
-                fixed_ip, floating_ip))
-        actual = ri.floating_forward_rules(fip)
-        expected = [dnat_from_floatingip_to_fixedip,
-                    snat_from_fixedip_to_floatingip]
-        self.assertEqual(expected, actual)
-
-    def test_floating_mangle_rules_no_fip_ns(self):
-        router = mock.MagicMock()
-        router.get.return_value = [{'host': HOSTNAME},
-                                   {'host': mock.sentinel.otherhost}]
-        ri = self._create_router(router)
-        floating_ip = mock.Mock()
-        fixed_ip = mock.Mock()
-        internal_mark = mock.Mock()
-        self.assertFalse(ri.floating_mangle_rules(floating_ip, fixed_ip,
-                                                  internal_mark))
-
-    def test_floating_mangle_rules(self):
-        router = mock.MagicMock()
-        router.get.return_value = [{'host': HOSTNAME},
-                                   {'host': mock.sentinel.otherhost}]
-        ri = self._create_router(router)
-        floating_ip = '15.1.2.3'
-        fixed_ip = '192.168.0.1'
-        internal_mark = 'fake_mark'
-        rtr_2_fip_name = 'fake_router'
-        instance = mock.Mock()
-        instance.get_rtr_ext_device_name = mock.Mock(
-                                               return_value=rtr_2_fip_name)
-        ri.fip_ns = instance
-        mark_traffic_to_floating_ip = (
-            'floatingip', '-d %s/32 -i %s -j MARK --set-xmark %s' % (
-                floating_ip, rtr_2_fip_name, internal_mark))
-        mark_traffic_from_fixed_ip = (
-            'FORWARD', '-s %s/32 -j $float-snat' % fixed_ip)
-        actual = ri.floating_mangle_rules(floating_ip, fixed_ip, internal_mark)
-        expected = [mark_traffic_to_floating_ip, mark_traffic_from_fixed_ip]
-        self.assertEqual(expected, actual)
+        self.assertEqual([{'host': HOSTNAME}], fips)
 
     @mock.patch.object(ip_lib, 'send_ip_addr_adv_notif')
     @mock.patch.object(ip_lib, 'IPDevice')
@@ -308,7 +197,6 @@ class TestDvrRouterOperations(base.BaseTestCase):
     def test_floating_ip_added_dist(self, mIPRule, mIPDevice, mock_adv_notif):
         router = mock.MagicMock()
         ri = self._create_router(router)
-        ri.ex_gw_port = ri.router['gw_port']
         ext_net_id = _uuid()
         subnet_id = _uuid()
         agent_gw_port = {'fixed_ips': [{'ip_address': '20.0.0.30',
@@ -329,23 +217,22 @@ class TestDvrRouterOperations(base.BaseTestCase):
                'port_id': _uuid()}
         ri.fip_ns = mock.Mock()
         ri.fip_ns.agent_gateway_port = agent_gw_port
-        ri.create_dvr_external_gateway_on_agent(ri.ex_gw_port)
-        ri.connect_rtr_2_fip()
-        self.assertTrue(ri.rtr_fip_connect)
         ri.fip_ns.allocate_rule_priority.return_value = FIP_PRI
         subnet = lla.LinkLocalAddressPair('169.254.30.42/31')
         ri.rtr_fip_subnet = subnet
         ri.fip_ns.local_subnets = mock.Mock()
         ri.fip_ns.local_subnets.allocate.return_value = subnet
+        ri.dist_fip_count = 0
         ip_cidr = common_utils.ip_to_cidr(fip['floating_ip_address'])
         ri.floating_ip_added_dist(fip, ip_cidr)
         mIPRule().rule.add.assert_called_with(ip='192.168.0.1',
                                               table=16,
                                               priority=FIP_PRI)
         ri.fip_ns.local_subnets.allocate.assert_not_called()
+        self.assertEqual(1, ri.dist_fip_count)
 
         # Validate that fip_ns.local_subnets is called when
-        # ri.rtr_fip_subnet is None
+        # rtr_fip_subnet is None
         ri.rtr_fip_subnet = None
         ri.floating_ip_added_dist(fip, ip_cidr)
         mIPRule().rule.add.assert_called_with(ip='192.168.0.1',
@@ -360,7 +247,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
     def test_floating_ip_removed_dist(self, mIPRule, mIPDevice, mIPWrapper):
         router = mock.MagicMock()
         ri = self._create_router(router)
-        ri.ex_gw_port = ri.router['gw_port']
+
         subnet_id = _uuid()
         agent_gw_port = {'fixed_ips': [{'ip_address': '20.0.0.30',
                                         'prefixlen': 24,
@@ -372,6 +259,8 @@ class TestDvrRouterOperations(base.BaseTestCase):
                          'network_id': _uuid(),
                          'mac_address': 'ca:fe:de:ad:be:ef'}
         fip_cidr = '11.22.33.44/24'
+
+        ri.dist_fip_count = 2
         ri.fip_ns = mock.Mock()
         ri.fip_ns.get_name.return_value = 'fip_ns_name'
         ri.floating_ips_dict['11.22.33.44'] = FIP_PRI
@@ -386,6 +275,20 @@ class TestDvrRouterOperations(base.BaseTestCase):
             ip=str(netaddr.IPNetwork(fip_cidr).ip), table=16, priority=FIP_PRI)
         mIPDevice().route.delete_route.assert_called_with(fip_cidr, str(s.ip))
         ri.fip_ns.local_subnets.allocate.assert_not_called()
+
+        ri.dist_fip_count = 1
+        s1 = lla.LinkLocalAddressPair('15.1.2.3/32')
+        ri.rtr_fip_subnet = None
+        ri.fip_ns.local_subnets.allocate.return_value = s1
+        _, fip_to_rtr = s1.get_pair()
+        fip_ns = ri.fip_ns
+        ri.floating_ip_removed_dist(fip_cidr)
+        self.assertTrue(fip_ns.destroyed)
+        mIPWrapper().del_veth.assert_called_once_with(
+            fip_ns.get_int_device_name(router['id']))
+        self.assertEqual(1, mIPDevice().route.delete_gateway.call_count)
+        self.assertFalse(ri.fip_ns.unsubscribe.called)
+        ri.fip_ns.local_subnets.allocate.assert_called_once_with(ri.router_id)
 
     @mock.patch.object(ip_lib, 'IPRule')
     def test_floating_ip_moved_dist(self, mIPRule):
@@ -409,13 +312,9 @@ class TestDvrRouterOperations(base.BaseTestCase):
                                               table=16,
                                               priority=FIP_PRI)
 
-    def _test_add_floating_ip(self, ri, fip, is_failure=False):
-        if not is_failure:
-            ri.floating_ip_added_dist = mock.Mock(
-                return_value=lib_constants.FLOATINGIP_STATUS_ACTIVE)
-        else:
-            ri.floating_ip_added_dist = mock.Mock(
-                return_value=lib_constants.FLOATINGIP_STATUS_ERROR)
+    def _test_add_floating_ip(self, ri, fip, is_failure):
+        ri.floating_ip_added_dist = mock.Mock()
+
         result = ri.add_floating_ip(fip,
                                     mock.sentinel.interface_name,
                                     mock.sentinel.device)
@@ -427,17 +326,9 @@ class TestDvrRouterOperations(base.BaseTestCase):
         ri = self._create_router(mock.MagicMock())
         ip = '15.1.2.3'
         fip = {'floating_ip_address': ip}
-        result = self._test_add_floating_ip(ri, fip)
-        ri.floating_ip_added_dist.assert_called_once_with(fip, ip + '/32')
-        self.assertEqual(lib_constants.FLOATINGIP_STATUS_ACTIVE, result)
-
-    def test_add_floating_ip_failure(self):
-        ri = self._create_router(mock.MagicMock())
-        ip = '15.1.2.3'
-        fip = {'floating_ip_address': ip}
         result = self._test_add_floating_ip(ri, fip, True)
         ri.floating_ip_added_dist.assert_called_once_with(fip, ip + '/32')
-        self.assertEqual(lib_constants.FLOATINGIP_STATUS_ERROR, result)
+        self.assertEqual(lib_constants.FLOATINGIP_STATUS_ACTIVE, result)
 
     @mock.patch.object(router_info.RouterInfo, 'remove_floating_ip')
     def test_remove_floating_ip(self, super_remove_floating_ip):
@@ -495,10 +386,10 @@ class TestDvrRouterOperations(base.BaseTestCase):
         ports = ri.router.get(lib_constants.INTERFACE_KEY, [])
         subnet_id = l3_test_common.get_subnet_id(ports[0])
         test_ports = [{'mac_address': '00:11:22:33:44:55',
-                       'device_owner': lib_constants.DEVICE_OWNER_DHCP,
-                       'fixed_ips': [{'ip_address': '1.2.3.4',
-                                      'prefixlen': 24,
-                                      'subnet_id': subnet_id}]}]
+                      'device_owner': lib_constants.DEVICE_OWNER_DHCP,
+                      'fixed_ips': [{'ip_address': '1.2.3.4',
+                                     'prefixlen': 24,
+                                     'subnet_id': subnet_id}]}]
 
         self.plugin_api.get_ports_by_subnet.return_value = test_ports
 
@@ -666,6 +557,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
         self._set_ri_kwargs(agent, router['id'], router)
         ri = dvr_router.DvrLocalRouter(HOSTNAME, **self.ri_kwargs)
         ri.iptables_manager.ipv4['nat'] = mock.MagicMock()
+        ri.dist_fip_count = 0
         fip_ns = agent.get_fip_ns(mock.sentinel.ext_net_id)
         subnet_id = _uuid()
         fip_ns.agent_gateway_port = (
@@ -710,14 +602,14 @@ class TestDvrRouterOperations(base.BaseTestCase):
 
     def test_external_gateway_removed_ext_gw_port_and_fip(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
-        agent.conf.agent_mode = lib_constants.L3_AGENT_MODE_DVR_SNAT
+        agent.conf.agent_mode = 'dvr'
         router = l3_test_common.prepare_router_data(num_internal_ports=2)
         router['gw_port_host'] = HOSTNAME
         self.mock_driver.unplug.reset_mock()
 
         external_net_id = router['gw_port']['network_id']
         self._set_ri_kwargs(agent, router['id'], router)
-        ri = dvr_edge_rtr.DvrEdgeRouter(HOSTNAME, **self.ri_kwargs)
+        ri = dvr_router.DvrLocalRouter(HOSTNAME, **self.ri_kwargs)
         ri.remove_floating_ip = mock.Mock()
         agent._fetch_external_net_id = mock.Mock(return_value=external_net_id)
         ri.ex_gw_port = ri.router['gw_port']
@@ -744,6 +636,7 @@ class TestDvrRouterOperations(base.BaseTestCase):
 
         vm_floating_ip = '19.4.4.2'
         ri.floating_ips_dict[vm_floating_ip] = FIP_PRI
+        ri.dist_fip_count = 1
         ri.rtr_fip_subnet = ri.fip_ns.local_subnets.allocate(ri.router_id)
         _, fip_to_rtr = ri.rtr_fip_subnet.get_pair()
         self.mock_ip.get_devices.return_value = [
@@ -751,30 +644,10 @@ class TestDvrRouterOperations(base.BaseTestCase):
         ri.get_router_cidrs = mock.Mock(
             return_value={vm_floating_ip + '/32', '19.4.4.1/24'})
         self.device_exists.return_value = True
+
         ri.external_gateway_removed(
             ri.ex_gw_port,
             ri.get_external_device_name(ri.ex_gw_port['id']))
+
         ri.remove_floating_ip.assert_called_once_with(self.mock_ip_dev,
                                                       '19.4.4.2/32')
-
-    def test_get_router_cidrs_no_fip_ns(self):
-        router = mock.MagicMock()
-        router.get.return_value = [{'host': HOSTNAME},
-                                   {'host': mock.sentinel.otherhost}]
-        ri = self._create_router(router)
-        device = mock.Mock()
-        self.assertFalse(ri.get_router_cidrs(device))
-
-    def test_get_router_cidrs_no_device_exists(self):
-        router = mock.MagicMock()
-        router.get.return_value = [{'host': HOSTNAME},
-                                   {'host': mock.sentinel.otherhost}]
-        ri = self._create_router(router)
-        fake_fip_ns = mock.Mock(return_value=True)
-        fake_fip_ns.get_name = mock.Mock(return_value=None)
-        fake_fip_ns.get_int_device_name = mock.Mock(return_value=None)
-        ri.fip_ns = fake_fip_ns
-        device = mock.Mock()
-        device.exists = mock.Mock(return_value=False)
-        with mock.patch.object(ip_lib, 'IPDevice', return_value=device):
-            self.assertFalse(ri.get_router_cidrs(device))

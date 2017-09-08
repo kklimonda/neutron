@@ -18,7 +18,6 @@ import collections
 import random
 import time
 
-from neutron_lib import context
 from neutron_lib import exceptions as lib_exceptions
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -29,7 +28,9 @@ from oslo_service import service
 from oslo_utils import excutils
 from osprofiler import profiler
 
+from neutron._i18n import _LE, _LW
 from neutron.common import exceptions
+from neutron import context
 
 
 LOG = logging.getLogger(__name__)
@@ -56,8 +57,8 @@ RPC_DISABLED = False
 def init(conf):
     global TRANSPORT, NOTIFICATION_TRANSPORT, NOTIFIER
     exmods = get_allowed_exmods()
-    TRANSPORT = oslo_messaging.get_rpc_transport(conf,
-                                                 allowed_remote_exmods=exmods)
+    TRANSPORT = oslo_messaging.get_transport(conf,
+                                             allowed_remote_exmods=exmods)
     NOTIFICATION_TRANSPORT = oslo_messaging.get_notification_transport(
         conf, allowed_remote_exmods=exmods)
     serializer = RequestContextSerializer()
@@ -72,7 +73,7 @@ def cleanup():
     assert NOTIFIER is not None
     TRANSPORT.cleanup()
     NOTIFICATION_TRANSPORT.cleanup()
-    _BackingOffContextWrapper.reset_timeouts()
+    _ContextWrapper.reset_timeouts()
     TRANSPORT = NOTIFICATION_TRANSPORT = NOTIFIER = None
 
 
@@ -97,24 +98,6 @@ def _get_default_method_timeouts():
 
 
 class _ContextWrapper(object):
-    def __init__(self, original_context):
-        self._original_context = original_context
-
-    def __getattr__(self, name):
-        return getattr(self._original_context, name)
-
-    def cast(self, ctxt, method, **kwargs):
-        try:
-            self._original_context.cast(ctxt, method, **kwargs)
-        except Exception as e:
-            # TODO(kevinbenton): make catch specific to missing exchange once
-            # bug/1705351 is resolved on the oslo.messaging side; if
-            # oslo.messaging auto-creates the exchange, then just remove the
-            # code completely
-            LOG.debug("Ignored exception during cast: %e", e)
-
-
-class _BackingOffContextWrapper(_ContextWrapper):
     """Wraps oslo messaging contexts to set the timeout for calls.
 
     This intercepts RPC calls and sets the timeout value to the globally
@@ -147,6 +130,12 @@ class _BackingOffContextWrapper(_ContextWrapper):
                 })
             cls._max_timeout = max_timeout
 
+    def __init__(self, original_context):
+        self._original_context = original_context
+
+    def __getattr__(self, name):
+        return getattr(self._original_context, name)
+
     def call(self, ctxt, method, **kwargs):
         # two methods with the same name in different namespaces should
         # be tracked independently
@@ -167,19 +156,19 @@ class _BackingOffContextWrapper(_ContextWrapper):
                     min(self._METHOD_TIMEOUTS[scoped_method],
                         TRANSPORT.conf.rpc_response_timeout)
                 )
-                LOG.error("Timeout in RPC method %(method)s. Waiting for "
-                          "%(wait)s seconds before next attempt. If the "
-                          "server is not down, consider increasing the "
-                          "rpc_response_timeout option as Neutron "
-                          "server(s) may be overloaded and unable to "
-                          "respond quickly enough.",
+                LOG.error(_LE("Timeout in RPC method %(method)s. Waiting for "
+                              "%(wait)s seconds before next attempt. If the "
+                              "server is not down, consider increasing the "
+                              "rpc_response_timeout option as Neutron "
+                              "server(s) may be overloaded and unable to "
+                              "respond quickly enough."),
                           {'wait': int(round(wait)), 'method': scoped_method})
                 new_timeout = min(
                     self._original_context.timeout * 2, self.get_max_timeout())
                 if new_timeout > self._METHOD_TIMEOUTS[scoped_method]:
-                    LOG.warning("Increasing timeout for %(method)s calls "
-                                "to %(new)s seconds. Restart the agent to "
-                                "restore it to the default value.",
+                    LOG.warning(_LW("Increasing timeout for %(method)s calls "
+                                    "to %(new)s seconds. Restart the agent to "
+                                    "restore it to the default value."),
                                 {'method': scoped_method, 'new': new_timeout})
                     self._METHOD_TIMEOUTS[scoped_method] = new_timeout
                 time.sleep(wait)
@@ -189,21 +178,19 @@ class BackingOffClient(oslo_messaging.RPCClient):
     """An oslo messaging RPC Client that implements a timeout backoff.
 
     This has all of the same interfaces as oslo_messaging.RPCClient but
-    if the timeout parameter is not specified, the _BackingOffContextWrapper
-    returned will track when call timeout exceptions occur and exponentially
-    increase the timeout for the given call method.
+    if the timeout parameter is not specified, the _ContextWrapper returned
+    will track when call timeout exceptions occur and exponentially increase
+    the timeout for the given call method.
     """
     def prepare(self, *args, **kwargs):
         ctx = super(BackingOffClient, self).prepare(*args, **kwargs)
-        # don't back off contexts that explicitly set a timeout
-        if 'timeout' in kwargs:
-            return _ContextWrapper(ctx)
-        return _BackingOffContextWrapper(ctx)
+        # don't enclose Contexts that explicitly set a timeout
+        return _ContextWrapper(ctx) if 'timeout' not in kwargs else ctx
 
     @staticmethod
     def set_max_timeout(max_timeout):
         '''Set RPC timeout ceiling for all backing-off RPC clients.'''
-        _BackingOffContextWrapper.set_max_timeout(max_timeout)
+        _ContextWrapper.set_max_timeout(max_timeout)
 
 
 def get_client(target, version_cap=None, serializer=None):
@@ -218,7 +205,7 @@ def get_client(target, version_cap=None, serializer=None):
 def get_server(target, endpoints, serializer=None):
     assert TRANSPORT is not None
     serializer = RequestContextSerializer(serializer)
-    access_policy = dispatcher.DefaultRPCAccessPolicy
+    access_policy = dispatcher.LegacyRPCAccessPolicy
     return oslo_messaging.get_rpc_server(TRANSPORT, target, endpoints,
                                          'eventlet', serializer,
                                          access_policy=access_policy)
@@ -309,7 +296,7 @@ class Service(service.Service):
         # errors, go ahead and ignore them.. as we're shutting down anyway
         try:
             self.conn.close()
-        except Exception:  # nosec
+        except Exception:
             pass
         super(Service, self).stop()
 

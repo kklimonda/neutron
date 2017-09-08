@@ -10,21 +10,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import uuid
+
 import mock
 from neutron_lib import constants as n_const
-from neutron_lib import context
-from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
 from oslo_policy import policy as oslo_policy
 from oslo_serialization import jsonutils
-from oslo_utils import uuidutils
 import pecan
 from pecan import request
 
 from neutron.api import extensions
-from neutron.conf import quota as qconf
+from neutron import context
 from neutron import manager
 from neutron.pecan_wsgi.controllers import root as controllers
 from neutron.pecan_wsgi.controllers import utils as controller_utils
@@ -82,42 +81,33 @@ class TestRootController(test_functional.PecanFunctionalTest):
             self.assertEqual(value, versions[0][attr])
 
     def test_methods(self):
-        self._test_method_returns_code('post', 405)
-        self._test_method_returns_code('patch', 405)
-        self._test_method_returns_code('delete', 405)
-        self._test_method_returns_code('head', 405)
-        self._test_method_returns_code('put', 405)
+        self._test_method_returns_code('post')
+        self._test_method_returns_code('patch')
+        self._test_method_returns_code('delete')
+        self._test_method_returns_code('head')
+        self._test_method_returns_code('put')
 
 
 class TestV2Controller(TestRootController):
 
-    base_url = '/v2.0/'
+    base_url = '/v2.0'
 
     def test_get(self):
         """Verify current version info are returned."""
         response = self.app.get(self.base_url)
         self.assertEqual(response.status_int, 200)
         json_body = jsonutils.loads(response.body)
-        self.assertIn('resources', json_body)
-        self.assertIsInstance(json_body['resources'], list)
-        for r in json_body['resources']:
-            self.assertIn("links", r)
-            self.assertIn("name", r)
-            self.assertIn("collection", r)
-            self.assertIn(self.base_url, r['links'][0]['href'])
-
-    def test_get_no_trailing_slash(self):
-        response = self.app.get(self.base_url[:-1], expect_errors=True)
-        self.assertEqual(response.status_int, 404)
+        self.assertEqual('v2.0', json_body['version']['id'])
+        self.assertEqual('CURRENT', json_body['version']['status'])
 
     def test_routing_successs(self):
         """Test dispatch to controller for existing resource."""
-        response = self.app.get('%sports.json' % self.base_url)
+        response = self.app.get('%s/ports.json' % self.base_url)
         self.assertEqual(response.status_int, 200)
 
     def test_routing_failure(self):
         """Test dispatch to controller for non-existing resource."""
-        response = self.app.get('%sidonotexist.json' % self.base_url,
+        response = self.app.get('%s/idonotexist.json' % self.base_url,
                                 expect_errors=True)
         self.assertEqual(response.status_int, 404)
 
@@ -156,12 +146,12 @@ class TestExtensionsController(TestRootController):
         self.assertEqual(test_alias, json_body['extension']['alias'])
 
     def test_methods(self):
-        self._test_method_returns_code('post', 404)
-        self._test_method_returns_code('put', 404)
-        self._test_method_returns_code('patch', 404)
-        self._test_method_returns_code('delete', 404)
-        self._test_method_returns_code('head', 404)
-        self._test_method_returns_code('delete', 404)
+        self._test_method_returns_code('post', 405)
+        self._test_method_returns_code('put', 405)
+        self._test_method_returns_code('patch', 405)
+        self._test_method_returns_code('delete', 405)
+        self._test_method_returns_code('head', 405)
+        self._test_method_returns_code('delete', 405)
 
 
 class TestQuotasController(test_functional.PecanFunctionalTest):
@@ -169,9 +159,9 @@ class TestQuotasController(test_functional.PecanFunctionalTest):
 
     base_url = '/v2.0/quotas'
     default_expected_limits = {
-        'network': qconf.DEFAULT_QUOTA_NETWORK,
-        'port': qconf.DEFAULT_QUOTA_PORT,
-        'subnet': qconf.DEFAULT_QUOTA_SUBNET}
+        'network': 10,
+        'port': 50,
+        'subnet': 10}
 
     def _verify_limits(self, response, limits):
         for resource, limit in limits.items():
@@ -307,8 +297,6 @@ class TestResourceController(TestRootController):
 
     def setUp(self):
         super(TestResourceController, self).setUp()
-        policy.init()
-        self.addCleanup(policy.reset)
         self._gen_port()
 
     def _gen_port(self):
@@ -468,8 +456,6 @@ class TestPaginationAndSorting(test_functional.PecanFunctionalTest):
 
     def setUp(self):
         super(TestPaginationAndSorting, self).setUp()
-        policy.init()
-        self.addCleanup(policy.reset)
         self.plugin = directory.get_plugin()
         self.ctx = context.get_admin_context()
         self._create_networks(self.RESOURCE_COUNT)
@@ -690,7 +676,7 @@ class TestRequestProcessing(TestRootController):
         self.assertEqual('router', self.req_stash['resource_type'])
         # make sure the core plugin was identified as the handler for ports
         self.assertEqual(
-            directory.get_plugin(plugin_constants.L3),
+            directory.get_plugin(n_const.L3),
             self.req_stash['plugin'])
 
     def test_service_plugin_uri(self):
@@ -716,11 +702,9 @@ class TestRouterController(TestResourceController):
             ['neutron.services.l3_router.l3_router_plugin.L3RouterPlugin',
              'neutron.services.flavors.flavors_plugin.FlavorsPlugin'])
         super(TestRouterController, self).setUp()
-        policy.init()
-        self.addCleanup(policy.reset)
         plugin = directory.get_plugin()
         ctx = context.get_admin_context()
-        l3_plugin = directory.get_plugin(plugin_constants.L3)
+        l3_plugin = directory.get_plugin(n_const.L3)
         network_id = pecan_utils.create_network(ctx, plugin)['id']
         self.subnet = pecan_utils.create_subnet(ctx, plugin, network_id)
         self.router = pecan_utils.create_router(ctx, l3_plugin)
@@ -821,7 +805,7 @@ class TestL3AgentShimControllers(test_functional.PecanFunctionalTest):
                  'get_l3-routers': 'role:admin'}),
             overwrite=False)
         ctx = context.get_admin_context()
-        l3_plugin = directory.get_plugin(plugin_constants.L3)
+        l3_plugin = directory.get_plugin(n_const.L3)
         self.router = pecan_utils.create_router(ctx, l3_plugin)
         self.agent = helpers.register_l3_agent()
         # NOTE(blogan): Not sending notifications because this test is for
@@ -904,7 +888,7 @@ class TestShimControllers(test_functional.PecanFunctionalTest):
         # there is only one subresource so far
         sub_resource_collection = (
             pecan_utils.FakeExtension.FAKE_SUB_RESOURCE_COLLECTION)
-        temp_id = uuidutils.generate_uuid()
+        temp_id = str(uuid.uuid1())
         url = '/v2.0/{0}/{1}/{2}'.format(
             uri_collection,
             temp_id,

@@ -14,7 +14,6 @@
 
 import functools
 
-from neutron_lib.utils import net
 from oslo_config import cfg
 from oslo_utils import uuidutils
 import testtools
@@ -31,7 +30,7 @@ from neutron.tests.functional import base
 class InterfaceDriverTestCaseMixin(object):
     def _test_mtu_set_after_action(self, device_name, br_name, namespace,
                                    action=None):
-        mac_address = net.get_random_mac('fa:16:3e:00:00:00'.split(':'))
+        mac_address = utils.get_random_mac('fa:16:3e:00:00:00'.split(':'))
 
         plug = functools.partial(
             self.interface.plug,
@@ -93,7 +92,7 @@ class OVSInterfaceDriverTestCase(linux_base.BaseOVSLinuxTestCase,
 
     def test_plug_succeeds(self):
         device_name = utils.get_rand_name()
-        mac_address = net.get_random_mac('fa:16:3e:00:00:00'.split(':'))
+        mac_address = utils.get_random_mac('fa:16:3e:00:00:00'.split(':'))
         namespace = self.useFixture(net_helpers.NamespaceFixture()).name
 
         self.assertFalse(self.bridge.get_port_name_list())

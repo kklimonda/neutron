@@ -14,10 +14,8 @@
 
 import os.path
 import random
-import re
 import sys
 
-import ddt
 import eventlet
 import mock
 import netaddr
@@ -33,6 +31,7 @@ from neutron.common import utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.common import utils as plugin_utils
 from neutron.tests import base
+from neutron.tests.common import helpers
 from neutron.tests.unit import tests
 
 load_tests = testscenarios.load_tests_apply_scenarios
@@ -93,6 +92,54 @@ def _port_rule_masking(port_min, port_max):
         port_range.shake()
         current = port_range
     return current.get_list()
+
+
+class TestParseMappings(base.BaseTestCase):
+    def parse(self, mapping_list, unique_values=True, unique_keys=True):
+        return utils.parse_mappings(mapping_list, unique_values, unique_keys)
+
+    def test_parse_mappings_fails_for_missing_separator(self):
+        with testtools.ExpectedException(ValueError):
+            self.parse(['key'])
+
+    def test_parse_mappings_fails_for_missing_key(self):
+        with testtools.ExpectedException(ValueError):
+            self.parse([':val'])
+
+    def test_parse_mappings_fails_for_missing_value(self):
+        with testtools.ExpectedException(ValueError):
+            self.parse(['key:'])
+
+    def test_parse_mappings_fails_for_extra_separator(self):
+        with testtools.ExpectedException(ValueError):
+            self.parse(['key:val:junk'])
+
+    def test_parse_mappings_fails_for_duplicate_key(self):
+        with testtools.ExpectedException(ValueError):
+            self.parse(['key:val1', 'key:val2'])
+
+    def test_parse_mappings_fails_for_duplicate_value(self):
+        with testtools.ExpectedException(ValueError):
+            self.parse(['key1:val', 'key2:val'])
+
+    def test_parse_mappings_succeeds_for_one_mapping(self):
+        self.assertEqual({'key': 'val'}, self.parse(['key:val']))
+
+    def test_parse_mappings_succeeds_for_n_mappings(self):
+        self.assertEqual({'key1': 'val1', 'key2': 'val2'},
+                         self.parse(['key1:val1', 'key2:val2']))
+
+    def test_parse_mappings_succeeds_for_duplicate_value(self):
+        self.assertEqual({'key1': 'val', 'key2': 'val'},
+                         self.parse(['key1:val', 'key2:val'], False))
+
+    def test_parse_mappings_succeeds_for_no_mappings(self):
+        self.assertEqual({}, self.parse(['']))
+
+    def test_parse_mappings_succeeds_for_nonuniq_key(self):
+        self.assertEqual({'key': ['val1', 'val2']},
+                         self.parse(['key:val1', 'key:val2', 'key:val2'],
+                                    unique_keys=False))
 
 
 class TestParseTunnelRangesMixin(object):
@@ -395,6 +442,41 @@ class TestParseVlanRangeList(UtilTestParseVlanRanges):
         self.assertEqual(expected_networks, self.parse_list(config_list))
 
 
+class TestDictUtils(base.BaseTestCase):
+    def test_dict2str(self):
+        dic = {"key1": "value1", "key2": "value2", "key3": "value3"}
+        expected = "key1=value1,key2=value2,key3=value3"
+        self.assertEqual(expected, utils.dict2str(dic))
+
+    def test_str2dict(self):
+        string = "key1=value1,key2=value2,key3=value3"
+        expected = {"key1": "value1", "key2": "value2", "key3": "value3"}
+        self.assertEqual(expected, utils.str2dict(string))
+
+    def test_dict_str_conversion(self):
+        dic = {"key1": "value1", "key2": "value2"}
+        self.assertEqual(dic, utils.str2dict(utils.dict2str(dic)))
+
+    def test_diff_list_of_dict(self):
+        old_list = [{"key1": "value1"},
+                    {"key2": "value2"},
+                    {"key3": "value3"}]
+        new_list = [{"key1": "value1"},
+                    {"key2": "value2"},
+                    {"key4": "value4"}]
+        added, removed = utils.diff_list_of_dict(old_list, new_list)
+        self.assertEqual([dict(key4="value4")], added)
+        self.assertEqual([dict(key3="value3")], removed)
+
+
+class TestDict2Tuples(base.BaseTestCase):
+    def test_dict(self):
+        input_dict = {'foo': 'bar', '42': 'baz', 'aaa': 'zzz'}
+        expected = (('42', 'baz'), ('aaa', 'zzz'), ('foo', 'bar'))
+        output_tuple = utils.dict2tuple(input_dict)
+        self.assertEqual(expected, output_tuple)
+
+
 class TestExceptionLogger(base.BaseTestCase):
     def test_normal_call(self):
         result = "Result"
@@ -596,6 +678,37 @@ class TestDelayedStringRenderer(base.BaseTestCase):
         self.assertTrue(my_func.called)
 
 
+class TestRoundVal(base.BaseTestCase):
+    def test_round_val_ok(self):
+        for expected, value in ((0, 0),
+                                (0, 0.1),
+                                (1, 0.5),
+                                (1, 1.49),
+                                (2, 1.5)):
+            self.assertEqual(expected, utils.round_val(value))
+
+
+class TestSafeDecodeUtf8(base.BaseTestCase):
+
+    @helpers.requires_py2
+    def test_py2_does_nothing(self):
+        s = 'test-py2'
+        self.assertIs(s, utils.safe_decode_utf8(s))
+
+    @helpers.requires_py3
+    def test_py3_decoded_valid_bytes(self):
+        s = bytes('test-py2', 'utf-8')
+        decoded_str = utils.safe_decode_utf8(s)
+        self.assertIsInstance(decoded_str, six.text_type)
+        self.assertEqual(s, decoded_str.encode('utf-8'))
+
+    @helpers.requires_py3
+    def test_py3_decoded_invalid_bytes(self):
+        s = bytes('test-py2', 'utf_16')
+        decoded_str = utils.safe_decode_utf8(s)
+        self.assertIsInstance(decoded_str, six.text_type)
+
+
 class TestPortRuleMasking(base.BaseTestCase):
     def test_port_rule_wrong_input(self):
         with testtools.ExpectedException(ValueError):
@@ -691,20 +804,17 @@ class TestExcDetails(base.BaseTestCase):
             utils.extract_exc_details(Exception()), six.text_type)
 
 
-@ddt.ddt
 class ImportModulesRecursivelyTestCase(base.BaseTestCase):
 
-    @ddt.data('/', r'\\')
-    def test_recursion(self, separator):
+    def test_recursion(self):
         expected_modules = (
             'neutron.tests.unit.tests.example.dir.example_module',
             'neutron.tests.unit.tests.example.dir.subdir.example_module',
         )
         for module in expected_modules:
             sys.modules.pop(module, None)
-
-        topdir = re.sub(r'[/\\]+', separator, os.path.dirname(tests.__file__))
-        modules = utils.import_modules_recursively(topdir)
+        modules = utils.import_modules_recursively(
+            os.path.dirname(tests.__file__))
         for module in expected_modules:
             self.assertIn(module, modules)
             self.assertIn(module, sys.modules)

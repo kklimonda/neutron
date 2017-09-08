@@ -15,15 +15,16 @@
 
 import abc
 
-from neutron_lib.api.definitions import portbindings
-from neutron_lib.callbacks import resources
 from neutron_lib import constants as const
-from neutron_lib.plugins.ml2 import api
 from oslo_log import log
 import six
 
+from neutron._i18n import _LW
+from neutron.callbacks import resources
 from neutron.db import provisioning_blocks
+from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_constants
+from neutron.plugins.ml2 import driver_api as api
 
 LOG = log.getLogger(__name__)
 
@@ -109,8 +110,8 @@ class AgentMechanismDriverBase(api.MechanismDriver):
                         LOG.debug("Bound using segment: %s", segment)
                         return
             else:
-                LOG.warning("Refusing to bind port %(pid)s to dead agent: "
-                            "%(agent)s",
+                LOG.warning(_LW("Refusing to bind port %(pid)s to dead agent: "
+                                "%(agent)s"),
                             {'pid': context.current['id'], 'agent': agent})
 
     @abc.abstractmethod
@@ -168,18 +169,11 @@ class SimpleAgentMechanismDriverBase(AgentMechanismDriverBase):
     def try_to_bind_segment_for_agent(self, context, segment, agent):
         if self.check_segment_for_agent(segment, agent):
             context.set_binding(segment[api.ID],
-                                self.get_vif_type(context, agent, segment),
-                                self.get_vif_details(context, agent, segment))
+                                self.vif_type,
+                                self.vif_details)
             return True
         else:
             return False
-
-    def get_vif_details(self, context, agent, segment):
-        return self.vif_details
-
-    def get_vif_type(self, context, agent, segment):
-        """Return the vif type appropriate for the agent and segment."""
-        return self.vif_type
 
     @abc.abstractmethod
     def get_allowed_network_types(self, agent=None):
@@ -239,11 +233,10 @@ class SimpleAgentMechanismDriverBase(AgentMechanismDriverBase):
         network_type = segment[api.NETWORK_TYPE]
         if network_type not in allowed_network_types:
             LOG.debug(
-                'Network %(network_id)s with segment %(id)s is type '
-                'of %(network_type)s but agent %(agent)s or mechanism driver '
-                'only support %(allowed_network_types)s.',
-                {'network_id': segment['network_id'],
-                 'id': segment['id'],
+                'Network %(network_id)s is of type %(network_type)s '
+                'but agent %(agent)s or mechanism driver only '
+                'support %(allowed_network_types)s.',
+                {'network_id': segment['id'],
                  'network_type': network_type,
                  'agent': agent['host'],
                  'allowed_network_types': allowed_network_types})
@@ -253,13 +246,12 @@ class SimpleAgentMechanismDriverBase(AgentMechanismDriverBase):
             physnet = segment[api.PHYSICAL_NETWORK]
             if not self.physnet_in_mappings(physnet, mappings):
                 LOG.debug(
-                    'Network %(network_id)s with segment %(id)s is connected '
-                    'to physical network %(physnet)s, but agent %(agent)s '
-                    'reported physical networks %(mappings)s. '
+                    'Network %(network_id)s is connected to physical '
+                    'network %(physnet)s, but agent %(agent)s reported '
+                    'physical networks %(mappings)s. '
                     'The physical network must be configured on the '
                     'agent if binding is to succeed.',
-                    {'network_id': segment['network_id'],
-                     'id': segment['id'],
+                    {'network_id': segment['id'],
                      'physnet': physnet,
                      'agent': agent['host'],
                      'mappings': mappings})

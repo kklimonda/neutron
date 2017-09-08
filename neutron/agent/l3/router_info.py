@@ -13,13 +13,14 @@
 #    under the License.
 
 import collections
-
 import netaddr
 from neutron_lib import constants as lib_constants
 from neutron_lib.utils import helpers
 from oslo_log import log as logging
 
-from neutron._i18n import _
+import six
+
+from neutron._i18n import _, _LE, _LW
 from neutron.agent.l3 import namespaces
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
@@ -115,9 +116,6 @@ class RouterInfo(object):
         # enable_snat by default if it wasn't specified by plugin
         self._snat_enabled = self._router.get('enable_snat', True)
 
-    def is_router_master(self):
-        return True
-
     def get_internal_device_name(self, port_id):
         return (INTERNAL_DEV_PREFIX + port_id)[:self.driver.DEV_NAME_LEN]
 
@@ -161,9 +159,7 @@ class RouterInfo(object):
         """Filter Floating IPs to be hosted on this agent."""
         return self.router.get(lib_constants.FLOATINGIP_KEY, [])
 
-    def floating_forward_rules(self, fip):
-        fixed_ip = fip['fixed_ip_address']
-        floating_ip = fip['floating_ip_address']
+    def floating_forward_rules(self, floating_ip, fixed_ip):
         return [('PREROUTING', '-d %s/32 -j DNAT --to-destination %s' %
                  (floating_ip, fixed_ip)),
                 ('OUTPUT', '-d %s/32 -j DNAT --to-destination %s' %
@@ -217,7 +213,9 @@ class RouterInfo(object):
         # Loop once to ensure that floating ips are configured.
         for fip in floating_ips:
             # Rebuild iptables rules for the floating ip.
-            for chain, rule in self.floating_forward_rules(fip):
+            fixed = fip['fixed_ip_address']
+            fip_ip = fip['floating_ip_address']
+            for chain, rule in self.floating_forward_rules(fip_ip, fixed):
                 self.iptables_manager.ipv4['nat'].add_rule(chain, rule,
                                                            tag='floating_ip')
 
@@ -298,8 +296,8 @@ class RouterInfo(object):
         except RuntimeError:
             # any exception occurred here should cause the floating IP
             # to be set in error state
-            LOG.warning("Unable to configure IP address for "
-                        "floating IP: %s", fip['id'])
+            LOG.warning(_LW("Unable to configure IP address for "
+                            "floating IP: %s"), fip['id'])
 
     def add_floating_ip(self, fip, interface_name, device):
         raise NotImplementedError()
@@ -437,7 +435,8 @@ class RouterInfo(object):
         for fixed_ip in fixed_ips:
             ip_lib.send_ip_addr_adv_notif(ns_name,
                                           interface_name,
-                                          fixed_ip['ip_address'])
+                                          fixed_ip['ip_address'],
+                                          self.agent_conf.send_arp_for_ha)
 
     def internal_network_added(self, port):
         network_id = port['network_id']
@@ -466,7 +465,8 @@ class RouterInfo(object):
 
     def _get_existing_devices(self):
         ip_wrapper = ip_lib.IPWrapper(namespace=self.ns_name)
-        ip_devs = ip_wrapper.get_devices()
+        ip_devs = ip_wrapper.get_devices(exclude_loopback=True,
+                                         exclude_gre_devices=True)
         return [ip_dev.name for ip_dev in ip_devs]
 
     @staticmethod
@@ -476,13 +476,10 @@ class RouterInfo(object):
         for existing_port in existing_ports:
             current_port = current_ports_dict.get(existing_port['id'])
             if current_port:
-                fixed_ips_changed = (
-                    sorted(existing_port['fixed_ips'],
+                if (sorted(existing_port['fixed_ips'],
                            key=helpers.safe_sort_key) !=
-                    sorted(current_port['fixed_ips'],
-                           key=helpers.safe_sort_key))
-                mtu_changed = existing_port['mtu'] != current_port['mtu']
-                if fixed_ips_changed or mtu_changed:
+                        sorted(current_port['fixed_ips'],
+                               key=helpers.safe_sort_key)):
                     updated_ports[current_port['id']] = current_port
         return updated_ports
 
@@ -505,9 +502,7 @@ class RouterInfo(object):
                   self.router_id)
         self.radvd.disable()
 
-    def internal_network_updated(self, interface_name, ip_cidrs, mtu):
-        self.driver.set_mtu(interface_name, mtu, namespace=self.ns_name,
-                            prefix=INTERNAL_DEV_PREFIX)
+    def internal_network_updated(self, interface_name, ip_cidrs):
         self.driver.init_router_port(
             interface_name,
             ip_cidrs=ip_cidrs,
@@ -567,8 +562,7 @@ class RouterInfo(object):
                 ip_cidrs = common_utils.fixed_ip_cidrs(p['fixed_ips'])
                 LOG.debug("updating internal network for port %s", p)
                 updated_cidrs += ip_cidrs
-                self.internal_network_updated(
-                    interface_name, ip_cidrs, p['mtu'])
+                self.internal_network_updated(interface_name, ip_cidrs)
                 enable_ra = enable_ra or self._port_has_ipv6_subnet(p)
 
         # Check if there is any pd prefix update
@@ -711,7 +705,8 @@ class RouterInfo(object):
         for fixed_ip in ex_gw_port['fixed_ips']:
             ip_lib.send_ip_addr_adv_notif(ns_name,
                                           interface_name,
-                                          fixed_ip['ip_address'])
+                                          fixed_ip['ip_address'],
+                                          self.agent_conf.send_arp_for_ha)
 
     def is_v6_gateway_set(self, gateway_ips):
         """Check to see if list of gateway_ips has an IPv6 gateway.
@@ -882,7 +877,7 @@ class RouterInfo(object):
 
         except n_exc.FloatingIpSetupException:
             # All floating IPs must be put in error state
-            LOG.exception("Failed to process floating IPs.")
+            LOG.exception(_LE("Failed to process floating IPs."))
             fip_statuses = self.put_fips_in_error_state()
         finally:
             self.update_fip_statuses(fip_statuses)
@@ -908,7 +903,7 @@ class RouterInfo(object):
         except (n_exc.FloatingIpSetupException,
                 n_exc.IpTablesApplyException):
                 # All floating IPs must be put in error state
-                LOG.exception("Failed to process floating IPs.")
+                LOG.exception(_LE("Failed to process floating IPs."))
                 fip_statuses = self.put_fips_in_error_state()
         finally:
             self.update_fip_statuses(fip_statuses)
@@ -983,7 +978,7 @@ class RouterInfo(object):
             device_name = name_generator(p['id'])
             ip_cidrs = common_utils.fixed_ip_cidrs(p['fixed_ips'])
             port_as_marks = self.get_port_address_scope_mark(p)
-            for ip_version in {common_utils.get_ip_version(cidr)
+            for ip_version in {ip_lib.get_ip_version(cidr)
                                for cidr in ip_cidrs}:
                 devicename_scopemark[ip_version][device_name] = (
                     port_as_marks[ip_version])
@@ -1033,7 +1028,7 @@ class RouterInfo(object):
                 iptables['filter'].add_rule(
                     'scope',
                     self.address_scope_filter_rule(device_name, mark))
-        for subnet_id, prefix in self.pd_subnets.items():
+        for subnet_id, prefix in six.iteritems(self.pd_subnets):
             if prefix != n_const.PROVISIONAL_IPV6_PD_PREFIX:
                 self._process_pd_iptables_rules(prefix, subnet_id)
 
@@ -1102,8 +1097,8 @@ class RouterInfo(object):
             self.agent.pd.sync_router(self.router['id'])
             self._process_external_on_delete()
         else:
-            LOG.warning("Can't gracefully delete the router %s: "
-                        "no router namespace found.", self.router['id'])
+            LOG.warning(_LW("Can't gracefully delete the router %s: "
+                            "no router namespace found."), self.router['id'])
 
     @common_utils.exception_logger()
     def process(self):
@@ -1123,8 +1118,10 @@ class RouterInfo(object):
         self.routes_updated(self.routes, self.router['routes'])
         self.routes = self.router['routes']
 
-        # Update ex_gw_port on the router info cache
+        # Update ex_gw_port and enable_snat on the router info cache
         self.ex_gw_port = self.get_ex_gw_port()
         self.fip_map = dict([(fip['floating_ip_address'],
                               fip['fixed_ip_address'])
                              for fip in self.get_floating_ips()])
+        # TODO(Carl) FWaaS uses this.  Why is it set after processing is done?
+        self.enable_snat = self.router.get('enable_snat')

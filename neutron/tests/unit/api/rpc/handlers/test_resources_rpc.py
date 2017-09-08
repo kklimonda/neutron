@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import mock
-from neutron_lib import context
 from oslo_utils import uuidutils
 from oslo_versionedobjects import fields as obj_fields
 from oslo_versionedobjects import fixture
@@ -24,6 +23,7 @@ from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.callbacks import version_manager
 from neutron.api.rpc.handlers import resources_rpc
 from neutron.common import topics
+from neutron import context
 from neutron.objects import base as objects_base
 from neutron.objects import common_types
 from neutron.tests import base
@@ -300,6 +300,18 @@ class ResourcesPushRpcApiTestCase(ResourcesRpcBaseTestCase):
                            for resource in self.resource_objs2],
             event_type=TEST_EVENT)
 
+    def test_push_mitaka_backwardscompat(self):
+        #TODO(mangelajo) remove in Ocata, since the 'resource' parameter
+        #                is just for backwards compatibility with Mitaka
+        #                agents.
+        self.rpc.push(
+            self.context, [self.resource_objs[0]], TEST_EVENT)
+
+        self.cctxt_mock.cast.assert_called_once_with(
+            self.context, 'push',
+            resource=self.resource_objs[0].obj_to_primitive(),
+            event_type=TEST_EVENT)
+
 
 class ResourcesPushRpcCallbackTestCase(ResourcesRpcBaseTestCase):
     """Tests the agent-side of the RPC interface."""
@@ -318,4 +330,18 @@ class ResourcesPushRpcCallbackTestCase(ResourcesRpcBaseTestCase):
         reg_push_mock.assert_called_once_with(self.context,
                                               self.resource_objs[0].obj_name(),
                                               self.resource_objs,
+                                              TEST_EVENT)
+
+    @mock.patch.object(resources_rpc.cons_registry, 'push')
+    def test_push_mitaka_backwardscompat(self, reg_push_mock):
+        #TODO(mangelajo) remove in Ocata, since the 'resource' parameter
+        #                is just for backwards compatibility with Mitaka
+        #                agents.
+        self.obj_registry.register(FakeResource)
+        self.callbacks.push(self.context,
+                            resource=self.resource_objs[0].obj_to_primitive(),
+                            event_type=TEST_EVENT)
+        reg_push_mock.assert_called_once_with(self.context,
+                                              self.resource_objs[0].obj_name(),
+                                              [self.resource_objs[0]],
                                               TEST_EVENT)

@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import abc
 import collections
 import imp
 import os
@@ -23,10 +24,11 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_middleware import base
 import routes
+import six
 import webob.dec
 import webob.exc
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.common import exceptions
 from neutron import extensions as core_extensions
 from neutron.plugins.common import constants as const
@@ -58,6 +60,31 @@ def register_custom_supported_check(alias, f, plugin_agnostic=False):
         _PLUGIN_AGNOSTIC_EXTENSIONS.add(alias)
 
 
+@six.add_metaclass(abc.ABCMeta)
+class PluginInterface(object):
+
+    @classmethod
+    def __subclasshook__(cls, klass):
+        """Checking plugin class.
+
+        The __subclasshook__ method is a class method
+        that will be called every time a class is tested
+        using issubclass(klass, PluginInterface).
+        In that case, it will check that every method
+        marked with the abstractmethod decorator is
+        provided by the plugin class.
+        """
+
+        if not cls.__abstractmethods__:
+            return NotImplemented
+
+        for method in cls.__abstractmethods__:
+            if any(method in base.__dict__ for base in klass.__mro__):
+                continue
+            return NotImplemented
+        return True
+
+
 class ActionExtensionController(wsgi.Controller):
 
     def __init__(self, application):
@@ -70,7 +97,7 @@ class ActionExtensionController(wsgi.Controller):
     def action(self, request, id):
         input_dict = self._deserialize(request.body,
                                        request.get_content_type())
-        for action_name, handler in self.action_handlers.items():
+        for action_name, handler in six.iteritems(self.action_handlers):
             if action_name in input_dict:
                 return handler(input_dict, request, id)
         # no action handler found (bump to downstream application)
@@ -112,7 +139,7 @@ class ExtensionController(wsgi.Controller):
 
     def index(self, request):
         extensions = []
-        for _alias, ext in self.extension_manager.extensions.items():
+        for _alias, ext in six.iteritems(self.extension_manager.extensions):
             extensions.append(self._translate(ext))
         return dict(extensions=extensions)
 
@@ -153,7 +180,7 @@ class ExtensionMiddleware(base.ConfigurableMiddleware):
 
             LOG.debug('Extended resource: %s',
                       resource.collection)
-            for action, method in resource.collection_actions.items():
+            for action, method in six.iteritems(resource.collection_actions):
                 conditions = dict(method=[method])
                 path = "/%s/%s" % (resource.collection, action)
                 with mapper.submapper(controller=resource.controller,
@@ -283,7 +310,7 @@ class ExtensionManager(object):
     """
 
     def __init__(self, path):
-        LOG.info('Initializing extension manager.')
+        LOG.info(_LI('Initializing extension manager.'))
         self.path = path
         self.extensions = {}
         self._load_all_extensions()
@@ -344,7 +371,7 @@ class ExtensionManager(object):
                 if check_optionals and optional_exts_set - set(processed_exts):
                     continue
                 extended_attrs = ext.get_extended_resources(version)
-                for res, resource_attrs in extended_attrs.items():
+                for res, resource_attrs in six.iteritems(extended_attrs):
                     attr_map.setdefault(res, {}).update(resource_attrs)
                 processed_exts[ext_name] = ext
                 del exts_to_process[ext_name]
@@ -359,10 +386,10 @@ class ExtensionManager(object):
                 break
         if exts_to_process:
             unloadable_extensions = set(exts_to_process.keys())
-            LOG.error("Unable to process extensions (%s) because "
-                      "the configured plugins do not satisfy "
-                      "their requirements. Some features will not "
-                      "work as expected.",
+            LOG.error(_LE("Unable to process extensions (%s) because "
+                          "the configured plugins do not satisfy "
+                          "their requirements. Some features will not "
+                          "work as expected."),
                       ', '.join(unloadable_extensions))
             self._check_faulty_extensions(unloadable_extensions)
         # Extending extensions' attributes map.
@@ -391,14 +418,12 @@ class ExtensionManager(object):
     def _check_extension(self, extension):
         """Checks for required methods in extension objects."""
         try:
-            LOG.debug('Ext name="%(name)s" alias="%(alias)s" '
-                      'description="%(desc)s" updated="%(updated)s"',
-                      {'name': extension.get_name(),
-                       'alias': extension.get_alias(),
-                       'desc': extension.get_description(),
-                       'updated': extension.get_updated()})
+            LOG.debug('Ext name: %s', extension.get_name())
+            LOG.debug('Ext alias: %s', extension.get_alias())
+            LOG.debug('Ext description: %s', extension.get_description())
+            LOG.debug('Ext updated: %s', extension.get_updated())
         except AttributeError:
-            LOG.exception("Exception loading extension")
+            LOG.exception(_LE("Exception loading extension"))
             return False
         return isinstance(extension, api_extensions.ExtensionDescriptor)
 
@@ -417,7 +442,7 @@ class ExtensionManager(object):
             if os.path.exists(path):
                 self._load_all_extensions_from_path(path)
             else:
-                LOG.error("Extension path '%s' doesn't exist!", path)
+                LOG.error(_LE("Extension path '%s' doesn't exist!"), path)
 
     def _load_all_extensions_from_path(self, path):
         # Sorting the extension list makes the order in which they
@@ -430,19 +455,19 @@ class ExtensionManager(object):
                 ext_path = os.path.join(path, f)
                 if file_ext.lower() == '.py' and not mod_name.startswith('_'):
                     mod = imp.load_source(mod_name, ext_path)
-                    ext_name = mod_name.capitalize()
+                    ext_name = mod_name[0].upper() + mod_name[1:]
                     new_ext_class = getattr(mod, ext_name, None)
                     if not new_ext_class:
-                        LOG.warning('Did not find expected name '
-                                    '"%(ext_name)s" in %(file)s',
+                        LOG.warning(_LW('Did not find expected name '
+                                        '"%(ext_name)s" in %(file)s'),
                                     {'ext_name': ext_name,
                                      'file': ext_path})
                         continue
                     new_ext = new_ext_class()
                     self.add_extension(new_ext)
             except Exception as exception:
-                LOG.warning("Extension file %(f)s wasn't loaded due to "
-                            "%(exception)s",
+                LOG.warning(_LW("Extension file %(f)s wasn't loaded due to "
+                                "%(exception)s"),
                             {'f': f, 'exception': exception})
 
     def add_extension(self, ext):
@@ -451,7 +476,7 @@ class ExtensionManager(object):
             return
 
         alias = ext.get_alias()
-        LOG.info('Loaded extension: %s', alias)
+        LOG.info(_LI('Loaded extension: %s'), alias)
 
         if alias in self.extensions:
             raise exceptions.DuplicatedExtension(alias=alias)
@@ -485,8 +510,9 @@ class PluginAwareExtensionManager(ExtensionManager):
         alias = extension.get_alias()
         supports_extension = alias in self.get_supported_extension_aliases()
         if not supports_extension:
-            LOG.info("Extension %s not supported by any of loaded "
-                     "plugins", alias)
+            LOG.info(_LI("Extension %s not supported by any of loaded "
+                         "plugins"),
+                    alias)
         return supports_extension
 
     def _plugins_implement_interface(self, extension):
@@ -495,8 +521,8 @@ class PluginAwareExtensionManager(ExtensionManager):
         for plugin in self.plugins.values():
             if isinstance(plugin, extension.get_plugin_interface()):
                 return True
-        LOG.warning("Loaded plugins do not implement extension "
-                    "%s interface",
+        LOG.warning(_LW("Loaded plugins do not implement extension "
+                        "%s interface"),
                     extension.get_alias())
         return False
 

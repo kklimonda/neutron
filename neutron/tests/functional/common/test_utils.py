@@ -12,6 +12,8 @@
 
 import testtools
 
+import eventlet
+
 from neutron.common import utils
 from neutron.tests import base
 
@@ -23,3 +25,15 @@ class TestWaitUntilTrue(base.BaseTestCase):
     def test_wait_until_true_predicate_fails(self):
         with testtools.ExpectedException(utils.WaitTimeout):
             utils.wait_until_true(lambda: False, 2)
+
+    def test_wait_until_true_predicate_fails_compatibility_test(self):
+        """This test makes sure that eventlet.TimeoutError can still be caught.
+        """
+        try:
+            utils.wait_until_true(lambda: False, 2)
+        except eventlet.TimeoutError:
+            return
+        except Exception:
+            pass
+        self.fail('wait_until_true() does not raise eventlet.TimeoutError '
+                  'compatible exception by default.')

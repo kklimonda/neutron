@@ -18,8 +18,9 @@ import re
 
 from neutron_lib.utils import helpers
 from oslo_log import log as logging
+import six
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE, _LW
 from neutron.agent.linux import ip_link_support
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
@@ -46,7 +47,7 @@ class PciOsWrapper(object):
         vf_list = []
         dev_path = cls.DEVICE_PATH % dev_name
         if not os.path.isdir(dev_path):
-            LOG.error("Failed to get devices for %s", dev_name)
+            LOG.error(_LE("Failed to get devices for %s"), dev_name)
             raise exc.InvalidDeviceError(dev_name=dev_name,
                                          reason=_("Device not found"))
         file_list = os.listdir(dev_path)
@@ -114,12 +115,14 @@ class EmbSwitch(object):
     @ivar pci_dev_wrapper: pci device wrapper
     """
 
-    def __init__(self, dev_name, exclude_devices):
+    def __init__(self, phys_net, dev_name, exclude_devices):
         """Constructor
 
+        @param phys_net: physical network
         @param dev_name: network device name
         @param exclude_devices: list of pci slots to exclude
         """
+        self.phys_net = phys_net
         self.dev_name = dev_name
         self.pci_slot_map = {}
         self.pci_dev_wrapper = pci_lib.PciDeviceIPWrapper(dev_name)
@@ -216,7 +219,7 @@ class EmbSwitch(object):
     def _get_vf_index(self, pci_slot):
         vf_index = self.pci_slot_map.get(pci_slot)
         if vf_index is None:
-            LOG.warning("Cannot find vf index for pci slot %s",
+            LOG.warning(_LW("Cannot find vf index for pci slot %s"),
                         pci_slot)
             raise exc.InvalidPciSlotError(pci_slot=pci_slot)
         return vf_index
@@ -388,13 +391,13 @@ class ESwitchManager(object):
         """
         if exclude_devices is None:
             exclude_devices = {}
-        for phys_net, dev_names in device_mappings.items():
+        for phys_net, dev_names in six.iteritems(device_mappings):
             for dev_name in dev_names:
                 self._process_emb_switch_map(phys_net, dev_name,
                                              exclude_devices)
 
     def _create_emb_switch(self, phys_net, dev_name, exclude_devices):
-        embedded_switch = EmbSwitch(dev_name, exclude_devices)
+        embedded_switch = EmbSwitch(phys_net, dev_name, exclude_devices)
         self.emb_switches_map.setdefault(phys_net, []).append(embedded_switch)
         for pci_slot in embedded_switch.get_pci_slot_list():
             self.pci_slot_map[pci_slot] = embedded_switch
@@ -410,8 +413,8 @@ class ESwitchManager(object):
         if embedded_switch:
             used_device_mac = embedded_switch.get_pci_device(pci_slot)
             if used_device_mac != device_mac:
-                LOG.warning("device pci mismatch: %(device_mac)s "
-                            "- %(pci_slot)s",
+                LOG.warning(_LW("device pci mismatch: %(device_mac)s "
+                                "- %(pci_slot)s"),
                             {"device_mac": device_mac, "pci_slot": pci_slot})
                 embedded_switch = None
         return embedded_switch
@@ -453,10 +456,10 @@ class ESwitchManager(object):
             if embedded_switch.get_pci_device(pci_slot) is None:
                 embedded_switch.set_device_rate(pci_slot, rate_type, 0)
             else:
-                LOG.warning("VF with PCI slot %(pci_slot)s is already "
-                            "assigned; skipping reset for '%(rate_type)s' "
-                            "device configuration parameter",
+                LOG.warning(_LW("VF with PCI slot %(pci_slot)s is already "
+                                "assigned; skipping reset for '%(rate_type)s' "
+                                "device configuration parameter"),
                             {'pci_slot': pci_slot, 'rate_type': rate_type})
         else:
-            LOG.error("PCI slot %(pci_slot)s has no mapping to Embedded "
-                      "Switch; skipping", {'pci_slot': pci_slot})
+            LOG.error(_LE("PCI slot %(pci_slot)s has no mapping to Embedded "
+                          "Switch; skipping"), {'pci_slot': pci_slot})

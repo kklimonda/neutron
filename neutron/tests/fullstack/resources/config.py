@@ -61,16 +61,20 @@ class NeutronConfigFixture(ConfigFixture):
         super(NeutronConfigFixture, self).__init__(
             env_desc, host_desc, temp_dir, base_filename='neutron.conf')
 
+        service_plugins = ['router', 'trunk']
+        if env_desc.qos:
+            service_plugins.append('qos')
+
         self.config.update({
             'DEFAULT': {
                 'host': self._generate_host(),
                 'state_path': self._generate_state_path(self.temp_dir),
                 'api_paste_config': self._generate_api_paste(),
                 'core_plugin': 'ml2',
-                'service_plugins': env_desc.service_plugins,
+                'service_plugins': ','.join(service_plugins),
                 'auth_strategy': 'noauth',
                 'debug': 'True',
-                'agent_down_time': str(env_desc.agent_down_time),
+                'agent_down_time': env_desc.agent_down_time,
                 'transport_url':
                     'rabbit://%(user)s:%(password)s@%(host)s:5672/%(vhost)s' %
                     {'user': rabbitmq_environment.user,
@@ -87,17 +91,7 @@ class NeutronConfigFixture(ConfigFixture):
             'oslo_policy': {
                 'policy_file': self._generate_policy_json(),
             },
-            'agent': {
-                'report_interval': str(env_desc.agent_down_time / 2.0)
-            },
         })
-        # Set root_helper/root_helper_daemon only when env var is set
-        root_helper = os.environ.get('OS_ROOTWRAP_CMD')
-        if root_helper:
-            self.config['agent']['root_helper'] = root_helper
-        root_helper_daemon = os.environ.get('OS_ROOTWRAP_DAEMON_CMD')
-        if root_helper_daemon:
-            self.config['agent']['root_helper_daemon'] = root_helper_daemon
 
     def _setUp(self):
         self.config['DEFAULT'].update({

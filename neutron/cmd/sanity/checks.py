@@ -23,6 +23,7 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 
+from neutron._i18n import _LE
 from neutron.agent.common import ovs_lib
 from neutron.agent.l3 import ha_router
 from neutron.agent.l3 import namespaces
@@ -31,7 +32,6 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ip_link_support
 from neutron.agent.linux import keepalived
 from neutron.agent.linux import utils as agent_utils
-from neutron.cmd import runtime_checks
 from neutron.common import constants
 from neutron.common import utils as common_utils
 from neutron.plugins.common import constants as const
@@ -94,8 +94,7 @@ def ofctl_arg_supported(cmd, **kwargs):
     br_name = common_utils.get_rand_device_name(prefix='br-test-')
     with ovs_lib.OVSBridge(br_name) as test_br:
         full_args = ["ovs-ofctl", cmd, test_br.br_name,
-                     ovs_lib._build_flow_expr_str(kwargs, cmd.split('-')[0],
-                                                  False)]
+                     ovs_lib._build_flow_expr_str(kwargs, cmd.split('-')[0])]
         try:
             agent_utils.execute(full_args, run_as_root=True)
         except RuntimeError as e:
@@ -103,8 +102,8 @@ def ofctl_arg_supported(cmd, **kwargs):
                       "command %s. Exception: %s", full_args, e)
             return False
         except Exception:
-            LOG.exception("Unexpected exception while checking supported"
-                          " feature via command: %s", full_args)
+            LOG.exception(_LE("Unexpected exception while checking supported"
+                              " feature via command: %s"), full_args)
             return False
         else:
             return True
@@ -156,8 +155,8 @@ def _vf_management_support(required_caps):
                 LOG.debug("ip link command does not support "
                           "vf capability '%(cap)s'", {'cap': cap})
     except ip_link_support.UnsupportedIpLinkCommand:
-        LOG.exception("Unexpected exception while checking supported "
-                      "ip link command")
+        LOG.exception(_LE("Unexpected exception while checking supported "
+                          "ip link command"))
         return False
     return is_supported
 
@@ -218,7 +217,15 @@ def dnsmasq_version_supported():
 
 
 def dhcp_release6_supported():
-    return runtime_checks.dhcp_release6_supported()
+    try:
+        cmd = ['dhcp_release6', '--help']
+        env = {'LC_ALL': 'C'}
+        agent_utils.execute(cmd, addl_env=env)
+    except (OSError, RuntimeError, IndexError, ValueError) as e:
+        LOG.debug("Exception while checking dhcp_release6. "
+                  "Exception: %s", e)
+        return False
+    return True
 
 
 def bridge_firewalling_enabled():
@@ -340,6 +347,7 @@ def keepalived_ipv6_supported():
 
             ha_dev.link.set_up()
             gw_dev.link.set_up()
+            ha_dev.addr.add('169.254.192.8/18')
 
             ka.configure()
 
@@ -361,11 +369,11 @@ def ovsdb_native_supported():
         ovs.get_bridges()
         return True
     except ImportError as ex:
-        LOG.error("Failed to import required modules. Ensure that the "
-                  "python-openvswitch package is installed. Error: %s",
+        LOG.error(_LE("Failed to import required modules. Ensure that the "
+                      "python-openvswitch package is installed. Error: %s"),
                   ex)
     except Exception:
-        LOG.exception("Unexpected exception occurred.")
+        LOG.exception(_LE("Unexpected exception occurred."))
 
     return False
 
@@ -411,17 +419,6 @@ def ip6tables_supported():
         return True
     except (OSError, RuntimeError, IndexError, ValueError) as e:
         LOG.debug("Exception while checking for installed ip6tables. "
-                  "Exception: %s", e)
-        return False
-
-
-def conntrack_supported():
-    try:
-        cmd = ['conntrack', '--version']
-        agent_utils.execute(cmd)
-        return True
-    except (OSError, RuntimeError, IndexError, ValueError) as e:
-        LOG.debug("Exception while checking for installed conntrack. "
                   "Exception: %s", e)
         return False
 

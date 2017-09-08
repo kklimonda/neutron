@@ -13,12 +13,11 @@
 from neutron.plugins.common import constants
 from neutron_lib.plugins import directory
 from oslo_log import log as logging
-from oslo_utils import versionutils
 from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import fields as obj_fields
 
+from neutron._i18n import _LW
 from neutron.objects import base
-from neutron.objects import common_types
 from neutron.services.qos import qos_consts
 
 LOG = logging.getLogger(__name__)
@@ -37,28 +36,11 @@ class QosRuleType(base.NeutronObject):
     # Version 1.0: Initial version
     # Version 1.1: Added QosDscpMarkingRule
     # Version 1.2: Added QosMinimumBandwidthRule
-    # Version 1.3: Added drivers field
-    VERSION = '1.3'
+    VERSION = '1.2'
 
     fields = {
         'type': RuleTypeField(),
-        'drivers': obj_fields.ListOfObjectsField(
-            'QosRuleTypeDriver', nullable=True)
     }
-
-    synthetic_fields = ['drivers']
-
-    # we don't receive context because we don't need db access at all
-    @classmethod
-    def get_object(cls, rule_type_name, **kwargs):
-        plugin = directory.get_plugin(alias=constants.QOS)
-        drivers = plugin.supported_rule_type_details(rule_type_name)
-        drivers_obj = [QosRuleTypeDriver(
-            name=driver['name'],
-            supported_parameters=driver['supported_parameters'])
-            for driver in drivers]
-
-        return cls(type=rule_type_name, drivers=drivers_obj)
 
     # we don't receive context because we don't need db access at all
     @classmethod
@@ -66,34 +48,21 @@ class QosRuleType(base.NeutronObject):
         if validate_filters:
             cls.validate_filters(**kwargs)
 
+        #TODO(mangelajo): remove in backwards compatible available rule
+        #                 inspection in Pike
+
+        core_plugin_supported_rules = getattr(
+            directory.get_plugin(), 'supported_qos_rule_types', None)
+
         rule_types = (
+            core_plugin_supported_rules or
             directory.get_plugin(alias=constants.QOS).supported_rule_types)
+
+        if core_plugin_supported_rules:
+            LOG.warning(_LW(
+                "Your core plugin defines supported_qos_rule_types which is "
+                "deprecated and shall be implemented through a QoS driver."
+            ))
 
         # TODO(ihrachys): apply filters to returned result
         return [cls(type=type_) for type_ in rule_types]
-
-    def obj_make_compatible(self, primitive, target_version):
-        _target_version = versionutils.convert_version_to_tuple(target_version)
-
-        if _target_version < (1, 3):
-            primitive.pop('drivers', None)
-
-
-@obj_base.VersionedObjectRegistry.register
-class QosRuleTypeDriver(base.NeutronObject):
-    # Version 1.0: Initial version
-    VERSION = '1.0'
-
-    fields = {
-        'name': obj_fields.StringField(),
-        'supported_parameters': common_types.ListOfDictOfMiscValuesField()
-    }
-
-    def to_dict(self):
-        return {
-            'name': self.name,
-            'supported_parameters': self.supported_parameters}
-
-    @classmethod
-    def get_objects(cls, context, **kwargs):
-        raise NotImplementedError()

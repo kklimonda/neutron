@@ -33,8 +33,6 @@ class ExtraDhcpOpt(base.NeutronDbObject):
          'ip_version': obj_fields.IntegerField(),
     }
 
-    fields_no_update = ['port_id']
-
     foreign_keys = {
         'Port': {'port_id': 'id'},
     }

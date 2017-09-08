@@ -129,8 +129,7 @@ class TestNetworkExtension(model_base.BASEV2):
     value = sa.Column(sa.String(64))
     network = orm.relationship(
         models_v2.Network,
-        backref=orm.backref('extension', cascade='delete', uselist=False,
-                            lazy='joined'))
+        backref=orm.backref('extension', cascade='delete', uselist=False))
 
 
 class TestSubnetExtension(model_base.BASEV2):
@@ -140,8 +139,7 @@ class TestSubnetExtension(model_base.BASEV2):
     value = sa.Column(sa.String(64))
     subnet = orm.relationship(
         models_v2.Subnet,
-        backref=orm.backref('extension', cascade='delete', uselist=False,
-                            lazy='joined'))
+        backref=orm.backref('extension', cascade='delete', uselist=False))
 
 
 class TestPortExtension(model_base.BASEV2):
@@ -151,8 +149,7 @@ class TestPortExtension(model_base.BASEV2):
     value = sa.Column(sa.String(64))
     port = orm.relationship(
         models_v2.Port,
-        backref=orm.backref('extension', cascade='delete', uselist=False,
-                            lazy='joined'))
+        backref=orm.backref('extension', cascade='delete', uselist=False))
 
 
 class TestDBExtensionDriver(TestExtensionDriverBase):

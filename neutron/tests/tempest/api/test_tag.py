@@ -10,7 +10,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 
@@ -19,9 +18,8 @@ from neutron.tests.tempest.api import base
 
 class TagTestJSON(base.BaseAdminNetworkTest):
 
-    required_extensions = ['tag']
-
     @classmethod
+    @test.requires_ext(extension="tag", service="network")
     def resource_setup(cls):
         super(TagTestJSON, cls).resource_setup()
         cls.res_id = cls._create_resource()
@@ -83,8 +81,8 @@ class TagNetworkTestJSON(TagTestJSON):
         network = cls.create_network()
         return network['id']
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('5621062d-fbfb-4437-9d69-138c78ea4188')
+    @test.attr(type='smoke')
+    @test.idempotent_id('5621062d-fbfb-4437-9d69-138c78ea4188')
     def test_network_tags(self):
         self._test_tag_operations()
 
@@ -98,8 +96,8 @@ class TagSubnetTestJSON(TagTestJSON):
         subnet = cls.create_subnet(network)
         return subnet['id']
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('2805aabf-a94c-4e70-a0b2-9814f06beb03')
+    @test.attr(type='smoke')
+    @test.idempotent_id('2805aabf-a94c-4e70-a0b2-9814f06beb03')
     @test.requires_ext(extension="tag-ext", service="network")
     def test_subnet_tags(self):
         self._test_tag_operations()
@@ -114,8 +112,8 @@ class TagPortTestJSON(TagTestJSON):
         port = cls.create_port(network)
         return port['id']
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('c7c44f2c-edb0-4ebd-a386-d37cec155c34')
+    @test.attr(type='smoke')
+    @test.idempotent_id('c7c44f2c-edb0-4ebd-a386-d37cec155c34')
     @test.requires_ext(extension="tag-ext", service="network")
     def test_port_tags(self):
         self._test_tag_operations()
@@ -130,8 +128,8 @@ class TagSubnetPoolTestJSON(TagTestJSON):
                                            prefixes=['10.0.0.0/8'])
         return subnetpool['id']
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('bdc1c24b-c0b5-4835-953c-8f67dc11edfe')
+    @test.attr(type='smoke')
+    @test.idempotent_id('bdc1c24b-c0b5-4835-953c-8f67dc11edfe')
     @test.requires_ext(extension="tag-ext", service="network")
     def test_subnetpool_tags(self):
         self._test_tag_operations()
@@ -145,8 +143,8 @@ class TagRouterTestJSON(TagTestJSON):
         router = cls.create_router(router_name='test')
         return router['id']
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('b898ff92-dc33-4232-8ab9-2c6158c80d28')
+    @test.attr(type='smoke')
+    @test.idempotent_id('b898ff92-dc33-4232-8ab9-2c6158c80d28')
     @test.requires_ext(extension="router", service="network")
     @test.requires_ext(extension="tag-ext", service="network")
     def test_router_tags(self):
@@ -155,9 +153,9 @@ class TagRouterTestJSON(TagTestJSON):
 
 class TagFilterTestJSON(base.BaseAdminNetworkTest):
     credentials = ['primary', 'alt', 'admin']
-    required_extensions = ['tag']
 
     @classmethod
+    @test.requires_ext(extension="tag", service="network")
     def resource_setup(cls):
         super(TagFilterTestJSON, cls).resource_setup()
 
@@ -177,7 +175,7 @@ class TagFilterTestJSON(base.BaseAdminNetworkTest):
     @classmethod
     def setup_clients(cls):
         super(TagFilterTestJSON, cls).setup_clients()
-        cls.client = cls.os_alt.network_client
+        cls.client = cls.alt_manager.network_client
 
     def _assertEqualResources(self, expected, res):
         actual = [n['name'] for n in res if n['name'].startswith('tag-res')]
@@ -237,8 +235,8 @@ class TagFilterNetworkTestJSON(TagFilterTestJSON):
         res = self.client.list_networks(**filters)
         return res[self.resource]
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('a66b5cca-7db2-40f5-a33d-8ac9f864e53e')
+    @test.attr(type='smoke')
+    @test.idempotent_id('a66b5cca-7db2-40f5-a33d-8ac9f864e53e')
     def test_filter_network_tags(self):
         self._test_filter_tags()
 
@@ -256,8 +254,8 @@ class TagFilterSubnetTestJSON(TagFilterTestJSON):
         res = self.client.list_subnets(**filters)
         return res[self.resource]
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('dd8f9ba7-bcf6-496f-bead-714bd3daac10')
+    @test.attr(type='smoke')
+    @test.idempotent_id('dd8f9ba7-bcf6-496f-bead-714bd3daac10')
     @test.requires_ext(extension="tag-ext", service="network")
     def test_filter_subnet_tags(self):
         self._test_filter_tags()
@@ -276,8 +274,8 @@ class TagFilterPortTestJSON(TagFilterTestJSON):
         res = self.client.list_ports(**filters)
         return res[self.resource]
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('09c036b8-c8d0-4bee-b776-7f4601512898')
+    @test.attr(type='smoke')
+    @test.idempotent_id('09c036b8-c8d0-4bee-b776-7f4601512898')
     @test.requires_ext(extension="tag-ext", service="network")
     def test_filter_port_tags(self):
         self._test_filter_tags()
@@ -296,8 +294,8 @@ class TagFilterSubnetpoolTestJSON(TagFilterTestJSON):
         res = self.client.list_subnetpools(**filters)
         return res[self.resource]
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('16ae7ad2-55c2-4821-9195-bfd04ab245b7')
+    @test.attr(type='smoke')
+    @test.idempotent_id('16ae7ad2-55c2-4821-9195-bfd04ab245b7')
     @test.requires_ext(extension="tag-ext", service="network")
     def test_filter_subnetpool_tags(self):
         self._test_filter_tags()
@@ -315,37 +313,8 @@ class TagFilterRouterTestJSON(TagFilterTestJSON):
         res = self.client.list_routers(**filters)
         return res[self.resource]
 
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('cdd3f3ea-073d-4435-a6cb-826a4064193d')
+    @test.attr(type='smoke')
+    @test.idempotent_id('cdd3f3ea-073d-4435-a6cb-826a4064193d')
     @test.requires_ext(extension="tag-ext", service="network")
     def test_filter_router_tags(self):
         self._test_filter_tags()
-
-
-class UpdateTagsTest(base.BaseAdminNetworkTest):
-
-    required_extensions = ['tag']
-
-    def _get_and_compare_tags(self, tags, res_id):
-        # nothing specific about networks here, just a resource that is
-        # available in all setups
-        res_body = self.client.get_tags('networks', res_id)
-        self.assertItemsEqual(tags, res_body['tags'])
-
-    @decorators.attr(type='smoke')
-    @decorators.idempotent_id('74c56fb1-a3b1-4a62-a8d2-d04dca6bd4cd')
-    def test_update_tags_affects_only_updated_resource(self):
-        res1 = self.create_network()
-        res2 = self.create_network()
-
-        self.client.update_tags('networks', res1['id'], ['red', 'blue'])
-        self._get_and_compare_tags(['red', 'blue'], res1['id'])
-
-        self.client.update_tags('networks', res2['id'], ['red'])
-        self._get_and_compare_tags(['red'], res2['id'])
-
-        self.client.update_tags('networks', res2['id'], [])
-        self._get_and_compare_tags([], res2['id'])
-
-        # check that updates on res2 hasn't dropped tags from res1
-        self._get_and_compare_tags(['red', 'blue'], res1['id'])

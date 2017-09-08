@@ -14,26 +14,28 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api.definitions import network as net_def
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources
+from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
-from neutron_lib.plugins import constants
 from neutron_lib.plugins import directory
 from oslo_log import log as logging
+from sqlalchemy import sql
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE
+from neutron.api.v2 import attributes
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
 from neutron.common import exceptions as c_exc
-from neutron.db import _resource_extend as resource_extend
 from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
 from neutron.db import common_db_mixin
+from neutron.db import db_base_plugin_v2
+from neutron.db.models import external_net as ext_net_models
+from neutron.db import models_v2
+from neutron.db import standard_attr
 from neutron.extensions import l3
 from neutron.objects import auto_allocate as auto_allocate_obj
-from neutron.objects import base as base_obj
 from neutron.objects import exceptions as obj_exc
-from neutron.objects import network as net_obj
 from neutron.plugins.common import utils as p_utils
 from neutron.services.auto_allocate import exceptions
 
@@ -42,37 +44,36 @@ IS_DEFAULT = 'is_default'
 CHECK_REQUIREMENTS = 'dry-run'
 
 
+def _extend_external_network_default(core_plugin, net_res, net_db):
+    """Add is_default field to 'show' response."""
+    if net_db.external is not None:
+        net_res[IS_DEFAULT] = net_db.external.is_default
+    return net_res
+
+
 @db_api.retry_if_session_inactive()
 def _ensure_external_network_default_value_callback(
-    resource, event, trigger, context, request, network, **kwargs):
+    resource, event, trigger, context, request, network):
     """Ensure the is_default db field matches the create/update request."""
-    is_default = request.get(IS_DEFAULT)
-    if is_default is None:
-        return
-    if is_default:
+    is_default = request.get(IS_DEFAULT, False)
+    if event in (events.BEFORE_CREATE, events.BEFORE_UPDATE) and is_default:
         # ensure there is only one default external network at any given time
-        pager = base_obj.Pager(limit=1)
-        objs = net_obj.ExternalNetwork.get_objects(context,
-            _pager=pager, is_default=True)
-        if objs:
-            if objs[0] and network['id'] != objs[0].network_id:
-                raise exceptions.DefaultExternalNetworkExists(
-                    net_id=objs[0].network_id)
+        obj = (context.session.query(ext_net_models.ExternalNetwork).
+            filter_by(is_default=True)).first()
+        if obj and network['id'] != obj.network_id:
+            raise exceptions.DefaultExternalNetworkExists(
+                net_id=obj.network_id)
 
-    orig = kwargs.get('original_network')
-    if orig and orig.get(IS_DEFAULT) == is_default:
-        return
-    network[IS_DEFAULT] = is_default
     # Reflect the status of the is_default on the create/update request
-    obj = net_obj.ExternalNetwork.get_object(context,
-                                             network_id=network['id'])
-    if obj:
-        obj.is_default = is_default
-        obj.update()
+    obj = (context.session.query(ext_net_models.ExternalNetwork).
+        filter_by(network_id=network['id']))
+    obj.update({IS_DEFAULT: is_default})
 
 
-@resource_extend.has_resource_extenders
 class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
+
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+        attributes.NETWORKS, [_extend_external_network_default])
 
     def __new__(cls, *args, **kwargs):
         # NOTE(kevinbenton): we subscribe on object construction because
@@ -80,9 +81,11 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
         new = super(AutoAllocatedTopologyMixin, cls).__new__(cls, *args,
                                                              **kwargs)
         registry.subscribe(_ensure_external_network_default_value_callback,
-            resources.NETWORK, events.PRECOMMIT_UPDATE)
+            resources.EXTERNAL_NETWORK, events.BEFORE_CREATE)
         registry.subscribe(_ensure_external_network_default_value_callback,
-            resources.NETWORK, events.PRECOMMIT_CREATE)
+            resources.EXTERNAL_NETWORK, events.AFTER_CREATE)
+        registry.subscribe(_ensure_external_network_default_value_callback,
+            resources.EXTERNAL_NETWORK, events.BEFORE_UPDATE)
         return new
 
     # TODO(armax): if a tenant modifies auto allocated resources under
@@ -106,14 +109,6 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
         if not getattr(self, '_l3_plugin', None):
             self._l3_plugin = directory.get_plugin(constants.L3)
         return self._l3_plugin
-
-    @staticmethod
-    @resource_extend.extends([net_def.COLLECTION_NAME])
-    def _extend_external_network_default(net_res, net_db):
-        """Add is_default field to 'show' response."""
-        if net_db.external is not None:
-            net_res[IS_DEFAULT] = net_db.external.is_default
-        return net_res
 
     def get_auto_allocated_topology(self, context, tenant_id, fields=None):
         """Return tenant's network associated to auto-allocated topology.
@@ -170,8 +165,8 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
         except exceptions.UnknownProvisioningError as e:
             # Clean partially provisioned topologies, and reraise the
             # error. If it can be retried, so be it.
-            LOG.error("Unknown error while provisioning topology for "
-                      "tenant %(tenant_id)s. Reason: %(reason)s",
+            LOG.error(_LE("Unknown error while provisioning topology for "
+                          "tenant %(tenant_id)s. Reason: %(reason)s"),
                       {'tenant_id': tenant_id, 'reason': e})
             self._cleanup(
                 context, network_id=e.network_id,
@@ -223,19 +218,23 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
 
     def _get_default_external_network(self, context):
         """Get the default external network for the deployment."""
-
-        default_external_networks = net_obj.ExternalNetwork.get_objects(
-            context, is_default=True)
+        with context.session.begin(subtransactions=True):
+            default_external_networks = (context.session.query(
+                ext_net_models.ExternalNetwork).
+                filter_by(is_default=sql.true()).
+                join(models_v2.Network).
+                join(standard_attr.StandardAttribute).
+                order_by(standard_attr.StandardAttribute.id).all())
 
         if not default_external_networks:
-            LOG.error("Unable to find default external network "
-                      "for deployment, please create/assign one to "
-                      "allow auto-allocation to work correctly.")
+            LOG.error(_LE("Unable to find default external network "
+                          "for deployment, please create/assign one to "
+                          "allow auto-allocation to work correctly."))
             raise exceptions.AutoAllocationFailure(
                 reason=_("No default router:external network"))
         if len(default_external_networks) > 1:
-            LOG.error("Multiple external default networks detected. "
-                      "Network %s is true 'default'.",
+            LOG.error(_LE("Multiple external default networks detected. "
+                          "Network %s is true 'default'."),
                       default_external_networks[0]['network_id'])
         return default_external_networks[0].network_id
 
@@ -249,7 +248,7 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
             s for s in default_subnet_pools if s
         ]
         if not available_pools:
-            LOG.error("No default pools available")
+            LOG.error(_LE("No default pools available"))
             raise n_exc.NotFound()
 
         return available_pools
@@ -280,9 +279,9 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
             return subnets
         except (c_exc.SubnetAllocationError, ValueError,
                 n_exc.BadRequest, n_exc.NotFound) as e:
-            LOG.error("Unable to auto allocate topology for tenant "
-                      "%(tenant_id)s due to missing or unmet "
-                      "requirements. Reason: %(reason)s",
+            LOG.error(_LE("Unable to auto allocate topology for tenant "
+                          "%(tenant_id)s due to missing or unmet "
+                          "requirements. Reason: %(reason)s"),
                       {'tenant_id': tenant_id, 'reason': e})
             if network:
                 self._cleanup(context, network['id'])
@@ -312,9 +311,9 @@ class AutoAllocatedTopologyMixin(common_db_mixin.CommonDbMixin):
                 attached_subnets.append(subnet)
             return router
         except n_exc.BadRequest as e:
-            LOG.error("Unable to auto allocate topology for tenant "
-                      "%(tenant_id)s because of router errors. "
-                      "Reason: %(reason)s",
+            LOG.error(_LE("Unable to auto allocate topology for tenant "
+                          "%(tenant_id)s because of router errors. "
+                          "Reason: %(reason)s"),
                       {'tenant_id': tenant_id, 'reason': e})
             router_id = router['id'] if router else None
             self._cleanup(context,

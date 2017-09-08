@@ -10,10 +10,44 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.callbacks import exceptions
+from neutron_lib import exceptions
 
-# NOTE(boden): This module will be removed soon; use neutron-lib callbacks
+from neutron._i18n import _
 
-Invalid = exceptions.Invalid
-CallbackFailure = exceptions.CallbackFailure
-NotificationError = exceptions.NotificationError
+
+class Invalid(exceptions.NeutronException):
+    message = _("The value '%(value)s' for %(element)s is not valid.")
+
+
+class CallbackFailure(exceptions.MultipleExceptions):
+
+    def __init__(self, errors):
+        self.errors = errors
+
+    def __str__(self):
+        if isinstance(self.errors, list):
+            return ','.join(str(error) for error in self.errors)
+        else:
+            return str(self.errors)
+
+    @property
+    def inner_exceptions(self):
+        if isinstance(self.errors, list):
+            return [self._unpack_if_notification_error(e) for e in self.errors]
+        return [self._unpack_if_notification_error(self.errors)]
+
+    @staticmethod
+    def _unpack_if_notification_error(exc):
+        if isinstance(exc, NotificationError):
+            return exc.error
+        return exc
+
+
+class NotificationError(object):
+
+    def __init__(self, callback_id, error):
+        self.callback_id = callback_id
+        self.error = error
+
+    def __str__(self):
+        return 'Callback %s failed with "%s"' % (self.callback_id, self.error)

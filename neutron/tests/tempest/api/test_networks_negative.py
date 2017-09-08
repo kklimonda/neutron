@@ -10,8 +10,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
+from tempest import test
 import testtools
 
 from neutron.tests.tempest.api import base
@@ -25,8 +25,8 @@ class NetworksNegativeTest(base.BaseNetworkTest):
         cls.network = cls.create_network()
         cls.subnet = cls.create_subnet(cls.network)
 
-    @decorators.attr(type='negative')
-    @decorators.idempotent_id('9f80f25b-5d1b-4f26-9f6b-774b9b270819')
+    @test.attr(type='negative')
+    @test.idempotent_id('9f80f25b-5d1b-4f26-9f6b-774b9b270819')
     def test_delete_network_in_use(self):
         port = self.client.create_port(network_id=self.network['id'])
         self.addCleanup(self.client.delete_port, port['port']['id'])

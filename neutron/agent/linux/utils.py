@@ -13,17 +13,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import fcntl
 import glob
 import grp
 import os
 import pwd
 import shlex
 import socket
+import struct
 import threading
-import time
 
+import debtcollector
 import eventlet
 from eventlet.green import subprocess
+from eventlet import greenthread
+from neutron_lib import constants
 from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -31,12 +35,13 @@ from oslo_rootwrap import client
 from oslo_utils import encodeutils
 from oslo_utils import excutils
 from oslo_utils import fileutils
+from six import iterbytes
 from six.moves import http_client as httplib
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE
+from neutron.agent.common import config
 from neutron.agent.linux import xenapi_root_helper
 from neutron.common import utils
-from neutron.conf.agent import common as config
 from neutron import wsgi
 
 
@@ -111,7 +116,7 @@ def execute_rootwrap_daemon(cmd, process_input, addl_env):
         return client.execute(cmd, process_input)
     except Exception:
         with excutils.save_and_reraise_exception():
-            LOG.error("Rootwrap error running command: %s", cmd)
+            LOG.error(_LE("Rootwrap error running command: %s"), cmd)
 
 
 def execute(cmd, process_input=None, addl_env=None,
@@ -149,14 +154,30 @@ def execute(cmd, process_input=None, addl_env=None,
                 LOG.error(msg)
             if check_exit_code:
                 raise ProcessExecutionError(msg, returncode=returncode)
+        else:
+            LOG.debug("Exit code: %d", returncode)
 
     finally:
         # NOTE(termie): this appears to be necessary to let the subprocess
         #               call clean something up in between calls, without
         #               it two execute calls in a row hangs the second one
-        time.sleep(0)
+        greenthread.sleep(0)
 
     return (_stdout, _stderr) if return_stderr else _stdout
+
+
+@debtcollector.removals.remove(
+    version='Ocata', removal_version='Pike',
+    message="Use 'neutron.agent.linux.ip_lib.get_device_mac' instead."
+)
+def get_interface_mac(interface):
+    MAC_START = 18
+    MAC_END = 24
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    dev = interface[:constants.DEVICE_NAME_MAX_LEN]
+    dev = encodeutils.to_utf8(dev)
+    info = fcntl.ioctl(s.fileno(), 0x8927, struct.pack('256s', dev))
+    return ':'.join(["%02x" % b for b in iterbytes(info[MAC_START:MAC_END])])
 
 
 def find_child_pids(pid, recursive=False):
@@ -221,8 +242,11 @@ def kill_process(pid, signal, run_as_root=False):
     """Kill the process with the given pid using the given signal."""
     try:
         execute(['kill', '-%d' % signal, pid], run_as_root=run_as_root)
-    except ProcessExecutionError:
-        if process_is_running(pid):
+    except ProcessExecutionError as ex:
+        # TODO(dalvarez): this check has i18n issues. Maybe we can use
+        # use gettext module setting a global locale or just pay attention
+        # to returncode instead of checking the ex message.
+        if 'No such process' not in str(ex):
             raise
 
 
@@ -249,7 +273,7 @@ def get_value_from_file(filename, converter=None):
             try:
                 return converter(f.read()) if converter else f.read()
             except ValueError:
-                LOG.error('Unable to convert value in %s', filename)
+                LOG.error(_LE('Unable to convert value in %s'), filename)
     except IOError:
         LOG.debug('Unable to access %s', filename)
 
@@ -307,15 +331,8 @@ def remove_abs_path(cmd):
     return cmd
 
 
-def process_is_running(pid):
-    """Find if the given PID is running in the system.
-
-    """
-    return pid and os.path.exists('/proc/%s' % pid)
-
-
 def get_cmdline_from_pid(pid):
-    if not process_is_running(pid):
+    if pid is None or not os.path.exists('/proc/%s' % pid):
         return []
     with open('/proc/%s/cmdline' % pid, 'r') as f:
         return f.readline().split('\0')[:-1]
@@ -387,6 +404,12 @@ class UnixDomainHTTPConnection(httplib.HTTPConnection):
 
 
 class UnixDomainHttpProtocol(eventlet.wsgi.HttpProtocol):
+    # TODO(jlibosva): This is just a workaround not to set TCP_NODELAY on
+    # socket due to 40714b1ffadd47b315ca07f9b85009448f0fe63d evenlet change
+    # This should be removed once
+    # https://github.com/eventlet/eventlet/issues/301 is fixed
+    disable_nagle_algorithm = False
+
     def __init__(self, request, client_address, server):
         if not client_address:
             client_address = ('<local>', 0)
@@ -419,5 +442,4 @@ class UnixDomainWSGIServer(wsgi.Server):
                              application,
                              max_size=self.num_threads,
                              protocol=UnixDomainHttpProtocol,
-                             log=logger,
-                             log_format=cfg.CONF.wsgi_log_format)
+                             log=logger)

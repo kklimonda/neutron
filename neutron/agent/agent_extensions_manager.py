@@ -13,6 +13,7 @@
 from oslo_log import log
 import stevedore
 
+from neutron._i18n import _LI
 from neutron.conf.agent import agent_extensions_manager as agent_ext_mgr_config
 
 LOG = log.getLogger(__name__)
@@ -27,7 +28,7 @@ class AgentExtensionsManager(stevedore.named.NamedExtensionManager):
         super(AgentExtensionsManager, self).__init__(
             namespace, conf.agent.extensions,
             invoke_on_load=True, name_order=True)
-        LOG.info("Loaded agent extensions: %s", self.names())
+        LOG.info(_LI("Loaded agent extensions: %s"), self.names())
 
     def initialize(self, connection, driver_type, agent_api=None):
         """Initialize enabled agent extensions.
@@ -43,7 +44,7 @@ class AgentExtensionsManager(stevedore.named.NamedExtensionManager):
         """
         # Initialize each agent extension in the list.
         for extension in self:
-            LOG.info("Initializing agent extension '%s'", extension.name)
+            LOG.info(_LI("Initializing agent extension '%s'"), extension.name)
             # If the agent has provided an agent_api object, this object will
             # be passed to all interested extensions.  This object must be
             # consumed by each such extension before the extension's
