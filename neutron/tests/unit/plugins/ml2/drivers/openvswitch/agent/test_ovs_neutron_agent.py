@@ -42,6 +42,7 @@ from neutron.tests.unit.plugins.ml2.drivers.openvswitch.agent \
 
 
 NOTIFIER = 'neutron.plugins.ml2.rpc.AgentNotifierApi'
+PULLAPI = 'neutron.api.rpc.handlers.resources_rpc.ResourcesPullRpcApi'
 OVS_LINUX_KERN_VERS_WITHOUT_VXLAN = "3.12.0"
 
 FAKE_MAC = '00:11:22:33:44:55'
@@ -101,6 +102,7 @@ class TestOvsNeutronAgent(object):
     def setUp(self):
         super(TestOvsNeutronAgent, self).setUp()
         self.useFixture(test_vlanmanager.LocalVlanManagerFixture())
+        mock.patch(PULLAPI).start()
         notifier_p = mock.patch(NOTIFIER)
         notifier_cls = notifier_p.start()
         self.notifier = mock.Mock()
@@ -112,7 +114,6 @@ class TestOvsNeutronAgent(object):
                              'neutron.agent.firewall.NoopFirewallDriver',
                              group='SECURITYGROUP')
         cfg.CONF.set_default('quitting_rpc_timeout', 10, 'AGENT')
-        cfg.CONF.set_default('prevent_arp_spoofing', False, 'AGENT')
         cfg.CONF.set_default('local_ip', '127.0.0.1', 'OVS')
         mock.patch(
             'neutron.agent.ovsdb.native.helpers.enable_connection_uri').start()
@@ -123,6 +124,7 @@ class TestOvsNeutronAgent(object):
         mock.patch('neutron.agent.common.ovs_lib.BaseOVS.config',
                    new_callable=mock.PropertyMock,
                    return_value={}).start()
+        mock.patch('neutron.agent.ovsdb.impl_idl._connection').start()
         self.agent = self._make_agent()
         self.agent.sg_agent = mock.Mock()
 
@@ -211,6 +213,20 @@ class TestOvsNeutronAgent(object):
         expected = n_const.AGENT_TYPE_OVS
         self.assertEqual(expected,
                          self.agent.agent_state['agent_type'])
+
+    def test_agent_available_local_vlans(self):
+        expected = [p_const.MIN_VLAN_TAG,
+                    p_const.MIN_VLAN_TAG + 1,
+                    p_const.MAX_VLAN_TAG - 1,
+                    p_const.MAX_VLAN_TAG]
+        exception = [p_const.MIN_VLAN_TAG - 1,
+                     p_const.MAX_VLAN_TAG + 1,
+                     p_const.MAX_VLAN_TAG + 2]
+        available_vlan = self.agent.available_local_vlans
+        for tag in expected:
+            self.assertIn(tag, available_vlan)
+        for tag in exception:
+            self.assertNotIn(tag, available_vlan)
 
     def test_agent_type_alt(self):
         with mock.patch.object(self.mod_agent.OVSNeutronAgent,
@@ -617,10 +633,15 @@ class TestOvsNeutronAgent(object):
             added=set([3]), current=vif_port_set,
             removed=set([2]), updated=set([1])
         )
-        with mock.patch.object(self.agent, 'tun_br', autospec=True):
+        with mock.patch.object(self.agent, 'tun_br', autospec=True), \
+                mock.patch.object(self.agent.plugin_rpc,
+                                  'update_device_list') as upd_l:
             actual = self.mock_scan_ports(
                 vif_port_set, registered_ports, port_tags_dict=port_tags_dict)
         self.assertEqual(expected, actual)
+        upd_l.assert_called_once_with(mock.ANY, [], set([1]),
+                                      self.agent.agent_id,
+                                      self.agent.conf.host)
 
     def test_update_retries_map_and_remove_devs_not_to_retry(self):
         failed_devices_retries_map = {
@@ -696,9 +717,11 @@ class TestOvsNeutronAgent(object):
         port_details = [
             {'network_id': 'net1', 'vif_port': vif_port1,
              'device': devices_up[0],
+             'device_owner': 'network:dhcp',
              'admin_state_up': True},
             {'network_id': 'net1', 'vif_port': vif_port2,
              'device': devices_down[0],
+             'device_owner': 'network:dhcp',
              'admin_state_up': False}]
         with mock.patch.object(
             self.agent.plugin_rpc, 'update_device_list',
@@ -1383,7 +1406,7 @@ class TestOvsNeutronAgent(object):
                 mock.patch.object(self.agent, 'patch_tun_ofport', new=2),\
                 mock.patch.object(self.agent, 'patch_int_ofport', new=2),\
                 mock.patch.object(self.agent.tun_br,
-                                  'delete_flows') as delete,\
+                                  'uninstall_flows') as delete,\
                 mock.patch.object(self.agent.int_br,
                                   "add_patch_port") as int_patch_port,\
                 mock.patch.object(self.agent.tun_br,
@@ -1448,7 +1471,7 @@ class TestOvsNeutronAgent(object):
         fdb_entry = {'net3': {}}
         with mock.patch.object(self.agent.tun_br, 'add_flow') as add_flow_fn,\
                 mock.patch.object(self.agent.tun_br,
-                                  'delete_flows') as del_flow_fn,\
+                                  'uninstall_flows') as del_flow_fn,\
                 mock.patch.object(self.agent,
                                   '_setup_tunnel_port') as add_tun_fn,\
                 mock.patch.object(self.agent,
@@ -1586,11 +1609,11 @@ class TestOvsNeutronAgent(object):
         lvm.tun_ofports = set(['1', '2'])
         with mock.patch.object(self.agent.tun_br, 'mod_flow') as mod_flow_fn,\
                 mock.patch.object(self.agent.tun_br,
-                                  'delete_flows') as delete_flows_fn:
+                                  'uninstall_flows') as uninstall_flows_fn:
             self.agent.del_fdb_flow(self.agent.tun_br, n_const.FLOODING_ENTRY,
                                     '1.1.1.1', lvm, '3')
             self.assertFalse(mod_flow_fn.called)
-            self.assertFalse(delete_flows_fn.called)
+            self.assertFalse(uninstall_flows_fn.called)
 
     def test_recl_lv_port_to_preserve(self):
         self._prepare_l2_pop_ofports()
@@ -2056,7 +2079,8 @@ class TestOvsNeutronAgent(object):
         expected = [
             mock.call(in_port=1)
         ]
-        self.assertEqual(expected, self.agent.int_br.delete_flows.mock_calls)
+        self.assertEqual(expected,
+                         self.agent.int_br.uninstall_flows.mock_calls)
         self.assertEqual(newmap, self.agent.vifname_to_ofport_map)
         self.assertFalse(
             self.agent.int_br.delete_arp_spoofing_protection.called)
@@ -2120,9 +2144,9 @@ class TestOvsNeutronAgentRyu(TestOvsNeutronAgent,
     def test_cleanup_stale_flows(self):
         uint64_max = (1 << 64) - 1
         with mock.patch.object(self.agent.int_br,
-                              'dump_flows') as dump_flows,\
+                               'dump_flows') as dump_flows,\
                 mock.patch.object(self.agent.int_br,
-                                  'delete_flows') as del_flow:
+                                  'uninstall_flows') as uninstall_flows:
             self.agent.int_br.set_agent_uuid_stamp(1234)
             dump_flows.return_value = [
                 # mock ryu.ofproto.ofproto_v1_3_parser.OFPFlowStats
@@ -2137,8 +2161,8 @@ class TestOvsNeutronAgentRyu(TestOvsNeutronAgent,
                                   cookie_mask=uint64_max),
                         mock.call(cookie=9029,
                                   cookie_mask=uint64_max)]
-            del_flow.assert_has_calls(expected, any_order=True)
-            self.assertEqual(len(expected), len(del_flow.mock_calls))
+            uninstall_flows.assert_has_calls(expected, any_order=True)
+            self.assertEqual(len(expected), len(uninstall_flows.mock_calls))
 
 
 class AncillaryBridgesTest(object):
@@ -2146,9 +2170,10 @@ class AncillaryBridgesTest(object):
     def setUp(self):
         super(AncillaryBridgesTest, self).setUp()
         conn_patcher = mock.patch(
-            'neutron.agent.ovsdb.native.connection.Connection.start')
+            'neutron.agent.ovsdb.impl_idl._connection')
         conn_patcher.start()
         self.addCleanup(conn_patcher.stop)
+        mock.patch(PULLAPI).start()
         notifier_p = mock.patch(NOTIFIER)
         notifier_cls = notifier_p.start()
         self.notifier = mock.Mock()
@@ -2268,6 +2293,7 @@ class TestOvsDvrNeutronAgent(object):
 
     def setUp(self):
         super(TestOvsDvrNeutronAgent, self).setUp()
+        mock.patch(PULLAPI).start()
         notifier_p = mock.patch(NOTIFIER)
         notifier_cls = notifier_p.start()
         self.notifier = mock.Mock()
@@ -2279,6 +2305,7 @@ class TestOvsDvrNeutronAgent(object):
         mock.patch('neutron.agent.common.ovs_lib.BaseOVS.config',
                    new_callable=mock.PropertyMock,
                    return_value={}).start()
+        mock.patch('neutron.agent.ovsdb.impl_idl._connection').start()
         with mock.patch.object(self.mod_agent.OVSNeutronAgent,
                                'setup_integration_br'),\
                 mock.patch.object(self.mod_agent.OVSNeutronAgent,
@@ -3021,8 +3048,6 @@ class TestOvsDvrNeutronAgent(object):
                                        priority=1),
                 mock.call.install_drop(table_id=constants.DVR_TO_SRC_MAC_VLAN,
                                        priority=1),
-                mock.call.install_normal(table_id=constants.LOCAL_SWITCHING,
-                                         priority=1),
                 mock.call.install_drop(table_id=constants.LOCAL_SWITCHING,
                                        priority=2,
                                        in_port=ioport),

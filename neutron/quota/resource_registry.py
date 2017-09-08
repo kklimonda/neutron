@@ -14,7 +14,8 @@ from oslo_config import cfg
 from oslo_log import log
 import six
 
-from neutron._i18n import _, _LI, _LW
+from neutron._i18n import _
+from neutron.db import api as db_api
 from neutron.quota import resource
 
 LOG = log.getLogger(__name__)
@@ -71,7 +72,7 @@ def set_resources_dirty(context):
         return
 
     for res in get_all_resources().values():
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             if is_tracked(res.name) and res.dirty:
                 res.mark_dirty(context)
 
@@ -171,14 +172,14 @@ class ResourceRegistry(object):
 
         if (not cfg.CONF.QUOTAS.track_quota_usage or
             resource_name not in self._tracked_resource_mappings):
-            LOG.info(_LI("Creating instance of CountableResource for "
-                         "resource:%s"), resource_name)
+            LOG.info("Creating instance of CountableResource for "
+                     "resource:%s", resource_name)
             return resource.CountableResource(
                 resource_name, resource._count_resource,
                 'quota_%s' % resource_name)
         else:
-            LOG.info(_LI("Creating instance of TrackedResource for "
-                         "resource:%s"), resource_name)
+            LOG.info("Creating instance of TrackedResource for "
+                     "resource:%s", resource_name)
             return resource.TrackedResource(
                 resource_name,
                 self._tracked_resource_mappings[resource_name],
@@ -212,7 +213,7 @@ class ResourceRegistry(object):
         """Find out if a resource if tracked or not.
 
         :param resource_name: name of the resource.
-        :returns True if resource_name is registered and tracked, otherwise
+        :returns: True if resource_name is registered and tracked, otherwise
                  False. Please note that here when False it returned it
                  simply means that resource_name is not a TrackedResource
                  instance, it does not necessarily mean that the resource
@@ -222,7 +223,7 @@ class ResourceRegistry(object):
 
     def register_resource(self, resource):
         if resource.name in self._resources:
-            LOG.warning(_LW('%s is already registered'), resource.name)
+            LOG.warning('%s is already registered', resource.name)
         if resource.name in self._tracked_resource_mappings:
             resource.register_events()
         self._resources[resource.name] = resource

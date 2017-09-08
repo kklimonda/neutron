@@ -17,6 +17,7 @@ import collections
 import re
 
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
 from oslo_config import cfg
@@ -24,10 +25,9 @@ from oslo_db import exception as db_exc
 from oslo_log import log as logging
 from oslo_policy import policy
 from oslo_utils import excutils
-from oslo_utils import importutils
 import six
 
-from neutron._i18n import _, _LE, _LW
+from neutron._i18n import _
 from neutron.api.v2 import attributes
 from neutron.common import cache_utils as cache
 from neutron.common import constants as const
@@ -105,7 +105,7 @@ def _should_validate_sub_attributes(attribute, sub_attr):
     validate = attribute.get('validate')
     return (validate and isinstance(sub_attr, collections.Iterable) and
             any([k.startswith('type:dict') and
-                 v for (k, v) in six.iteritems(validate)]))
+                 v for (k, v) in validate.items()]))
 
 
 def _build_subattr_match_rule(attr_name, attr, action, target):
@@ -116,8 +116,7 @@ def _build_subattr_match_rule(attr_name, attr, action, target):
     validate = attr['validate']
     key = [k for k in validate.keys() if k.startswith('type:dict')]
     if not key:
-        LOG.warning(_LW("Unable to find data type descriptor "
-                        "for attribute %s"),
+        LOG.warning("Unable to find data type descriptor for attribute %s",
                     attr_name)
         return
     data = validate[key[0]]
@@ -222,7 +221,6 @@ class OwnerCheck(policy.Check):
         f = getattr(directory.get_plugin(), 'get_%s' % resource_type)
         # f *must* exist, if not found it is better to let neutron
         # explode. Check will be performed with admin context
-        context = importutils.import_module('neutron.context')
         try:
             data = f(context.get_admin_context(),
                      resource_id,
@@ -236,7 +234,7 @@ class OwnerCheck(policy.Check):
             raise db_exc.RetryRequest(e)
         except Exception:
             with excutils.save_and_reraise_exception():
-                LOG.exception(_LE('Policy check error while calling %s!'), f)
+                LOG.exception('Policy check error while calling %s!', f)
         return data[field]
 
     def __call__(self, target, creds, enforcer):
@@ -370,9 +368,6 @@ def check(context, action, target, plugin=None, might_not_exist=False,
                                target,
                                credentials,
                                pluralized=pluralized)
-    # logging applied rules in case of failure
-    if not result:
-        log_rule_list(match_rule)
     return result
 
 
@@ -409,23 +404,3 @@ def enforce(context, action, target, plugin=None, pluralized=None):
             log_rule_list(rule)
             LOG.debug("Failed policy check for '%s'", action)
     return result
-
-
-def check_is_admin(context):
-    """Verify context has admin rights according to policy settings."""
-    init()
-    # the target is user-self
-    credentials = context.to_policy_values()
-    if ADMIN_CTX_POLICY not in _ENFORCER.rules:
-        return False
-    return _ENFORCER.enforce(ADMIN_CTX_POLICY, credentials, credentials)
-
-
-def check_is_advsvc(context):
-    """Verify context has advsvc rights according to policy settings."""
-    init()
-    # the target is user-self
-    credentials = context.to_policy_values()
-    if ADVSVC_CTX_POLICY not in _ENFORCER.rules:
-        return False
-    return _ENFORCER.enforce(ADVSVC_CTX_POLICY, credentials, credentials)

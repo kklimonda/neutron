@@ -13,30 +13,28 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import netaddr
+
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
 from oslo_config import cfg
-from oslo_db import exception as db_exc
 from oslo_log import helpers as log_helpers
 from oslo_log import log as logging
 from sqlalchemy import or_
-from sqlalchemy.orm import exc
 
-from neutron._i18n import _, _LE
-from neutron.callbacks import events
-from neutron.callbacks import registry
-from neutron.callbacks import resources
-from neutron.common import _deprecate
+from neutron._i18n import _
 from neutron.common import utils
 from neutron.db import api as db_api
-from neutron.db.models import dvr as dvr_models
 from neutron.db import models_v2
 from neutron.extensions import dvr as ext_dvr
-from neutron.extensions import portbindings
+from neutron.objects import exceptions
+from neutron.objects import router
 
-_deprecate._moved_global('DistributedVirtualRouterMacAddress',
-                         new_module=dvr_models)
 
 LOG = logging.getLogger(__name__)
 
@@ -57,39 +55,9 @@ dvr_mac_address_opts = [
 cfg.CONF.register_opts(dvr_mac_address_opts)
 
 
-@db_api.retry_if_session_inactive()
-def _delete_mac_associated_with_agent(resource, event, trigger, context, agent,
-                                      **kwargs):
-    host = agent['host']
-    plugin = directory.get_plugin()
-    if [a for a in plugin.get_agents(context, filters={'host': [host]})
-            if a['id'] != agent['id']]:
-        # there are still agents on this host, don't mess with the mac entry
-        # until they are all deleted.
-        return
-    try:
-        with db_api.context_manager.writer.using(context):
-            entry = (context.session.query(
-                        dvr_models.DistributedVirtualRouterMacAddress).
-                     filter(
-                        dvr_models.DistributedVirtualRouterMacAddress.host ==
-                        host).
-                     one())
-            context.session.delete(entry)
-    except exc.NoResultFound:
-        return
-    # notify remaining agents so they cleanup flows
-    dvr_macs = plugin.get_dvr_mac_address_list(context)
-    plugin.notifier.dvr_mac_address_update(context, dvr_macs)
-
-
+@registry.has_registry_receivers
 class DVRDbMixin(ext_dvr.DVRMacAddressPluginBase):
     """Mixin class to add dvr mac address to db_plugin_base_v2."""
-
-    def __new__(cls, *args, **kwargs):
-        registry.subscribe(_delete_mac_associated_with_agent,
-                           resources.AGENT, events.BEFORE_DELETE)
-        return super(DVRDbMixin, cls).__new__(cls)
 
     @property
     def plugin(self):
@@ -101,29 +69,45 @@ class DVRDbMixin(ext_dvr.DVRMacAddressPluginBase):
         self._plugin = directory.get_plugin()
         return self._plugin
 
+    @staticmethod
+    @registry.receives(resources.AGENT, [events.BEFORE_DELETE])
+    @db_api.retry_if_session_inactive()
+    def _delete_mac_associated_with_agent(resource, event, trigger, context,
+                                          agent, **kwargs):
+        host = agent['host']
+        plugin = directory.get_plugin()
+        if [a for a in plugin.get_agents(context, filters={'host': [host]})
+                if a['id'] != agent['id']]:
+            # there are still agents on this host, don't mess with the mac
+            # entry until they are all deleted.
+            return
+
+        if not router.DVRMacAddress.delete_objects(context, host=host):
+            return
+
+        # notify remaining agents so they cleanup flows
+        dvr_macs = plugin.get_dvr_mac_address_list(context)
+        plugin.notifier.dvr_mac_address_update(context, dvr_macs)
+
     @db_api.context_manager.reader
     def _get_dvr_mac_address_by_host(self, context, host):
-        try:
-            query = context.session.query(
-                dvr_models.DistributedVirtualRouterMacAddress)
-            dvrma = query.filter(
-                dvr_models.DistributedVirtualRouterMacAddress.host == host
-            ).one()
-        except exc.NoResultFound:
+        dvr_obj = router.DVRMacAddress.get_object(context, host=host)
+        if not dvr_obj:
             raise ext_dvr.DVRMacAddressNotFound(host=host)
-        return dvrma
+        return self._make_dvr_mac_address_dict(dvr_obj)
 
     @utils.transaction_guard
     @db_api.retry_if_session_inactive()
     def _create_dvr_mac_address_retry(self, context, host, base_mac):
         with db_api.context_manager.writer.using(context):
             mac_address = utils.get_random_mac(base_mac)
-            dvr_mac_binding = dvr_models.DistributedVirtualRouterMacAddress(
-                host=host, mac_address=mac_address)
-            context.session.add(dvr_mac_binding)
+            dvr_mac_binding = router.DVRMacAddress(
+                context, host=host, mac_address=netaddr.EUI(mac_address))
+            dvr_mac_binding.create()
             LOG.debug("Generated DVR mac for host %(host)s "
                       "is %(mac_address)s",
                       {'host': host, 'mac_address': mac_address})
+
         dvr_macs = self.get_dvr_mac_address_list(context)
         # TODO(vivek): improve scalability of this fanout by
         # sending a single mac address rather than the entire set
@@ -135,15 +119,17 @@ class DVRDbMixin(ext_dvr.DVRMacAddressPluginBase):
         base_mac = cfg.CONF.dvr_base_mac.split(':')
         try:
             return self._create_dvr_mac_address_retry(context, host, base_mac)
-        except db_exc.DBDuplicateEntry:
-            LOG.error(_LE("MAC generation error after %s attempts"),
+        except exceptions.NeutronDbObjectDuplicateEntry:
+            LOG.error("MAC generation error after %s attempts",
                       db_api.MAX_RETRIES)
         raise ext_dvr.MacAddressGenerationFailure(host=host)
 
     @db_api.context_manager.reader
     def get_dvr_mac_address_list(self, context):
-        return (context.session.
-                query(dvr_models.DistributedVirtualRouterMacAddress).all())
+        return [
+            dvr_mac.to_dict()
+            for dvr_mac in router.DVRMacAddress.get_objects(context)
+        ]
 
     def get_dvr_mac_address_by_host(self, context, host):
         """Determine the MAC for the DVR port associated to host."""
@@ -157,7 +143,7 @@ class DVRDbMixin(ext_dvr.DVRMacAddressPluginBase):
 
     def _make_dvr_mac_address_dict(self, dvr_mac_entry, fields=None):
         return {'host': dvr_mac_entry['host'],
-                'mac_address': dvr_mac_entry['mac_address']}
+                'mac_address': str(dvr_mac_entry['mac_address'])}
 
     @log_helpers.log_method_call
     @db_api.retry_if_session_inactive()
@@ -168,7 +154,7 @@ class DVRDbMixin(ext_dvr.DVRMacAddressPluginBase):
         :param context: rpc request context
         :param host: host id to match and extract ports of interest
         :param subnet: subnet id to match and extract ports of interest
-        :returns list -- Ports on the given subnet in the input host
+        :returns: list -- Ports on the given subnet in the input host
         """
         filters = {'fixed_ips': {'subnet_id': [subnet]},
                    portbindings.HOST_ID: [host]}
@@ -214,12 +200,9 @@ class DVRDbMixin(ext_dvr.DVRMacAddressPluginBase):
             internal_gateway_ports = self.plugin.get_ports(
                 context, filters=filter)
             if not internal_gateway_ports:
-                LOG.error(_LE("Could not retrieve gateway port "
-                              "for subnet %s"), subnet_info)
+                LOG.error("Could not retrieve gateway port "
+                          "for subnet %s", subnet_info)
                 return {}
             internal_port = internal_gateway_ports[0]
             subnet_info['gateway_mac'] = internal_port['mac_address']
             return subnet_info
-
-
-_deprecate._MovedGlobals()

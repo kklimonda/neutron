@@ -15,6 +15,7 @@
 
 import copy
 import functools
+import textwrap
 
 import mock
 import netaddr
@@ -23,9 +24,7 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 import testtools
-import textwrap
 
-from neutron.agent.common import config as agent_config
 from neutron.agent.common import ovs_lib
 from neutron.agent.l3 import agent as neutron_l3_agent
 from neutron.agent.l3 import namespaces
@@ -36,6 +35,7 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
 from neutron.common import constants as n_const
 from neutron.common import utils as common_utils
+from neutron.conf.agent import common as agent_config
 from neutron.conf import common as common_config
 from neutron.tests.common import l3_test_common
 from neutron.tests.common import net_helpers
@@ -84,8 +84,6 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
         get_temp_file_path = functools.partial(self.get_temp_file_path,
                                                root=temp_dir)
         conf.set_override('state_path', temp_dir.path)
-        # NOTE(cbrandily): log_file or log_dir must be set otherwise
-        # metadata_proxy_watch_log has no effect
         conf.set_override('log_file',
                           get_temp_file_path('log_file'))
         conf.set_override('metadata_proxy_socket',
@@ -474,7 +472,7 @@ class L3AgentTestFramework(base.BaseSudoTestCase):
 
     def _assert_internal_devices(self, router):
         internal_devices = router.router[constants.INTERFACE_KEY]
-        self.assertTrue(len(internal_devices))
+        self.assertGreater(len(internal_devices), 0)
         for device in internal_devices:
             self.assertTrue(self.device_exists_with_ips_and_mac(
                 device, router.get_internal_device_name, router.ns_name))

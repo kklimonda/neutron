@@ -14,16 +14,16 @@
 #    under the License.
 
 from tempest.lib.common.utils import data_utils
-from tempest import test
+from tempest.lib import decorators
 
 from neutron.tests.tempest.api import base_routers as base
 
 
 class RoutersTestDVR(base.BaseRouterTest):
 
+    required_extensions = ['router', 'dvr']
+
     @classmethod
-    @test.requires_ext(extension="router", service="network")
-    @test.requires_ext(extension="dvr", service="network")
     def resource_setup(cls):
         # The check above will pass if api_extensions=all, which does
         # not mean DVR extension itself is present.
@@ -39,7 +39,7 @@ class RoutersTestDVR(base.BaseRouterTest):
             raise cls.skipException(msg)
         cls.admin_client.delete_router(router['router']['id'])
 
-    @test.idempotent_id('08a2a0a8-f1e4-4b34-8e30-e522e836c44e')
+    @decorators.idempotent_id('08a2a0a8-f1e4-4b34-8e30-e522e836c44e')
     def test_distributed_router_creation(self):
         """
         Test uses administrative credentials to creates a
@@ -56,7 +56,7 @@ class RoutersTestDVR(base.BaseRouterTest):
                         router['router']['id'])
         self.assertTrue(router['router']['distributed'])
 
-    @test.idempotent_id('8a0a72b4-7290-4677-afeb-b4ffe37bc352')
+    @decorators.idempotent_id('8a0a72b4-7290-4677-afeb-b4ffe37bc352')
     def test_centralized_router_creation(self):
         """
         Test uses administrative credentials to creates a
@@ -74,7 +74,7 @@ class RoutersTestDVR(base.BaseRouterTest):
                         router['router']['id'])
         self.assertFalse(router['router']['distributed'])
 
-    @test.idempotent_id('acd43596-c1fb-439d-ada8-31ad48ae3c2e')
+    @decorators.idempotent_id('acd43596-c1fb-439d-ada8-31ad48ae3c2e')
     def test_centralized_router_update_to_dvr(self):
         """
         Test uses administrative credentials to creates a
@@ -90,10 +90,12 @@ class RoutersTestDVR(base.BaseRouterTest):
         name = data_utils.rand_name('router')
         # router needs to be in admin state down in order to be upgraded to DVR
         router = self.admin_client.create_router(name, distributed=False,
+                                                 ha=False,
                                                  admin_state_up=False)
         self.addCleanup(self.admin_client.delete_router,
                         router['router']['id'])
         self.assertFalse(router['router']['distributed'])
+        self.assertFalse(router['router']['ha'])
         router = self.admin_client.update_router(router['router']['id'],
                                                  distributed=True)
         self.assertTrue(router['router']['distributed'])

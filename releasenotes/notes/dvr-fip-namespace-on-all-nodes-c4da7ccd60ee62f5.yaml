@@ -1,0 +1,11 @@
+---
+features:
+  - Proactively create DVR floating IP namespace on all compute nodes
+    when a gateway is configured.
+issues:
+  - Creating DVR floating IP namespace on all nodes proactively
+    might consume public IP Address, but by using
+    subnet service-types as explained in `the networking guide
+    <https://docs.openstack.org/neutron/latest/admin/config-service-subnets.html>`__
+    consumers can use the private IPs for floating IP agent gateway ports
+    and need not consume any public IP addresses.

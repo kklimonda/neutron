@@ -13,11 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
 from oslo_log import log
 from pecan import hooks
 
-from neutron.callbacks import events
-from neutron.callbacks import registry
 from neutron.common import rpc as n_rpc
 from neutron.pecan_wsgi import constants as pecan_constants
 from neutron.pecan_wsgi.hooks import utils
@@ -66,7 +66,6 @@ class NotifierHook(hooks.PecanHook):
             return
         action = pecan_constants.ACTION_MAP.get(state.request.method)
         if not action or action not in ('create', 'update', 'delete'):
-            LOG.debug("No notification will be sent for action: %s", action)
             return
         if utils.is_member_action(utils.get_controller(state)):
             return

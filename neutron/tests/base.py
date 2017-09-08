@@ -19,18 +19,18 @@
 import abc
 import contextlib
 import functools
-import gc
 import inspect
 import os
 import os.path
-import weakref
 
 import eventlet.timeout
 import fixtures
 import mock
+from neutron_lib.callbacks import manager as registry_manager
 from neutron_lib import fixture
 from oslo_concurrency.fixture import lockutils
 from oslo_config import cfg
+from oslo_db import options as db_options
 from oslo_messaging import conffixture as messaging_conffixture
 from oslo_utils import excutils
 from oslo_utils import fileutils
@@ -43,10 +43,11 @@ from neutron._i18n import _
 from neutron.agent.linux import external_process
 from neutron.api.rpc.callbacks.consumer import registry as rpc_consumer_reg
 from neutron.api.rpc.callbacks.producer import registry as rpc_producer_reg
-from neutron.callbacks import manager as registry_manager
-from neutron.callbacks import registry
 from neutron.common import config
 from neutron.common import rpc as n_rpc
+from neutron.conf.agent import common as agent_config
+from neutron.db import _model_query as model_query
+from neutron.db import _resource_extend as resource_extend
 from neutron.db import agentschedulers_db
 from neutron.db import api as db_api
 from neutron import manager
@@ -62,6 +63,8 @@ CONF.import_opt('state_path', 'neutron.conf.common')
 
 ROOTDIR = os.path.dirname(__file__)
 ETCDIR = os.path.join(ROOTDIR, 'etc')
+
+SUDO_CMD = 'sudo -n'
 
 
 def etcdir(*p):
@@ -84,14 +87,13 @@ def setup_test_logging(config_opts, log_dir, log_file_path_template):
     log_file = sanitize_log_path(
         os.path.join(log_dir, log_file_path_template))
     config_opts.set_override('log_file', log_file)
-    config_opts.set_override('use_stderr', False)
     config.setup_logging()
 
 
 def sanitize_log_path(path):
     # Sanitize the string so that its log path is shell friendly
     replace_map = {' ': '-', '(': '_', ')': '_'}
-    for s, r in six.iteritems(replace_map):
+    for s, r in replace_map.items():
         path = path.replace(s, r)
     return path
 
@@ -114,7 +116,7 @@ def _catch_timeout(f):
     def func(self, *args, **kwargs):
         try:
             return f(self, *args, **kwargs)
-        except eventlet.timeout.Timeout as e:
+        except eventlet.Timeout as e:
             self.fail('Execution of this test timed out: %s' % e)
     return func
 
@@ -147,9 +149,9 @@ class DietTestCase(base.BaseTestCase):
         super(DietTestCase, self).setUp()
 
         # FIXME(amuller): this must be called in the Neutron unit tests base
-        # class to initialize the DB connection string. Moving this may cause
-        # non-deterministic failures. Bug #1489098 for more info.
-        config.set_db_defaults()
+        # class. Moving this may cause non-deterministic failures. Bug #1489098
+        # for more info.
+        db_options.set_defaults(cfg.CONF, connection='sqlite://')
 
         # Configure this first to ensure pm debugging support for setUp()
         debugger = os.environ.get('OS_POST_MORTEM_DEBUGGER')
@@ -168,10 +170,21 @@ class DietTestCase(base.BaseTestCase):
         # six before removing the cleanup callback from here.
         self.addCleanup(mock.patch.stopall)
 
+        self.addCleanup(self.reset_model_query_hooks)
+        self.addCleanup(self.reset_resource_extend_functions)
+
         self.addOnException(self.check_for_systemexit)
         self.orig_pid = os.getpid()
 
         tools.reset_random_seed()
+
+    @staticmethod
+    def reset_model_query_hooks():
+        model_query._model_query_hooks = {}
+
+    @staticmethod
+    def reset_resource_extend_functions():
+        resource_extend._resource_extend_functions = {}
 
     def addOnException(self, handler):
 
@@ -196,7 +209,7 @@ class DietTestCase(base.BaseTestCase):
 
     @contextlib.contextmanager
     def assert_max_execution_time(self, max_execution_time=5):
-        with eventlet.timeout.Timeout(max_execution_time, False):
+        with eventlet.Timeout(max_execution_time, False):
             yield
             return
         self.fail('Execution of this test timed out')
@@ -207,7 +220,7 @@ class DietTestCase(base.BaseTestCase):
         self.assertEqual(expect_val, actual_val)
 
     def sort_dict_lists(self, dic):
-        for key, value in six.iteritems(dic):
+        for key, value in dic.items():
             if isinstance(value, list):
                 dic[key] = sorted(value)
             elif isinstance(value, dict):
@@ -291,7 +304,10 @@ class BaseTestCase(DietTestCase):
 
         self.setup_rpc_mocks()
         self.setup_config()
-        self.setup_test_registry_instance()
+
+        self._callback_manager = registry_manager.CallbacksManager()
+        self.useFixture(fixture.CallbackRegistryFixture(
+            callback_manager=self._callback_manager))
         # Give a private copy of the directory to each test.
         self.useFixture(fixture.PluginDirectoryFixture())
 
@@ -305,7 +321,7 @@ class BaseTestCase(DietTestCase):
     def get_new_temp_dir(self):
         """Create a new temporary directory.
 
-        :returns fixtures.TempDir
+        :returns: fixtures.TempDir
         """
         return self.useFixture(fixtures.TempDir())
 
@@ -314,7 +330,7 @@ class BaseTestCase(DietTestCase):
 
         Returns the same directory during the whole test case.
 
-        :returns fixtures.TempDir
+        :returns: fixtures.TempDir
         """
         if not hasattr(self, '_temp_dir'):
             self._temp_dir = self.get_new_temp_dir()
@@ -333,7 +349,7 @@ class BaseTestCase(DietTestCase):
         :type filename: string
         :param root: temporary directory to create a new file in
         :type root: fixtures.TempDir
-        :returns absolute file path string
+        :returns: absolute file path string
         """
         root = root or self.get_default_temp_dir()
         return root.join(filename)
@@ -359,12 +375,6 @@ class BaseTestCase(DietTestCase):
         self.addCleanup(n_rpc.cleanup)
         n_rpc.init(CONF)
 
-    def setup_test_registry_instance(self):
-        """Give a private copy of the registry to each test."""
-        self._callback_manager = registry_manager.CallbacksManager()
-        mock.patch.object(registry, '_get_callback_manager',
-                          return_value=self._callback_manager).start()
-
     def setup_config(self, args=None):
         """Tests that need a non-default config can override this method."""
         self.config_parse(args=args)
@@ -382,7 +392,7 @@ class BaseTestCase(DietTestCase):
         test by the fixtures cleanup process.
         """
         group = kw.pop('group', None)
-        for k, v in six.iteritems(kw):
+        for k, v in kw.items():
             CONF.set_override(k, v, group)
 
     def setup_coreplugin(self, core_plugin=None, load_plugins=True):
@@ -398,6 +408,14 @@ class BaseTestCase(DietTestCase):
         if notification_driver is None:
             notification_driver = [fake_notifier.__name__]
         cfg.CONF.set_override("notification_driver", notification_driver)
+
+    def setup_rootwrap(self):
+        agent_config.register_root_helper(cfg.CONF)
+        self.config(group='AGENT',
+                    root_helper=os.environ.get('OS_ROOTWRAP_CMD', SUDO_CMD))
+        self.config(group='AGENT',
+                    root_helper_daemon=os.environ.get(
+                        'OS_ROOTWRAP_DAEMON_CMD'))
 
 
 class PluginFixture(fixtures.Fixture):
@@ -435,23 +453,7 @@ class PluginFixture(fixtures.Fixture):
         # TODO(marun) Fix plugins that do not properly initialize notifiers
         agentschedulers_db.AgentSchedulerDbMixin.agent_notifiers = {}
 
-        # Perform a check for deallocation only if explicitly
-        # configured to do so since calling gc.collect() after every
-        # test increases test suite execution time by ~50%.
-        check_plugin_deallocation = (
-            bool_from_env('OS_CHECK_PLUGIN_DEALLOCATION'))
-        if check_plugin_deallocation:
-            plugin = weakref.ref(nm._instance.plugin)
-
         nm.clear_instance()
-
-        if check_plugin_deallocation:
-            gc.collect()
-
-            # TODO(marun) Ensure that mocks are deallocated?
-            if plugin() and not isinstance(plugin(), mock.Base):
-                raise AssertionError(
-                    'The plugin for this test was not deallocated.')
 
 
 class Timeout(fixtures.Fixture):

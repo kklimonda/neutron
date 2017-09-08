@@ -31,14 +31,28 @@ class QosRuleNotFound(e.NotFound):
                 "could not be found.")
 
 
+class QoSPolicyDefaultAlreadyExists(e.Conflict):
+    message = _("A default QoS policy exists for project %(project_id)s.")
+
+
 class PortQosBindingNotFound(e.NotFound):
     message = _("QoS binding for port %(port_id)s and policy %(policy_id)s "
                 "could not be found.")
 
 
+class PortQosBindingError(e.NeutronException):
+    message = _("QoS binding for port %(port_id)s and policy %(policy_id)s "
+                "could not be created: %(db_error)s.")
+
+
 class NetworkQosBindingNotFound(e.NotFound):
     message = _("QoS binding for network %(net_id)s and policy %(policy_id)s "
                 "could not be found.")
+
+
+class NetworkQosBindingError(e.NeutronException):
+    message = _("QoS binding for network %(net_id)s and policy %(policy_id)s "
+                "could not be created: %(db_error)s.")
 
 
 class PlacementEndpointNotFound(e.NotFound):
@@ -95,6 +109,8 @@ class FlatNetworkInUse(e.InUse):
 
 
 class TenantNetworksDisabled(e.ServiceUnavailable):
+    # NOTE(vvargaszte): May be removed in the future as it is not used in
+    # Neutron, only in the Neutron plugin of OpenContrail.
     message = _("Tenant network creation is not enabled.")
 
 
@@ -109,6 +125,10 @@ class MalformedRequestBody(e.BadRequest):
 
 class InvalidAllocationPool(e.BadRequest):
     message = _("The allocation pool %(pool)s is not valid.")
+
+
+class QosRuleNotSupported(e.Conflict):
+    message = _("Rule %(rule_type)s is not supported by port %(port_id)s")
 
 
 class UnsupportedPortDeviceOwner(e.Conflict):
@@ -157,8 +177,11 @@ class InvalidSharedSetting(e.Conflict):
                 "%(network)s. Multiple tenants are using it.")
 
 
-class InvalidExtensionEnv(e.BadRequest):
-    message = _("Invalid extension environment: %(reason)s.")
+class QoSRuleParameterConflict(e.Conflict):
+    message = _("Unable to add the rule with value %(rule_value)s to the "
+                "policy %(policy_id)s as the existing rule of type "
+                "%(existing_rule)s restricts the bandwidth to "
+                "%(existing_value)s.")
 
 
 class ExtensionsNotFound(e.NotFound):
@@ -201,6 +224,11 @@ class DuplicatedExtension(e.NeutronException):
     message = _("Found duplicate extension: %(alias)s.")
 
 
+class DriverCallError(e.MultipleExceptions):
+    def __init__(self, exc_list=None):
+        super(DriverCallError, self).__init__(exc_list or [])
+
+
 class DeviceIDNotOwnedByTenant(e.Conflict):
     message = _("The following device_id %(device_id)s is not owned by your "
                 "tenant or matches another tenants router.")
@@ -212,10 +240,6 @@ class InvalidCIDR(e.BadRequest):
 
 class RouterNotCompatibleWithAgent(e.NeutronException):
     message = _("Router '%(router_id)s' is not compatible with this agent.")
-
-
-class DvrHaRouterNotSupported(e.NeutronException):
-    message = _("Router '%(router_id)s' cannot be both DVR and HA.")
 
 
 class FailToDropPrivilegesExit(SystemExit):
@@ -242,10 +266,6 @@ class NetworkIdOrRouterIdRequiredError(e.NeutronException):
 
 class AbortSyncRouters(e.NeutronException):
     message = _("Aborting periodic_sync_routers_task due to an error.")
-
-
-class MissingMinSubnetPoolPrefix(e.BadRequest):
-    message = _("Unspecified minimum subnet pool prefix.")
 
 
 class EmptySubnetPoolPrefixList(e.BadRequest):

@@ -14,12 +14,17 @@
 #
 
 import netaddr
-from neutron_lib import constants
+from neutron_lib import context as nctx
+from neutron_lib.plugins import constants
 from neutron_lib.plugins import directory
+from oslo_db import exception as db_exc
 from oslo_utils import uuidutils
+from sqlalchemy.orm import session as se
+from webob import exc
 
-from neutron import context as nctx
+from neutron.db import api as db_api
 from neutron.db import models_v2
+from neutron.objects import ports as port_obj
 from neutron.plugins.ml2 import config
 from neutron.tests.unit.plugins.ml2 import test_plugin
 
@@ -45,15 +50,29 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         super(TestRevisionPlugin, self).setUp()
         self.cp = directory.get_plugin()
         self.l3p = directory.get_plugin(constants.L3)
-        self.ctx = nctx.get_admin_context()
+        self._ctx = nctx.get_admin_context()
+
+    @property
+    def ctx(self):
+        # TODO(kevinbenton): return ctx without expire_all after switch to
+        # enginefacade complete. We expire_all here because the switch to
+        # the new engine facade is resulting in changes being spread over
+        # other sessions so we can end up getting stale reads in the parent
+        # session if objects remain in the identity map.
+        if not self._ctx.session.is_active:
+            self._ctx.session.expire_all()
+        return self._ctx
 
     def test_handle_expired_object(self):
         rp = directory.get_plugin('revision_plugin')
         with self.port():
             with self.ctx.session.begin():
-                ipal_obj = self.ctx.session.query(models_v2.IPAllocation).one()
+                ipal_objs = port_obj.IPAllocation.get_objects(self.ctx)
+                if not ipal_objs:
+                    raise Exception("No IP allocations available.")
+                ipal_obj = ipal_objs[0]
                 # load port into our session
-                port_obj = self.ctx.session.query(models_v2.Port).one()
+                port = self.ctx.session.query(models_v2.Port).one()
                 # simulate concurrent delete in another session
                 other_ctx = nctx.get_admin_context()
                 other_ctx.session.delete(
@@ -61,7 +80,7 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
                 )
                 # expire the port so the revision bumping code will trigger a
                 # lookup on its attributes and encounter an ObjectDeletedError
-                self.ctx.session.expire(port_obj)
+                self.ctx.session.expire(port)
                 rp._bump_related_revisions(self.ctx.session, ipal_obj)
 
     def test_port_name_update_revises(self):
@@ -71,6 +90,55 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
             response = self._update('ports', port['port']['id'], new)
             new_rev = response['port']['revision_number']
             self.assertGreater(new_rev, rev)
+
+    def test_constrained_port_update(self):
+        with self.port() as port:
+            rev = port['port']['revision_number']
+            new = {'port': {'name': 'nigiri'}}
+            for val in (rev - 1, rev + 1):
+                # make sure off-by ones are rejected
+                self._update('ports', port['port']['id'], new,
+                             headers={'If-Match': 'revision_number=%s' % val},
+                             expected_code=exc.HTTPPreconditionFailed.code)
+            after_attempt = self._show('ports', port['port']['id'])
+            self.assertEqual(rev, after_attempt['port']['revision_number'])
+            self.assertEqual(port['port']['name'],
+                             after_attempt['port']['name'])
+            # correct revision should work
+            self._update('ports', port['port']['id'], new,
+                         headers={'If-Match': 'revision_number=%s' % rev})
+
+    def test_constrained_port_delete(self):
+        with self.port() as port:
+            rev = port['port']['revision_number']
+            for val in (rev - 1, rev + 1):
+                # make sure off-by ones are rejected
+                self._delete('ports', port['port']['id'],
+                             headers={'If-Match': 'revision_number=%s' % val},
+                             expected_code=exc.HTTPPreconditionFailed.code)
+            # correct revision should work
+            self._delete('ports', port['port']['id'],
+                         headers={'If-Match': 'revision_number=%s' % rev})
+
+    def test_constrained_port_update_handles_db_retries(self):
+        # here we ensure all of the constraint handling logic persists
+        # on retriable failures to commit caused by races with another
+        # update
+        with self.port() as port:
+            rev = port['port']['revision_number']
+            new = {'port': {'name': 'nigiri'}}
+
+            def concurrent_increment(s):
+                db_api.sqla_remove(se.Session, 'before_commit',
+                                   concurrent_increment)
+                # slip in a concurrent update that will bump the revision
+                self._update('ports', port['port']['id'], new)
+                raise db_exc.DBDeadlock()
+            db_api.sqla_listen(se.Session, 'before_commit',
+                               concurrent_increment)
+            self._update('ports', port['port']['id'], new,
+                         headers={'If-Match': 'revision_number=%s' % rev},
+                         expected_code=exc.HTTPPreconditionFailed.code)
 
     def test_port_ip_update_revises(self):
         with self.port() as port:
@@ -128,7 +196,8 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         # add an intf and make sure it bumps rev
         with self.subnet(tenant_id='some_tenant', cidr='10.0.1.0/24') as s:
             interface_info = {'subnet_id': s['subnet']['id']}
-        self.l3p.add_router_interface(self.ctx, router['id'], interface_info)
+        self.l3p.add_router_interface(self.ctx, router['id'],
+                                      interface_info)
         router = updated
         updated = self.l3p.get_router(self.ctx, router['id'])
         self.assertGreater(updated['revision_number'],
@@ -158,7 +227,8 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         with self.port() as port:
             rev = port['port']['revision_number']
             qos_plugin = directory.get_plugin('QOS')
-            qos_policy = {'policy': {'name': "policy1",
+            qos_policy = {'policy': {'id': uuidutils.generate_uuid(),
+                                     'name': "policy1",
                                      'project_id': uuidutils.generate_uuid()}}
             qos_obj = qos_plugin.create_policy(self.ctx, qos_policy)
             data = {'port': {'qos_policy_id': qos_obj['id']}}
@@ -170,7 +240,8 @@ class TestRevisionPlugin(test_plugin.Ml2PluginV2TestCase):
         with self.network() as network:
             rev = network['network']['revision_number']
             qos_plugin = directory.get_plugin('QOS')
-            qos_policy = {'policy': {'name': "policy1",
+            qos_policy = {'policy': {'id': uuidutils.generate_uuid(),
+                                     'name': "policy1",
                                      'project_id': uuidutils.generate_uuid()}}
             qos_obj = qos_plugin.create_policy(self.ctx, qos_policy)
             data = {'network': {'qos_policy_id': qos_obj['id']}}

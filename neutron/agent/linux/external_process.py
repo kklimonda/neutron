@@ -21,12 +21,14 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import fileutils
+import psutil
 import six
 
-from neutron._i18n import _, _LW, _LE
-from neutron.agent.common import config as agent_cfg
+from neutron._i18n import _
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
+
+from neutron.conf.agent import common as agent_cfg
 
 LOG = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ class ProcessManager(MonitoredProcess):
         self.cmd_addl_env = cmd_addl_env
         self.pids_path = pids_path or self.conf.external_pids
         self.pid_file = pid_file
-        self.run_as_root = run_as_root
+        self.run_as_root = run_as_root or self.namespace is not None
         self.custom_reload_callback = custom_reload_callback
 
         if service:
@@ -108,10 +110,11 @@ class ProcessManager(MonitoredProcess):
             if get_stop_command:
                 cmd = get_stop_command(self.get_pid_file_name())
                 ip_wrapper = ip_lib.IPWrapper(namespace=self.namespace)
-                ip_wrapper.netns.execute(cmd, addl_env=self.cmd_addl_env)
+                ip_wrapper.netns.execute(cmd, addl_env=self.cmd_addl_env,
+                                         run_as_root=self.run_as_root)
             else:
                 cmd = ['kill', '-%s' % (sig), pid]
-                utils.execute(cmd, run_as_root=True)
+                utils.execute(cmd, run_as_root=self.run_as_root)
                 # In the case of shutting down, remove the pid file
                 if sig == '9':
                     fileutils.delete_if_exists(self.get_pid_file_name())
@@ -138,16 +141,18 @@ class ProcessManager(MonitoredProcess):
 
     @property
     def active(self):
-        pid = self.pid
-        if pid is None:
-            return False
+        cmdline = self.cmdline
+        return self.uuid in cmdline if cmdline else False
 
-        cmdline = '/proc/%s/cmdline' % pid
+    @property
+    def cmdline(self):
+        pid = self.pid
+        if not pid:
+            return
         try:
-            with open(cmdline, "r") as f:
-                return self.uuid in f.readline()
-        except IOError:
-            return False
+            return ' '.join(psutil.Process(pid).cmdline())
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return
 
 
 ServiceId = collections.namedtuple('ServiceId', ['uuid', 'service'])
@@ -232,9 +237,9 @@ class ProcessMonitor(object):
             pm = self._monitored_processes.get(service_id)
 
             if pm and not pm.active:
-                LOG.error(_LE("%(service)s for %(resource_type)s "
-                              "with uuid %(uuid)s not found. "
-                              "The process should not have died"),
+                LOG.error("%(service)s for %(resource_type)s "
+                          "with uuid %(uuid)s not found. "
+                          "The process should not have died",
                           {'service': service_id.service,
                            'resource_type': self._resource_type,
                            'uuid': service_id.uuid})
@@ -252,14 +257,14 @@ class ProcessMonitor(object):
         action_function(service_id)
 
     def _respawn_action(self, service_id):
-        LOG.warning(_LW("Respawning %(service)s for uuid %(uuid)s"),
+        LOG.warning("Respawning %(service)s for uuid %(uuid)s",
                     {'service': service_id.service,
                      'uuid': service_id.uuid})
         self._monitored_processes[service_id].enable()
 
     def _exit_action(self, service_id):
-        LOG.error(_LE("Exiting agent as programmed in check_child_processes_"
-                      "actions"))
+        LOG.error("Exiting agent as programmed in check_child_processes_"
+                  "actions")
         self._exit_handler(service_id.uuid, service_id.service)
 
     def _exit_handler(self, uuid, service):
@@ -269,7 +274,7 @@ class ProcessMonitor(object):
         check_child_processes_actions, and one of our external processes die
         unexpectedly.
         """
-        LOG.error(_LE("Exiting agent because of a malfunction with the "
-                      "%(service)s process identified by uuid %(uuid)s"),
+        LOG.error("Exiting agent because of a malfunction with the "
+                  "%(service)s process identified by uuid %(uuid)s",
                   {'service': service, 'uuid': uuid})
         raise SystemExit(1)

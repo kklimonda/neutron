@@ -10,9 +10,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+# NOTE(boden): This module will be removed soon; use neutron-lib callbacks
+
 # String literals representing core resources.
 AGENT = 'agent'
-EXTERNAL_NETWORK = 'external_network'
 FLOATING_IP = 'floatingip'
 NETWORK = 'network'
 NETWORKS = 'networks'
@@ -29,5 +30,4 @@ SEGMENT = 'segment'
 SEGMENT_HOST_MAPPING = 'segment_host_mapping'
 SUBNET = 'subnet'
 SUBNETS = 'subnets'
-SUBNET_GATEWAY = 'subnet_gateway'
 SUBNETPOOL_ADDRESS_SCOPE = 'subnetpool_address_scope'

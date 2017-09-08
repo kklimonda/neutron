@@ -13,25 +13,24 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api.definitions import port_security as psec
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import resources
 from neutron_lib import constants as n_const
 from neutron_lib import exceptions
 from neutron_lib.plugins import directory
+from neutron_lib.plugins.ml2 import api
 from oslo_log import log
 import oslo_messaging
 from sqlalchemy.orm import exc
 
-from neutron._i18n import _LE, _LW
 from neutron.api.rpc.handlers import dvr_rpc
 from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
-from neutron.callbacks import resources
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.db import l3_hamode_db
 from neutron.db import provisioning_blocks
-from neutron.extensions import portbindings
-from neutron.extensions import portsecurity as psec
 from neutron.plugins.ml2 import db as ml2_db
-from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import type_tunnel
 from neutron.services.qos import qos_consts
 # REVISIT(kmestery): Allow the type and mechanism drivers to supply the
@@ -57,6 +56,14 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
     def __init__(self, notifier, type_manager):
         self.setup_tunnel_callback_mixin(notifier, type_manager)
         super(RpcCallbacks, self).__init__()
+
+    def _get_new_status(self, host, port_context):
+        port = port_context.current
+        if not host or host == port_context.host:
+            new_status = (n_const.PORT_STATUS_BUILD if port['admin_state_up']
+                          else n_const.PORT_STATUS_DOWN)
+            if port['status'] != new_status:
+                return new_status
 
     def get_device_details(self, rpc_context, **kwargs):
         """Agent requests device details."""
@@ -88,36 +95,34 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
             if port['network_id'] not in cached_networks:
                 cached_networks[port['network_id']] = (
                     port_context.network.current)
-        return self._get_device_details(rpc_context, agent_id=agent_id,
-                                        host=host, device=device,
-                                        port_context=port_context)
-
-    def _get_device_details(self, rpc_context, agent_id, host, device,
-                            port_context):
-        segment = port_context.bottom_bound_segment
-        port = port_context.current
-        plugin = directory.get_plugin()
-        port_id = port_context.current['id']
-
-        if not segment:
-            LOG.warning(_LW("Device %(device)s requested by agent "
-                            "%(agent_id)s on network %(network_id)s not "
-                            "bound, vif_type: %(vif_type)s"),
-                        {'device': device,
-                         'agent_id': agent_id,
-                         'network_id': port['network_id'],
-                         'vif_type': port_context.vif_type})
-            return {'device': device}
-
-        if (not host or host == port_context.host):
-            new_status = (n_const.PORT_STATUS_BUILD if port['admin_state_up']
-                          else n_const.PORT_STATUS_DOWN)
-            if port['status'] != new_status:
+        result = self._get_device_details(rpc_context, agent_id=agent_id,
+                                          host=host, device=device,
+                                          port_context=port_context)
+        if 'network_id' in result:
+            # success so we update status
+            new_status = self._get_new_status(host, port_context)
+            if new_status:
                 plugin.update_port_status(rpc_context,
                                           port_id,
                                           new_status,
                                           host,
                                           port_context.network.current)
+        return result
+
+    def _get_device_details(self, rpc_context, agent_id, host, device,
+                            port_context):
+        segment = port_context.bottom_bound_segment
+        port = port_context.current
+
+        if not segment:
+            LOG.warning("Device %(device)s requested by agent "
+                        "%(agent_id)s on network %(network_id)s not "
+                        "bound, vif_type: %(vif_type)s",
+                        {'device': device,
+                         'agent_id': agent_id,
+                         'network_id': port['network_id'],
+                         'vif_type': port_context.vif_type})
+            return {'device': device}
 
         network_qos_policy_id = port_context.network._network.get(
             qos_consts.QOS_POLICY_ID)
@@ -181,9 +186,19 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                                device=device,
                                port_context=bound_contexts[device]))
             except Exception:
-                LOG.exception(_LE("Failed to get details for device %s"),
+                LOG.exception("Failed to get details for device %s",
                               device)
                 failed_devices.append(device)
+        new_status_map = {ctxt.current['id']: self._get_new_status(host, ctxt)
+                          for ctxt in bound_contexts.values() if ctxt}
+        # filter out any without status changes
+        new_status_map = {p: s for p, s in new_status_map.items() if s}
+        try:
+            plugin.update_port_statuses(rpc_context, new_status_map, host)
+        except Exception:
+            LOG.exception("Failure updating statuses, retrying all")
+            failed_devices = devices_to_fetch
+            devices = []
 
         return {'devices': devices,
                 'failed_devices': failed_devices}
@@ -215,8 +230,8 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                           "executed concurrently. Ignoring StaleDataError.")
                 return {'device': device,
                         'exists': port_exists}
-        self.notify_ha_port_status(port_id, rpc_context,
-                                   n_const.PORT_STATUS_DOWN, host)
+        self.notify_l2pop_port_wiring(port_id, rpc_context,
+                                      n_const.PORT_STATUS_DOWN, host)
 
         return {'device': device,
                 'exists': port_exists}
@@ -250,8 +265,8 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                     return
         else:
             self.update_port_status_to_active(port, rpc_context, port_id, host)
-        self.notify_ha_port_status(port_id, rpc_context,
-                                   n_const.PORT_STATUS_ACTIVE, host, port=port)
+        self.notify_l2pop_port_wiring(port_id, rpc_context,
+                                      n_const.PORT_STATUS_ACTIVE, host)
 
     def update_port_status_to_active(self, port, rpc_context, port_id, host):
         plugin = directory.get_plugin()
@@ -274,29 +289,46 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                 rpc_context, port['id'], resources.PORT,
                 provisioning_blocks.L2_AGENT_ENTITY)
 
-    def notify_ha_port_status(self, port_id, rpc_context,
-                              status, host, port=None):
+    def notify_l2pop_port_wiring(self, port_id, rpc_context,
+                                 status, host):
+        """Notify the L2pop driver that a port has been wired/unwired.
+
+        The L2pop driver uses this notification to broadcast forwarding
+        entries to other agents on the same network as the port for port_id.
+        """
         plugin = directory.get_plugin()
         l2pop_driver = plugin.mechanism_manager.mech_drivers.get(
                 'l2population')
         if not l2pop_driver:
             return
+        port = ml2_db.get_port(rpc_context, port_id)
         if not port:
-            port = ml2_db.get_port(rpc_context, port_id)
-            if not port:
+            return
+        # NOTE: DVR ports are already handled and updated through l2pop
+        # and so we don't need to update it again here
+        if port['device_owner'] == n_const.DEVICE_OWNER_DVR_INTERFACE:
+            return
+        port_context = plugin.get_bound_port_context(
+                rpc_context, port_id)
+        if not port_context:
+            # port deleted
+            return
+        port = port_context.current
+        if (status == n_const.PORT_STATUS_ACTIVE and
+            port[portbindings.HOST_ID] != host and
+            not l3_hamode_db.is_ha_router_port(rpc_context,
+                                               port['device_owner'],
+                                               port['device_id'])):
+                # don't setup ACTIVE forwarding entries unless bound to this
+                # host or if it's an HA port (which is special-cased in the
+                # mech driver)
                 return
-        is_ha_port = l3_hamode_db.is_ha_router_port(rpc_context,
-                                                    port['device_owner'],
-                                                    port['device_id'])
-        if is_ha_port:
-            port_context = plugin.get_bound_port_context(
-                    rpc_context, port_id)
-            port_context.current['status'] = status
-            port_context.current[portbindings.HOST_ID] = host
-            if status == n_const.PORT_STATUS_ACTIVE:
-                l2pop_driver.obj.update_port_up(port_context)
-            else:
-                l2pop_driver.obj.update_port_down(port_context)
+        port_context.current['status'] = status
+        port_context.current[portbindings.HOST_ID] = host
+        if status == n_const.PORT_STATUS_ACTIVE:
+            l2pop_driver.obj.update_port_up(port_context)
+        else:
+            l2pop_driver.obj.update_port_down(port_context)
 
     def update_device_list(self, rpc_context, **kwargs):
         devices_up = []
@@ -313,7 +345,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                         **kwargs)
                 except Exception:
                     failed_devices_up.append(device)
-                    LOG.error(_LE("Failed to update device %s up"), device)
+                    LOG.error("Failed to update device %s up", device)
                 else:
                     devices_up.append(device)
 
@@ -327,7 +359,7 @@ class RpcCallbacks(type_tunnel.TunnelRpcCallbackMixin):
                         **kwargs)
                 except Exception:
                     failed_devices_down.append(device)
-                    LOG.error(_LE("Failed to update device %s down"), device)
+                    LOG.error("Failed to update device %s down", device)
                 else:
                     devices_down.append(dev)
 

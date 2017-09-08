@@ -15,20 +15,27 @@
 
 import functools
 
+from neutron_lib.api.definitions import network as net_def
+from neutron_lib.api.definitions import port as port_def
+from neutron_lib.api.definitions import subnet as subnet_def
+from neutron_lib.api.definitions import subnetpool as subnetpool_def
 from neutron_lib.api import validators
 from neutron_lib import constants
 from neutron_lib import exceptions as n_exc
+from neutron_lib.utils import net
 from oslo_config import cfg
 from oslo_log import log as logging
 from sqlalchemy.orm import exc
 
-from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
 from neutron.common import exceptions
-from neutron.common import utils
+from neutron.db import _model_query as model_query
+from neutron.db import _resource_extend as resource_extend
 from neutron.db import _utils as db_utils
+from neutron.db import api as db_api
 from neutron.db import common_db_mixin
 from neutron.db import models_v2
+from neutron.objects import ports as port_obj
 from neutron.objects import subnet as subnet_obj
 from neutron.objects import subnetpool as subnetpool_obj
 
@@ -81,8 +88,9 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
 
     @staticmethod
     def _generate_mac():
-        return utils.get_random_mac(cfg.CONF.base_mac.split(':'))
+        return net.get_random_mac(cfg.CONF.base_mac.split(':'))
 
+    @db_api.context_manager.reader
     def _is_mac_in_use(self, context, network_id, mac_address):
         return bool(context.session.query(models_v2.Port).
                     filter(models_v2.Port.network_id == network_id).
@@ -98,14 +106,12 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                   {'ip_address': ip_address,
                    'network_id': network_id,
                    'subnet_id': subnet_id})
-        with context.session.begin(subtransactions=True):
-            for ipal in (context.session.query(models_v2.IPAllocation).
-                         filter_by(network_id=network_id,
-                                   ip_address=ip_address,
-                                   subnet_id=subnet_id)):
-                context.session.delete(ipal)
+        port_obj.IPAllocation.delete_objects(
+            context, network_id=network_id, ip_address=ip_address,
+            subnet_id=subnet_id)
 
     @staticmethod
+    @db_api.context_manager.writer
     def _store_ip_allocation(context, ip_address, network_id, subnet_id,
                              port_id):
         LOG.debug("Allocated IP %(ip_address)s "
@@ -114,16 +120,13 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                    'network_id': network_id,
                    'subnet_id': subnet_id,
                    'port_id': port_id})
-        allocated = models_v2.IPAllocation(
-            network_id=network_id,
-            port_id=port_id,
-            ip_address=ip_address,
-            subnet_id=subnet_id
-        )
-        port_db = context.session.query(models_v2.Port).get(port_id)
-        port_db.fixed_ips.append(allocated)
-        port_db.fixed_ips.sort(key=lambda fip: (fip['ip_address'],
-                                                fip['subnet_id']))
+        allocated = port_obj.IPAllocation(
+            context, network_id=network_id, port_id=port_id,
+            ip_address=ip_address, subnet_id=subnet_id)
+        # NOTE(lujinluo): Add IPAllocations obj to the port fixed_ips
+        # in Port OVO integration, i.e. the same way we did in
+        # Ib32509d974c8654131112234bcf19d6eae8f7cca
+        allocated.create()
 
     def _make_subnet_dict(self, subnet, fields=None, context=None):
         res = {'id': subnet['id'],
@@ -149,7 +152,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         # The shared attribute for a subnet is the same as its parent network
         res['shared'] = self._is_network_shared(context, subnet.rbac_entries)
         # Call auxiliary extend functions, if any
-        self._apply_dict_extend_functions(attributes.SUBNETS, res, subnet)
+        resource_extend.apply_funcs(subnet_def.COLLECTION_NAME, res, subnet)
         return db_utils.resource_fields(res, fields)
 
     def _make_subnetpool_dict(self, subnetpool, fields=None):
@@ -168,8 +171,8 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                'ip_version': subnetpool['ip_version'],
                'default_quota': subnetpool['default_quota'],
                'address_scope_id': subnetpool['address_scope_id']}
-        self._apply_dict_extend_functions(attributes.SUBNETPOOLS, res,
-                                          subnetpool)
+        resource_extend.apply_funcs(
+            subnetpool_def.COLLECTION_NAME, res, subnetpool)
         return db_utils.resource_fields(res, fields)
 
     def _make_port_dict(self, port, fields=None,
@@ -188,20 +191,19 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
                "device_owner": port["device_owner"]}
         # Call auxiliary extend functions, if any
         if process_extensions:
-            self._apply_dict_extend_functions(
-                attributes.PORTS, res, port)
+            resource_extend.apply_funcs(port_def.COLLECTION_NAME, res, port)
         return db_utils.resource_fields(res, fields)
 
     def _get_network(self, context, id):
         try:
-            network = self._get_by_id(context, models_v2.Network, id)
+            network = model_query.get_by_id(context, models_v2.Network, id)
         except exc.NoResultFound:
             raise n_exc.NetworkNotFound(net_id=id)
         return network
 
     def _get_subnet(self, context, id):
         try:
-            subnet = self._get_by_id(context, models_v2.Subnet, id)
+            subnet = model_query.get_by_id(context, models_v2.Subnet, id)
         except exc.NoResultFound:
             raise n_exc.SubnetNotFound(subnet_id=id)
         return subnet
@@ -215,7 +217,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
 
     def _get_port(self, context, id):
         try:
-            port = self._get_by_id(context, models_v2.Port, id)
+            port = model_query.get_by_id(context, models_v2.Port, id)
         except exc.NoResultFound:
             raise n_exc.PortNotFound(port_id=id)
         return port
@@ -229,14 +231,17 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         return port_qry.filter_by(network_id=network_id,
                 device_owner=constants.DEVICE_OWNER_ROUTER_GW).all()
 
+    @db_api.context_manager.reader
     def _get_subnets_by_network(self, context, network_id):
         subnet_qry = context.session.query(models_v2.Subnet)
         return subnet_qry.filter_by(network_id=network_id).all()
 
+    @db_api.context_manager.reader
     def _get_subnets_by_subnetpool(self, context, subnetpool_id):
         subnet_qry = context.session.query(models_v2.Subnet)
         return subnet_qry.filter_by(subnetpool_id=subnetpool_id).all()
 
+    @db_api.context_manager.reader
     def _get_all_subnets(self, context):
         # NOTE(salvatore-orlando): This query might end up putting
         # a lot of stress on the db. Consider adding a cache layer
@@ -245,16 +250,17 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
     def _get_subnets(self, context, filters=None, fields=None,
                      sorts=None, limit=None, marker=None,
                      page_reverse=False):
-        marker_obj = self._get_marker_obj(context, 'subnet', limit, marker)
+        marker_obj = db_utils.get_marker_obj(self, context, 'subnet',
+                                             limit, marker)
         make_subnet_dict = functools.partial(self._make_subnet_dict,
                                              context=context)
-        return self._get_collection(context, models_v2.Subnet,
-                                    make_subnet_dict,
-                                    filters=filters, fields=fields,
-                                    sorts=sorts,
-                                    limit=limit,
-                                    marker_obj=marker_obj,
-                                    page_reverse=page_reverse)
+        return model_query.get_collection(context, models_v2.Subnet,
+                                          make_subnet_dict,
+                                          filters=filters, fields=fields,
+                                          sorts=sorts,
+                                          limit=limit,
+                                          marker_obj=marker_obj,
+                                          page_reverse=page_reverse)
 
     def _make_network_dict(self, network, fields=None,
                            process_extensions=True, context=None):
@@ -269,8 +275,7 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         res['shared'] = self._is_network_shared(context, network.rbac_entries)
         # Call auxiliary extend functions, if any
         if process_extensions:
-            self._apply_dict_extend_functions(
-                attributes.NETWORKS, res, network)
+            resource_extend.apply_funcs(net_def.COLLECTION_NAME, res, network)
         return db_utils.resource_fields(res, fields)
 
     def _is_network_shared(self, context, rbac_entries):
@@ -307,13 +312,3 @@ class DbBasePluginCommon(common_db_mixin.CommonDbMixin):
         return [{'subnet_id': ip["subnet_id"],
                  'ip_address': ip["ip_address"]}
                 for ip in ips]
-
-    @staticmethod
-    def _port_filter_hook(context, original_model, conditions):
-        # Apply the port filter only in non-admin and non-advsvc context
-        if db_utils.model_query_scope_is_project(context, original_model):
-            conditions |= (models_v2.Port.network_id.in_(
-                context.session.query(models_v2.Network.id).
-                filter(context.project_id == models_v2.Network.project_id).
-                subquery()))
-        return conditions

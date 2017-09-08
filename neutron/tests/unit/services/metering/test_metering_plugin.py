@@ -13,12 +13,13 @@
 # under the License.
 
 import mock
+from neutron_lib import context
 from neutron_lib.plugins import directory
 from oslo_utils import uuidutils
 
 from neutron.api.rpc.agentnotifiers import metering_rpc_agent_api
 from neutron.api.v2 import attributes as attr
-from neutron import context
+from neutron.common import utils
 from neutron.db import api as db_api
 from neutron.db.metering import metering_rpc
 from neutron.db.models import agent as agent_model
@@ -97,7 +98,7 @@ class TestMeteringPlugin(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
 
         self.tenant_id = 'a7e61382-47b8-4d40-bae3-f95981b5637b'
         self.ctx = FakeContext('', self.tenant_id, is_admin=True)
-        self.context_patch = mock.patch('neutron.context.Context',
+        self.context_patch = mock.patch('neutron_lib.context.Context',
                                         return_value=self.ctx)
         self.mock_context = self.context_patch.start()
 
@@ -265,7 +266,8 @@ class TestMeteringPlugin(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
                          'tenant_id': self.tenant_id,
                          '_metering_labels': [
                              {'rule': {
-                                 'remote_ip_prefix': '10.0.0.0/24',
+                                 'remote_ip_prefix': utils.AuthenticIPNetwork(
+                                     '10.0.0.0/24'),
                                  'direction': 'ingress',
                                  'metering_label_id': self.uuid,
                                  'excluded': False,
@@ -281,7 +283,8 @@ class TestMeteringPlugin(test_db_base_plugin_v2.NeutronDbPluginV2TestCase,
                          'tenant_id': self.tenant_id,
                          '_metering_labels': [
                              {'rule': {
-                                  'remote_ip_prefix': '10.0.0.0/24',
+                                  'remote_ip_prefix': utils.AuthenticIPNetwork(
+                                      '10.0.0.0/24'),
                                   'direction': 'ingress',
                                   'metering_label_id': self.uuid,
                                   'excluded': False,
@@ -348,7 +351,7 @@ class TestMeteringPluginL3AgentScheduler(
 
         self.tenant_id = 'a7e61382-47b8-4d40-bae3-f95981b5637b'
         self.ctx = FakeContext('', self.tenant_id, is_admin=True)
-        self.context_patch = mock.patch('neutron.context.Context',
+        self.context_patch = mock.patch('neutron_lib.context.Context',
                                         return_value=self.ctx)
         self.mock_context = self.context_patch.start()
 

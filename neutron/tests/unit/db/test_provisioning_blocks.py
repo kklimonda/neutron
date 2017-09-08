@@ -13,11 +13,12 @@
 #    under the License.
 
 import mock
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
+from neutron_lib import context as n_ctx
 import testtools
 
-from neutron.callbacks import registry
-from neutron.callbacks import resources
-from neutron import context as n_ctx
+from neutron.db import api as db_api
 from neutron.db import models_v2
 from neutron.db import provisioning_blocks as pb
 from neutron.tests.unit import testlib_api
@@ -37,7 +38,7 @@ class TestStatusBarriers(testlib_api.SqlTestCase):
                            pb.PROVISIONING_COMPLETE)
 
     def _make_net(self):
-        with self.ctx.session.begin():
+        with db_api.context_manager.writer.using(self.ctx):
             net = models_v2.Network(name='net_net', status='ACTIVE',
                                     tenant_id='1', admin_state_up=True)
             self.ctx.session.add(net)
@@ -45,10 +46,11 @@ class TestStatusBarriers(testlib_api.SqlTestCase):
 
     def _make_port(self):
         net = self._make_net()
-        with self.ctx.session.begin():
-            port = models_v2.Port(networks=net, mac_address='1', tenant_id='1',
-                                  admin_state_up=True, status='DOWN',
-                                  device_id='2', device_owner='3')
+        with db_api.context_manager.writer.using(self.ctx):
+            port = models_v2.Port(network_id=net.id, mac_address='1',
+                                  tenant_id='1', admin_state_up=True,
+                                  status='DOWN', device_id='2',
+                                  device_owner='3')
             self.ctx.session.add(port)
         return port
 

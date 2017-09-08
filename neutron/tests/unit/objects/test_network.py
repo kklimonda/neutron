@@ -10,8 +10,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import mock
+
 from neutron.objects import base as obj_base
 from neutron.objects import network
+from neutron.objects.qos import binding
 from neutron.objects.qos import policy
 from neutron.tests.unit.objects import test_base as obj_test_base
 from neutron.tests.unit import testlib_api
@@ -28,7 +31,7 @@ class NetworkPortSecurityDbObjTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(NetworkPortSecurityDbObjTestCase, self).setUp()
-        self.update_obj_fields({'id': lambda: self._create_network().id})
+        self.update_obj_fields({'id': lambda: self._create_test_network_id()})
 
 
 class NetworkSegmentIfaceObjTestCase(obj_test_base.BaseObjectIfaceTestCase):
@@ -51,8 +54,29 @@ class NetworkSegmentDbObjTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(NetworkSegmentDbObjTestCase, self).setUp()
-        network = self._create_network()
-        self.update_obj_fields({'network_id': network.id})
+        self.update_obj_fields(
+            {'network_id': lambda: self._create_test_network_id()})
+
+    def test_hosts(self):
+        hosts = ['host1', 'host2']
+        obj = self._make_object(self.obj_fields[0])
+        obj.hosts = hosts
+        obj.create()
+
+        obj = network.NetworkSegment.get_object(self.context, id=obj.id)
+        self.assertEqual(hosts, obj.hosts)
+
+        obj.hosts = ['host3']
+        obj.update()
+
+        obj = network.NetworkSegment.get_object(self.context, id=obj.id)
+        self.assertEqual(['host3'], obj.hosts)
+
+        obj.hosts = None
+        obj.update()
+
+        obj = network.NetworkSegment.get_object(self.context, id=obj.id)
+        self.assertFalse(obj.hosts)
 
 
 class NetworkObjectIfaceTestCase(obj_test_base.BaseObjectIfaceTestCase):
@@ -69,7 +93,8 @@ class NetworkDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
                               testlib_api.SqlTestCase):
     _test_class = network.Network
 
-    def test_qos_policy_id(self):
+    @mock.patch.object(policy.QosPolicy, 'unset_default')
+    def test_qos_policy_id(self, *mocks):
         policy_obj = policy.QosPolicy(self.context)
         policy_obj.create()
 
@@ -95,7 +120,8 @@ class NetworkDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
         obj = network.Network.get_object(self.context, id=obj.id)
         self.assertIsNone(obj.qos_policy_id)
 
-    def test__attach_qos_policy(self):
+    @mock.patch.object(policy.QosPolicy, 'unset_default')
+    def test__attach_qos_policy(self, *mocks):
         obj = self._make_object(self.obj_fields[0])
         obj.create()
 
@@ -105,6 +131,10 @@ class NetworkDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
         obj = network.Network.get_object(self.context, id=obj.id)
         self.assertEqual(policy_obj.id, obj.qos_policy_id)
+        qos_binding_obj = binding.QosPolicyNetworkBinding.get_object(
+            self.context, network_id=obj.id)
+        self.assertEqual(qos_binding_obj.policy_id, obj.qos_policy_id)
+        old_policy_id = policy_obj.id
 
         policy_obj2 = policy.QosPolicy(self.context)
         policy_obj2.create()
@@ -112,6 +142,12 @@ class NetworkDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
         obj = network.Network.get_object(self.context, id=obj.id)
         self.assertEqual(policy_obj2.id, obj.qos_policy_id)
+        qos_binding_obj2 = binding.QosPolicyNetworkBinding.get_object(
+            self.context, network_id=obj.id)
+        self.assertEqual(qos_binding_obj2.policy_id, obj.qos_policy_id)
+        qos_binding_obj = binding.QosPolicyNetworkBinding.get_objects(
+            self.context, policy_id=old_policy_id)
+        self.assertEqual(0, len(qos_binding_obj))
 
     def test_dns_domain(self):
         obj = self._make_object(self.obj_fields[0])
@@ -161,9 +197,8 @@ class SegmentHostMappingDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(SegmentHostMappingDbObjectTestCase, self).setUp()
-        self._create_test_network()
-        self._create_test_segment(network=self._network)
-        self.update_obj_fields({'segment_id': self._segment['id']})
+        self.update_obj_fields(
+            {'segment_id': lambda: self._create_test_segment_id()})
 
 
 class NetworkDNSDomainIfaceObjectTestcase(
@@ -180,4 +215,21 @@ class NetworkDNSDomainDbObjectTestcase(obj_test_base.BaseDbObjectTestCase,
     def setUp(self):
         super(NetworkDNSDomainDbObjectTestcase, self).setUp()
         self.update_obj_fields(
-            {'network_id': lambda: self._create_network().id})
+            {'network_id': lambda: self._create_test_network_id()})
+
+
+class ExternalNetworkIfaceObjectTestCase(
+    obj_test_base.BaseObjectIfaceTestCase):
+
+    _test_class = network.ExternalNetwork
+
+
+class ExternalNetworkDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
+                                      testlib_api.SqlTestCase):
+
+    _test_class = network.ExternalNetwork
+
+    def setUp(self):
+        super(ExternalNetworkDbObjectTestCase, self).setUp()
+        self.update_obj_fields(
+            {'network_id': lambda: self._create_test_network_id()})

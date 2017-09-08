@@ -22,8 +22,8 @@ from neutron.common import constants
 
 
 core_opts = [
-    cfg.StrOpt('bind_host', default='0.0.0.0',
-               help=_("The host IP to bind to")),
+    cfg.HostAddressOpt('bind_host', default='0.0.0.0',
+                       help=_("The host IP to bind to.")),
     cfg.PortOpt('bind_port', default=9696,
                 help=_("The port to bind to")),
     cfg.StrOpt('api_extensions_path', default="",
@@ -65,11 +65,6 @@ core_opts = [
                help=_("Maximum number of DNS nameservers per subnet")),
     cfg.IntOpt('max_subnet_host_routes', default=20,
                help=_("Maximum number of host routes per subnet")),
-    cfg.IntOpt('max_fixed_ips_per_port', default=5,
-               deprecated_for_removal=True,
-               help=_("Maximum number of fixed ips per port. This option "
-                      "is deprecated and will be removed in the Ocata "
-                      "release.")),
     cfg.BoolOpt('ipv6_pd_enabled', default=False,
                 help=_("Enables IPv6 Prefix Delegation for automatic subnet "
                        "CIDR allocation. "
@@ -96,12 +91,17 @@ core_opts = [
                        "Attention: the following parameter MUST be set to "
                        "False if Neutron is being used in conjunction with "
                        "Nova security groups.")),
-    cfg.StrOpt('host', default=net.get_hostname(),
-               sample_default='example.domain',
-               help=_("Hostname to be used by the Neutron server, agents and "
-                      "services running on this machine. All the agents and "
-                      "services running on this machine must use the same "
-                      "host value.")),
+    cfg.HostAddressOpt('host', default=net.get_hostname(),
+                       sample_default='example.domain',
+                       help=_("Hostname to be used by the Neutron server, "
+                              "agents and services running on this machine. "
+                              "All the agents and services running on this "
+                              "machine must use the same host value.")),
+    cfg.StrOpt("network_link_prefix",
+               help=_("This string is prepended to the normal URL that is "
+                      "returned in links to the OpenStack Network API. If it "
+                      "is empty (the default), the URLs are returned "
+                      "unchanged.")),
     cfg.BoolOpt('notify_nova_on_port_status_changes', default=True,
                 help=_("Send notification to nova when port status changes")),
     cfg.BoolOpt('notify_nova_on_port_data_changes', default=True,
@@ -117,11 +117,12 @@ core_opts = [
     cfg.BoolOpt('vlan_transparent', default=False,
                 help=_('If True, then allow plugins that support it to '
                        'create VLAN transparent networks.')),
-    cfg.StrOpt('web_framework', default='legacy',
+    cfg.StrOpt('web_framework', default='pecan',
+               deprecated_for_removal=True,
                choices=('legacy', 'pecan'),
                help=_("This will choose the web framework in which to run "
-                      "the Neutron API server. 'pecan' is a new experimental "
-                      "rewrite of the API server.")),
+                      "the Neutron API server. 'pecan' is a new "
+                      "rewrite of the API routing components.")),
     cfg.IntOpt('global_physnet_mtu', default=constants.DEFAULT_NETWORK_MTU,
                deprecated_name='segment_mtu', deprecated_group='ml2',
                help=_('MTU of the underlying physical network. Neutron uses '

@@ -16,6 +16,7 @@ import mock
 from neutron_lib import constants
 
 from neutron.agent import firewall
+from neutron.agent.linux.openvswitch_firewall import constants as ovsfw_consts
 from neutron.agent.linux.openvswitch_firewall import firewall as ovsfw
 from neutron.agent.linux.openvswitch_firewall import rules
 from neutron.common import constants as n_const
@@ -185,8 +186,7 @@ class TestCreateProtocolFlows(base.BaseTestCase):
         rule = {'protocol': constants.PROTO_NAME_TCP}
         expected_flows = [{
             'table': ovs_consts.RULES_INGRESS_TABLE,
-            'dl_dst': self.port.mac,
-            'actions': 'strip_vlan,output:1',
+            'actions': 'output:1',
             'nw_proto': constants.PROTO_NUM_TCP,
         }]
         self._test_create_protocol_flows_helper(
@@ -196,7 +196,6 @@ class TestCreateProtocolFlows(base.BaseTestCase):
         rule = {'protocol': constants.PROTO_NAME_TCP}
         expected_flows = [{
             'table': ovs_consts.RULES_EGRESS_TABLE,
-            'dl_src': self.port.mac,
             'actions': 'resubmit(,{:d})'.format(
                 ovs_consts.ACCEPT_OR_INGRESS_TABLE),
             'nw_proto': constants.PROTO_NUM_TCP,
@@ -208,7 +207,6 @@ class TestCreateProtocolFlows(base.BaseTestCase):
         rule = {}
         expected_flows = [{
             'table': ovs_consts.RULES_EGRESS_TABLE,
-            'dl_src': self.port.mac,
             'actions': 'resubmit(,{:d})'.format(
                 ovs_consts.ACCEPT_OR_INGRESS_TABLE),
         }]
@@ -220,7 +218,6 @@ class TestCreateProtocolFlows(base.BaseTestCase):
                 'protocol': constants.PROTO_NAME_ICMP}
         expected_flows = [{
             'table': ovs_consts.RULES_EGRESS_TABLE,
-            'dl_src': self.port.mac,
             'actions': 'resubmit(,{:d})'.format(
                 ovs_consts.ACCEPT_OR_INGRESS_TABLE),
             'nw_proto': constants.PROTO_NUM_IPV6_ICMP,
@@ -235,7 +232,6 @@ class TestCreateProtocolFlows(base.BaseTestCase):
                 'port_range_max': 23}
         expected_flows = [{
             'table': ovs_consts.RULES_EGRESS_TABLE,
-            'dl_src': self.port.mac,
             'actions': 'resubmit(,{:d})'.format(
                 ovs_consts.ACCEPT_OR_INGRESS_TABLE),
             'nw_proto': constants.PROTO_NUM_TCP,
@@ -307,18 +303,73 @@ class TestCreatePortRangeFlows(base.BaseTestCase):
         self._test_create_port_range_flows_helper(expected_flows, rule)
 
 
-class TestCreateRuleForIpAddress(base.BaseTestCase):
-    def test_create_rule_for_ip_address(self):
-        sg_rule = {
-            'remote_group_id': 'remote_id',
-            'direction': firewall.INGRESS_DIRECTION,
-            'some_settings': 'foo',
+class TestCreateFlowsForIpAddress(base.BaseTestCase):
+    def _generate_conjuncion_actions(self, conj_ids, offset):
+        return ','.join(
+            ["conjunction(%d,1/2)" % (c + offset)
+             for c in conj_ids])
+
+    def test_create_flows_for_ip_address_egress(self):
+        expected_template = {
+            'table': ovs_consts.RULES_EGRESS_TABLE,
+            'priority': 70,
+            'dl_type': n_const.ETHERTYPE_IP,
+            'reg_net': 0x123,
+            'nw_dst': '192.168.0.1/32'
         }
-        expected_rule = {
-            'direction': firewall.INGRESS_DIRECTION,
-            'source_ip_prefix': '192.168.0.1/32',
-            'some_settings': 'foo',
+
+        conj_ids = [12, 20]
+        flows = rules.create_flows_for_ip_address(
+            '192.168.0.1', firewall.EGRESS_DIRECTION, constants.IPv4,
+            0x123, conj_ids)
+
+        self.assertEqual(2, len(flows))
+        self.assertEqual(ovsfw_consts.OF_STATE_ESTABLISHED_NOT_REPLY,
+                         flows[0]['ct_state'])
+        self.assertEqual(ovsfw_consts.OF_STATE_NEW_NOT_ESTABLISHED,
+                         flows[1]['ct_state'])
+        self.assertEqual(self._generate_conjuncion_actions(conj_ids, 0),
+                         flows[0]['actions'])
+        self.assertEqual(self._generate_conjuncion_actions(conj_ids, 1),
+                         flows[1]['actions'])
+        for f in flows:
+            del f['actions']
+            del f['ct_state']
+            self.assertEqual(expected_template, f)
+
+
+class TestCreateConjFlows(base.BaseTestCase):
+    def test_create_conj_flows(self):
+        ovs_port = mock.Mock(ofport=1, vif_mac='00:00:00:00:00:00')
+        port_dict = {'device': 'port_id'}
+        port = ovsfw.OFPort(
+            port_dict, ovs_port, vlan_tag=TESTING_VLAN_TAG)
+
+        conj_id = 1234
+        expected_template = {
+            'table': ovs_consts.RULES_INGRESS_TABLE,
+            'dl_type': n_const.ETHERTYPE_IPV6,
+            'priority': 70,
+            'conj_id': conj_id,
+            'reg_port': port.ofport
         }
-        translated_rule = rules.create_rule_for_ip_address(
-            '192.168.0.1', sg_rule)
-        self.assertEqual(expected_rule, translated_rule)
+
+        flows = rules.create_conj_flows(port, conj_id,
+                                        firewall.INGRESS_DIRECTION,
+                                        constants.IPv6)
+
+        self.assertEqual(ovsfw_consts.OF_STATE_ESTABLISHED_NOT_REPLY,
+                         flows[0]['ct_state'])
+        self.assertEqual(ovsfw_consts.OF_STATE_NEW_NOT_ESTABLISHED,
+                         flows[1]['ct_state'])
+        self.assertEqual("output:{:d}".format(port.ofport),
+                         flows[0]['actions'])
+        self.assertEqual("ct(commit,zone=NXM_NX_REG{:d}[0..15]),{:s}".format(
+            ovsfw_consts.REG_NET, flows[0]['actions']),
+                         flows[1]['actions'])
+
+        for f in flows:
+            del f['actions']
+            del f['ct_state']
+            self.assertEqual(expected_template, f)
+            expected_template['conj_id'] += 1

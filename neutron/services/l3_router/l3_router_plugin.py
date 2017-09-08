@@ -14,14 +14,18 @@
 #    under the License.
 
 from neutron_lib import constants as n_const
+from neutron_lib.plugins import constants as plugin_constants
+from neutron_lib.services import base as service_base
 from oslo_config import cfg
 from oslo_log import helpers as log_helpers
+from oslo_log import log as logging
 from oslo_utils import importutils
 
 from neutron.api.rpc.agentnotifiers import l3_rpc_agent_api
 from neutron.api.rpc.handlers import l3_rpc
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
+from neutron.db import _resource_extend as resource_extend
 from neutron.db import common_db_mixin
 from neutron.db import dns_db
 from neutron.db import extraroute_db
@@ -35,9 +39,19 @@ from neutron.extensions import l3
 from neutron.quota import resource_registry
 from neutron import service
 from neutron.services.l3_router.service_providers import driver_controller
-from neutron.services import service_base
 
 
+LOG = logging.getLogger(__name__)
+
+
+def disable_dvr_extension_by_config(aliases):
+    if not cfg.CONF.enable_dvr:
+        LOG.info('Disabled DVR extension.')
+        if 'dvr' in aliases:
+            aliases.remove('dvr')
+
+
+@resource_extend.has_resource_extenders
 class L3RouterPlugin(service_base.ServicePluginBase,
                      common_db_mixin.CommonDbMixin,
                      extraroute_db.ExtraRoute_db_mixin,
@@ -55,10 +69,10 @@ class L3RouterPlugin(service_base.ServicePluginBase,
     l3_db.L3_NAT_db_mixin, l3_hamode_db.L3_HA_NAT_db_mixin,
     l3_dvr_db.L3_NAT_with_dvr_db_mixin, and extraroute_db.ExtraRoute_db_mixin.
     """
-    supported_extension_aliases = ["dvr", "router", "ext-gw-mode",
-                                   "extraroute", "l3_agent_scheduler",
-                                   "l3-ha", "router_availability_zone",
-                                   "l3-flavors"]
+    _supported_extension_aliases = ["dvr", "router", "ext-gw-mode",
+                                    "extraroute", "l3_agent_scheduler",
+                                    "l3-ha", "router_availability_zone",
+                                    "l3-flavors"]
 
     __native_pagination_support = True
     __native_sorting_support = True
@@ -82,6 +96,14 @@ class L3RouterPlugin(service_base.ServicePluginBase,
         self.add_worker(rpc_worker)
         self.l3_driver_controller = driver_controller.DriverController(self)
 
+    @property
+    def supported_extension_aliases(self):
+        if not hasattr(self, '_aliases'):
+            aliases = self._supported_extension_aliases[:]
+            disable_dvr_extension_by_config(aliases)
+            self._aliases = aliases
+        return self._aliases
+
     @log_helpers.log_method_call
     def start_rpc_listeners(self):
         # RPC support
@@ -94,7 +116,7 @@ class L3RouterPlugin(service_base.ServicePluginBase,
 
     @classmethod
     def get_plugin_type(cls):
-        return n_const.L3
+        return plugin_constants.L3
 
     def get_plugin_description(self):
         """returns string description of the plugin."""
@@ -120,10 +142,7 @@ class L3RouterPlugin(service_base.ServicePluginBase,
             context, floatingip,
             initial_status=n_const.FLOATINGIP_STATUS_DOWN)
 
-
-def add_flavor_id(plugin, router_res, router_db):
-    router_res['flavor_id'] = router_db['flavor_id']
-
-
-common_db_mixin.CommonDbMixin.register_dict_extend_funcs(
-    l3.ROUTERS, [add_flavor_id])
+    @staticmethod
+    @resource_extend.extends([l3.ROUTERS])
+    def add_flavor_id(router_res, router_db):
+        router_res['flavor_id'] = router_db['flavor_id']

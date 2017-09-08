@@ -124,7 +124,13 @@ class NetworkClientJSON(service_client.RestClient):
             # list of field's name. An example:
             # {'fields': ['id', 'name']}
             plural = self.pluralize(resource_name)
-            uri = '%s/%s' % (self.get_uri(plural), resource_id)
+            if 'details_quotas' in plural:
+                details, plural = plural.split('_')
+                uri = '%s/%s/%s' % (self.get_uri(plural),
+                                    resource_id, details)
+            else:
+                uri = '%s/%s' % (self.get_uri(plural), resource_id)
+
             if fields:
                 uri += '?' + urlparse.urlencode(fields, doseq=1)
             resp, body = self.get(uri)
@@ -148,10 +154,11 @@ class NetworkClientJSON(service_client.RestClient):
 
     def _updater(self, resource_name):
         def _update(res_id, **kwargs):
+            headers = kwargs.pop('headers', {})
             plural = self.pluralize(resource_name)
             uri = '%s/%s' % (self.get_uri(plural), res_id)
             post_data = self.serialize({resource_name: kwargs})
-            resp, body = self.put(uri, post_data)
+            resp, body = self.put(uri, post_data, headers=headers)
             body = self.deserialize_single(body)
             self.expected_success(200, resp.status)
             return service_client.ResponseBody(resp, body)
@@ -366,6 +373,8 @@ class NetworkClientJSON(service_client.RestClient):
             'external_gateway_info', body['router']['external_gateway_info'])
         if 'distributed' in kwargs:
             update_body['distributed'] = kwargs['distributed']
+        if 'ha' in kwargs:
+            update_body['ha'] = kwargs['ha']
         update_body = dict(router=update_body)
         update_body = jsonutils.dumps(update_body)
         resp, body = self.put(uri, update_body)
@@ -550,12 +559,13 @@ class NetworkClientJSON(service_client.RestClient):
         return service_client.ResponseBody(resp, body)
 
     def create_qos_policy(self, name, description=None, shared=False,
-                          tenant_id=None):
+                          tenant_id=None, is_default=False):
         uri = '%s/qos/policies' % self.uri_prefix
         post_data = {
             'policy': {
                 'name': name,
-                'shared': shared
+                'shared': shared,
+                'is_default': is_default
             }
         }
         if description is not None:
@@ -575,16 +585,19 @@ class NetworkClientJSON(service_client.RestClient):
         self.expected_success(200, resp.status)
         return service_client.ResponseBody(resp, body)
 
-    def create_bandwidth_limit_rule(self, policy_id, max_kbps, max_burst_kbps):
+    def create_bandwidth_limit_rule(self, policy_id, max_kbps,
+                                    max_burst_kbps, direction=None):
         uri = '%s/qos/policies/%s/bandwidth_limit_rules' % (
             self.uri_prefix, policy_id)
-        post_data = self.serialize({
+        post_data = {
             'bandwidth_limit_rule': {
                 'max_kbps': max_kbps,
                 'max_burst_kbps': max_burst_kbps
             }
-        })
-        resp, body = self.post(uri, post_data)
+        }
+        if direction:
+            post_data['bandwidth_limit_rule']['direction'] = direction
+        resp, body = self.post(uri, self.serialize(post_data))
         self.expected_success(201, resp.status)
         body = jsonutils.loads(body)
         return service_client.ResponseBody(resp, body)
@@ -608,6 +621,8 @@ class NetworkClientJSON(service_client.RestClient):
     def update_bandwidth_limit_rule(self, policy_id, rule_id, **kwargs):
         uri = '%s/qos/policies/%s/bandwidth_limit_rules/%s' % (
             self.uri_prefix, policy_id, rule_id)
+        if "direction" in kwargs and kwargs['direction'] is None:
+            kwargs.pop('direction')
         post_data = {'bandwidth_limit_rule': kwargs}
         resp, body = self.put(uri, jsonutils.dumps(post_data))
         body = self.deserialize_single(body)
@@ -715,6 +730,14 @@ class NetworkClientJSON(service_client.RestClient):
 
     def list_qos_rule_types(self):
         uri = '%s/qos/rule-types' % self.uri_prefix
+        resp, body = self.get(uri)
+        self.expected_success(200, resp.status)
+        body = jsonutils.loads(body)
+        return service_client.ResponseBody(resp, body)
+
+    def show_qos_rule_type(self, rule_type_name):
+        uri = '%s/qos/rule-types/%s' % (
+            self.uri_prefix, rule_type_name)
         resp, body = self.get(uri)
         self.expected_success(200, resp.status)
         body = jsonutils.loads(body)

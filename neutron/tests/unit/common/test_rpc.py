@@ -55,7 +55,7 @@ class TestRPC(base.DietTestCase):
 
     @mock.patch.object(rpc, 'get_allowed_exmods')
     @mock.patch.object(rpc, 'RequestContextSerializer')
-    @mock.patch.object(messaging, 'get_transport')
+    @mock.patch.object(messaging, 'get_rpc_transport')
     @mock.patch.object(messaging, 'get_notification_transport')
     @mock.patch.object(messaging, 'Notifier')
     def test_init(self, mock_not, mock_noti_trans, mock_trans, mock_ser,
@@ -168,7 +168,7 @@ class TestRPC(base.DietTestCase):
         server = rpc.get_server(tgt, ends, serializer='foo')
 
         mock_ser.assert_called_once_with('foo')
-        access_policy = dispatcher.LegacyRPCAccessPolicy
+        access_policy = dispatcher.DefaultRPCAccessPolicy
         mock_get.assert_called_once_with(rpc.TRANSPORT, tgt, ends,
                                          'eventlet', ser,
                                          access_policy=access_policy)
@@ -234,46 +234,41 @@ class TestRequestContextSerializer(base.DietTestCase):
 
         context.to_dict.assert_called_once_with()
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context(self, m, n):
+    def test_deserialize_context(self):
         context_dict = {'foo': 'bar',
                         'user_id': 1,
-                        'tenant_id': 1}
+                        'tenant_id': 1,
+                        'is_admin': True}
 
         c = self.ser.deserialize_context(context_dict)
 
         self.assertEqual(1, c.user_id)
         self.assertEqual(1, c.project_id)
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context_no_user_id(self, m, n):
+    def test_deserialize_context_no_user_id(self):
         context_dict = {'foo': 'bar',
                         'user': 1,
-                        'tenant_id': 1}
+                        'tenant_id': 1,
+                        'is_admin': True}
 
         c = self.ser.deserialize_context(context_dict)
 
         self.assertEqual(1, c.user_id)
         self.assertEqual(1, c.project_id)
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context_no_tenant_id(self, m, n):
+    def test_deserialize_context_no_tenant_id(self):
         context_dict = {'foo': 'bar',
                         'user_id': 1,
-                        'project_id': 1}
+                        'project_id': 1,
+                        'is_admin': True}
 
         c = self.ser.deserialize_context(context_dict)
 
         self.assertEqual(1, c.user_id)
         self.assertEqual(1, c.project_id)
 
-    @mock.patch('neutron.policy.check_is_advsvc', return_val=False)
-    @mock.patch('neutron.policy.check_is_admin', return_val=False)
-    def test_deserialize_context_no_ids(self, m, n):
-        context_dict = {'foo': 'bar'}
+    def test_deserialize_context_no_ids(self):
+        context_dict = {'foo': 'bar', 'is_admin': True}
 
         c = self.ser.deserialize_context(context_dict)
 
@@ -340,21 +335,26 @@ class TimeoutTestCase(base.DietTestCase):
         # ensure that the timeout was not increased and the back-off sleep
         # wasn't called
         self.assertEqual(
-            5, rpc._ContextWrapper._METHOD_TIMEOUTS['create_pb_and_j'])
+            5,
+            rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['create_pb_and_j'])
         self.assertFalse(self.sleep.called)
 
     def test_timeout_store_defaults(self):
         # any method should default to the configured timeout
-        self.assertEqual(rpc.TRANSPORT.conf.rpc_response_timeout,
-                         rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'])
-        self.assertEqual(rpc.TRANSPORT.conf.rpc_response_timeout,
-                         rpc._ContextWrapper._METHOD_TIMEOUTS['method_2'])
+        self.assertEqual(
+            rpc.TRANSPORT.conf.rpc_response_timeout,
+            rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'])
+        self.assertEqual(
+            rpc.TRANSPORT.conf.rpc_response_timeout,
+            rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_2'])
         # a change to an existing should not affect new or existing ones
-        rpc._ContextWrapper._METHOD_TIMEOUTS['method_2'] = 7000
-        self.assertEqual(rpc.TRANSPORT.conf.rpc_response_timeout,
-                         rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'])
-        self.assertEqual(rpc.TRANSPORT.conf.rpc_response_timeout,
-                         rpc._ContextWrapper._METHOD_TIMEOUTS['method_3'])
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_2'] = 7000
+        self.assertEqual(
+            rpc.TRANSPORT.conf.rpc_response_timeout,
+            rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'])
+        self.assertEqual(
+            rpc.TRANSPORT.conf.rpc_response_timeout,
+            rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_3'])
 
     def test_method_timeout_sleep(self):
         rpc.TRANSPORT.conf.rpc_response_timeout = 2
@@ -367,7 +367,7 @@ class TimeoutTestCase(base.DietTestCase):
             self.sleep.reset_mock()
 
     def test_method_timeout_increases_on_timeout_exception(self):
-        rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'] = 1
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'] = 1
         for i in range(5):
             with testtools.ExpectedException(messaging.MessagingTimeout):
                 self.client.call(self.call_context, 'method_1')
@@ -383,15 +383,17 @@ class TimeoutTestCase(base.DietTestCase):
         for i in range(5):
             with testtools.ExpectedException(messaging.MessagingTimeout):
                 self.client.call(self.call_context, 'method_1')
-        self.assertEqual(10 * rpc.TRANSPORT.conf.rpc_response_timeout,
-                         rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'])
+        self.assertEqual(
+            10 * rpc.TRANSPORT.conf.rpc_response_timeout,
+            rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'])
         with testtools.ExpectedException(messaging.MessagingTimeout):
             self.client.call(self.call_context, 'method_1')
-        self.assertEqual(10 * rpc.TRANSPORT.conf.rpc_response_timeout,
-                         rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'])
+        self.assertEqual(
+            10 * rpc.TRANSPORT.conf.rpc_response_timeout,
+            rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'])
 
     def test_timeout_unchanged_on_other_exception(self):
-        rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'] = 1
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'] = 1
         rpc.TRANSPORT._send.side_effect = ValueError
         with testtools.ExpectedException(ValueError):
             self.client.call(self.call_context, 'method_1')
@@ -403,8 +405,8 @@ class TimeoutTestCase(base.DietTestCase):
         self.assertEqual([1, 1], timeouts)
 
     def test_timeouts_for_methods_tracked_independently(self):
-        rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'] = 1
-        rpc._ContextWrapper._METHOD_TIMEOUTS['method_2'] = 1
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'] = 1
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_2'] = 1
         for method in ('method_1', 'method_1', 'method_2',
                        'method_1', 'method_2'):
             with testtools.ExpectedException(messaging.MessagingTimeout):
@@ -414,8 +416,8 @@ class TimeoutTestCase(base.DietTestCase):
         self.assertEqual([1, 2, 1, 4, 2], timeouts)
 
     def test_timeouts_for_namespaces_tracked_independently(self):
-        rpc._ContextWrapper._METHOD_TIMEOUTS['ns1.method'] = 1
-        rpc._ContextWrapper._METHOD_TIMEOUTS['ns2.method'] = 1
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['ns1.method'] = 1
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['ns2.method'] = 1
         for ns in ('ns1', 'ns2'):
             self.client.target.namespace = ns
             for i in range(4):
@@ -426,7 +428,7 @@ class TimeoutTestCase(base.DietTestCase):
         self.assertEqual([1, 2, 4, 8, 1, 2, 4, 8], timeouts)
 
     def test_method_timeout_increases_with_prepare(self):
-        rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'] = 1
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'] = 1
         ctx = self.client.prepare(version='1.4')
         with testtools.ExpectedException(messaging.MessagingTimeout):
             ctx.call(self.call_context, 'method_1')
@@ -440,23 +442,48 @@ class TimeoutTestCase(base.DietTestCase):
 
     def test_set_max_timeout_caps_all_methods(self):
         rpc.TRANSPORT.conf.rpc_response_timeout = 300
-        rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'] = 100
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'] = 100
         rpc.BackingOffClient.set_max_timeout(50)
         # both explicitly tracked
-        self.assertEqual(50, rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'])
+        self.assertEqual(
+            50, rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'])
         # as well as new methods
-        self.assertEqual(50, rpc._ContextWrapper._METHOD_TIMEOUTS['method_2'])
+        self.assertEqual(
+            50, rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_2'])
 
     def test_set_max_timeout_retains_lower_timeouts(self):
-        rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'] = 10
+        rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'] = 10
         rpc.BackingOffClient.set_max_timeout(50)
-        self.assertEqual(10, rpc._ContextWrapper._METHOD_TIMEOUTS['method_1'])
+        self.assertEqual(
+            10, rpc._BackingOffContextWrapper._METHOD_TIMEOUTS['method_1'])
 
     def test_set_max_timeout_overrides_default_timeout(self):
         rpc.TRANSPORT.conf.rpc_response_timeout = 10
-        self.assertEqual(10 * 10, rpc._ContextWrapper.get_max_timeout())
-        rpc._ContextWrapper.set_max_timeout(10)
-        self.assertEqual(10, rpc._ContextWrapper.get_max_timeout())
+        self.assertEqual(
+            10 * 10, rpc._BackingOffContextWrapper.get_max_timeout())
+        rpc._BackingOffContextWrapper.set_max_timeout(10)
+        self.assertEqual(10, rpc._BackingOffContextWrapper.get_max_timeout())
+
+
+class CastExceptionTestCase(base.DietTestCase):
+    def setUp(self):
+        super(CastExceptionTestCase, self).setUp()
+
+        self.messaging_conf = messaging_conffixture.ConfFixture(CONF)
+        self.messaging_conf.transport_driver = 'fake'
+        self.messaging_conf.response_timeout = 0
+        self.useFixture(self.messaging_conf)
+
+        self.addCleanup(rpc.cleanup)
+        rpc.init(CONF)
+        rpc.TRANSPORT = mock.MagicMock()
+        rpc.TRANSPORT._send.side_effect = Exception
+        target = messaging.Target(version='1.0', topic='testing')
+        self.client = rpc.get_client(target)
+        self.cast_context = mock.Mock()
+
+    def test_cast_catches_exception(self):
+        self.client.cast(self.cast_context, 'method_1')
 
 
 class TestConnection(base.DietTestCase):

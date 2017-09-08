@@ -29,15 +29,14 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import excutils
-import six
 
-from neutron._i18n import _, _LE, _LW
-from neutron.agent.common import config
+from neutron._i18n import _
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_comments as ic
 from neutron.agent.linux import utils as linux_utils
 from neutron.common import exceptions as n_exc
 from neutron.common import utils
+from neutron.conf.agent import common as config
 
 LOG = logging.getLogger(__name__)
 
@@ -252,8 +251,8 @@ class IptablesTable(object):
                                                           top, self.wrap_name,
                                                           comment=comment)))
         except ValueError:
-            LOG.warning(_LW('Tried to remove rule that was not there:'
-                            ' %(chain)r %(rule)r %(wrap)r %(top)r'),
+            LOG.warning('Tried to remove rule that was not there:'
+                        ' %(chain)r %(rule)r %(wrap)r %(top)r',
                         {'chain': chain, 'rule': rule,
                          'top': top, 'wrap': wrap})
 
@@ -359,7 +358,7 @@ class IptablesManager(object):
             elif ip_version == 6:
                 tables = self.ipv6
 
-            for table, chains in six.iteritems(builtin_chains[ip_version]):
+            for table, chains in builtin_chains[ip_version].items():
                 for chain in chains:
                     tables[table].add_chain(chain)
                     tables[table].add_rule(chain, '-j $%s' %
@@ -494,8 +493,8 @@ class IptablesManager(object):
                          commands[log_start:log_end],
                          log_start + 1)
                      )
-        LOG.error(_LE("IPTablesManager.apply failed to apply the "
-                      "following set of iptables rules:\n%s"),
+        LOG.error("IPTablesManager.apply failed to apply the "
+                  "following set of iptables rules:\n%s",
                   '\n'.join(log_lines))
 
     def _apply_synchronized(self):
@@ -526,8 +525,8 @@ class IptablesManager(object):
                     if (self.namespace and not
                             ip_lib.IPWrapper().netns.exists(self.namespace)):
                         ctx.reraise = False
-                        LOG.error(_LE("Namespace %s was deleted during "
-                                  "IPTables operations."), self.namespace)
+                        LOG.error("Namespace %s was deleted during IPTables "
+                                  "operations.", self.namespace)
                         return []
             all_lines = save_output.split('\n')
             commands = []
@@ -672,9 +671,9 @@ class IptablesManager(object):
         def _weed_out_duplicates(line):
             if line in seen_lines:
                 thing = 'chain' if line.startswith(':') else 'rule'
-                LOG.warning(_LW("Duplicate iptables %(thing)s detected. This "
-                                "may indicate a bug in the iptables "
-                                "%(thing)s generation code. Line: %(line)s"),
+                LOG.warning("Duplicate iptables %(thing)s detected. This "
+                            "may indicate a bug in the iptables "
+                            "%(thing)s generation code. Line: %(line)s",
                             {'thing': thing, 'line': line})
                 return False
             seen_lines.add(line)
@@ -711,8 +710,8 @@ class IptablesManager(object):
         """Return the sum of the traffic counters of all rules of a chain."""
         cmd_tables = self._get_traffic_counters_cmd_tables(chain, wrap)
         if not cmd_tables:
-            LOG.warning(_LW('Attempted to get traffic counters of chain %s '
-                            'which does not exist'), chain)
+            LOG.warning('Attempted to get traffic counters of chain %s '
+                        'which does not exist', chain)
             return
 
         name = get_chain_name(chain, wrap)

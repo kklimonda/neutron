@@ -17,15 +17,16 @@ import collections
 
 import netaddr
 from neutron_lib import constants
+from neutron_lib.utils import net
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import importutils
 import testtools
 
-from neutron.agent.common import config
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.common import utils
+from neutron.conf.agent import common as config
 from neutron.tests.common import net_helpers
 from neutron.tests.functional import base as functional_base
 
@@ -57,7 +58,7 @@ class IpLibTestFramework(functional_base.BaseSudoTestCase):
         return Device(name or utils.get_rand_name(),
                       ip_cidrs or ["%s/24" % TEST_IP],
                       mac_address or
-                      utils.get_random_mac('fa:16:3e:00:00:00'.split(':')),
+                      net.get_random_mac('fa:16:3e:00:00:00'.split(':')),
                       namespace or utils.get_rand_name())
 
     def _safe_delete_device(self, device):
@@ -232,7 +233,7 @@ class IpLibTestCase(IpLibTestFramework):
         attr = self.generate_device_details(
             ip_cidrs=["%s/24" % TEST_IP, "fd00::1/64"]
         )
-        mac_address = utils.get_random_mac('fa:16:3e:00:00:00'.split(':'))
+        mac_address = net.get_random_mac('fa:16:3e:00:00:00'.split(':'))
         device = self.manage_device(attr)
         device.neigh.add(TEST_IP_NEIGH, mac_address)
 
@@ -265,7 +266,7 @@ class IpLibTestCase(IpLibTestFramework):
         attr = self.generate_device_details(
             ip_cidrs=["%s/24" % TEST_IP, "fd00::1/64"]
         )
-        mac_address = utils.get_random_mac('fa:16:3e:00:00:00'.split(':'))
+        mac_address = net.get_random_mac('fa:16:3e:00:00:00'.split(':'))
         device = self.manage_device(attr)
 
         # trying to delete a non-existent entry shouldn't raise an error

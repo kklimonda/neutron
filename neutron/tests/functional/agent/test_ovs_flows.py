@@ -24,6 +24,7 @@ from oslo_serialization import jsonutils
 from oslo_utils import importutils
 from testtools.content import text_content
 
+from neutron.agent.common import ovs_lib
 from neutron.agent.common import utils
 from neutron.agent.linux import ip_lib
 from neutron.cmd.sanity import checks
@@ -311,12 +312,48 @@ class ARPSpoofTestCase(OVSAgentTestBase):
 
 class CanaryTableTestCase(OVSAgentTestBase):
     def test_canary_table(self):
-        self.br_int.delete_flows()
+        self.br_int.uninstall_flows(cookie=ovs_lib.COOKIE_ANY)
         self.assertEqual(constants.OVS_RESTARTED,
                          self.br_int.check_canary_table())
         self.br_int.setup_canary_table()
         self.assertEqual(constants.OVS_NORMAL,
                          self.br_int.check_canary_table())
+
+
+class DeleteFlowsTestCase(OVSAgentTestBase):
+
+    def test_delete_flows_bridge_cookie_only(self):
+        PORT = 1
+
+        self.br_int.add_flow(in_port=PORT, ip=True, nw_dst="1.1.1.1",
+                             actions="output:11")
+        self.br_int.add_flow(in_port=PORT, ip=True, nw_dst="2.2.2.2",
+                             cookie=42, actions="output:42")
+
+        # delete (should only delete flows with the bridge cookie)
+        self.br_int.delete_flows(in_port=PORT)
+        flows = self.br_int.dump_flows_for(in_port=PORT,
+                                           cookie=self.br_int._default_cookie)
+        flows42 = self.br_int.dump_flows_for(in_port=PORT, cookie=42)
+
+        # check that only flows with cookie 42 remain
+        self.assertFalse(flows)
+        self.assertTrue(flows42)
+
+    def test_delete_flows_all(self):
+        PORT = 1
+
+        self.br_int.add_flow(in_port=PORT, ip=True, nw_dst="1.1.1.1",
+                             actions="output:11")
+        self.br_int.add_flow(in_port=PORT, ip=True, nw_dst="2.2.2.2",
+                             cookie=42, actions="output:42")
+
+        # delete both flows
+        self.br_int.delete_flows(in_port=PORT, cookie=ovs_lib.COOKIE_ANY)
+
+        # check that no flow remains
+        flows = self.br_int.dump_flows_for(in_port=PORT)
+        self.assertFalse(flows)
 
 
 class OVSFlowTestCase(OVSAgentTestBase):
@@ -391,8 +428,8 @@ class OVSFlowTestCase(OVSAgentTestBase):
     @helpers.skip_if_ovs_older_than("2.5.1")
     def test_install_flood_to_tun(self):
         attrs = {
-            'remote_ip': '192.0.2.1',  # RFC 5737 TEST-NET-1
-            'local_ip': '198.51.100.1',  # RFC 5737 TEST-NET-2
+            'remote_ip': self.get_test_net_address(1),
+            'local_ip': self.get_test_net_address(2),
         }
         kwargs = {'vlan': 777, 'tun_id': 888}
         port_name = common_utils.get_rand_device_name(net_helpers.PORT_PREFIX)
@@ -413,3 +450,19 @@ class OVSFlowTestCase(OVSAgentTestBase):
         trace = self._run_trace(self.tun_br.br_name, test_packet)
         self.assertEqual(" unchanged", trace["Final flow"])
         self.assertIn("drop", trace["Datapath actions"])
+
+    def test_install_instructions_str(self):
+        kwargs = {'in_port': 345, 'vlan_tci': 0x1123}
+        dst_p = self.useFixture(
+            net_helpers.OVSPortFixture(self.br_tun, self.namespace)).port
+        dst_ofp = self.br_tun.get_port_ofport(dst_p.name)
+        self.br_tun.install_instructions("pop_vlan,output:%d" % dst_ofp,
+                                         priority=10, **kwargs)
+        trace = self._run_trace(self.br_tun.br_name,
+                                "in_port=%(in_port)d,dl_src=12:34:56:78:aa:bb,"
+                                "dl_dst=24:12:56:78:aa:bb,dl_type=0x0800,"
+                                "nw_src=192.168.0.1,nw_dst=192.168.0.2,"
+                                "nw_proto=1,nw_tos=0,nw_ttl=128,"
+                                "icmp_type=8,icmp_code=0,vlan_tci=%(vlan_tci)d"
+                                % kwargs)
+        self.assertIn("pop_vlan,", trace["Datapath actions"])

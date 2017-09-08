@@ -10,13 +10,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import contextlib
-
 from neutron_lib import constants
 from neutron_lib import exceptions
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LE
+from neutron._i18n import _
 from neutron.agent.common import ovs_lib
 from neutron.services.trunk.drivers.openvswitch.agent import exceptions as exc
 from neutron.services.trunk.drivers.openvswitch import utils
@@ -93,25 +91,6 @@ class TrunkParentPort(object):
             self.DEV_PREFIX, port_id)
         self._transaction = None
 
-    # TODO(jlibosva): Move nested transaction to ovs_lib
-    @contextlib.contextmanager
-    def ovsdb_transaction(self):
-        """Context manager for ovsdb transaction.
-
-        The object caches whether its already in transaction and if it is, the
-        original transaction is returned.  This behavior enables calling
-        manager several times while always getting the same transaction.
-        """
-        if self._transaction:
-            yield self._transaction
-        else:
-            with self.bridge.ovsdb.transaction() as txn:
-                self._transaction = txn
-                try:
-                    yield txn
-                finally:
-                    self._transaction = None
-
     def plug(self, br_int):
         """Plug patch ports between trunk bridge and given bridge.
 
@@ -136,7 +115,7 @@ class TrunkParentPort(object):
         patch_trunk_attrs = get_patch_peer_attrs(self.patch_port_int_name,
                                                  self.port_mac, self.port_id)
 
-        with self.ovsdb_transaction() as txn:
+        with ovsdb.transaction() as txn:
             txn.add(ovsdb.add_port(br_int.br_name,
                                    self.patch_port_int_name))
             txn.add(ovsdb.db_set('Interface', self.patch_port_int_name,
@@ -156,7 +135,7 @@ class TrunkParentPort(object):
                        subport.
         """
         ovsdb = self.bridge.ovsdb
-        with self.ovsdb_transaction() as txn:
+        with ovsdb.transaction() as txn:
             txn.add(ovsdb.del_br(self.bridge.br_name))
             txn.add(ovsdb.del_port(self.patch_port_int_name,
                                    bridge.br_name))
@@ -190,7 +169,7 @@ class SubPort(TrunkParentPort):
                        will be created.
         """
         ovsdb = self.bridge.ovsdb
-        with self.ovsdb_transaction() as txn:
+        with ovsdb.transaction() as txn:
             super(SubPort, self).plug(br_int)
             txn.add(ovsdb.db_set(
                 "Port", self.patch_port_trunk_name,
@@ -206,7 +185,7 @@ class SubPort(TrunkParentPort):
                        subport.
         """
         ovsdb = self.bridge.ovsdb
-        with self.ovsdb_transaction() as txn:
+        with ovsdb.transaction() as txn:
             txn.add(ovsdb.del_port(self.patch_port_trunk_name,
                                    self.bridge.br_name))
             txn.add(ovsdb.del_port(self.patch_port_int_name,
@@ -269,8 +248,8 @@ class TrunkManager(object):
             LOG.debug("Deleted bridge '%s' and patch peers '%s'.",
                       trunk_bridge.br_name, patch_peers)
         except RuntimeError as e:
-            LOG.error(_LE("Could not delete '%(peers)s' associated to "
-                          "trunk bridge %(name)s. Reason: %(reason)s."),
+            LOG.error("Could not delete '%(peers)s' associated to "
+                      "trunk bridge %(name)s. Reason: %(reason)s.",
                       {'peers': patch_peers,
                        'name': trunk_bridge.br_name,
                        'reason': e})

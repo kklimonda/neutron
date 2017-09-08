@@ -9,17 +9,20 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+import testtools
 
 from oslo_utils import uuidutils
+from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 
 from neutron.tests.tempest.api import base
+from neutron.tests.tempest import config
 
 
 class NetworksTestAdmin(base.BaseAdminNetworkTest):
 
-    @test.idempotent_id('d3c76044-d067-4cb0-ae47-8cdd875c7f67')
+    @decorators.idempotent_id('d3c76044-d067-4cb0-ae47-8cdd875c7f67')
     @test.requires_ext(extension="project-id", service="network")
     def test_admin_create_network_keystone_v3(self):
         project_id = self.client.tenant_id  # non-admin
@@ -37,7 +40,7 @@ class NetworksTestAdmin(base.BaseAdminNetworkTest):
         self.assertEqual(project_id, lookup_net['project_id'])
         self.assertEqual(project_id, lookup_net['tenant_id'])
 
-    @test.idempotent_id('8d21aaca-4364-4eb9-8b79-44b4fff6373b')
+    @decorators.idempotent_id('8d21aaca-4364-4eb9-8b79-44b4fff6373b')
     @test.requires_ext(extension="project-id", service="network")
     def test_admin_create_network_keystone_v3_and_tenant(self):
         project_id = self.client.tenant_id  # non-admin
@@ -55,7 +58,7 @@ class NetworksTestAdmin(base.BaseAdminNetworkTest):
         self.assertEqual(project_id, lookup_net['project_id'])
         self.assertEqual(project_id, lookup_net['tenant_id'])
 
-    @test.idempotent_id('08b92179-669d-45ee-8233-ef6611190809')
+    @decorators.idempotent_id('08b92179-669d-45ee-8233-ef6611190809')
     @test.requires_ext(extension="project-id", service="network")
     def test_admin_create_network_keystone_v3_and_other_tenant(self):
         project_id = self.client.tenant_id  # non-admin
@@ -68,3 +71,17 @@ class NetworksTestAdmin(base.BaseAdminNetworkTest):
                               client=self.admin_client)
         expected_message = "'project_id' and 'tenant_id' do not match"
         self.assertEqual(expected_message, e.resp_body['message'])
+
+    @decorators.idempotent_id('571d0dde-0f84-11e7-b565-fa163e4fa634')
+    @testtools.skipUnless("vxlan" in config.CONF.neutron_plugin_options.
+                          available_type_drivers,
+                          'VXLAN type_driver is not enabled')
+    @test.requires_ext(extension="provider", service="network")
+    def test_create_tenant_network_vxlan(self):
+        network = self.admin_client.create_network(
+            **{"provider:network_type": "vxlan"})['network']
+        self.addCleanup(self.admin_client.delete_network,
+                        network['id'])
+        network = self.admin_client.show_network(
+            network['id'])['network']
+        self.assertEqual('vxlan', network['provider:network_type'])

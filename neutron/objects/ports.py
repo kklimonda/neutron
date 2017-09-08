@@ -13,6 +13,7 @@
 #    under the License.
 
 import netaddr
+from oslo_utils import versionutils
 from oslo_versionedobjects import base as obj_base
 from oslo_versionedobjects import fields as obj_fields
 
@@ -20,12 +21,13 @@ from neutron.common import constants
 from neutron.common import utils
 from neutron.db import api as db_api
 from neutron.db.models import dns as dns_models
+from neutron.db.models import l3
 from neutron.db.models import securitygroup as sg_models
 from neutron.db import models_v2
-from neutron.db.qos import models as qos_models
 from neutron.objects import base
 from neutron.objects import common_types
 from neutron.objects.db import api as obj_db_api
+from neutron.objects.qos import binding
 from neutron.plugins.ml2 import models as ml2_models
 
 
@@ -155,6 +157,8 @@ class IPAllocation(base.NeutronDbObject):
         'ip_address': obj_fields.IPAddressField(),
     }
 
+    fields_no_update = fields.keys()
+
     primary_keys = ['subnet_id', 'network_id', 'ip_address']
 
     foreign_keys = {
@@ -179,11 +183,33 @@ class IPAllocation(base.NeutronDbObject):
             fields['ip_address'] = netaddr.IPAddress(fields['ip_address'])
         return fields
 
+    @classmethod
+    def get_alloc_by_subnet_id(cls, context, subnet_id, device_owner,
+                               exclude=True):
+        # need to join with ports table as IPAllocation's port
+        # is not joined eagerly and thus producing query which yields
+        # incorrect results
+        if exclude:
+            alloc_db = (context.session.query(models_v2.IPAllocation).
+                       filter_by(subnet_id=subnet_id).join(models_v2.Port).
+                       filter(~models_v2.Port.device_owner.
+                       in_(device_owner)).first())
+        else:
+            alloc_db = (context.session.query(models_v2.IPAllocation).
+                       filter_by(subnet_id=subnet_id).join(models_v2.Port).
+                       filter(models_v2.Port.device_owner.
+                       in_(device_owner)).first())
+        if exclude and alloc_db:
+            return super(IPAllocation, cls)._load_object(context, alloc_db)
+        if alloc_db:
+            return True
+
 
 @obj_base.VersionedObjectRegistry.register
 class PortDNS(base.NeutronDbObject):
     # Version 1.0: Initial version
-    VERSION = '1.0'
+    # Version 1.1: Add dns_domain attribute
+    VERSION = '1.1'
 
     db_model = dns_models.PortDNS
 
@@ -200,13 +226,20 @@ class PortDNS(base.NeutronDbObject):
         'previous_dns_name': common_types.DomainNameField(),
         'previous_dns_domain': common_types.DomainNameField(),
         'dns_name': common_types.DomainNameField(),
+        'dns_domain': common_types.DomainNameField(),
     }
+
+    def obj_make_compatible(self, primitive, target_version):
+        _target_version = versionutils.convert_version_to_tuple(target_version)
+        if _target_version < (1, 1):
+            primitive.pop('dns_domain', None)
 
 
 @obj_base.VersionedObjectRegistry.register
 class Port(base.NeutronDbObject):
     # Version 1.0: Initial version
-    VERSION = '1.0'
+    # Version 1.1: Add data_plane_status field
+    VERSION = '1.1'
 
     db_model = models_v2.Port
 
@@ -226,6 +259,9 @@ class Port(base.NeutronDbObject):
         ),
         'binding': obj_fields.ObjectField(
             'PortBinding', nullable=True
+        ),
+        'data_plane_status': obj_fields.ObjectField(
+            'PortDataPlaneStatus', nullable=True
         ),
         'dhcp_options': obj_fields.ListOfObjectsField(
             'ExtraDhcpOpt', nullable=True
@@ -256,10 +292,15 @@ class Port(base.NeutronDbObject):
         # field in later object iterations
     }
 
+    extra_filter_names = {'security_group_ids'}
+
+    fields_no_update = ['project_id', 'network_id']
+
     synthetic_fields = [
         'allowed_address_pairs',
         'binding',
         'binding_levels',
+        'data_plane_status',
         'dhcp_options',
         'distributed_binding',
         'dns',
@@ -299,16 +340,13 @@ class Port(base.NeutronDbObject):
                 self._attach_qos_policy(fields['qos_policy_id'])
 
     def _attach_qos_policy(self, qos_policy_id):
-        # TODO(ihrachys): introduce an object for the binding to isolate
-        # database access in a single place, currently scattered between port
-        # and policy objects
-        obj_db_api.delete_objects(
-            self.obj_context, qos_models.QosPortPolicyBinding, port_id=self.id)
+        binding.QosPolicyPortBinding.delete_objects(
+            self.obj_context, port_id=self.id)
         if qos_policy_id:
-            obj_db_api.create_object(
-                self.obj_context, qos_models.QosPortPolicyBinding,
-                {'port_id': self.id, 'policy_id': qos_policy_id}
-            )
+            port_binding_obj = binding.QosPolicyPortBinding(
+                self.obj_context, policy_id=qos_policy_id, port_id=self.id)
+            port_binding_obj.create()
+
         self.qos_policy_id = qos_policy_id
         self.obj_reset_changes(['qos_policy_id'])
 
@@ -374,3 +412,20 @@ class Port(base.NeutronDbObject):
         else:
             self.qos_policy_id = None
         self.obj_reset_changes(['qos_policy_id'])
+
+    def obj_make_compatible(self, primitive, target_version):
+        _target_version = versionutils.convert_version_to_tuple(target_version)
+
+        if _target_version < (1, 1):
+            primitive.pop('data_plane_status', None)
+
+    @classmethod
+    def get_ports_by_router(cls, context, router_id, owner, subnet):
+        rport_qry = context.session.query(models_v2.Port).join(
+            l3.RouterPort)
+        ports = rport_qry.filter(
+            l3.RouterPort.router_id == router_id,
+            l3.RouterPort.port_type == owner,
+            models_v2.Port.network_id == subnet['network_id']
+        )
+        return [cls._load_object(context, db_obj) for db_obj in ports.all()]

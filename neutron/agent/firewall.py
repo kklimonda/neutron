@@ -18,11 +18,12 @@ import contextlib
 
 import six
 
+from neutron_lib.api.definitions import port_security as psec
 from neutron_lib import constants as n_const
 
 import neutron.common.constants as const
 from neutron.common import utils
-from neutron.extensions import portsecurity as psec
+
 
 INGRESS_DIRECTION = const.INGRESS_DIRECTION
 EGRESS_DIRECTION = const.EGRESS_DIRECTION
@@ -33,10 +34,16 @@ DIRECTION_IP_PREFIX = {INGRESS_DIRECTION: 'source_ip_prefix',
 # List of ICMPv6 types that should be permitted (ingress) by default. This list
 # depends on iptables conntrack behavior of recognizing ICMP errors (types 1-4)
 # as related traffic.
-ICMPV6_ALLOWED_TYPES = [n_const.ICMPV6_TYPE_MLD_QUERY,
-                        n_const.ICMPV6_TYPE_RA,
-                        n_const.ICMPV6_TYPE_NS,
-                        n_const.ICMPV6_TYPE_NA]
+ICMPV6_ALLOWED_INGRESS_TYPES = (n_const.ICMPV6_TYPE_MLD_QUERY,
+                                n_const.ICMPV6_TYPE_RA,
+                                n_const.ICMPV6_TYPE_NS,
+                                n_const.ICMPV6_TYPE_NA)
+
+# List of ICMPv6 types that should be permitted (egress) by default.
+ICMPV6_ALLOWED_EGRESS_TYPES = (n_const.ICMPV6_TYPE_MLD_QUERY,
+                               n_const.ICMPV6_TYPE_RS,
+                               n_const.ICMPV6_TYPE_NS,
+                               n_const.ICMPV6_TYPE_NA)
 
 
 def port_sec_enabled(port):
@@ -154,6 +161,13 @@ class FirewallDriver(object):
         which use enhanced RPC for security_groups.
         """
         raise NotImplementedError()
+
+    def process_trusted_ports(self, port_ids):
+        """Process ports that are trusted and shouldn't be filtered."""
+        pass
+
+    def remove_trusted_ports(self, port_ids):
+        pass
 
 
 class NoopFirewallDriver(FirewallDriver):

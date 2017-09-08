@@ -18,16 +18,17 @@ import contextlib
 import mock
 from neutron_lib.api import validators
 from neutron_lib import constants as const
+from neutron_lib import context
+from neutron_lib.db import constants as db_const
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 import oslo_db.exception as exc
-import six
 import testtools
 import webob.exc
 
 from neutron.api.v2 import attributes as attr
 from neutron.common import exceptions as n_exc
-from neutron import context
+from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2
 from neutron.db import securitygroups_db
 from neutron.extensions import securitygroup as ext_sg
@@ -37,6 +38,8 @@ from neutron.tests.unit.db import test_db_base_plugin_v2
 
 DB_PLUGIN_KLASS = ('neutron.tests.unit.extensions.test_securitygroup.'
                    'SecurityGroupTestPlugin')
+LONG_NAME_OK = 'x' * (db_const.NAME_FIELD_SIZE)
+LONG_NAME_NG = 'x' * (db_const.NAME_FIELD_SIZE + 1)
 
 
 class SecurityGroupTestExtensionManager(object):
@@ -183,7 +186,7 @@ class SecurityGroupsTestCase(test_db_base_plugin_v2.NeutronDbPluginV2TestCase):
         """Asserts that the sg rule has expected key/value pairs passed
            in as expected_kvs dictionary
         """
-        for k, v in six.iteritems(expected_kvs):
+        for k, v in expected_kvs.items():
             self.assertEqual(security_group_rule[k], v)
 
 
@@ -203,8 +206,7 @@ class SecurityGroupTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
         default_sg = self._ensure_default_security_group(context, tenant_id)
         if not validators.is_attr_set(port['port'].get(ext_sg.SECURITYGROUPS)):
             port['port'][ext_sg.SECURITYGROUPS] = [default_sg]
-        session = context.session
-        with session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             sgids = self._get_security_groups_on_port(context, port)
             port = super(SecurityGroupTestPlugin, self).create_port(context,
                                                                     port)
@@ -213,8 +215,7 @@ class SecurityGroupTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
         return port
 
     def update_port(self, context, id, port):
-        session = context.session
-        with session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             if ext_sg.SECURITYGROUPS in port['port']:
                 port['port'][ext_sg.SECURITYGROUPS] = (
                     self._get_security_groups_on_port(context, port))
@@ -378,6 +379,39 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
             self.assertEqual(data['security_group']['description'],
                              res['security_group']['description'])
 
+    def test_update_security_group_with_max_name_length(self):
+        with self.security_group() as sg:
+            data = {'security_group': {'name': LONG_NAME_OK,
+                                       'description': 'new_desc'}}
+            req = self.new_update_request('security-groups',
+                                          data,
+                                          sg['security_group']['id'])
+            res = self.deserialize(self.fmt, req.get_response(self.ext_api))
+            self.assertEqual(data['security_group']['name'],
+                             res['security_group']['name'])
+            self.assertEqual(data['security_group']['description'],
+                             res['security_group']['description'])
+
+    def test_update_security_group_with_too_long_name(self):
+        with self.security_group() as sg:
+            data = {'security_group': {'name': LONG_NAME_NG,
+                                       'description': 'new_desc'}}
+            req = self.new_update_request('security-groups',
+                                          data,
+                                          sg['security_group']['id'])
+            res = req.get_response(self.ext_api)
+            self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
+
+    def test_update_security_group_with_boolean_type_name(self):
+        with self.security_group() as sg:
+            data = {'security_group': {'name': True,
+                                       'description': 'new_desc'}}
+            req = self.new_update_request('security-groups',
+                                          data,
+                                          sg['security_group']['id'])
+            res = req.get_response(self.ext_api)
+            self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
+
     def test_check_default_security_group_description(self):
         with self.network():
             res = self.new_list_request('security-groups')
@@ -404,6 +438,24 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
         res = self._create_security_group(self.fmt, name, description)
         self.deserialize(self.fmt, res)
         self.assertEqual(webob.exc.HTTPConflict.code, res.status_int)
+
+    def test_create_security_group_with_max_name_length(self):
+        description = 'my webservers'
+        res = self._create_security_group(self.fmt, LONG_NAME_OK, description)
+        self.deserialize(self.fmt, res)
+        self.assertEqual(webob.exc.HTTPCreated.code, res.status_int)
+
+    def test_create_security_group_with_too_long_name(self):
+        description = 'my webservers'
+        res = self._create_security_group(self.fmt, LONG_NAME_NG, description)
+        self.deserialize(self.fmt, res)
+        self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
+
+    def test_create_security_group_with_boolean_type_name(self):
+        description = 'my webservers'
+        res = self._create_security_group(self.fmt, True, description)
+        self.deserialize(self.fmt, res)
+        self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
 
     def test_list_security_groups(self):
         with self.security_group(name='sg1', description='sg') as v1,\
@@ -486,7 +538,7 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
         test_addr = {'192.168.1.1/24': 'IPv6',
                      '2001:db8:1234::/48': 'IPv4',
                      '192.168.2.1/24': 'BadEthertype'}
-        for remote_ip_prefix, ethertype in six.iteritems(test_addr):
+        for remote_ip_prefix, ethertype in test_addr.items():
             with self.security_group(name, description) as sg:
                 sg_id = sg['security_group']['id']
                 rule = self._build_security_group_rule(
@@ -1380,6 +1432,25 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                                      res['port'].get(ext_sg.SECURITYGROUPS))
                     self._delete('ports', port['port']['id'])
 
+    def test_update_port_with_invalid_type_in_security_groups_param(self):
+        with self.network() as n:
+            with self.subnet(n):
+                with self.security_group() as sg:
+                    res = self._create_port(self.fmt, n['network']['id'],
+                                            security_groups=(
+                                                [sg['security_group']['id']]))
+                    port = self.deserialize(self.fmt, res)
+
+                    data = {'port': {'fixed_ips': port['port']['fixed_ips'],
+                                     'name': port['port']['name'],
+                                     'security_groups': True}}
+
+                    req = self.new_update_request('ports', data,
+                                                  port['port']['id'])
+                    res = req.get_response(self.api)
+                    self.assertEqual(webob.exc.HTTPBadRequest.code,
+                                     res.status_int)
+
     def test_create_port_with_bad_security_group(self):
         with self.network() as n:
             with self.subnet(n):
@@ -1387,6 +1458,14 @@ class TestSecurityGroups(SecurityGroupDBTestCase):
                                         security_groups=['bad_id'])
 
                 self.deserialize(self.fmt, res)
+                self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
+
+    def test_create_port_with_invalid_type_in_security_groups_param(self):
+        with self.network() as n:
+            with self.subnet(n):
+                res = self._create_port(self.fmt, n['network']['id'],
+                                        security_groups=True)
+
                 self.assertEqual(webob.exc.HTTPBadRequest.code, res.status_int)
 
     def test_create_delete_security_group_port_in_use(self):
@@ -1696,7 +1775,7 @@ class TestConvertIPPrefixToCIDR(base.BaseTestCase):
 
     def test_convert_ip_prefix_no_netmask_to_cidr(self):
         addr = {'10.1.2.3': '32', 'fe80::2677:3ff:fe7d:4c': '128'}
-        for k, v in six.iteritems(addr):
+        for k, v in addr.items():
             self.assertEqual(ext_sg.convert_ip_prefix_to_cidr(k),
                              '%s/%s' % (k, v))
 

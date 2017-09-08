@@ -15,6 +15,7 @@
 
 import copy
 
+from oslo_log import log as logging
 from oslo_policy import policy as oslo_policy
 from oslo_utils import excutils
 from pecan import hooks
@@ -28,6 +29,8 @@ from neutron.pecan_wsgi import constants as pecan_constants
 from neutron.pecan_wsgi.controllers import quota
 from neutron.pecan_wsgi.hooks import utils
 from neutron import policy
+
+LOG = logging.getLogger(__name__)
 
 
 def _custom_getter(resource, resource_id):
@@ -124,7 +127,7 @@ class PolicyHook(hooks.PecanHook):
                 resources_copy.append(obj)
         # TODO(salv-orlando): as other hooks might need to prefetch resources,
         # store them in the request context. However, this should be done in a
-        # separate hook which is conventietly called before all other hooks
+        # separate hook which is conveniently called before all other hooks
         state.request.context['original_resources'] = original_resources
         for item in resources_copy:
             try:
@@ -184,11 +187,14 @@ class PolicyHook(hooks.PecanHook):
                         policy_method(neutron_context, action, item,
                                       plugin=plugin,
                                       pluralized=collection))]
-        except oslo_policy.PolicyNotAuthorized as e:
+        except oslo_policy.PolicyNotAuthorized:
             # This exception must be explicitly caught as the exception
             # translation hook won't be called if an error occurs in the
-            # 'after' handler.
-            raise webob.exc.HTTPForbidden(str(e))
+            # 'after' handler.  Instead of raising an HTTPForbidden exception,
+            # we have to set the status_code here to prevent the catch_errors
+            # middleware from turning this into a 500.
+            state.response.status_code = 403
+            return
 
         if is_single:
             resp = resp[0]
@@ -247,4 +253,7 @@ class PolicyHook(hooks.PecanHook):
             # This should be migrated to project_id later.
             if attr_name == 'tenant_id':
                 attributes_to_exclude.append('project_id')
+        if attributes_to_exclude:
+            LOG.debug("Attributes excluded by policy engine: %s",
+                      attributes_to_exclude)
         return attributes_to_exclude

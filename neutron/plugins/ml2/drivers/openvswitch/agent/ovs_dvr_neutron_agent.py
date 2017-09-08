@@ -22,7 +22,7 @@ import oslo_messaging
 from oslo_utils import excutils
 from osprofiler import profiler
 
-from neutron._i18n import _LE, _LI, _LW
+from neutron.agent.common import ovs_lib
 from neutron.common import utils as n_utils
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
@@ -169,13 +169,13 @@ class OVSDVRNeutronAgent(object):
         try:
             self.get_dvr_mac_address_with_retry()
         except oslo_messaging.RemoteError as e:
-            LOG.error(_LE('L2 agent could not get DVR MAC address at '
-                          'startup due to RPC error.  It happens when the '
-                          'server does not support this RPC API.  Detailed '
-                          'message: %s'), e)
+            LOG.error('L2 agent could not get DVR MAC address at '
+                      'startup due to RPC error.  It happens when the '
+                      'server does not support this RPC API.  Detailed '
+                      'message: %s', e)
         except oslo_messaging.MessagingTimeout:
-            LOG.error(_LE('DVR: Failed to obtain a valid local '
-                          'DVR MAC address'))
+            LOG.error('DVR: Failed to obtain a valid local '
+                      'DVR MAC address')
 
         if not self.in_distributed_mode():
             sys.exit(1)
@@ -192,9 +192,9 @@ class OVSDVRNeutronAgent(object):
                 with excutils.save_and_reraise_exception() as ctx:
                     if retry_count > 0:
                         ctx.reraise = False
-                        LOG.warning(_LW('L2 agent could not get DVR MAC '
-                                        'address from server. Retrying. '
-                                        'Detailed message: %s'), e)
+                        LOG.warning('L2 agent could not get DVR MAC '
+                                    'address from server. Retrying. '
+                                    'Detailed message: %s', e)
             else:
                 LOG.debug("L2 Agent DVR: Received response for "
                           "get_dvr_mac_address_by_host() from "
@@ -205,11 +205,11 @@ class OVSDVRNeutronAgent(object):
     def setup_dvr_flows_on_integ_br(self):
         '''Setup up initial dvr flows into br-int'''
 
-        LOG.info(_LI("L2 Agent operating in DVR Mode with MAC %s"),
+        LOG.info("L2 Agent operating in DVR Mode with MAC %s",
                  self.dvr_mac_address)
         # Remove existing flows in integration bridge
         if self.conf.AGENT.drop_flows_on_start:
-            self.int_br.delete_flows()
+            self.int_br.uninstall_flows(cookie=ovs_lib.COOKIE_ANY)
 
         # Add a canary flow to int_br to track OVS restarts
         self.int_br.setup_canary_table()
@@ -219,10 +219,6 @@ class OVSDVRNeutronAgent(object):
 
         self.int_br.install_drop(table_id=constants.DVR_TO_SRC_MAC_VLAN,
                                  priority=1)
-
-        # Insert 'normal' action as the default for Table LOCAL_SWITCHING
-        self.int_br.install_normal(table_id=constants.LOCAL_SWITCHING,
-                                   priority=1)
 
         for physical_network in self.bridge_mappings:
             self.int_br.install_drop(table_id=constants.LOCAL_SWITCHING,
@@ -364,9 +360,9 @@ class OVSDVRNeutronAgent(object):
             subnet_info = self.plugin_rpc.get_subnet_for_dvr(
                 self.context, subnet_uuid, fixed_ips=fixed_ips)
             if not subnet_info:
-                LOG.warning(_LW("DVR: Unable to retrieve subnet information "
-                                "for subnet_id %s. The subnet or the gateway "
-                                "may have already been deleted"), subnet_uuid)
+                LOG.warning("DVR: Unable to retrieve subnet information "
+                            "for subnet_id %s. The subnet or the gateway "
+                            "may have already been deleted", subnet_uuid)
                 return
             LOG.debug("get_subnet_for_dvr for subnet %(uuid)s "
                       "returned with %(info)s",
@@ -500,13 +496,13 @@ class OVSDVRNeutronAgent(object):
             subs = list(ovsport.get_subnets())
             if subs[0] == fixed_ip['subnet_id']:
                 return
-            LOG.error(_LE("Centralized-SNAT port %(port)s on subnet "
-                          "%(port_subnet)s already seen on a different "
-                          "subnet %(orig_subnet)s"), {
-                "port": port.vif_id,
-                "port_subnet": fixed_ip['subnet_id'],
-                "orig_subnet": subs[0],
-            })
+            LOG.error("Centralized-SNAT port %(port)s on subnet "
+                      "%(port_subnet)s already seen on a different "
+                      "subnet %(orig_subnet)s", {
+                          "port": port.vif_id,
+                          "port_subnet": fixed_ip['subnet_id'],
+                          "orig_subnet": subs[0],
+                      })
             return
         subnet_uuid = fixed_ip['subnet_id']
         ldm = None
@@ -517,9 +513,9 @@ class OVSDVRNeutronAgent(object):
             subnet_info = self.plugin_rpc.get_subnet_for_dvr(
                 self.context, subnet_uuid, fixed_ips=fixed_ips)
             if not subnet_info:
-                LOG.warning(_LW("DVR: Unable to retrieve subnet information "
-                                "for subnet_id %s. The subnet or the gateway "
-                                "may have already been deleted"), subnet_uuid)
+                LOG.warning("DVR: Unable to retrieve subnet information "
+                            "for subnet_id %s. The subnet or the gateway "
+                            "may have already been deleted", subnet_uuid)
                 return
             LOG.debug("get_subnet_for_dvr for subnet %(uuid)s "
                       "returned with %(info)s",
@@ -561,8 +557,8 @@ class OVSDVRNeutronAgent(object):
 
         if (port.vif_id in self.local_ports and
                 self.local_ports[port.vif_id].ofport != port.ofport):
-            LOG.info(_LI("DVR: Port %(vif)s changed port number to "
-                         "%(ofport)s, rebinding."),
+            LOG.info("DVR: Port %(vif)s changed port number to "
+                     "%(ofport)s, rebinding.",
                      {'vif': port.vif_id, 'ofport': port.ofport})
             self.unbind_port_from_dvr(port, local_vlan_map)
         if device_owner == n_const.DEVICE_OWNER_DVR_INTERFACE:

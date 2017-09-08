@@ -13,14 +13,14 @@
 #    under the License.
 #
 import functools
-import netaddr
 
 import fixtures
+import netaddr
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 from neutronclient.common import exceptions
 
 from neutron.common import utils
-from neutron.extensions import portbindings
 
 
 def _safe_method(f):
@@ -50,6 +50,13 @@ class ClientFixture(fixtures.Fixture):
         self.addCleanup(_safe_method(delete), data['id'])
         return data
 
+    def _update_resource(self, resource_type, id, spec):
+        update = getattr(self.client, 'update_%s' % resource_type)
+
+        body = {resource_type: spec}
+        resp = update(id, body=body)
+        return resp[resource_type]
+
     def create_router(self, tenant_id, name=None, ha=False,
                       external_network=None):
         resource_type = 'router'
@@ -78,6 +85,9 @@ class ClientFixture(fixtures.Fixture):
             spec['provider:physical_network'] = physical_network
 
         return self._create_resource(resource_type, spec)
+
+    def update_network(self, id, **kwargs):
+        return self._update_resource('network', id, kwargs)
 
     def create_subnet(self, tenant_id, network_id,
                       cidr, gateway_ip=None, name=None, enable_dhcp=True,
@@ -132,12 +142,14 @@ class ClientFixture(fixtures.Fixture):
                         router=router_id, body=body)
         return router_interface_info
 
-    def create_qos_policy(self, tenant_id, name, description, shared):
+    def create_qos_policy(self, tenant_id, name, description, shared,
+                          is_default):
         policy = self.client.create_qos_policy(
             body={'policy': {'name': name,
                              'description': description,
                              'shared': shared,
-                             'tenant_id': tenant_id}})
+                             'tenant_id': tenant_id,
+                             'is_default': is_default}})
 
         def detach_and_delete_policy():
             qos_policy_id = policy['policy']['id']
@@ -156,12 +168,14 @@ class ClientFixture(fixtures.Fixture):
         return policy['policy']
 
     def create_bandwidth_limit_rule(self, tenant_id, qos_policy_id, limit=None,
-                                    burst=None):
+                                    burst=None, direction=None):
         rule = {'tenant_id': tenant_id}
         if limit:
             rule['max_kbps'] = limit
         if burst:
             rule['max_burst_kbps'] = burst
+        if direction:
+            rule['direction'] = direction
         rule = self.client.create_bandwidth_limit_rule(
             policy=qos_policy_id,
             body={'bandwidth_limit_rule': rule})

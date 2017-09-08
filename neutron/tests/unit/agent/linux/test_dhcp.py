@@ -17,19 +17,19 @@ import os
 
 import mock
 import netaddr
+from neutron_lib.api.definitions import extra_dhcp_opt as edo_ext
 from neutron_lib import constants
 from oslo_config import cfg
 import oslo_messaging
 from oslo_utils import fileutils
 import testtools
 
-from neutron.agent.common import config
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import external_process
 from neutron.common import constants as n_const
+from neutron.conf.agent import common as config
 from neutron.conf.agent import dhcp as dhcp_config
 from neutron.conf import common as base_config
-from neutron.extensions import extra_dhcp_opt as edo_ext
 from neutron.tests import base
 from neutron.tests import tools
 
@@ -172,7 +172,7 @@ class FakePort5(object):
         self.mac_address = '00:00:0f:aa:bb:55'
         self.device_id = 'fake_port5'
         self.extra_dhcp_opts = [
-            DhcpOpt(opt_name=edo_ext.CLIENT_ID,
+            DhcpOpt(opt_name=edo_ext.DHCP_OPT_CLIENT_ID,
                     opt_value='test5')]
 
 
@@ -188,7 +188,7 @@ class FakePort6(object):
         self.mac_address = '00:00:0f:aa:bb:66'
         self.device_id = 'fake_port6'
         self.extra_dhcp_opts = [
-            DhcpOpt(opt_name=edo_ext.CLIENT_ID,
+            DhcpOpt(opt_name=edo_ext.DHCP_OPT_CLIENT_ID,
                     opt_value='test6',
                     ip_version=4),
             DhcpOpt(opt_name='dns-server',
@@ -316,6 +316,20 @@ class FakeRouterPort2(object):
         self.extra_dhcp_opts = []
 
 
+class FakeRouterPortSegmentID(object):
+    def __init__(self):
+        self.id = 'qqqqqqqq-qqqq-qqqq-qqqq-qqqqqqqqqqqq'
+        self.admin_state_up = True
+        self.device_owner = constants.DEVICE_OWNER_ROUTER_INTF
+        self.fixed_ips = [
+            FakeIPAllocation('192.168.2.1',
+                             'iiiiiiii-iiii-iiii-iiii-iiiiiiiiiiii')]
+        self.dns_assignment = [FakeDNSAssignment('192.168.2.1')]
+        self.mac_address = '00:00:0f:rr:rr:r3'
+        self.device_id = 'fake_router_port3'
+        self.extra_dhcp_opts = []
+
+
 class FakePortMultipleAgents1(object):
     def __init__(self):
         self.id = 'rrrrrrrr-rrrr-rrrr-rrrr-rrrrrrrrrrrr'
@@ -379,6 +393,24 @@ class FakeV4Subnet2(FakeV4Subnet):
         self.cidr = '192.168.1.0/24'
         self.gateway_ip = '192.168.1.1'
         self.host_routes = []
+
+
+class FakeV4SubnetSegmentID(FakeV4Subnet):
+    def __init__(self):
+        super(FakeV4SubnetSegmentID, self).__init__()
+        self.id = 'iiiiiiii-iiii-iiii-iiii-iiiiiiiiiiii'
+        self.cidr = '192.168.2.0/24'
+        self.gateway_ip = '192.168.2.1'
+        self.host_routes = []
+        self.segment_id = 1
+
+
+class FakeV4SubnetSegmentID2(FakeV4Subnet):
+    def __init__(self):
+        super(FakeV4SubnetSegmentID2, self).__init__()
+        self.id = 'jjjjjjjj-jjjj-jjjj-jjjj-jjjjjjjjjjjj'
+        self.host_routes = []
+        self.segment_id = 2
 
 
 class FakeV4MetadataSubnet(FakeV4Subnet):
@@ -650,6 +682,33 @@ class FakeDualNetworkDualDHCP(object):
         self.id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
         self.subnets = [FakeV4Subnet(), FakeV4Subnet2()]
         self.ports = [FakePort1(), FakeRouterPort(), FakeRouterPort2()]
+        self.namespace = 'qdhcp-ns'
+
+
+class FakeDualNetworkDualDHCPOnLinkSubnetRoutesDisabled(object):
+    def __init__(self):
+        self.id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+        self.subnets = [FakeV4Subnet(), FakeV4SubnetSegmentID()]
+        self.ports = [FakePort1(), FakeRouterPort(), FakeRouterPortSegmentID()]
+        self.namespace = 'qdhcp-ns'
+
+
+class FakeNonLocalSubnets(object):
+    def __init__(self):
+        self.id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+        self.subnets = [FakeV4SubnetSegmentID2()]
+        self.non_local_subnets = [FakeV4SubnetSegmentID()]
+        self.ports = [FakePort1(), FakeRouterPort(), FakeRouterPortSegmentID()]
+        self.namespace = 'qdhcp-ns'
+
+
+class FakeDualNetworkTriDHCPOneOnLinkSubnetRoute(object):
+    def __init__(self):
+        self.id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+        self.subnets = [FakeV4Subnet(), FakeV4Subnet2(),
+                        FakeV4SubnetSegmentID()]
+        self.ports = [FakePort1(), FakeRouterPort(), FakeRouterPort2(),
+                      FakeRouterPortSegmentID()]
         self.namespace = 'qdhcp-ns'
 
 
@@ -1109,10 +1168,10 @@ class TestDnsmasq(TestBase):
         else:
             seconds = 's'
         if has_static:
-            prefix = '--dhcp-range=set:tag%d,%s,static,%s%s'
+            prefix = '--dhcp-range=set:tag%d,%s,static,%s,%s%s'
             prefix6 = '--dhcp-range=set:tag%d,%s,static,%s,%s%s'
         elif has_stateless:
-            prefix = '--dhcp-range=set:tag%d,%s,%s%s'
+            prefix = '--dhcp-range=set:tag%d,%s,%s,%s%s'
             prefix6 = '--dhcp-range=set:tag%d,%s,%s,%s%s'
         possible_leases = 0
         for i, s in enumerate(network.subnets):
@@ -1120,7 +1179,9 @@ class TestDnsmasq(TestBase):
                 or s.ipv6_address_mode == constants.DHCPV6_STATEFUL):
                 if s.ip_version == 4:
                     expected.extend([prefix % (
-                        i, s.cidr.split('/')[0], lease_duration, seconds)])
+                        i, s.cidr.split('/')[0],
+                        netaddr.IPNetwork(s.cidr).netmask, lease_duration,
+                        seconds)])
                 else:
                     expected.extend([prefix6 % (
                         i, s.cidr.split('/')[0], s.cidr.split('/')[1],
@@ -1424,6 +1485,51 @@ class TestDnsmasq(TestBase):
 
         self._test_output_opts_file(expected, FakeDualNetworkDualDHCP())
 
+    def test_output_opts_file_dual_dhcp_rfc3442_no_on_link_subnet_routes(self):
+        expected = (
+            'tag:tag0,option:dns-server,8.8.8.8\n'
+            'tag:tag0,option:classless-static-route,20.0.0.1/24,20.0.0.1,'
+            '169.254.169.254/32,192.168.0.1,0.0.0.0/0,192.168.0.1\n'
+            'tag:tag0,249,20.0.0.1/24,20.0.0.1,'
+            '169.254.169.254/32,192.168.0.1,0.0.0.0/0,192.168.0.1\n'
+            'tag:tag0,option:router,192.168.0.1\n'
+            'tag:tag1,option:dns-server,8.8.8.8\n'
+            'tag:tag1,option:classless-static-route,'
+            '169.254.169.254/32,192.168.2.1,0.0.0.0/0,192.168.2.1\n'
+            'tag:tag1,249,169.254.169.254/32,192.168.2.1,'
+            '0.0.0.0/0,192.168.2.1\n'
+            'tag:tag1,option:router,192.168.2.1').lstrip()
+
+        self._test_output_opts_file(expected,
+            FakeDualNetworkDualDHCPOnLinkSubnetRoutesDisabled())
+
+    def test_output_opts_file_dual_dhcp_rfc3442_one_on_link_subnet_route(self):
+        expected = (
+            'tag:tag0,option:dns-server,8.8.8.8\n'
+            'tag:tag0,option:classless-static-route,20.0.0.1/24,20.0.0.1,'
+            '169.254.169.254/32,192.168.0.1,'
+            '192.168.1.0/24,0.0.0.0,0.0.0.0/0,192.168.0.1\n'
+            'tag:tag0,249,20.0.0.1/24,20.0.0.1,'
+            '169.254.169.254/32,192.168.0.1,192.168.1.0/24,0.0.0.0,'
+            '0.0.0.0/0,192.168.0.1\n'
+            'tag:tag0,option:router,192.168.0.1\n'
+            'tag:tag1,option:dns-server,8.8.8.8\n'
+            'tag:tag1,option:classless-static-route,'
+            '169.254.169.254/32,192.168.1.1,'
+            '192.168.0.0/24,0.0.0.0,0.0.0.0/0,192.168.1.1\n'
+            'tag:tag1,249,169.254.169.254/32,192.168.1.1,'
+            '192.168.0.0/24,0.0.0.0,0.0.0.0/0,192.168.1.1\n'
+            'tag:tag1,option:router,192.168.1.1\n'
+            'tag:tag2,option:dns-server,8.8.8.8\n'
+            'tag:tag2,option:classless-static-route,'
+            '169.254.169.254/32,192.168.2.1,0.0.0.0/0,192.168.2.1\n'
+            'tag:tag2,249,169.254.169.254/32,192.168.2.1,'
+            '0.0.0.0/0,192.168.2.1\n'
+            'tag:tag2,option:router,192.168.2.1').lstrip()
+
+        self._test_output_opts_file(expected,
+            FakeDualNetworkTriDHCPOneOnLinkSubnetRoute())
+
     def test_output_opts_file_no_gateway(self):
         expected = (
             'tag:tag0,option:classless-static-route,'
@@ -1433,6 +1539,23 @@ class TestDnsmasq(TestBase):
 
         ipm_retval = {FakeV4SubnetNoGateway().id: '192.168.1.1'}
         self._test_output_opts_file(expected, FakeV4NoGatewayNetwork(),
+                                    ipm_retval=ipm_retval)
+
+    def test_non_local_subnets(self):
+        expected = (
+            'tag:tag0,option:dns-server,8.8.8.8\n'
+            'tag:tag0,option:classless-static-route,'
+            '169.254.169.254/32,192.168.0.1,0.0.0.0/0,192.168.0.1\n'
+            'tag:tag0,249,169.254.169.254/32,192.168.0.1,'
+            '0.0.0.0/0,192.168.0.1\ntag:tag0,option:router,192.168.0.1\n'
+            'tag:tag1,option:dns-server,8.8.8.8\n'
+            'tag:tag1,option:classless-static-route,'
+            '169.254.169.254/32,192.168.2.1,0.0.0.0/0,192.168.2.1\n'
+            'tag:tag1,249,169.254.169.254/32,192.168.2.1,'
+            '0.0.0.0/0,192.168.2.1\n'
+            'tag:tag1,option:router,192.168.2.1').lstrip()
+        ipm_retval = {FakeV4SubnetSegmentID2().id: '192.168.0.1'}
+        self._test_output_opts_file(expected, FakeNonLocalSubnets(),
                                     ipm_retval=ipm_retval)
 
     def test_output_opts_file_no_neutron_router_on_subnet(self):

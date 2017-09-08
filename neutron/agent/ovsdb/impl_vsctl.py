@@ -22,11 +22,14 @@ from oslo_utils import excutils
 from oslo_utils import uuidutils
 import six
 
-from neutron._i18n import _LE
 from neutron.agent.common import utils
 from neutron.agent.ovsdb import api as ovsdb
 
 LOG = logging.getLogger(__name__)
+
+
+def api_factory(context):
+    return OvsdbVsctl(context)
 
 
 class Transaction(ovsdb.Transaction):
@@ -66,8 +69,8 @@ class Transaction(ovsdb.Transaction):
         except Exception as e:
             with excutils.save_and_reraise_exception() as ctxt:
                 if self.log_errors:
-                    LOG.error(_LE("Unable to execute %(cmd)s. "
-                                  "Exception: %(exception)s"),
+                    LOG.error("Unable to execute %(cmd)s. "
+                              "Exception: %(exception)s",
                               {'cmd': full_args, 'exception': e})
                 if not self.check_error:
                     ctxt.reraise = False
@@ -126,8 +129,8 @@ class DbCommand(BaseCommand):
             # This shouldn't happen, but if it does and we check_errors
             # log and raise.
             with excutils.save_and_reraise_exception():
-                LOG.error(_LE("Could not parse: %(raw_result)s. "
-                              "Exception: %(exception)s"),
+                LOG.error("Could not parse: %(raw_result)s. "
+                          "Exception: %(exception)s",
                           {'raw_result': raw_result, 'exception': e})
 
         headings = json['headings']
@@ -178,7 +181,11 @@ class BrExistsCommand(DbCommand):
 
 
 class OvsdbVsctl(ovsdb.API):
-    def transaction(self, check_error=False, log_errors=True, **kwargs):
+    def __init__(self, context):
+        super(OvsdbVsctl, self).__init__()
+        self.context = context
+
+    def create_transaction(self, check_error=False, log_errors=True, **kwargs):
         return Transaction(self.context, check_error, log_errors, **kwargs)
 
     def add_manager(self, connection_uri):
@@ -243,7 +250,7 @@ class OvsdbVsctl(ovsdb.API):
         for value in values:
             if isinstance(value, collections.Mapping):
                 args += ["{}={}".format(ovsdb.py_to_val(k), ovsdb.py_to_val(v))
-                         for k, v in six.iteritems(value)]
+                         for k, v in value.items()]
             else:
                 args.append(ovsdb.py_to_val(value))
         return BaseCommand(self.context, 'add', args=args)

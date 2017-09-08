@@ -15,11 +15,13 @@
 
 import netaddr
 from tempest.common import waiters
-from tempest.lib.common import ssh
 from tempest.lib.common.utils import data_utils
+from tempest.lib import decorators
 from tempest import test
 import testscenarios
+from testscenarios.scenarios import multiply_scenarios
 
+from neutron.tests.tempest.common import ssh
 from neutron.tests.tempest import config
 from neutron.tests.tempest.scenario import base
 from neutron.tests.tempest.scenario import constants
@@ -44,21 +46,16 @@ class FloatingIpTestCasesMixin(object):
         cls.create_router_interface(cls.router['id'], cls.subnet['id'])
         cls.keypair = cls.create_keypair()
 
-        cls.secgroup = cls.manager.network_client.create_security_group(
+        cls.secgroup = cls.os_primary.network_client.create_security_group(
             name=data_utils.rand_name('secgroup-'))['security_group']
         cls.security_groups.append(cls.secgroup)
         cls.create_loginable_secgroup_rule(secgroup_id=cls.secgroup['id'])
         cls.create_pingable_secgroup_rule(secgroup_id=cls.secgroup['id'])
 
-        cls._src_server = cls._create_server()
         if cls.same_network:
             cls._dest_network = cls.network
         else:
             cls._dest_network = cls._create_dest_network()
-        cls._dest_server_with_fip = cls._create_server(
-            network=cls._dest_network)
-        cls._dest_server_without_fip = cls._create_server(
-            create_floating_ip=False, network=cls._dest_network)
 
     @classmethod
     def _create_dest_network(cls):
@@ -68,38 +65,54 @@ class FloatingIpTestCasesMixin(object):
         cls.create_router_interface(cls.router['id'], subnet['id'])
         return network
 
-    @classmethod
-    def _create_server(cls, create_floating_ip=True, network=None):
+    def _create_server(self, create_floating_ip=True, network=None):
         if network is None:
-            network = cls.network
-        port = cls.create_port(network, security_groups=[cls.secgroup['id']])
+            network = self.network
+        port = self.create_port(network, security_groups=[self.secgroup['id']])
         if create_floating_ip:
-            fip = cls.create_and_associate_floatingip(port['id'])
+            fip = self.create_and_associate_floatingip(port['id'])
         else:
             fip = None
-        server = cls.create_server(
+        server = self.create_server(
             flavor_ref=CONF.compute.flavor_ref,
             image_ref=CONF.compute.image_ref,
-            key_name=cls.keypair['name'],
+            key_name=self.keypair['name'],
             networks=[{'port': port['id']}])['server']
-        waiters.wait_for_server_status(cls.manager.servers_client,
+        waiters.wait_for_server_status(self.os_primary.servers_client,
                                        server['id'],
                                        constants.SERVER_STATUS_ACTIVE)
         return {'port': port, 'fip': fip, 'server': server}
 
     def _test_east_west(self):
+        # The proxy VM is used to control the source VM when it doesn't
+        # have a floating-ip.
+        if self.src_has_fip:
+            proxy = None
+            proxy_client = None
+        else:
+            proxy = self._create_server()
+            proxy_client = ssh.Client(proxy['fip']['floating_ip_address'],
+                                      CONF.validation.image_ssh_user,
+                                      pkey=self.keypair['private_key'])
+
         # Source VM
-        server1 = self._src_server
-        server1_ip = server1['fip']['floating_ip_address']
-        ssh_client = ssh.Client(server1_ip,
+        if self.src_has_fip:
+            src_server = self._create_server()
+            src_server_ip = src_server['fip']['floating_ip_address']
+        else:
+            src_server = self._create_server(create_floating_ip=False)
+            src_server_ip = src_server['port']['fixed_ips'][0]['ip_address']
+        ssh_client = ssh.Client(src_server_ip,
                                 CONF.validation.image_ssh_user,
-                                pkey=self.keypair['private_key'])
+                                pkey=self.keypair['private_key'],
+                                proxy_client=proxy_client)
 
         # Destination VM
         if self.dest_has_fip:
-            dest_server = self._dest_server_with_fip
+            dest_server = self._create_server(network=self._dest_network)
         else:
-            dest_server = self._dest_server_without_fip
+            dest_server = self._create_server(create_floating_ip=False,
+                                              network=self._dest_network)
 
         # Check connectivity
         self.check_remote_connectivity(ssh_client,
@@ -111,29 +124,33 @@ class FloatingIpTestCasesMixin(object):
 
 class FloatingIpSameNetwork(FloatingIpTestCasesMixin,
                             base.BaseTempestTestCase):
-    # REVISIT(yamamoto): 'SRC without FIP' case is possible?
-    scenarios = [
+    scenarios = multiply_scenarios([
+        ('SRC with FIP', dict(src_has_fip=True)),
+        ('SRC without FIP', dict(src_has_fip=False)),
+    ], [
         ('DEST with FIP', dict(dest_has_fip=True)),
         ('DEST without FIP', dict(dest_has_fip=False)),
-    ]
+    ])
 
     same_network = True
 
-    @test.idempotent_id('05c4e3b3-7319-4052-90ad-e8916436c23b')
+    @decorators.idempotent_id('05c4e3b3-7319-4052-90ad-e8916436c23b')
     def test_east_west(self):
         self._test_east_west()
 
 
 class FloatingIpSeparateNetwork(FloatingIpTestCasesMixin,
                                 base.BaseTempestTestCase):
-    # REVISIT(yamamoto): 'SRC without FIP' case is possible?
-    scenarios = [
+    scenarios = multiply_scenarios([
+        ('SRC with FIP', dict(src_has_fip=True)),
+        ('SRC without FIP', dict(src_has_fip=False)),
+    ], [
         ('DEST with FIP', dict(dest_has_fip=True)),
         ('DEST without FIP', dict(dest_has_fip=False)),
-    ]
+    ])
 
     same_network = False
 
-    @test.idempotent_id('f18f0090-3289-4783-b956-a0f8ac511e8b')
+    @decorators.idempotent_id('f18f0090-3289-4783-b956-a0f8ac511e8b')
     def test_east_west(self):
         self._test_east_west()

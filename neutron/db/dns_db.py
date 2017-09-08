@@ -18,11 +18,9 @@ from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from neutron._i18n import _, _LE
-from neutron.common import _deprecate
+from neutron._i18n import _
 from neutron.common import utils
-from neutron.db import db_base_plugin_v2
-from neutron.db.models import dns as dns_models
+from neutron.db import _resource_extend as resource_extend
 from neutron.extensions import dns
 from neutron.extensions import l3
 from neutron.objects import floatingip as fip_obj
@@ -31,11 +29,6 @@ from neutron.objects import ports as port_obj
 from neutron.services.externaldns import driver
 
 LOG = logging.getLogger(__name__)
-
-
-_deprecate._moved_global('PortDNS', new_module=dns_models)
-_deprecate._moved_global('NetworkDNSDomain', new_module=dns_models)
-_deprecate._moved_global('FloatingIPDNS', new_module=dns_models)
 
 
 class DNSActionsData(object):
@@ -48,6 +41,7 @@ class DNSActionsData(object):
         self.previous_dns_domain = previous_dns_domain
 
 
+@resource_extend.has_resource_extenders
 class DNSDbMixin(object):
     """Mixin class to add DNS methods to db_base_plugin_v2."""
 
@@ -65,22 +59,20 @@ class DNSDbMixin(object):
                       cfg.CONF.external_dns_driver)
             return self._dns_driver
         except ImportError:
-            LOG.exception(_LE("ImportError exception occurred while loading "
-                              "the external DNS service driver"))
+            LOG.exception("ImportError exception occurred while loading "
+                          "the external DNS service driver")
             raise dns.ExternalDNSDriverNotFound(
                 driver=cfg.CONF.external_dns_driver)
 
-    def _extend_floatingip_dict_dns(self, floatingip_res, floatingip_db):
+    @staticmethod
+    @resource_extend.extends([l3.FLOATINGIPS])
+    def _extend_floatingip_dict_dns(floatingip_res, floatingip_db):
         floatingip_res['dns_domain'] = ''
         floatingip_res['dns_name'] = ''
         if floatingip_db.dns:
             floatingip_res['dns_domain'] = floatingip_db.dns['dns_domain']
             floatingip_res['dns_name'] = floatingip_db.dns['dns_name']
         return floatingip_res
-
-    # Register dict extend functions for floating ips
-    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
-        l3.FLOATINGIPS, ['_extend_floatingip_dict_dns'])
 
     def _process_dns_floatingip_create_precommit(self, context,
                                                  floatingip_data, req_data):
@@ -218,10 +210,10 @@ class DNSDbMixin(object):
             self.dns_driver.delete_record_set(context, dns_domain, dns_name,
                                               records)
         except (dns.DNSDomainNotFound, dns.DuplicateRecordSet) as e:
-            LOG.exception(_LE("Error deleting Floating IP data from external "
-                              "DNS service. Name: '%(name)s'. Domain: "
-                              "'%(domain)s'. IP addresses '%(ips)s'. DNS "
-                              "service driver message '%(message)s'"),
+            LOG.exception("Error deleting Floating IP data from external "
+                          "DNS service. Name: '%(name)s'. Domain: "
+                          "'%(domain)s'. IP addresses '%(ips)s'. DNS "
+                          "service driver message '%(message)s'",
                           {"name": dns_name,
                            "domain": dns_domain,
                            "message": e.msg,
@@ -249,13 +241,10 @@ class DNSDbMixin(object):
             self.dns_driver.create_record_set(context, dns_domain, dns_name,
                                               records)
         except (dns.DNSDomainNotFound, dns.DuplicateRecordSet) as e:
-            LOG.exception(_LE("Error publishing floating IP data in external "
-                              "DNS service. Name: '%(name)s'. Domain: "
-                              "'%(domain)s'. DNS service driver message "
-                              "'%(message)s'"),
+            LOG.exception("Error publishing floating IP data in external "
+                          "DNS service. Name: '%(name)s'. Domain: "
+                          "'%(domain)s'. DNS service driver message "
+                          "'%(message)s'",
                           {"name": dns_name,
                            "domain": dns_domain,
                            "message": e.msg})
-
-
-_deprecate._MovedGlobals()

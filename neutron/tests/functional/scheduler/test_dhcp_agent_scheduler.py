@@ -16,16 +16,15 @@
 import collections
 from operator import attrgetter
 
+from neutron_lib.api.definitions import provider_net as providernet
 from neutron_lib import constants
-import six
+from neutron_lib import context
 import testscenarios
 
-from neutron import context
 from neutron.db import agents_db
 from neutron.db import agentschedulers_db
 from neutron.db import common_db_mixin
 from neutron.db.network_dhcp_agent_binding import models as ndab_model
-from neutron.extensions import providernet
 from neutron.scheduler import dhcp_agent_scheduler
 from neutron.tests.common import helpers
 from neutron.tests.unit.plugins.ml2 import test_plugin
@@ -401,7 +400,7 @@ class TestAutoSchedule(test_dhcp_sch.TestDhcpSchedulerBaseTestCase,
 
         # pre schedule the networks to the agents defined in
         # self.hosted_networks before calling auto_schedule_network
-        for agent, networks in six.iteritems(self.hosted_networks):
+        for agent, networks in self.hosted_networks.items():
             agent_index = self._extract_index(agent)
             for net in networks:
                 net_index = self._extract_index(net)

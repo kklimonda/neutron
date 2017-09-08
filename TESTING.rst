@@ -20,6 +20,7 @@
       '''''''  Heading 4
       (Avoid deeper levels because they do not render well.)
 
+.. _testing_neutron:
 
 Testing Neutron
 ===============
@@ -49,17 +50,17 @@ We will talk about three classes of tests: unit, functional and integration.
 Each respective category typically targets a larger scope of code. Other than
 that broad categorization, here are a few more characteristic:
 
-  * Unit tests - Should be able to run on your laptop, directly following a
-    'git clone' of the project. The underlying system must not be mutated,
-    mocks can be used to achieve this. A unit test typically targets a function
-    or class.
-  * Functional tests - Run against a pre-configured environment
-    (tools/configure_for_func_testing.sh). Typically test a component
-    such as an agent using no mocks.
-  * Integration tests - Run against a running cloud, often target the API level,
-    but also 'scenarios' or 'user stories'. You may find such tests under
-    tests/tempest/api, tests/tempest/scenario, tests/fullstack, and in the
-    Tempest and Rally projects.
+* Unit tests - Should be able to run on your laptop, directly following a
+  'git clone' of the project. The underlying system must not be mutated,
+  mocks can be used to achieve this. A unit test typically targets a function
+  or class.
+* Functional tests - Run against a pre-configured environment
+  (tools/configure_for_func_testing.sh). Typically test a component
+  such as an agent using no mocks.
+* Integration tests - Run against a running cloud, often target the API level,
+  but also 'scenarios' or 'user stories'. You may find such tests under
+  tests/tempest/api, tests/tempest/scenario, tests/fullstack, and in the
+  Tempest and Rally projects.
 
 Tests in the Neutron tree are typically organized by the testing infrastructure
 used, and not by the scope of the test. For example, many tests under the
@@ -150,10 +151,7 @@ Functional tests (neutron/tests/functional/) are intended to
 validate actual system interaction. Mocks should be used sparingly,
 if at all. Care should be taken to ensure that existing system
 resources are not modified and that resources created in tests are
-properly cleaned up both on test success and failure. Note that when run
-at the gate, the functional tests compile OVS from source. Check out
-neutron/tests/contrib/gate_hook.sh. Other jobs presently use OVS from
-packages.
+properly cleaned up both on test success and failure.
 
 Let's examine the benefits of the functional testing framework.
 Neutron offers a library called 'ip_lib' that wraps around the 'ip' binary.
@@ -191,7 +189,7 @@ One such method creates a virtual device in a namespace,
 and ensures that both the namespace and the device are cleaned up at the
 end of the test run regardless of success or failure using the 'addCleanup'
 method. The test generates details for a temporary device, asserts that
-a device by that name does not exist, create that device, asserts that
+a device by that name does not exist, creates that device, asserts that
 it now exists, deletes it, and asserts that it no longer exists.
 Such a test avoids all three issues mentioned above if it were written
 using the unit testing framework.
@@ -199,7 +197,7 @@ using the unit testing framework.
 Functional tests are also used to target larger scope, such as agents.
 Many good examples exist: See the OVS, L3 and DHCP agents functional tests.
 Such tests target a top level agent method and assert that the system
-interaction that was supposed to be perform was indeed performed.
+interaction that was supposed to be performed was indeed performed.
 For example, to test the DHCP agent's top level method that accepts network
 attributes and configures dnsmasq for that network, the test:
 
@@ -209,6 +207,17 @@ attributes and configures dnsmasq for that network, the test:
 * Creates a temporary namespace and device, and calls 'dhclient' from that
   namespace.
 * Assert that the device successfully obtained the expected IP address.
+
+Test exceptions
++++++++++++++++
+
+Test neutron.tests.functional.agent.test_ovs_flows.OVSFlowTestCase.\
+test_install_flood_to_tun is currently skipped if openvswitch version is less
+than 2.5.1. This version contains bug where appctl command prints wrong output
+for Final flow. It's been fixed in openvswitch
+2.5.1 in `this commit <https://github.com/openvswitch/ovs/commit/8c0b419a0b9ac0141d6973dcc80306dfc6a83d31>`_.
+If openvswitch version meets the test requirement then the test is triggered
+normally.
 
 Fullstack Tests
 ~~~~~~~~~~~~~~~
@@ -303,6 +312,19 @@ bridge connected to that port. The test is a true integration test, in the
 sense that it invokes the API and then asserts that Neutron interacted with
 the hypervisor appropriately.
 
+Gate exceptions
++++++++++++++++
+
+Currently we compile openvswitch kernel module from source for fullstack job on
+the gate. The reason is to fix bug related to local VXLAN tunneling which is
+present in current Ubuntu Xenial 16.04 kernel. Kernel was fixed with this
+`commit <https://github.com/torvalds/linux/commit/bbec7802c6948c8626b71a4fe31283cb4691c358>`_
+and backported with this
+`openvswitch commit <https://github.com/openvswitch/ovs/commit/b1c74f35273122db4ce2728a70fd34b98f525434>`_.
+Due to kernel compatibility, Ubuntu Trusty (Mitaka release) uses openvswitch
+version 2.5.1. Ubuntu Xenial jobs use 2.6.1. Both versions contain fixes for
+local VXLAN tunneling.
+
 API Tests
 ~~~~~~~~~
 
@@ -347,26 +369,33 @@ Tests for other resources should be contributed to the Neutron repository.
 Scenario tests should be similarly split up between Tempest and Neutron
 according to the API they're targeting.
 
+To create an API test, the testing class must at least inherit from
+neutron.tests.tempest.api.base.BaseNetworkTest base class. As some of tests
+may require certain extensions to be enabled, the base class provides
+``required_extensions`` class attribute which can be used by subclasses to
+define a list of required extensions for particular test class.
+
 Scenario Tests
 ~~~~~~~~~~~~~~
 
 Scenario tests (neutron/tests/tempest/scenario), like API tests, use the
 Tempest test infrastructure and have the same requirements. Guidelines for
 writing a good scenario test may be found at the Tempest developer guide:
-http://docs.openstack.org/developer/tempest/field_guide/scenario.html
+https://docs.openstack.org/tempest/latest/field_guide/scenario.html
 
 Scenario tests, like API tests, are split between the Tempest and Neutron
 repositories according to the Neutron API the test is targeting.
 
 Some scenario tests require advanced ``Glance`` images (for example, ``Ubuntu``
 or ``CentOS``) in order to pass. Those tests are skipped by default. To enable
-them, make sure ``tempest.conf`` is configured to use an advanced image, and
-then set the following in ``tempest`` configuration file::
+them, include the following in ``tempest.conf``:
 
-.. code-block:: ini
+   .. code-block:: ini
 
-    [neutron_plugin_options]
-    image_is_advanced = True
+      [compute]
+      image_ref = <uuid of advanced image>
+      [neutron_plugin_options]
+      image_is_advanced = True
 
 Specific test requirements for advanced images are:
 
@@ -455,9 +484,7 @@ the tracking of long-running tests and other things.
 
 For more information on the standard Tox-based test infrastructure used by
 OpenStack and how to do some common test/debugging procedures with Testr,
-see this wiki page:
-
-  https://wiki.openstack.org/wiki/Testr
+see this wiki page: https://wiki.openstack.org/wiki/Testr
 
 .. _Testr: https://wiki.openstack.org/wiki/Testr
 .. _tox: http://tox.readthedocs.org/en/latest/
@@ -525,10 +552,8 @@ When running full-stack tests on a clean VM for the first time, we
 advise to run ./stack.sh successfully to make sure all Neutron's
 dependencies are met. Full-stack based Neutron daemons produce logs to a
 sub-folder in /opt/stack/logs/dsvm-fullstack-logs (for example, a test named
-"test_example" will produce logs to /opt/stack/logs/dsvm-fullstack-logs/test_example/),
+"test_example" will produce logs to /opt/stack/logs/dsvm-fullstack-logs/test_example.log),
 so that will be a good place to look if your test is failing.
-Logging from the test infrastructure itself is placed in:
-/opt/stack/logs/dsvm-fullstack-logs/test_example.log.
 Fullstack test suite assumes 240.0.0.0/4 (Class E) range in root namespace of
 the test machine is available for its usage.
 
@@ -559,7 +584,8 @@ For example, the following would run only a single test or test case::
       $ tox -e py27 neutron.tests.unit.test_manager.NeutronManagerTestCase.test_service_plugin_is_loaded
 
 If you want to pass other arguments to ostestr, you can do the following::
-      $ tox -e -epy27 -- --regex neutron.tests.unit.test_manager --serial
+
+      $ tox -e py27 -- --regex neutron.tests.unit.test_manager --serial
 
 
 Coverage
@@ -579,10 +605,10 @@ doc/source/devref/testing_coverage.rst. You could also rely on Zuul
 logs, that are generated post-merge (not every project builds coverage
 results). To access them, do the following:
 
-  * Check out the latest `merge commit <https://review.openstack.org/gitweb?p=openstack/neutron.git;a=search;s=Jenkins;st=author>`_
-  * Go to: http://logs.openstack.org/<first-2-digits-of-sha1>/<sha1>/post/neutron-coverage/.
-  * `Spec <https://review.openstack.org/#/c/221494/>`_ is a work in progress to
-    provide a better landing page.
+* Check out the latest `merge commit <https://review.openstack.org/gitweb?p=openstack/neutron.git;a=search;s=Jenkins;st=author>`_
+* Go to: http://logs.openstack.org/<first-2-digits-of-sha1>/<sha1>/post/neutron-coverage/.
+* `Spec <https://review.openstack.org/#/c/221494/>`_ is a work in progress to
+  provide a better landing page.
 
 Debugging
 ---------

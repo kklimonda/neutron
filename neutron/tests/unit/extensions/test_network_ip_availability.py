@@ -59,6 +59,38 @@ class TestNetworkIPAvailabilityAPI(
                                     expected_used_ips=expected_used_ips,
                                     expected_total_ips=expected_total_ips)
 
+    def test_usages_query_list_with_fields_total_ips(self):
+        with self.network() as net:
+            with self.subnet(network=net):
+                # list by query fields: total_ips
+                params = 'fields=total_ips'
+                request = self.new_list_request(API_RESOURCE, params=params)
+                response = self.deserialize(self.fmt,
+                                            request.get_response(self.ext_api))
+                self.assertIn(IP_AVAILS_KEY, response)
+                self.assertEqual(1, len(response[IP_AVAILS_KEY]))
+                availability = response[IP_AVAILS_KEY][0]
+                self.assertIn('total_ips', availability)
+                self.assertEqual(253, availability['total_ips'])
+                self.assertNotIn('network_id', availability)
+
+    def test_usages_query_show_with_fields_total_ips(self):
+        with self.network() as net:
+            with self.subnet(network=net):
+                network = net['network']
+                # Show by query fields: total_ips
+                params = ['total_ips']
+                request = self.new_show_request(API_RESOURCE,
+                                                network['id'],
+                                                fields=params)
+                response = self.deserialize(
+                    self.fmt, request.get_response(self.ext_api))
+                self.assertIn(IP_AVAIL_KEY, response)
+                availability = response[IP_AVAIL_KEY]
+                self.assertIn('total_ips', availability)
+                self.assertEqual(253, availability['total_ips'])
+                self.assertNotIn('network_id', availability)
+
     @staticmethod
     def _find_availability(availabilities, net_id):
         for ip_availability in availabilities:
@@ -269,7 +301,7 @@ class TestNetworkIPAvailabilityAPI(
         test_tenant_id = 'a-unique-test-id'
         with self.network(tenant_id=test_tenant_id) as net:
             with self.subnet(network=net):
-                # Get by query param: network_name
+                # Get by query param: tenant_id
                 params = 'tenant_id=%s' % test_tenant_id
                 request = self.new_list_request(API_RESOURCE, params=params)
                 response = self.deserialize(self.fmt,
@@ -281,7 +313,7 @@ class TestNetworkIPAvailabilityAPI(
                 for net_avail in response[IP_AVAILS_KEY]:
                     self.assertEqual(test_tenant_id, net_avail['tenant_id'])
 
-                # Get by NON-matching query param: network_name
+                # Get by NON-matching query param: tenant_id
                 params = 'tenant_id=clearly-wont-match'
                 request = self.new_list_request(API_RESOURCE, params=params)
                 response = self.deserialize(self.fmt,

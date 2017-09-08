@@ -41,7 +41,7 @@ class SecurityGroupDbObjTestCase(test_base.BaseDbObjectTestCase,
         sg_obj.is_default = True
         sg_obj.create()
 
-        default_sg_obj = securitygroup._DefaultSecurityGroup.get_object(
+        default_sg_obj = securitygroup.DefaultSecurityGroup.get_object(
             self.context,
             project_id=sg_obj.project_id,
             security_group_id=sg_obj.id)
@@ -60,7 +60,7 @@ class SecurityGroupDbObjTestCase(test_base.BaseDbObjectTestCase,
         sg_obj.is_default = False
         sg_obj.create()
 
-        default_sg_obj = securitygroup._DefaultSecurityGroup.get_object(
+        default_sg_obj = securitygroup.DefaultSecurityGroup.get_object(
             self.context,
             project_id=sg_obj.project_id,
             security_group_id=sg_obj.id)
@@ -100,18 +100,21 @@ class SecurityGroupDbObjTestCase(test_base.BaseDbObjectTestCase,
 
 class DefaultSecurityGroupIfaceObjTestCase(test_base.BaseObjectIfaceTestCase):
 
-    _test_class = securitygroup._DefaultSecurityGroup
+    _test_class = securitygroup.DefaultSecurityGroup
 
 
 class DefaultSecurityGroupDbObjTestCase(test_base.BaseDbObjectTestCase,
                                         testlib_api.SqlTestCase):
 
-    _test_class = securitygroup._DefaultSecurityGroup
+    _test_class = securitygroup.DefaultSecurityGroup
 
     def setUp(self):
         super(DefaultSecurityGroupDbObjTestCase, self).setUp()
-        self._create_test_security_group()
-        self.update_obj_fields({'security_group_id': self._securitygroup.id})
+        self.update_obj_fields(
+            {
+                'security_group_id':
+                    lambda: self._create_test_security_group_id()
+            })
 
 
 class SecurityGroupRuleIfaceObjTestCase(test_base.BaseObjectIfaceTestCase):
@@ -126,6 +129,10 @@ class SecurityGroupRuleDbObjTestCase(test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(SecurityGroupRuleDbObjTestCase, self).setUp()
-        self._create_test_security_group()
-        self.update_obj_fields({'security_group_id': self._securitygroup.id,
-                                'remote_group_id': self._securitygroup.id})
+        self.update_obj_fields(
+            {
+                'security_group_id':
+                    lambda: self._create_test_security_group_id(),
+                'remote_group_id':
+                    lambda: self._create_test_security_group_id()
+            })

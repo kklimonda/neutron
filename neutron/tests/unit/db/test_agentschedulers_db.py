@@ -17,6 +17,8 @@ import datetime
 
 import mock
 from neutron_lib import constants
+from neutron_lib import context
+from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
@@ -30,14 +32,14 @@ from neutron.api.rpc.handlers import dhcp_rpc
 from neutron.api.rpc.handlers import l3_rpc
 from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
-from neutron import context
 from neutron.db import agents_db
 from neutron.db import agentschedulers_db
 from neutron.db.models import agent as agent_model
-from neutron.db.models import l3agent as rb_model
 from neutron.extensions import agent
 from neutron.extensions import dhcpagentscheduler
 from neutron.extensions import l3agentscheduler
+from neutron.objects import agent as ag_obj
+from neutron.objects import l3agent as rb_obj
 from neutron.tests.common import helpers
 from neutron.tests import fake_notifier
 from neutron.tests import tools
@@ -59,6 +61,8 @@ DEVICE_OWNER_COMPUTE = ''.join([constants.DEVICE_OWNER_COMPUTE_PREFIX,
 
 
 class AgentSchedulerTestMixIn(object):
+
+    block_dhcp_notifier = False
 
     def _request_list(self, path, admin_context=True,
                       expected_code=exc.HTTPOk.code):
@@ -256,7 +260,7 @@ class OvsAgentSchedulerTestCaseBase(test_l3.L3NatTestCaseMixin,
         # the global attribute map
         attributes.RESOURCE_ATTRIBUTE_MAP.update(
             agent.RESOURCE_ATTRIBUTE_MAP)
-        self.l3plugin = directory.get_plugin(constants.L3)
+        self.l3plugin = directory.get_plugin(plugin_constants.L3)
         self.l3_notify_p = mock.patch(
             'neutron.extensions.l3agentscheduler.notify')
         self.patched_l3_notify = self.l3_notify_p.start()
@@ -672,7 +676,7 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
             agt.heartbeat_timestamp - datetime.timedelta(hours=1))
         self.adminContext.session.commit()
 
-        plugin = directory.get_plugin(constants.L3)
+        plugin = directory.get_plugin(plugin_constants.L3)
         plugin.reschedule_routers_from_down_agents()
 
     def _set_agent_admin_state_up(self, host, state):
@@ -689,7 +693,7 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
             # schedule the router to host A
             l3_rpc_cb.get_router_ids(self.adminContext, host=L3_HOSTA)
 
-            plugin = directory.get_plugin(constants.L3)
+            plugin = directory.get_plugin(plugin_constants.L3)
             mock.patch.object(
                 plugin, 'reschedule_router',
                 side_effect=[
@@ -706,16 +710,16 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
             self._take_down_agent_and_run_reschedule(L3_HOSTA)  # Exception
 
     def test_router_rescheduler_catches_exceptions_on_fetching_bindings(self):
-        with mock.patch('neutron.context.get_admin_context') as get_ctx:
+        with mock.patch('neutron_lib.context.get_admin_context') as get_ctx:
             mock_ctx = mock.Mock()
             get_ctx.return_value = mock_ctx
             mock_ctx.session.query.side_effect = db_exc.DBError()
-            plugin = directory.get_plugin(constants.L3)
+            plugin = directory.get_plugin(plugin_constants.L3)
             # check that no exception is raised
             plugin.reschedule_routers_from_down_agents()
 
     def test_router_rescheduler_iterates_after_reschedule_failure(self):
-        plugin = directory.get_plugin(constants.L3)
+        plugin = directory.get_plugin(plugin_constants.L3)
         l3_rpc_cb = l3_rpc.L3RpcCallback()
         self._register_agent_states()
         with self.router() as r1, self.router() as r2:
@@ -747,7 +751,7 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
                 self.assertFalse(rr.called)
 
     def test_router_is_not_rescheduled_if_agent_is_back_online(self):
-        plugin = directory.get_plugin(constants.L3)
+        plugin = directory.get_plugin(plugin_constants.L3)
         l3_rpc_cb = l3_rpc.L3RpcCallback()
         agent = helpers.register_l3_agent(host=L3_HOSTA)
         with self.router(),\
@@ -790,10 +794,12 @@ class OvsAgentSchedulerTestCase(OvsAgentSchedulerTestCaseBase):
 
             # A should still have it even though it was inactive due to the
             # admin_state being down
-            rab = rb_model.RouterL3AgentBinding
-            binding = (self.adminContext.session.query(rab).
-                       filter(rab.router_id == r['router']['id']).first())
-            self.assertEqual(binding.l3_agent.host, L3_HOSTA)
+            bindings = rb_obj.RouterL3AgentBinding.get_objects(
+                    self.adminContext, router_id=r['router']['id'])
+            binding = bindings.pop() if bindings else None
+            l3_agent = ag_obj.Agent.get_objects(
+                self.adminContext, id=binding.l3_agent_id)
+            self.assertEqual(l3_agent[0].host, L3_HOSTA)
 
             # B should not pick up the router
             ret_b = l3_rpc_cb.get_router_ids(self.adminContext, host=L3_HOSTB)
@@ -1482,7 +1488,7 @@ class OvsL3AgentNotifierTestCase(test_l3.L3NatTestCaseMixin,
         fake_notifier.reset()
 
     def test_router_add_to_l3_agent_notification(self):
-        l3_plugin = directory.get_plugin(constants.L3)
+        l3_plugin = directory.get_plugin(plugin_constants.L3)
         l3_notifier = l3_plugin.agent_notifiers[constants.AGENT_TYPE_L3]
         with mock.patch.object(
             l3_notifier.client,
@@ -1504,7 +1510,7 @@ class OvsL3AgentNotifierTestCase(test_l3.L3NatTestCaseMixin,
             self._assert_notify(notifications, expected_event_type)
 
     def test_router_remove_from_l3_agent_notification(self):
-        l3_plugin = directory.get_plugin(constants.L3)
+        l3_plugin = directory.get_plugin(plugin_constants.L3)
         l3_notifier = l3_plugin.agent_notifiers[constants.AGENT_TYPE_L3]
         with mock.patch.object(
             l3_notifier.client,
@@ -1529,7 +1535,7 @@ class OvsL3AgentNotifierTestCase(test_l3.L3NatTestCaseMixin,
             self._assert_notify(notifications, expected_event_type)
 
     def test_agent_updated_l3_agent_notification(self):
-        l3_plugin = directory.get_plugin(constants.L3)
+        l3_plugin = directory.get_plugin(plugin_constants.L3)
         l3_notifier = l3_plugin.agent_notifiers[constants.AGENT_TYPE_L3]
         with mock.patch.object(
             l3_notifier.client,

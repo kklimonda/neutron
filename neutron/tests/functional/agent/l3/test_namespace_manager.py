@@ -14,6 +14,7 @@
 #    under the License.
 
 import mock
+from oslo_config import cfg
 from oslo_utils import uuidutils
 
 from neutron.agent.l3 import dvr_snat_ns
@@ -29,7 +30,7 @@ class NamespaceManagerTestFramework(base.BaseSudoTestCase):
 
     def setUp(self):
         super(NamespaceManagerTestFramework, self).setUp()
-        self.agent_conf = mock.MagicMock()
+        self.agent_conf = cfg.CONF
         self.metadata_driver_mock = mock.Mock()
         self.namespace_manager = namespace_manager.NamespaceManager(
             self.agent_conf, driver=None,
@@ -85,5 +86,6 @@ class NamespaceManagerTestCase(NamespaceManagerTestFramework):
             (self.metadata_driver_mock.destroy_monitored_metadata_proxy.
              assert_called_once_with(mock.ANY,
                                      router_id_to_delete,
-                                     self.agent_conf))
+                                     self.agent_conf,
+                                     ns_name))
             self.assertFalse(self._namespace_exists(ns_name))

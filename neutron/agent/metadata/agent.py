@@ -17,6 +17,7 @@ import hmac
 
 import httplib2
 from neutron_lib import constants
+from neutron_lib import context
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
@@ -26,7 +27,7 @@ import six
 import six.moves.urllib.parse as urlparse
 import webob
 
-from neutron._i18n import _, _LE, _LW
+from neutron._i18n import _
 from neutron.agent.linux import utils as agent_utils
 from neutron.agent import rpc as agent_rpc
 from neutron.common import cache_utils as cache
@@ -34,7 +35,6 @@ from neutron.common import constants as n_const
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.conf.agent.metadata import config
-from neutron import context
 
 LOG = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ class MetadataProxyHandler(object):
                 return webob.exc.HTTPNotFound()
 
         except Exception:
-            LOG.exception(_LE("Unexpected error."))
+            LOG.exception("Unexpected error.")
             msg = _('An unknown error has occurred. '
                     'Please try your request again.')
             explanation = six.text_type(msg)
@@ -172,11 +172,11 @@ class MetadataProxyHandler(object):
             'X-Instance-ID-Signature': self._sign_instance_id(instance_id)
         }
 
-        nova_ip_port = '%s:%s' % (self.conf.nova_metadata_ip,
-                                  self.conf.nova_metadata_port)
+        nova_host_port = '%s:%s' % (self.conf.nova_metadata_host,
+                                    self.conf.nova_metadata_port)
         url = urlparse.urlunsplit((
             self.conf.nova_metadata_protocol,
-            nova_ip_port,
+            nova_host_port,
             req.path_info,
             req.query_string,
             ''))
@@ -188,20 +188,20 @@ class MetadataProxyHandler(object):
         if self.conf.nova_client_cert and self.conf.nova_client_priv_key:
             h.add_certificate(self.conf.nova_client_priv_key,
                               self.conf.nova_client_cert,
-                              nova_ip_port)
+                              nova_host_port)
         resp, content = h.request(url, method=req.method, headers=headers,
                                   body=req.body)
 
         if resp.status == 200:
-            LOG.debug(str(resp))
             req.response.content_type = resp['content-type']
             req.response.body = content
+            LOG.debug(str(resp))
             return req.response
         elif resp.status == 403:
-            LOG.warning(_LW(
+            LOG.warning(
                 'The remote metadata server responded with Forbidden. This '
                 'response usually occurs when shared secrets do not match.'
-            ))
+            )
             return webob.exc.HTTPForbidden()
         elif resp.status == 400:
             return webob.exc.HTTPBadRequest()
@@ -242,7 +242,7 @@ class UnixDomainMetadataProxy(object):
             'topic': 'N/A',
             'configurations': {
                 'metadata_proxy_socket': cfg.CONF.metadata_proxy_socket,
-                'nova_metadata_ip': cfg.CONF.nova_metadata_ip,
+                'nova_metadata_host': cfg.CONF.nova_metadata_host,
                 'nova_metadata_port': cfg.CONF.nova_metadata_port,
                 'log_agent_heartbeats': cfg.CONF.AGENT.log_agent_heartbeats,
             },
@@ -262,12 +262,12 @@ class UnixDomainMetadataProxy(object):
                 use_call=self.agent_state.get('start_flag'))
         except AttributeError:
             # This means the server does not support report_state
-            LOG.warning(_LW('Neutron server does not support state report.'
-                            ' State report for this agent will be disabled.'))
+            LOG.warning('Neutron server does not support state report.'
+                        ' State report for this agent will be disabled.')
             self.heartbeat.stop()
             return
         except Exception:
-            LOG.exception(_LE("Failed reporting state!"))
+            LOG.exception("Failed reporting state!")
             return
         self.agent_state.pop('start_flag', None)
 

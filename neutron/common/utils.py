@@ -23,6 +23,7 @@ import importlib
 import os
 import os.path
 import random
+import re
 import signal
 import sys
 import threading
@@ -30,15 +31,12 @@ import time
 import uuid
 import weakref
 
-import debtcollector
 from debtcollector import removals
 import eventlet
 from eventlet.green import subprocess
 import netaddr
 from neutron_lib import constants as n_const
-from neutron_lib.utils import file as file_utils
 from neutron_lib.utils import helpers
-from neutron_lib.utils import host
 from neutron_lib.utils import net
 from oslo_concurrency import lockutils
 from oslo_config import cfg
@@ -51,7 +49,7 @@ import six
 from stevedore import driver
 
 import neutron
-from neutron._i18n import _, _LE
+from neutron._i18n import _
 from neutron.db import api as db_api
 
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
@@ -60,23 +58,13 @@ SYNCHRONIZED_PREFIX = 'neutron-'
 
 DEFAULT_THROTTLER_VALUE = 2
 
+_SEPARATOR_REGEX = re.compile(r'[/\\]+')
+
 synchronized = lockutils.synchronized_with_prefix(SYNCHRONIZED_PREFIX)
 
 
-class WaitTimeout(Exception, eventlet.TimeoutError):
-    """Default exception coming from wait_until_true() function.
-
-    The reason is that eventlet.TimeoutError inherits from BaseException and
-    testtools.TestCase consumes only Exceptions. Which means in case
-    TimeoutError is raised, test runner stops and exits while it still has test
-    cases scheduled for execution.
-    """
-
-    def __str__(self):
-        return Exception.__str__(self)
-
-    def __repr__(self):
-        return Exception.__repr__(self)
+class WaitTimeout(Exception):
+    """Default exception coming from wait_until_true() function."""
 
 
 class LockWithTimer(object):
@@ -145,57 +133,8 @@ def subprocess_popen(args, stdin=None, stdout=None, stderr=None, shell=False,
                             close_fds=close_fds, env=env)
 
 
-@removals.remove(
-    message="Use parse_mappings from neutron_lib.utils.helpers")
-def parse_mappings(mapping_list, unique_values=True, unique_keys=True):
-    return helpers.parse_mappings(mapping_list, unique_values=unique_values,
-                                  unique_keys=unique_keys)
-
-
-@removals.remove(
-    message="Use get_hostname from neutron_lib.utils.net")
-def get_hostname():
-    return net.get_hostname()
-
-
 def get_first_host_ip(net, ip_version):
     return str(netaddr.IPAddress(net.first + 1, ip_version))
-
-
-@removals.remove(
-    message="Use compare_elements from neutron_lib.utils.helpers")
-def compare_elements(a, b):
-    return helpers.compare_elements(a, b)
-
-
-@removals.remove(
-    message="Use safe_sort_key from neutron_lib.utils.helpers")
-def safe_sort_key(value):
-    return helpers.safe_sort_key(value)
-
-
-@removals.remove(
-    message="Use dict2str from neutron_lib.utils.helpers")
-def dict2str(dic):
-    return helpers.dict2str(dic)
-
-
-@removals.remove(
-    message="Use str2dict from neutron_lib.utils.helpers")
-def str2dict(string):
-    return helpers.str2dict(string)
-
-
-@removals.remove(
-    message="Use dict2tuple from neutron_lib.utils.helpers")
-def dict2tuple(d):
-    return helpers.dict2tuple(d)
-
-
-@removals.remove(
-    message="Use diff_list_of_dict from neutron_lib.utils.helpers")
-def diff_list_of_dict(old_list, new_list):
-    return helpers.diff_list_of_dict(old_list, new_list)
 
 
 def is_extension_supported(plugin, ext_alias):
@@ -207,13 +146,13 @@ def log_opt_values(log):
     cfg.CONF.log_opt_values(log, logging.DEBUG)
 
 
+@removals.remove(
+    message="Use get_random_mac from neutron_lib.utils.net",
+    version="Pike",
+    removal_version="Queens"
+)
 def get_random_mac(base_mac):
-    mac = [int(base_mac[0], 16), int(base_mac[1], 16),
-           int(base_mac[2], 16), random.randint(0x00, 0xff),
-           random.randint(0x00, 0xff), random.randint(0x00, 0xff)]
-    if base_mac[3] != '00':
-        mac[3] = int(base_mac[3], 16)
-    return ':'.join(["%02x" % x for x in mac])
+    return net.get_random_mac(base_mac)
 
 
 def get_dhcp_agent_device_id(network_id, host):
@@ -223,12 +162,6 @@ def get_dhcp_agent_device_id(network_id, host):
     local_hostname = host.split('.')[0]
     host_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, str(local_hostname))
     return 'dhcp%s-%s' % (host_uuid, network_id)
-
-
-@removals.remove(
-    message="Use cpu_count from neutron_lib.utils.host")
-def cpu_count():
-    return host.cpu_count()
 
 
 class exception_logger(object):
@@ -347,15 +280,6 @@ def ip_version_from_int(ip_version_int):
     raise ValueError(_('Illegal IP version number'))
 
 
-def is_port_trusted(port):
-    """Used to determine if port can be trusted not to attack network.
-
-    Trust is currently based on the device_owner field starting with 'network:'
-    since we restrict who can use that in the default policy.json file.
-    """
-    return port['device_owner'].startswith(n_const.DEVICE_OWNER_NETWORK_PREFIX)
-
-
 class DelayedStringRenderer(object):
     """Takes a callable and its args and calls when __str__ is called
 
@@ -373,50 +297,22 @@ class DelayedStringRenderer(object):
         return str(self.function(*self.args, **self.kwargs))
 
 
-@removals.remove(
-    message="Use round_val from neutron_lib.utils.helpers")
-def round_val(val):
-    return helpers.round_val(val)
-
-
-@removals.remove(
-    message="Use replace_file from neutron_lib.utils")
-def replace_file(file_name, data, file_mode=0o644):
-    file_utils.replace_file(file_name, data, file_mode=file_mode)
-
-
-class _SilentDriverManager(driver.DriverManager):
-    """The lamest of hacks to allow us to pass a kwarg to DriverManager parent.
-
-    DriverManager doesn't accept the warn_on_missing_entrypoint param
-    to pass to its parent on __init__ so we mirror the __init__ here and bypass
-    the one in DriverManager in order to silence the warnings.
-    TODO(kevinbenton): remove once Ia6f5f749fc2f73ca6091fa6d58506fddb058902a
-    is released or we stop supporting loading by class path.
-    """
-    def __init__(self, namespace, name):
-        p = super(driver.DriverManager, self)  # pylint: disable=bad-super-call
-        p.__init__(
-            namespace=namespace, names=[name],
-            on_load_failure_callback=self._default_on_load_failure,
-            warn_on_missing_entrypoint=False
-        )
-
-
 def load_class_by_alias_or_classname(namespace, name):
     """Load class using stevedore alias or the class name
+
     :param namespace: namespace where the alias is defined
     :param name: alias or class name of the class to be loaded
-    :returns class if calls can be loaded
+    :returns: class if calls can be loaded
     :raises ImportError if class cannot be loaded
     """
 
     if not name:
-        LOG.error(_LE("Alias or class name is not set"))
+        LOG.error("Alias or class name is not set")
         raise ImportError(_("Class not found."))
     try:
         # Try to resolve class by alias
-        mgr = _SilentDriverManager(namespace, name)
+        mgr = driver.DriverManager(
+            namespace, name, warn_on_missing_entrypoint=False)
         class_to_load = mgr.driver
     except RuntimeError:
         e1_info = sys.exc_info()
@@ -424,18 +320,12 @@ def load_class_by_alias_or_classname(namespace, name):
         try:
             class_to_load = importutils.import_class(name)
         except (ImportError, ValueError):
-            LOG.error(_LE("Error loading class by alias"),
+            LOG.error("Error loading class by alias",
                       exc_info=e1_info)
-            LOG.error(_LE("Error loading class by class name"),
+            LOG.error("Error loading class by class name",
                       exc_info=True)
             raise ImportError(_("Class not found."))
     return class_to_load
-
-
-@removals.remove(
-    message="Use safe_decode_utf8 from neutron_lib.utils.helpers")
-def safe_decode_utf8(s):
-    return helpers.safe_decode_utf8(s)
 
 
 def _hex_format(port, mask=0):
@@ -746,7 +636,7 @@ def create_object_with_dependency(creator, dep_getter, dep_creator,
                     try:
                         dep_deleter(dependency)
                     except Exception:
-                        LOG.exception(_LE("Failed cleaning up dependency %s"),
+                        LOG.exception("Failed cleaning up dependency %s",
                                       dep_id)
     return result, dependency
 
@@ -788,22 +678,14 @@ def wait_until_true(predicate, timeout=60, sleep=1, exception=None):
                       (default) then WaitTimeout exception is raised.
     """
     try:
-        with eventlet.timeout.Timeout(timeout):
+        with eventlet.Timeout(timeout):
             while not predicate():
                 eventlet.sleep(sleep)
-    except eventlet.TimeoutError:
-        if exception is None:
-            debtcollector.deprecate(
-                "Raising eventlet.TimeoutError by default has been deprecated",
-                message="wait_until_true() now raises WaitTimeout error by "
-                        "default.",
-                version="Ocata",
-                removal_version="Pike")
-            exception = WaitTimeout("Timed out after %d seconds" % timeout)
-        #NOTE(jlibosva): In case None is passed exception is instantiated on
-        #                the line above.
-        #pylint: disable=raising-bad-type
-        raise exception
+    except eventlet.Timeout:
+        if exception is not None:
+            #pylint: disable=raising-bad-type
+            raise exception
+        raise WaitTimeout("Timed out after %d seconds" % timeout)
 
 
 class _AuthenticBase(object):
@@ -861,7 +743,7 @@ def attach_exc_details(e, msg, args=_NO_ARGS_MARKER):
 def extract_exc_details(e):
     for attr in ('_error_context_msg', '_error_context_args'):
         if not hasattr(e, attr):
-            return _LE('No details.')
+            return u'No details.'
     details = e._error_context_msg
     args = e._error_context_args
     if args is _NO_ARGS_MARKER:
@@ -871,6 +753,7 @@ def extract_exc_details(e):
 
 def import_modules_recursively(topdir):
     '''Import and return all modules below the topdir directory.'''
+    topdir = _SEPARATOR_REGEX.sub('/', topdir)
     modules = []
     for root, dirs, files in os.walk(topdir):
         for file_ in files:
@@ -881,7 +764,7 @@ def import_modules_recursively(topdir):
             if module == '__init__':
                 continue
 
-            import_base = root.replace('/', '.')
+            import_base = _SEPARATOR_REGEX.sub('.', root)
 
             # NOTE(ihrachys): in Python3, or when we are not located in the
             # directory containing neutron code, __file__ is absolute, so we
@@ -949,3 +832,10 @@ except AttributeError:
 def make_weak_ref(f):
     """Make a weak reference to a function accounting for bound methods."""
     return weak_method(f) if hasattr(f, '__self__') else weakref.ref(f)
+
+
+def resolve_ref(ref):
+    """Handles dereference of weakref."""
+    if isinstance(ref, weakref.ref):
+        ref = ref()
+    return ref

@@ -53,6 +53,9 @@ ARP_SPOOF_TABLE = 24
 # Table for MAC spoof filtering
 MAC_SPOOF_TABLE = 25
 
+# Table to decide whether further filtering is needed
+TRANSIENT_TABLE = 60
+
 # Tables used for ovs firewall
 BASE_EGRESS_TABLE = 71
 RULES_EGRESS_TABLE = 72
@@ -149,3 +152,7 @@ OVS_BRIDGE_NAME = 'ovs_bridge_name'
 
 # callback resource for notifying to ovsdb handler
 OVSDB_RESOURCE = 'ovsdb'
+
+# Used in ovs port 'external_ids' in order mark it for no cleanup when
+# ovs_cleanup script is used.
+SKIP_CLEANUP = 'skip_cleanup'

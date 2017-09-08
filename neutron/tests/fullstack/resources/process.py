@@ -59,12 +59,13 @@ class ProcessFixture(fixtures.Fixture):
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S-%f")
         log_file = "%s--%s.log" % (self.process_name, timestamp)
-        cmd = [spawn.find_executable(self.exec_name),
-               '--log-dir', log_dir,
-               '--log-file', log_file]
+        run_as_root = bool(self.namespace)
+        exec_name = (self.exec_name
+                     if run_as_root
+                     else spawn.find_executable(self.exec_name))
+        cmd = [exec_name, '--log-dir', log_dir, '--log-file', log_file]
         for filename in self.config_filenames:
             cmd += ['--config-file', filename]
-        run_as_root = bool(self.namespace)
         self.process = async_process.AsyncProcess(
             cmd, run_as_root=run_as_root, namespace=self.namespace
         )
@@ -135,17 +136,23 @@ class NeutronServerFixture(ServiceFixture):
     NEUTRON_SERVER = "neutron-server"
 
     def __init__(self, env_desc, host_desc,
-                 test_name, neutron_cfg_fixture, plugin_cfg_fixture):
+                 test_name, neutron_cfg_fixture, plugin_cfg_fixture,
+                 service_cfg_fixtures=None):
         super(NeutronServerFixture, self).__init__()
         self.env_desc = env_desc
         self.host_desc = host_desc
         self.test_name = test_name
         self.neutron_cfg_fixture = neutron_cfg_fixture
         self.plugin_cfg_fixture = plugin_cfg_fixture
+        self.service_cfg_fixtures = service_cfg_fixtures
 
     def _setUp(self):
         config_filenames = [self.neutron_cfg_fixture.filename,
                             self.plugin_cfg_fixture.filename]
+
+        if self.service_cfg_fixtures:
+            config_filenames.extend(
+                [scf.filename for scf in self.service_cfg_fixtures])
 
         self.process_fixture = self.useFixture(ProcessFixture(
             test_name=self.test_name,
@@ -255,13 +262,21 @@ class L3AgentFixture(ServiceFixture):
 
         config_filenames = [self.neutron_cfg_fixture.filename,
                             self.l3_agent_cfg_fixture.filename]
+
+        # if we execute in namespace as root, then allow rootwrap to find the
+        # executable, otherwise construct full path ourselves
+        if self.namespace:
+            exec_name = 'l3_agent.py'
+        else:
+            exec_name = spawn.find_executable(
+                'l3_agent.py',
+                path=os.path.join(fullstack_base.ROOTDIR, 'cmd'))
+
         self.process_fixture = self.useFixture(
             ProcessFixture(
                 test_name=self.test_name,
                 process_name=self.NEUTRON_L3_AGENT,
-                exec_name=spawn.find_executable(
-                    'l3_agent.py',
-                    path=os.path.join(base.ROOTDIR, 'common', 'agents')),
+                exec_name=exec_name,
                 config_filenames=config_filenames,
                 namespace=self.namespace
             )
@@ -290,13 +305,21 @@ class DhcpAgentFixture(fixtures.Fixture):
 
         config_filenames = [self.neutron_cfg_fixture.filename,
                             self.agent_cfg_fixture.filename]
+
+        # if we execute in namespace as root, then allow rootwrap to find the
+        # executable, otherwise construct full path ourselves
+        if self.namespace:
+            exec_name = 'dhcp_agent.py'
+        else:
+            exec_name = spawn.find_executable(
+                'dhcp_agent.py',
+                path=os.path.join(fullstack_base.ROOTDIR, 'cmd'))
+
         self.process_fixture = self.useFixture(
             ProcessFixture(
                 test_name=self.test_name,
                 process_name=self.NEUTRON_DHCP_AGENT,
-                exec_name=spawn.find_executable(
-                    'fullstack_dhcp_agent.py',
-                    path=os.path.join(base.ROOTDIR, 'common', 'agents')),
+                exec_name=exec_name,
                 config_filenames=config_filenames,
                 namespace=self.namespace
             )

@@ -13,16 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from neutron_lib.api.definitions import port_security as psec
 from neutron_lib.api import validators
+from neutron_lib import context
+from neutron_lib.exceptions import port_security as psec_exc
 from neutron_lib.plugins import directory
 from webob import exc
 
-from neutron import context
 from neutron.db import _utils as db_utils
+from neutron.db import api as db_api
 from neutron.db import db_base_plugin_v2
 from neutron.db import portsecurity_db
 from neutron.db import securitygroups_db
-from neutron.extensions import portsecurity as psec
 from neutron.extensions import securitygroup as ext_sg
 from neutron.tests.unit.db import test_db_base_plugin_v2
 from neutron.tests.unit.extensions import test_securitygroup
@@ -59,7 +61,7 @@ class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
     def create_network(self, context, network):
         tenant_id = network['network'].get('tenant_id')
         self._ensure_default_security_group(context, tenant_id)
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             neutron_db = super(PortSecurityTestPlugin, self).create_network(
                 context, network)
             neutron_db.update(network['network'])
@@ -68,7 +70,7 @@ class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
         return neutron_db
 
     def update_network(self, context, id, network):
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             neutron_db = super(PortSecurityTestPlugin, self).update_network(
                 context, id, network)
             if psec.PORTSECURITY in network['network']:
@@ -77,36 +79,35 @@ class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
         return neutron_db
 
     def get_network(self, context, id, fields=None):
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.reader.using(context):
             net = super(PortSecurityTestPlugin, self).get_network(
                 context, id)
         return db_utils.resource_fields(net, fields)
 
     def create_port(self, context, port):
         p = port['port']
-        with context.session.begin(subtransactions=True):
-            p[ext_sg.SECURITYGROUPS] = self._get_security_groups_on_port(
-                context, port)
-            neutron_db = super(PortSecurityTestPlugin, self).create_port(
-                context, port)
-            p.update(neutron_db)
+        p[ext_sg.SECURITYGROUPS] = self._get_security_groups_on_port(
+            context, port)
+        neutron_db = super(PortSecurityTestPlugin, self).create_port(
+            context, port)
+        p.update(neutron_db)
 
-            (port_security, has_ip) = self._determine_port_security_and_has_ip(
-                context, p)
-            p[psec.PORTSECURITY] = port_security
-            self._process_port_port_security_create(context, p, neutron_db)
+        (port_security, has_ip) = self._determine_port_security_and_has_ip(
+            context, p)
+        p[psec.PORTSECURITY] = port_security
+        self._process_port_port_security_create(context, p, neutron_db)
 
-            if (validators.is_attr_set(p.get(ext_sg.SECURITYGROUPS)) and
-                not (port_security and has_ip)):
-                raise psec.PortSecurityAndIPRequiredForSecurityGroups()
+        if (validators.is_attr_set(p.get(ext_sg.SECURITYGROUPS)) and
+            not (port_security and has_ip)):
+            raise psec_exc.PortSecurityAndIPRequiredForSecurityGroups()
 
-            # Port requires ip and port_security enabled for security group
-            if has_ip and port_security:
-                self._ensure_default_security_group_on_port(context, port)
+        # Port requires ip and port_security enabled for security group
+        if has_ip and port_security:
+            self._ensure_default_security_group_on_port(context, port)
 
-            if (p.get(ext_sg.SECURITYGROUPS) and p[psec.PORTSECURITY]):
-                self._process_port_create_security_group(
-                    context, p, p[ext_sg.SECURITYGROUPS])
+        if (p.get(ext_sg.SECURITYGROUPS) and p[psec.PORTSECURITY]):
+            self._process_port_create_security_group(
+                context, p, p[ext_sg.SECURITYGROUPS])
 
         return port['port']
 
@@ -114,7 +115,7 @@ class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
         delete_security_groups = self._check_update_deletes_security_groups(
             port)
         has_security_groups = self._check_update_has_security_groups(port)
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             ret_port = super(PortSecurityTestPlugin, self).update_port(
                 context, id, port)
             # copy values over - but not fixed_ips
@@ -130,13 +131,13 @@ class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
             # security groups, port security is set and port has ip
             if (has_security_groups and (not ret_port[psec.PORTSECURITY]
                                          or not has_ip)):
-                raise psec.PortSecurityAndIPRequiredForSecurityGroups()
+                raise psec_exc.PortSecurityAndIPRequiredForSecurityGroups()
 
             # Port security/IP was updated off. Need to check that no security
             # groups are on port.
             if ret_port[psec.PORTSECURITY] is not True or not has_ip:
                 if has_security_groups:
-                    raise psec.PortSecurityAndIPRequiredForSecurityGroups()
+                    raise psec_exc.PortSecurityAndIPRequiredForSecurityGroups()
 
                 # get security groups on port
                 filters = {'port_id': [id]}
@@ -144,7 +145,7 @@ class PortSecurityTestPlugin(db_base_plugin_v2.NeutronDbPluginV2,
                                    _get_port_security_group_bindings(
                                        context, filters))
                 if security_groups and not delete_security_groups:
-                    raise psec.PortSecurityPortHasSecurityGroup()
+                    raise psec_exc.PortSecurityPortHasSecurityGroup()
 
             if (delete_security_groups or has_security_groups):
                 # delete the port binding and read it with the new rules.

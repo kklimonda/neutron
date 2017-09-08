@@ -55,7 +55,7 @@ function load_rc_for_rally {
 
 
 case $VENV in
-"dsvm-functional"|"dsvm-fullstack")
+"dsvm-functional"|"dsvm-fullstack"|"dsvm-functional-python35"|"dsvm-fullstack-python35")
     # The following need to be set before sourcing
     # configure_for_func_testing.
     GATE_STACK_USER=stack
@@ -81,23 +81,32 @@ case $VENV in
         compile_ovs_kernel_module
     fi
 
-    load_conf_hook iptables_verify
-    # Make the workspace owned by the stack user
-    sudo chown -R $STACK_USER:$STACK_USER $BASE
+    # prepare base environment for ./stack.sh
+    load_rc_hook stack_base
+
+    # enable monitoring
+    load_rc_hook dstat
     ;;
 
-# TODO(ihrachys): remove dsvm-scenario from the list when it's no longer used in project-config
-"api"|"api-pecan"|"full-ovsfw"|"full-pecan"|"dsvm-scenario"|"dsvm-scenario-ovs"|"dsvm-scenario-linuxbridge")
-    load_rc_hook api_${FLAVOR}_extensions
+"api"|"api-pecan"|"full-ovsfw"|"full-pecan"|"dsvm-scenario-ovs"|"dsvm-scenario-linuxbridge")
+    # TODO(ihrachys) consider feeding result of ext-list into tempest.conf
+    load_rc_hook api_all_extensions
+    if [ "${FLAVOR}" = "dvrskip" ]; then
+        load_rc_hook disable_dvr_tests
+    fi
     load_conf_hook quotas
     load_rc_hook dns
     load_rc_hook qos
+    load_rc_hook segments
     load_rc_hook trunk
-    load_conf_hook mtu
+    load_conf_hook vlan_provider
+    load_conf_hook type_drivers
     load_conf_hook osprofiler
     if [[ "$VENV" =~ "dsvm-scenario" ]]; then
-        load_conf_hook iptables_verify
         load_rc_hook ubuntu_image
+    fi
+    if [[ "$VENV" =~ "dsvm-scenario-linuxbridge" ]]; then
+        load_conf_hook iptables_verify
     fi
     if [[ "$VENV" =~ "pecan" ]]; then
         load_conf_hook pecan
@@ -105,18 +114,19 @@ case $VENV in
     if [[ "$VENV" =~ "ovs" ]]; then
         load_conf_hook ovsfw
     fi
-
-    export DEVSTACK_LOCALCONF=$(cat $LOCAL_CONF)
-    $BASE/new/devstack-gate/devstack-vm-gate.sh
+    if [[ "$FLAVOR" = "dvrskip" ]]; then
+        load_conf_hook disable_dvr
+    fi
     ;;
 
 "rally")
     load_rc_for_rally
-    export DEVSTACK_LOCALCONF=$(cat $LOCAL_CONF)
-    $BASE/new/devstack-gate/devstack-vm-gate.sh
     ;;
 
 *)
     echo "Unrecognized environment $VENV".
     exit 1
 esac
+
+export DEVSTACK_LOCALCONF=$(cat $LOCAL_CONF)
+$BASE/new/devstack-gate/devstack-vm-gate.sh

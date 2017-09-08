@@ -17,13 +17,11 @@ NOTE: This module shall not be used by external projects. It will be moved
 
 import contextlib
 
+from neutron_lib.api import attributes
 from oslo_log import log as logging
 from oslo_utils import excutils
-import six
 from sqlalchemy.ext import associationproxy
 
-from neutron._i18n import _LE
-from neutron.api.v2 import attributes
 
 LOG = logging.getLogger(__name__)
 
@@ -41,7 +39,7 @@ def safe_creation(context, create_fn, delete_fn, create_bindings,
 
     More information when this method could be used can be found in
     developer guide - Effective Neutron: Database interaction section.
-    http://docs.openstack.org/developer/neutron/devref/effective_neutron.html
+    https://docs.openstack.org/neutron/latest/contributor/effective_neutron.html
 
     :param context: context
 
@@ -68,9 +66,9 @@ def safe_creation(context, create_fn, delete_fn, create_bindings,
                 try:
                     delete_fn(obj['id'])
                 except Exception as e:
-                    LOG.error(_LE("Cannot clean up created object %(obj)s. "
-                                  "Exception: %(exc)s"), {'obj': obj['id'],
-                                                          'exc': e})
+                    LOG.error("Cannot clean up created object %(obj)s. "
+                              "Exception: %(exc)s", {'obj': obj['id'],
+                                                     'exc': e})
         return obj, value
 
 
@@ -118,6 +116,24 @@ def filter_non_model_columns(data, model):
     """
     columns = [c.name for c in model.__table__.columns]
     return dict((k, v) for (k, v) in
-                six.iteritems(data) if k in columns or
+                data.items() if k in columns or
                 isinstance(getattr(model, k, None),
                            associationproxy.AssociationProxy))
+
+
+# NOTE: This used to be CommonDbMixin._get_marker_obj
+def get_marker_obj(plugin, context, resource, limit, marker):
+    """Retrieve a resource marker object.
+
+    This function is used to invoke:
+        plugin._get_<resource>(context, marker)
+    It is used for pagination.
+
+    :param plugin: The plugin processing the request.
+    :param context: The request context.
+    :param resource: The resource name.
+    :param limit: Indicates if pagination is in effect.
+    :param marker: The id of the marker object.
+    """
+    if limit and marker:
+        return getattr(plugin, '_get_%s' % resource)(context, marker)

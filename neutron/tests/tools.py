@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
 import datetime
 import os
 import platform
@@ -21,23 +20,25 @@ import random
 import time
 import warnings
 
+from debtcollector import removals
 import fixtures
 import mock
 import netaddr
 from neutron_lib import constants
+from neutron_lib import fixture
 from neutron_lib.utils import helpers
+from neutron_lib.utils import net
 from oslo_utils import netutils
 from oslo_utils import timeutils
-import six
 import unittest2
 
 from neutron.api.v2 import attributes
 from neutron.common import constants as n_const
-from neutron.db import common_db_mixin
 from neutron.plugins.common import constants as p_const
+from neutron.services.logapi.common import constants as log_const
 
 
-class AttributeMapMemento(fixtures.Fixture):
+class AttributeMapMemento(fixture.APIDefinitionFixture):
     """Create a copy of the resource attribute map so it can be restored during
     test cleanup.
 
@@ -53,17 +54,20 @@ class AttributeMapMemento(fixtures.Fixture):
     """
 
     def _setUp(self):
+        self.backup_global_resources = False
+        super(AttributeMapMemento, self)._setUp()
         # Shallow copy is not a proper choice for keeping a backup copy as
         # the RESOURCE_ATTRIBUTE_MAP map is modified in place through the
         # 0th level keys. Ideally deepcopy() would be used but this seems
         # to result in test failures. A compromise is to copy one level
         # deeper than a shallow copy.
         self.contents_backup = {}
-        for res, attrs in six.iteritems(attributes.RESOURCE_ATTRIBUTE_MAP):
+        for res, attrs in attributes.RESOURCE_ATTRIBUTE_MAP.items():
             self.contents_backup[res] = attrs.copy()
         self.addCleanup(self.restore)
 
     def restore(self):
+        super(AttributeMapMemento, self)._restore()
         attributes.RESOURCE_ATTRIBUTE_MAP = self.contents_backup
 
 
@@ -119,17 +123,6 @@ class SafeCleanupFixture(fixtures.Fixture):
 
         self.fixture.setUp()
         self.addCleanup(cleanUp)
-
-
-class CommonDbMixinHooksFixture(fixtures.Fixture):
-    def _setUp(self):
-        self.original_hooks = common_db_mixin.CommonDbMixin._model_query_hooks
-        self.addCleanup(self.restore_hooks)
-        common_db_mixin.CommonDbMixin._model_query_hooks = copy.copy(
-            common_db_mixin.CommonDbMixin._model_query_hooks)
-
-    def restore_hooks(self):
-        common_db_mixin.CommonDbMixin._model_query_hooks = self.original_hooks
 
 
 def setup_mock_calls(mocked_call, expected_calls_and_values):
@@ -254,17 +247,20 @@ def get_random_cidr(version=4):
     return '2001:db8:%x::/%d' % (random.getrandbits(16), 64)
 
 
+@removals.remove(
+    message="Use get_random_mac from neutron_lib.utils.net",
+    version="Pike",
+    removal_version="Queens"
+)
 def get_random_mac():
     """Generate a random mac address starting with fe:16:3e"""
-    mac = [0xfe, 0x16, 0x3e,
-        random.randint(0x00, 0xff),
-        random.randint(0x00, 0xff),
-        random.randint(0x00, 0xff)]
-    return ':'.join(map(lambda x: "%02x" % x, mac))
+    return net.get_random_mac(['fe', '16', '3e', '00', '00', '00'])
 
 
 def get_random_EUI():
-    return netaddr.EUI(get_random_mac())
+    return netaddr.EUI(
+        net.get_random_mac(['fe', '16', '3e', '00', '00', '00'])
+    )
 
 
 def get_random_ip_network(version=4):
@@ -278,9 +274,15 @@ def get_random_ip_address(version=4):
                                      random.randint(3, 254))
         return netaddr.IPAddress(ip_string)
     else:
-        ip = netutils.get_ipv6_addr_by_EUI64('2001:db8::/64',
-                                             get_random_mac())
+        ip = netutils.get_ipv6_addr_by_EUI64(
+            '2001:db8::/64',
+            net.get_random_mac(['fe', '16', '3e', '00', '00', '00'])
+        )
         return ip
+
+
+def get_random_floatingip_status():
+    return random.choice(n_const.VALID_FLOATINGIP_STATUS)
 
 
 def get_random_flow_direction():
@@ -326,3 +328,7 @@ def reset_random_seed():
 
 def get_random_ipv6_mode():
     return random.choice(constants.IPV6_MODES)
+
+
+def get_random_security_event():
+    return random.choice(log_const.LOG_EVENTS)

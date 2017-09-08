@@ -14,27 +14,22 @@
 #    under the License.
 
 from neutron_lib import exceptions as exc
+from neutron_lib.plugins.ml2 import api
 from oslo_config import cfg
 from oslo_log import log
-import six
 
-from neutron._i18n import _, _LI, _LW
-from neutron.common import _deprecate
+from neutron._i18n import _
 from neutron.common import exceptions as n_exc
 from neutron.conf.plugins.ml2.drivers import driver_type
-from neutron.db.models.plugins.ml2 import flatallocation as type_flat_model
+from neutron.db import api as db_api
 from neutron.objects import exceptions as obj_base
 from neutron.objects.plugins.ml2 import flatallocation as flat_obj
 from neutron.plugins.common import constants as p_const
-from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import helpers
 
 LOG = log.getLogger(__name__)
 
 driver_type.register_ml2_drivers_flat_opts()
-
-
-_deprecate._moved_global('FlatAllocation', new_module=type_flat_model)
 
 
 class FlatTypeDriver(helpers.BaseTypeDriver):
@@ -55,19 +50,19 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
     def _parse_networks(self, entries):
         self.flat_networks = entries
         if '*' in self.flat_networks:
-            LOG.info(_LI("Arbitrary flat physical_network names allowed"))
+            LOG.info("Arbitrary flat physical_network names allowed")
             self.flat_networks = None
         elif not self.flat_networks:
-            LOG.info(_LI("Flat networks are disabled"))
+            LOG.info("Flat networks are disabled")
         else:
-            LOG.info(_LI("Allowable flat physical_network names: %s"),
+            LOG.info("Allowable flat physical_network names: %s",
                      self.flat_networks)
 
     def get_type(self):
         return p_const.TYPE_FLAT
 
     def initialize(self):
-        LOG.info(_LI("ML2 FlatTypeDriver initialization complete"))
+        LOG.info("ML2 FlatTypeDriver initialization complete")
 
     def is_partial_segment(self, segment):
         return False
@@ -85,7 +80,7 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
                    % physical_network)
             raise exc.InvalidInput(error_message=msg)
 
-        for key, value in six.iteritems(segment):
+        for key, value in segment.items():
             if value and key not in [api.NETWORK_TYPE,
                                      api.PHYSICAL_NETWORK]:
                 msg = _("%s prohibited for flat provider network") % key
@@ -112,7 +107,7 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
 
     def release_segment(self, context, segment):
         physical_network = segment[api.PHYSICAL_NETWORK]
-        with context.session.begin(subtransactions=True):
+        with db_api.context_manager.writer.using(context):
             obj = flat_obj.FlatAllocation.get_object(
                 context,
                 physical_network=physical_network)
@@ -121,8 +116,8 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
                 LOG.debug("Releasing flat network on physical network %s",
                           physical_network)
             else:
-                LOG.warning(_LW(
-                    "No flat network found on physical network %s"),
+                LOG.warning(
+                    "No flat network found on physical network %s",
                     physical_network)
 
     def get_mtu(self, physical_network):
@@ -133,6 +128,3 @@ class FlatTypeDriver(helpers.BaseTypeDriver):
         if physical_network in self.physnet_mtus:
             mtu.append(int(self.physnet_mtus[physical_network]))
         return min(mtu) if mtu else 0
-
-
-_deprecate._MovedGlobals()

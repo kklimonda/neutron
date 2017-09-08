@@ -12,18 +12,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.api.v2 import attributes
-from neutron.db import db_base_plugin_v2
+from neutron_lib.api.definitions import network as net_def
+
+from neutron.db import _resource_extend as resource_extend
 from neutron.extensions import vlantransparent
 
 
+@resource_extend.has_resource_extenders
 class Vlantransparent_db_mixin(object):
     """Mixin class to add vlan transparent methods to db_base_plugin_v2."""
 
-    def _extend_network_dict_vlan_transparent(self, network_res, network_db):
+    @staticmethod
+    @resource_extend.extends([net_def.COLLECTION_NAME])
+    def _extend_network_dict_vlan_transparent(network_res, network_db):
         network_res[vlantransparent.VLANTRANSPARENT] = (
             network_db.vlan_transparent)
         return network_res
-
-    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
-        attributes.NETWORKS, ['_extend_network_dict_vlan_transparent'])

@@ -17,7 +17,7 @@ import operator
 from keystoneauth1 import loading as ks_loading
 from oslo_config import cfg
 
-import neutron.agent.common.config
+import neutron.agent.agent_extensions_manager
 import neutron.agent.linux.interface
 import neutron.agent.linux.pd
 import neutron.agent.linux.ra
@@ -25,6 +25,7 @@ import neutron.agent.ovsdb.api
 import neutron.agent.securitygroups_rpc
 import neutron.common.cache_utils
 import neutron.conf.agent.agent_extensions_manager
+import neutron.conf.agent.common
 import neutron.conf.agent.dhcp
 import neutron.conf.agent.l3.config
 import neutron.conf.agent.l3.ha
@@ -43,7 +44,6 @@ import neutron.conf.plugins.ml2.drivers.ovs_conf
 import neutron.conf.quota
 import neutron.conf.service
 import neutron.conf.services.metering_agent
-import neutron.conf.services.qos_driver_manager
 import neutron.conf.wsgi
 import neutron.db.agents_db
 import neutron.db.agentschedulers_db
@@ -80,17 +80,16 @@ def list_agent_opts():
     return [
         ('agent',
          itertools.chain(
-             neutron.agent.common.config.ROOT_HELPER_OPTS,
-             neutron.agent.common.config.AGENT_STATE_OPTS,
-             neutron.agent.common.config.IPTABLES_OPTS,
-             neutron.agent.common.config.PROCESS_MONITOR_OPTS,
-             neutron.agent.common.config.AVAILABILITY_ZONE_OPTS)
+             neutron.conf.agent.common.ROOT_HELPER_OPTS,
+             neutron.conf.agent.common.AGENT_STATE_OPTS,
+             neutron.conf.agent.common.IPTABLES_OPTS,
+             neutron.conf.agent.common.PROCESS_MONITOR_OPTS,
+             neutron.conf.agent.common.AVAILABILITY_ZONE_OPTS)
          ),
         ('DEFAULT',
          itertools.chain(
-             neutron.agent.common.config.INTERFACE_DRIVER_OPTS,
-             neutron.conf.agent.metadata.config.SHARED_OPTS,
-             neutron.conf.agent.metadata.config.DRIVER_OPTS)
+             neutron.conf.agent.common.INTERFACE_DRIVER_OPTS,
+             neutron.conf.agent.metadata.config.SHARED_OPTS)
          )
     ]
 
@@ -143,29 +142,22 @@ def list_opts():
     ]
 
 
-def list_qos_opts():
-    return [
-        ('qos',
-         neutron.conf.services.qos_driver_manager.QOS_PLUGIN_OPTS)
-    ]
-
-
 def list_base_agent_opts():
     return [
         ('DEFAULT',
          itertools.chain(
              neutron.agent.linux.interface.OPTS,
-             neutron.agent.common.config.INTERFACE_DRIVER_OPTS,
+             neutron.conf.agent.common.INTERFACE_DRIVER_OPTS,
              neutron.conf.agent.ovs_conf.OPTS)
          ),
-        ('agent', neutron.agent.common.config.AGENT_STATE_OPTS),
+        ('agent', neutron.conf.agent.common.AGENT_STATE_OPTS),
         ('ovs', neutron.agent.ovsdb.api.OPTS),
     ]
 
 
 def list_az_agent_opts():
     return [
-        ('agent', neutron.agent.common.config.AVAILABILITY_ZONE_OPTS),
+        ('agent', neutron.conf.agent.common.AVAILABILITY_ZONE_OPTS),
     ]
 
 
@@ -232,7 +224,7 @@ def list_metadata_agent_opts():
              meta_conf.UNIX_DOMAIN_METADATA_PROXY_OPTS,
              neutron.conf.cache_utils.cache_opts)
          ),
-        ('agent', neutron.agent.common.config.AGENT_STATE_OPTS)
+        ('agent', neutron.conf.agent.common.AGENT_STATE_OPTS)
     ]
 
 

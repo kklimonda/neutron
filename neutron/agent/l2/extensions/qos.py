@@ -20,13 +20,14 @@ from oslo_concurrency import lockutils
 from oslo_log import log as logging
 import six
 
-from neutron._i18n import _LW, _LI
 from neutron.agent.l2 import l2_agent_extension
 from neutron.api.rpc.callbacks.consumer import registry
 from neutron.api.rpc.callbacks import events
 from neutron.api.rpc.callbacks import resources
 from neutron.api.rpc.handlers import resources_rpc
+from neutron.common import constants
 from neutron import manager
+from neutron.services.qos import qos_consts
 
 LOG = logging.getLogger(__name__)
 
@@ -47,7 +48,10 @@ class QosAgentDriver(object):
     # delete_<type>
     #
     # where <type> is one of VALID_RULE_TYPES
-    SUPPORTED_RULES = set()
+    # There is exception from this rule for deletion of rules with
+    # attribute direction set to ingress (e.g. bandwidth limit rule).
+    # For deletion of such rule types delete handler has following name:
+    # delete_<type>_ingress
 
     @abc.abstractmethod
     def initialize(self):
@@ -86,14 +90,15 @@ class QosAgentDriver(object):
         :param qos_policy: the QoS policy to be removed from port.
         """
         if qos_policy is None:
-            rule_types = self.SUPPORTED_RULES
+            for rule_type in self.SUPPORTED_RULES:
+                self._handle_rule_delete(port, rule_type)
+                if self._rule_type_has_ingress_direction(rule_type):
+                    self._handle_rule_delete(port, rule_type, ingress=True)
         else:
-            rule_types = set(
-                [rule.rule_type
-                 for rule in self._iterate_rules(qos_policy.rules)])
-
-        for rule_type in rule_types:
-            self._handle_rule_delete(port, rule_type)
+            for rule in self._iterate_rules(qos_policy.rules):
+                self._handle_rule_delete(
+                    port, rule.rule_type,
+                    ingress=self._rule_is_ingress_direction(rule))
 
     def _iterate_rules(self, rules):
         for rule in rules:
@@ -101,12 +106,15 @@ class QosAgentDriver(object):
             if rule_type in self.SUPPORTED_RULES:
                 yield rule
             else:
-                LOG.warning(_LW('Unsupported QoS rule type for %(rule_id)s: '
-                                '%(rule_type)s; skipping'),
+                LOG.warning('Unsupported QoS rule type for %(rule_id)s: '
+                            '%(rule_type)s; skipping',
                             {'rule_id': rule.id, 'rule_type': rule_type})
 
-    def _handle_rule_delete(self, port, rule_type):
+    def _handle_rule_delete(self, port, rule_type, ingress=False):
         handler_name = "".join(("delete_", rule_type))
+        if ingress:
+            handler_name = "%s_%s" % (handler_name,
+                                      constants.INGRESS_DIRECTION)
         handler = getattr(self, handler_name)
         handler(port)
 
@@ -119,6 +127,17 @@ class QosAgentDriver(object):
             else:
                 LOG.debug("Port %(port)s excluded from QoS rule %(rule)s",
                           {'port': port, 'rule': rule.id})
+
+    def _rule_type_has_ingress_direction(self, rule_type):
+        supported_rule = self.SUPPORTED_RULES[rule_type]
+        if qos_consts.DIRECTION not in supported_rule.keys():
+            return False
+        return (constants.INGRESS_DIRECTION in
+                supported_rule[qos_consts.DIRECTION]['type:values'])
+
+    def _rule_is_ingress_direction(self, rule):
+        rule_direction = getattr(rule, "direction", constants.EGRESS_DIRECTION)
+        return rule_direction == constants.INGRESS_DIRECTION
 
 
 class PortPolicyMap(object):
@@ -241,9 +260,9 @@ class QosAgentExtension(l2_agent_extension.L2AgentExtension):
         qos_policy = self.resource_rpc.pull(
             context, resources.QOS_POLICY, qos_policy_id)
         if qos_policy is None:
-            LOG.info(_LI("QoS policy %(qos_policy_id)s applied to port "
-                         "%(port_id)s is not available on server, "
-                         "it has been deleted. Skipping."),
+            LOG.info("QoS policy %(qos_policy_id)s applied to port "
+                     "%(port_id)s is not available on server, "
+                     "it has been deleted. Skipping.",
                      {'qos_policy_id': qos_policy_id, 'port_id': port_id})
             self._process_reset_port(port)
         else:

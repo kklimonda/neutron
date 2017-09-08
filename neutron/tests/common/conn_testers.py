@@ -20,9 +20,12 @@ from neutron_lib import constants
 from oslo_utils import uuidutils
 
 from neutron.agent import firewall
-from neutron.agent.linux import ip_lib
 from neutron.common import constants as n_consts
 from neutron.common import utils as common_utils
+from neutron.plugins.ml2.drivers.openvswitch.agent.common import (
+    constants as ovs_consts)
+from neutron.plugins.ml2.drivers.openvswitch.agent.openflow.ovs_ofctl import (
+    br_int)
 from neutron.tests.common import machine_fixtures
 from neutron.tests.common import net_helpers
 
@@ -174,7 +177,7 @@ class ConnectionTester(fixtures.Fixture):
 
     def _test_icmp_connectivity(self, direction, protocol, src_port, dst_port):
         src_namespace, ip_address = self._get_namespace_and_address(direction)
-        ip_version = ip_lib.get_ip_version(ip_address)
+        ip_version = common_utils.get_ip_version(ip_address)
         icmp_timeout = ICMP_VERSION_TIMEOUTS[ip_version]
         try:
             net_helpers.assert_ping(src_namespace, ip_address,
@@ -359,6 +362,12 @@ class ConnectionTester(fixtures.Fixture):
                 "At least one packet got reply from %s namespace to %s "
                 "address." % self._get_namespace_and_address(direction)))
 
+    def set_peer_port_as_patch_port(self):
+        pass
+
+    def set_peer_port_as_vm_port(self):
+        pass
+
 
 class OVSBaseConnectionTester(ConnectionTester):
 
@@ -394,7 +403,10 @@ class OVSConnectionTester(OVSBaseConnectionTester):
 
     def _setUp(self):
         super(OVSConnectionTester, self)._setUp()
-        self.bridge = self.useFixture(net_helpers.OVSBridgeFixture()).bridge
+        br_name = self.useFixture(
+            net_helpers.OVSBridgeFixture()).bridge.br_name
+        self.bridge = br_int.OVSIntegrationBridge(br_name)
+        self.bridge.setup_default_table()
         machines = self.useFixture(
             machine_fixtures.PeerMachines(
                 self.bridge, self.ip_cidr)).machines
@@ -415,9 +427,47 @@ class OVSConnectionTester(OVSBaseConnectionTester):
 
     def set_vm_tag(self, tag):
         self.set_tag(self._vm.port.name, self.bridge, tag)
+        self._vm.port.vlan_tag = tag
 
     def set_peer_tag(self, tag):
         self.set_tag(self._peer.port.name, self.bridge, tag)
+        self._peer.port.vlan_tag = tag
+
+    def set_peer_port_as_patch_port(self):
+        """As packets coming from tunneling bridges are always tagged with
+        local VLAN tag, this flows will simulate the behavior.
+        """
+        self.bridge.add_flow(
+            table=ovs_consts.LOCAL_SWITCHING,
+            priority=110,
+            vlan_tci=0,
+            in_port=self.bridge.get_port_ofport(self._peer.port.name),
+            actions='mod_vlan_vid:0x%x,'
+                    'resubmit(,%d)' % (
+                        self._peer.port.vlan_tag,
+                        ovs_consts.LOCAL_SWITCHING)
+        )
+        self.bridge.add_flow(
+            table=ovs_consts.TRANSIENT_TABLE,
+            priority=4,
+            dl_vlan='0x%x' % self._peer.port.vlan_tag,
+            actions='strip_vlan,normal'
+        )
+
+    def set_peer_port_as_vm_port(self):
+        """Remove flows simulating traffic from tunneling bridges.
+
+        This method is opposite to set_peer_port_as_patch_port().
+        """
+        self.bridge.delete_flows(
+            table=ovs_consts.LOCAL_SWITCHING,
+            vlan_tci=0,
+            in_port=self.bridge.get_port_ofport(self._peer.port.name),
+        )
+        self.bridge.delete_flows(
+            table=ovs_consts.TRANSIENT_TABLE,
+            dl_vlan='0x%x' % self._peer.port.vlan_tag,
+        )
 
 
 class OVSTrunkConnectionTester(OVSBaseConnectionTester):

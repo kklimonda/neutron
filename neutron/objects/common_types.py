@@ -260,6 +260,10 @@ class DictOfMiscValuesField(obj_fields.AutoTypedField):
     AUTO_TYPE = DictOfMiscValues
 
 
+class ListOfDictOfMiscValuesField(obj_fields.AutoTypedField):
+    AUTO_TYPE = obj_fields.List(DictOfMiscValuesField())
+
+
 class IPNetwork(obj_fields.FieldType):
     """IPNetwork custom field.
 
@@ -298,3 +302,7 @@ class UUID(obj_fields.UUID):
 
 class UUIDField(obj_fields.AutoTypedField):
     AUTO_TYPE = UUID()
+
+
+class FloatingIPStatusEnumField(obj_fields.AutoTypedField):
+    AUTO_TYPE = obj_fields.Enum(valid_values=constants.VALID_FLOATINGIP_STATUS)

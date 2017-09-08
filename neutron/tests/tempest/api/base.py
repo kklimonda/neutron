@@ -76,6 +76,10 @@ class BaseNetworkTest(test.BaseTestCase):
             raise cls.skipException("Neutron support is required")
         if cls._ip_version == 6 and not CONF.network_feature_enabled.ipv6:
             raise cls.skipException("IPv6 Tests are disabled.")
+        for req_ext in getattr(cls, 'required_extensions', []):
+            if not test.is_extension_enabled(req_ext, 'network'):
+                msg = "%s extension not enabled." % req_ext
+                raise cls.skipException(msg)
 
     @classmethod
     def setup_credentials(cls):
@@ -86,7 +90,7 @@ class BaseNetworkTest(test.BaseTestCase):
     @classmethod
     def setup_clients(cls):
         super(BaseNetworkTest, cls).setup_clients()
-        cls.client = cls.os.network_client
+        cls.client = cls.os_primary.network_client
 
     @classmethod
     def resource_setup(cls):
@@ -114,14 +118,6 @@ class BaseNetworkTest(test.BaseTestCase):
     @classmethod
     def resource_cleanup(cls):
         if CONF.service_available.neutron:
-            # Clean up QoS rules
-            for qos_rule in cls.qos_rules:
-                cls._try_delete_resource(cls.admin_client.delete_qos_rule,
-                                         qos_rule['id'])
-            # Clean up QoS policies
-            for qos_policy in cls.qos_policies:
-                cls._try_delete_resource(cls.admin_client.delete_qos_policy,
-                                         qos_policy['id'])
             # Clean up floating IPs
             for floating_ip in cls.floating_ips:
                 cls._try_delete_resource(cls.client.delete_floatingip,
@@ -190,6 +186,17 @@ class BaseNetworkTest(test.BaseTestCase):
                     cls.admin_client.delete_address_scope,
                     address_scope['id'])
 
+            # Clean up QoS rules
+            for qos_rule in cls.qos_rules:
+                cls._try_delete_resource(cls.admin_client.delete_qos_rule,
+                                         qos_rule['id'])
+            # Clean up QoS policies
+            # as all networks and ports are already removed, QoS policies
+            # shouldn't be "in use"
+            for qos_policy in cls.qos_policies:
+                cls._try_delete_resource(cls.admin_client.delete_qos_policy,
+                                         qos_policy['id'])
+
         super(BaseNetworkTest, cls).resource_cleanup()
 
     @classmethod
@@ -213,13 +220,17 @@ class BaseNetworkTest(test.BaseTestCase):
             pass
 
     @classmethod
-    def create_network(cls, network_name=None, **kwargs):
+    def create_network(cls, network_name=None, client=None, **kwargs):
         """Wrapper utility that returns a test network."""
         network_name = network_name or data_utils.rand_name('test-network-')
 
-        body = cls.client.create_network(name=network_name, **kwargs)
+        client = client or cls.client
+        body = client.create_network(name=network_name, **kwargs)
         network = body['network']
-        cls.networks.append(network)
+        if client is cls.client:
+            cls.networks.append(network)
+        else:
+            cls.admin_networks.append(network)
         return network
 
     @classmethod
@@ -339,7 +350,7 @@ class BaseNetworkTest(test.BaseTestCase):
 
     @classmethod
     def create_admin_router(cls, *args, **kwargs):
-        return cls._create_router_with_client(cls.admin_manager.network_client,
+        return cls._create_router_with_client(cls.os_admin.network_client,
                                               *args, **kwargs)
 
     @classmethod
@@ -365,20 +376,21 @@ class BaseNetworkTest(test.BaseTestCase):
 
     @classmethod
     def create_qos_policy(cls, name, description=None, shared=False,
-                          tenant_id=None):
+                          tenant_id=None, is_default=False):
         """Wrapper utility that returns a test QoS policy."""
         body = cls.admin_client.create_qos_policy(
-            name, description, shared, tenant_id)
+            name, description, shared, tenant_id, is_default)
         qos_policy = body['policy']
         cls.qos_policies.append(qos_policy)
         return qos_policy
 
     @classmethod
-    def create_qos_bandwidth_limit_rule(cls, policy_id,
-                                       max_kbps, max_burst_kbps):
+    def create_qos_bandwidth_limit_rule(cls, policy_id, max_kbps,
+                                        max_burst_kbps,
+                                        direction=constants.EGRESS_DIRECTION):
         """Wrapper utility that returns a test QoS bandwidth limit rule."""
         body = cls.admin_client.create_bandwidth_limit_rule(
-            policy_id, max_kbps, max_burst_kbps)
+            policy_id, max_kbps, max_burst_kbps, direction)
         qos_rule = body['bandwidth_limit_rule']
         cls.qos_rules.append(qos_rule)
         return qos_rule
@@ -423,9 +435,8 @@ class BaseAdminNetworkTest(BaseNetworkTest):
     @classmethod
     def setup_clients(cls):
         super(BaseAdminNetworkTest, cls).setup_clients()
-        cls.admin_client = cls.os_adm.network_client
-        cls.identity_admin_client = cls.os_adm.tenants_client
-        cls.identity_admin_clientv3 = cls.os_admin.projects_client
+        cls.admin_client = cls.os_admin.network_client
+        cls.identity_admin_client = cls.os_admin.projects_client
 
     @classmethod
     def create_metering_label(cls, name, description):

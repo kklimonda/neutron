@@ -13,13 +13,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from neutron_lib.api.definitions import portbindings
 from neutron_lib.db import model_base
 import sqlalchemy as sa
 from sqlalchemy import orm
 
 from neutron.common import constants
 from neutron.db import models_v2
-from neutron.extensions import portbindings
 
 BINDING_PROFILE_LEN = 4095
 
@@ -56,9 +56,11 @@ class PortBinding(model_base.BASEV2):
     # eagerly load port bindings
     port = orm.relationship(
         models_v2.Port,
+        load_on_pending=True,
         backref=orm.backref("port_binding",
                             lazy='joined', uselist=False,
                             cascade='delete'))
+    revises_on_change = ('port', )
 
 
 class PortBindingLevel(model_base.BASEV2):
@@ -85,8 +87,10 @@ class PortBindingLevel(model_base.BASEV2):
     # eagerly load port bindings
     port = orm.relationship(
         models_v2.Port,
+        load_on_pending=True,
         backref=orm.backref("binding_levels", lazy='subquery',
                             cascade='delete'))
+    revises_on_change = ('port', )
 
 
 class DistributedPortBinding(model_base.BASEV2):
@@ -119,6 +123,8 @@ class DistributedPortBinding(model_base.BASEV2):
     # eagerly load port bindings
     port = orm.relationship(
         models_v2.Port,
+        load_on_pending=True,
         backref=orm.backref("distributed_port_binding",
                             lazy='subquery',
                             cascade='delete'))
+    revises_on_change = ('port', )

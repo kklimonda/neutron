@@ -31,12 +31,8 @@ class RouterRouteDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(RouterRouteDbObjectTestCase, self).setUp()
-
-        def getter():
-            self._create_test_router()
-            return self._router['id']
-
-        self.update_obj_fields({'router_id': getter})
+        self.update_obj_fields(
+            {'router_id': lambda: self._create_test_router_id()})
 
 
 class RouterExtraAttrsIfaceObjTestCase(obj_test_base.
@@ -50,9 +46,51 @@ class RouterExtraAttrsDbObjTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(RouterExtraAttrsDbObjTestCase, self).setUp()
+        self.update_obj_fields(
+            {'router_id': lambda: self._create_test_router_id()})
 
-        def getter():
-            self._create_test_router()
-            return self._router['id']
 
-        self.update_obj_fields({'router_id': getter})
+class RouterPortIfaceObjectTestCase(obj_test_base.BaseObjectIfaceTestCase):
+
+    _test_class = router.RouterPort
+
+
+class RouterPortDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
+                                 testlib_api.SqlTestCase):
+
+    _test_class = router.RouterPort
+
+    def setUp(self):
+        super(RouterPortDbObjectTestCase, self).setUp()
+        self.update_obj_fields(
+            {'router_id': lambda: self._create_test_router_id(),
+             'port_id': lambda: self._create_test_port_id()})
+
+
+class DVRMacAddressIfaceObjectTestCase(obj_test_base.BaseObjectIfaceTestCase):
+
+    _test_class = router.DVRMacAddress
+
+
+class DVRMacAddressDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
+                                    testlib_api.SqlTestCase):
+
+    _test_class = router.DVRMacAddress
+
+
+class FloatingIPIfaceObjectTestCase(obj_test_base.BaseObjectIfaceTestCase):
+
+    _test_class = router.FloatingIP
+
+
+class FloatingIPDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
+                                 testlib_api.SqlTestCase):
+
+    _test_class = router.FloatingIP
+
+    def setUp(self):
+        super(FloatingIPDbObjectTestCase, self).setUp()
+        self.update_obj_fields(
+            {'floating_port_id': lambda: self._create_test_port_id(),
+             'fixed_port_id': lambda: self._create_test_port_id(),
+             'router_id': lambda: self._create_test_router_id()})

@@ -15,13 +15,12 @@
 
 import mock
 from neutron_lib import constants
-from oslo_log import versionutils
 
-from neutron.agent.common import config
 from neutron.agent.common import ovs_lib
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
+from neutron.conf.agent import common as config
 from neutron.tests import base
 
 
@@ -55,23 +54,6 @@ class FakePort(object):
     network_id = network.id
 
 
-class FakeInterfaceDriverNoMtu(interface.LinuxInterfaceDriver):
-    # NOTE(ihrachys) this method intentially omit mtu= parameter, since that
-    # was the method signature before Mitaka. We should make sure the old
-    # signature still works.
-
-    def __init__(self, *args, **kwargs):
-        super(FakeInterfaceDriverNoMtu, self).__init__(*args, **kwargs)
-        self.plug_called = False
-
-    def plug_new(self, network_id, port_id, device_name, mac_address,
-                 bridge=None, namespace=None, prefix=None):
-        self.plug_called = True
-
-    def unplug(self, device_name, bridge=None, namespace=None, prefix=None):
-        pass
-
-
 class TestBase(base.BaseTestCase):
     def setUp(self):
         super(TestBase, self).setUp()
@@ -83,19 +65,6 @@ class TestBase(base.BaseTestCase):
         self.ip = self.ip_p.start()
         self.device_exists_p = mock.patch.object(ip_lib, 'device_exists')
         self.device_exists = self.device_exists_p.start()
-
-
-class TestABCDriverNoMtu(TestBase):
-
-    def test_plug_with_no_mtu_works(self):
-        driver = FakeInterfaceDriverNoMtu(self.conf)
-        self.device_exists.return_value = False
-        with mock.patch.object(
-                versionutils, 'report_deprecated_feature') as report:
-            driver.plug(
-                mock.Mock(), mock.Mock(), mock.Mock(), mock.Mock(), mtu=9000)
-        self.assertTrue(driver.plug_called)
-        self.assertTrue(report.called)
 
 
 class TestABCDriver(TestBase):
@@ -413,8 +382,7 @@ class TestOVSInterfaceDriver(TestBase):
                                          internal=True)
 
     def _test_plug(self, bridge=None, namespace=None):
-        with mock.patch('neutron.agent.ovsdb.native.connection.'
-                        'Connection.start'):
+        with mock.patch('neutron.agent.ovsdb.impl_idl._connection'):
             if not bridge:
                 bridge = 'br-int'
 
@@ -487,8 +455,7 @@ class TestOVSInterfaceDriverWithVeth(TestOVSInterfaceDriver):
 
     def _test_plug(self, devname=None, bridge=None, namespace=None,
                    prefix=None):
-        with mock.patch('neutron.agent.ovsdb.native.connection.'
-                        'Connection.start'):
+        with mock.patch('neutron.agent.ovsdb.impl_idl._connection'):
 
             if not devname:
                 devname = 'ns-0'

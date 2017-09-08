@@ -13,13 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
+from neutron_lib.plugins.ml2 import api
 from oslo_log import log
 
-from neutron._i18n import _LW
-from neutron.extensions import portbindings
 from neutron.plugins.common import constants as p_const
-from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import mech_agent
 from neutron.plugins.ml2.drivers.mech_sriov.mech_driver \
     import exceptions as exc
@@ -106,8 +105,7 @@ class SriovNicSwitchMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                                                           agent):
                         return
             else:
-                LOG.warning(_LW("Attempting to bind with dead agent: %s"),
-                            agent)
+                LOG.warning("Attempting to bind with dead agent: %s", agent)
 
     def try_to_bind_segment_for_agent(self, context, segment, agent):
         vnic_type = context.current.get(portbindings.VNIC_TYPE,

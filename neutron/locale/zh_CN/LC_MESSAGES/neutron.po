@@ -15,9 +15,9 @@
 # Andreas Jaeger <jaegerandi@gmail.com>, 2016. #zanata
 msgid ""
 msgstr ""
-"Project-Id-Version: neutron 10.0.2.dev10\n"
+"Project-Id-Version: neutron 11.0.0.0b3.dev326\n"
 "Report-Msgid-Bugs-To: https://bugs.launchpad.net/openstack-i18n/\n"
-"POT-Creation-Date: 2017-04-16 05:24+0000\n"
+"POT-Creation-Date: 2017-07-18 03:24+0000\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -153,10 +153,6 @@ msgid "'%s' cannot be converted to lowercase string"
 msgstr "无法将“%s”转换为小写字符串"
 
 #, python-format
-msgid "'%s' exceeds the 255 character FQDN limit"
-msgstr "“%s”超过了 255 个字符这一 FQDN 限制"
-
-#, python-format
 msgid "'%s' is a FQDN. It should be a relative domain name"
 msgstr "“%s”为 FQDN。它应该是相对域名"
 
@@ -167,10 +163,6 @@ msgstr "“%s”并非 FQDN"
 #, python-format
 msgid "'%s' is not a valid RBAC object type"
 msgstr "“%s”不是有效的 RBAC 对象类型"
-
-#, python-format
-msgid "'%s' is not an integer or uuid"
-msgstr "“%s”不是整数或 uuid"
 
 #, python-format
 msgid "'%s' is not supported for filtering"
@@ -351,10 +343,6 @@ msgstr "发生未知错误。请再次尝试您的请求。"
 msgid "Async process didn't respawn"
 msgstr "同步进程未重新衍生"
 
-#, python-format
-msgid "Attribute '%s' not allowed in POST"
-msgstr "在 POST 中，不允许属性“%s”"
-
 msgid "Authorization URL for connecting to designate in admin context"
 msgstr "管理员上下文中要指定的连接授权 URL"
 
@@ -400,10 +388,6 @@ msgstr "network_id 和 router_id 都为 None。必须提供其中一项。"
 msgid "Bridge %(bridge)s does not exist."
 msgstr "网桥 %(bridge)s 不存在。"
 
-#, python-format
-msgid "Bridge %s does not exist"
-msgstr "网桥 %s 不存在"
-
 msgid "Bulk operation not supported"
 msgstr "成批操作不受支持"
 
@@ -421,10 +405,6 @@ msgstr "针对 %(resource_type)s 的回调返回了错误的资源类型"
 #, python-format
 msgid "Cannot add floating IP to port %s that has no fixed IPv4 addresses"
 msgstr "无法将浮动 IP 添加至没有固定 IPv4 地址的端口 %s"
-
-#, python-format
-msgid "Cannot add floating IP to port on subnet %s which has no gateway_ip"
-msgstr "无法将浮动 IP 添加至子网 %s（不具有任何 gateway_ip）上的端口"
 
 #, python-format
 msgid "Cannot add multiple callbacks for %(resource_type)s"
@@ -451,10 +431,6 @@ msgid "Cannot disable enable_dhcp with ipv6 attributes set"
 msgstr "在设置了 ipv6 属性的情况下，无法禁用 enable_dhcp"
 
 #, python-format
-msgid "Cannot find %(table)s with %(col)s=%(match)s"
-msgstr "找不到具有 %(col)s=%(match)s 的 %(table)s"
-
-#, python-format
 msgid "Cannot handle subnet of type %(subnet_type)s"
 msgstr "无法处理类型为 %(subnet_type)s 的子网"
 
@@ -473,9 +449,6 @@ msgstr ""
 msgid ""
 "Cannot host distributed router %(router_id)s on legacy L3 agent %(agent_id)s."
 msgstr "无法在传统 L3 代理程序 %(agent_id)s 上托管分布式路由器 %(router_id)s。"
-
-msgid "Cannot match priority on flow deletion or modification"
-msgstr "无法匹配删除或修改流时的优先级"
 
 msgid "Cannot mix IPv4 and IPv6 prefixes in a subnet pool."
 msgstr "不能在子网池中同时使用 IPv4 前缀和 IPv6 前缀。"
@@ -653,16 +626,8 @@ msgstr ""
 msgid "Could not bind to %(host)s:%(port)s after trying for %(time)d seconds"
 msgstr "在尝试%(time)d 秒之后不能绑定 %(host)s:%(port)s "
 
-#, python-format
-msgid "Could not connect to %s"
-msgstr "无法连接至 %s"
-
 msgid "Could not deserialize data"
 msgstr "未能对数据进行反序列化"
-
-#, python-format
-msgid "Could not retrieve schema from %(conn)s: %(err)s"
-msgstr "无法从 %(conn)s 检索模式：%(err)s"
 
 #, python-format
 msgid ""
@@ -743,11 +708,6 @@ msgid ""
 msgstr ""
 "会使用以下格式为高级服务定义提供程序：<service_type>:<name>:<driver>[:"
 "default]"
-
-msgid ""
-"Delay within which agent is expected to update existing ports whent it "
-"restarts"
-msgstr "延迟时间，当代理重新启动时，在该段时间内，代理应该更新现有端口"
 
 msgid "Delete the namespace by removing all devices."
 msgstr "请通过除去所有设备来删除名称空间。"
@@ -898,19 +858,6 @@ msgstr ""
 "么可以手动调度这样的代理。"
 
 msgid ""
-"Enable/Disable log watch by metadata proxy. It should be disabled when "
-"metadata_proxy_user/group is not allowed to read/write its log file and "
-"copytruncate logrotate option must be used if logrotate is enabled on "
-"metadata proxy log files. Option default value is deduced from "
-"metadata_proxy_user: watch log is enabled if metadata_proxy_user is agent "
-"effective user id/name."
-msgstr ""
-"由元数据代理启用/禁用日志监控。当不允许 metadata_proxy_user/group 读/写其日志"
-"文件时，应当禁用日志监控，如果对元数据代理日志文件启用了 logrotate，那么必须"
-"使用 copytruncate logrotate 选项。从 metadata_proxy_user 推论出选项缺省值：如"
-"果 metadata_proxy_user 是代理有效用户标识/名称，那么启用了监控日志。"
-
-msgid ""
 "Enables IPv6 Prefix Delegation for automatic subnet CIDR allocation. Set to "
 "True to enable IPv6 Prefix Delegation for subnet allocation in a PD-capable "
 "environment. Users making subnet creation requests for IPv6 subnets without "
@@ -1023,10 +970,6 @@ msgid ""
 msgstr "无法将外部网络 %(net_id)s 更新为非外部网络，因为它包含现有的网关端口"
 
 #, python-format
-msgid "ExtraDhcpOpt %(id)s could not be found"
-msgstr "找不到 ExtraDhcpOpt %(id)s"
-
-#, python-format
 msgid "Failed rescheduling router %(router_id)s: no eligible l3 agent found."
 msgstr "重新安排路由器 %(router_id)s 失败：找不到合格 L3 代理。"
 
@@ -1069,10 +1012,6 @@ msgstr ""
 #, python-format
 msgid "Failed to locate source for %s."
 msgstr "未能找到 %s 的源。"
-
-#, python-format
-msgid "Failed to parse request. Required attribute '%s' not specified"
-msgstr "未能解析请求。未指定必需属性“%s”"
 
 msgid "Failed to remove supplemental groups"
 msgstr "未能移除补充组"
@@ -1162,9 +1101,6 @@ msgstr ""
 "+ UDP + GENEVE 头大小的总和。此字段的缺省大小为 50，这是没有任何附加选项头的 "
 "Geneve 头的大小。"
 
-msgid "Group (gid or name) running metadata proxy after its initialization"
-msgstr "在元数据代理的初始化之后，运行该代理的组（gid 或名称）"
-
 msgid ""
 "Group (gid or name) running metadata proxy after its initialization (if "
 "empty: agent effective group)."
@@ -1214,9 +1150,6 @@ msgstr "在子网 %(subnet_id)s 中已分配 IP 地址 %(ip)s"
 msgid "IP address %(ip)s does not belong to subnet %(subnet_id)s"
 msgstr "IP 地址 %(ip)s 不属于子网 %(subnet_id)s"
 
-msgid "IP address used by Nova metadata server."
-msgstr "Nova 元数据服务器使用的 IP 地址。"
-
 msgid "IP allocation failed. Try again later."
 msgstr "IP 分配失败。请稍后重试。"
 
@@ -1239,14 +1172,6 @@ msgstr "对于前缀授权，IPv6 寻址方式必须为 SLAAC 或者“无状态
 
 msgid "IPv6 RA Mode must be SLAAC or Stateless for Prefix Delegation."
 msgstr "对于前缀授权，IPv6 RA 方式必须为 SLAAC 或者“无状态”。"
-
-#, python-format
-msgid ""
-"IPv6 address %(address)s can not be directly assigned to a port on subnet "
-"%(id)s since the subnet is configured for automatic addresses"
-msgstr ""
-"IPv6 地址 %(address)s 无法直接分配给子网 %(id)s 上的端口，因为该子网是针对自"
-"动地址配置的"
 
 #, python-format
 msgid ""
@@ -1383,16 +1308,8 @@ msgid ""
 msgstr "认证类型 %(auth_type)s 无效，以下是有效类型：%(valid_auth_types)s"
 
 #, python-format
-msgid "Invalid data format for extra-dhcp-opt: %(data)s"
-msgstr "extra-dhcp-opt 的数据格式无效：%(data)s"
-
-#, python-format
 msgid "Invalid ethertype %(ethertype)s for protocol %(protocol)s."
 msgstr "ethertype %(ethertype)s 对协议 %(protocol)s 无效。"
-
-#, python-format
-msgid "Invalid extension environment: %(reason)s."
-msgstr "无效扩展环境：%(reason)s。"
 
 #, python-format
 msgid "Invalid format for routes: %(routes)s, %(reason)s"
@@ -1401,10 +1318,6 @@ msgstr "路由 %(routes)s 的格式无效，%(reason)s"
 #, python-format
 msgid "Invalid format: %s"
 msgstr "格式无效：%s"
-
-#, python-format
-msgid "Invalid input for %(attr)s. Reason: %(reason)s."
-msgstr "输入对于 %(attr)s 无效。原因：%(reason)s。"
 
 #, python-format
 msgid "Invalid instance state: %(state)s, valid states are: %(valid_states)s"
@@ -1741,9 +1654,6 @@ msgstr ""
 "从 IP 范围 %(parent_range)s（排除 IP 范围%(excluded_ranges)s）中找不到大小为 "
 "%(size)s 的网络。"
 
-msgid "Network that will have instance metadata proxied."
-msgstr "将代理实例元数据的网络。"
-
 #, python-format
 msgid "Network type value '%s' not supported"
 msgstr "网络类型值“%s”不受支持"
@@ -1895,10 +1805,6 @@ msgid "OVS vhost-user socket directory."
 msgstr "OVS vhost-user 套接字目录。"
 
 #, python-format
-msgid "OVSDB Error: %s"
-msgstr "OVSDB 错误：%s"
-
-#, python-format
 msgid "Object action %(action)s failed because: %(reason)s."
 msgstr "对象操作 %(action)s 失败，因为：%(reason)s。"
 
@@ -1988,16 +1894,8 @@ msgid "Port %(id)s does not have fixed ip %(address)s"
 msgstr "端口 %(id)s 没有固定 ip %(address)s"
 
 #, python-format
-msgid "Port %(port)s does not exist on %(bridge)s!"
-msgstr "端口 %(port)s 在 %(bridge)s 上不存在！"
-
-#, python-format
 msgid "Port %(port_id)s is already acquired by another DHCP agent"
 msgstr "另一 DHCP 代理程序尚未获取端口 %(port_id)s"
-
-#, python-format
-msgid "Port %s does not exist"
-msgstr "端口 %s 不存在"
 
 #, python-format
 msgid ""
@@ -2010,16 +1908,6 @@ msgid ""
 "Port Security must be enabled in order to have allowed address pairs on a "
 "port."
 msgstr "必须启用端口安全性，以便在端口上具有所允许的地址对。"
-
-msgid ""
-"Port has security group associated. Cannot disable port security or ip "
-"address until security group is removed"
-msgstr "端口已使安全组关联。直到除去安全组，才能禁用端口安全性或 IP 地址"
-
-msgid ""
-"Port security must be enabled and port must have an IP address in order to "
-"use security groups."
-msgstr "必须启用端口安全性，并且端口必须具有 IP 地址，以便使用安全组。"
 
 msgid ""
 "Port to listen on for OpenFlow connections. Used only for 'native' driver."
@@ -2232,10 +2120,6 @@ msgid "Router %(router_id)s has no interface on subnet %(subnet_id)s"
 msgstr "路由器 %(router_id)s 在子网 %(subnet_id)s 上不具有任何接口"
 
 #, python-format
-msgid "Router '%(router_id)s' cannot be both DVR and HA."
-msgstr "路由器“%(router_id)s”不能同时为 DVR 和 HA。"
-
-#, python-format
 msgid "Router '%(router_id)s' is not compatible with this agent."
 msgstr "路由器“%(router_id)s”与此代理程序不兼容。"
 
@@ -2262,20 +2146,6 @@ msgstr ""
 msgid "Router port must have at least one fixed IP"
 msgstr "路由器端口必须具有至少一个固定 IP"
 
-msgid "Router that will have connected instances' metadata proxied."
-msgstr "将代理相连实例元数据的路由器。"
-
-#, python-format
-msgid ""
-"Row doesn't exist in the DB. Request info: Table=%(table)s. Columns="
-"%(columns)s. Records=%(records)s."
-msgstr ""
-"该行在数据库中不存在。请求信息：Table=%(table)s。Columns=%(columns)s。"
-"Records=%(records)s。"
-
-msgid "Run as daemon."
-msgstr "作为守护程序运行。"
-
 #, python-format
 msgid "Running %(cmd)s (%(desc)s) for %(project)s ..."
 msgstr "正在对 %(project)s 运行 %(cmd)s (%(desc)s)..."
@@ -2283,9 +2153,6 @@ msgstr "正在对 %(project)s 运行 %(cmd)s (%(desc)s)..."
 #, python-format
 msgid "Running %(cmd)s for %(project)s ..."
 msgstr "正在对 %(project)s 运行 %(cmd)s..."
-
-msgid "Running without keystone AuthN requires that tenant_id is specified"
-msgstr "在没有 keystone AuthN 的情况下运行要求指定 tenant_id"
 
 msgid ""
 "Seconds between nodes reporting state to server; should be less than "
@@ -2351,11 +2218,6 @@ msgstr ""
 
 msgid "Send notification to nova when port status changes"
 msgstr "当端口状态更改时，将通知发送至 nova"
-
-msgid ""
-"Send this many gratuitous ARPs for HA setup, if less than or equal to 0, the "
-"feature is disabled"
-msgstr "针对 HA 设置，发送此大量免费 ARP，如果小于或等于 0，那么会禁用该功能"
 
 #, python-format
 msgid "Service Profile %(sp_id)s could not be found."
@@ -2464,10 +2326,6 @@ msgstr "用于 vxlan 接口协议包的 TOS。"
 
 msgid "TTL for vxlan interface protocol packets."
 msgstr "用于 vxlan 接口协议包的 TTL。"
-
-#, python-format
-msgid "Table %s can only be queried by UUID"
-msgstr "只能按 UUID 来查询表 %s"
 
 #, python-format
 msgid "Tag %(tag)s could not be found."
@@ -2610,9 +2468,6 @@ msgid ""
 "another tenants router."
 msgstr "以下 device_id %(device_id)s 不属于您的租户或与另一租户路由器 匹配。"
 
-msgid "The host IP to bind to"
-msgstr "主机 IP 要绑定至"
-
 msgid "The interface for interacting with the OVSDB"
 msgstr "用于与 OVSDB 进行交互的接口"
 
@@ -2712,10 +2567,6 @@ msgstr "要对其执行命令的子项目。可以是“%s”的其中一项。"
 msgid "The type of authentication to use"
 msgstr "要使用的认证的类型"
 
-#, python-format
-msgid "The value '%(value)s' for %(element)s is not valid."
-msgstr "%(element)s 的值“%(value)s”无效。"
-
 msgid ""
 "The working mode for the agent. Allowed modes are: 'legacy' - this preserves "
 "the existing behavior where the L3 agent is deployed on a centralized "
@@ -2736,9 +2587,6 @@ msgid ""
 "There are routers attached to this network that depend on this policy for "
 "access."
 msgstr "根据此策略，有一些路由器附加至此网络以用于访问。"
-
-msgid "Timeout"
-msgstr "超时"
 
 msgid ""
 "Timeout in seconds for ovs-vsctl commands. If the timeout expires, ovs "
@@ -2978,9 +2826,6 @@ msgstr "无法识别属性“%s”"
 msgid "Unrecognized field"
 msgstr "无法识别字段"
 
-msgid "Unspecified minimum subnet pool prefix."
-msgstr "未指定最低子网池前缀。"
-
 msgid "Unsupported Content-Type"
 msgstr "Content-Type 不受支持"
 
@@ -3033,9 +2878,6 @@ msgstr ""
 "使用 veth 而不是接线端口以使集成网桥与物理网络互连。设置为 True 时支持不具备 "
 "Open vSwitch 接线端口支持的内核。"
 
-msgid "User (uid or name) running metadata proxy after its initialization"
-msgstr "在元数据代理的初始化之后，运行该代理的用户（uid 或名称）"
-
 msgid ""
 "User (uid or name) running metadata proxy after its initialization (if "
 "empty: agent effective user)."
@@ -3087,13 +2929,6 @@ msgid ""
 msgstr ""
 "延迟值 (ms)，用于计算带有 QoS 的端口的队列的大小。请参阅 tc-tbf 手册以了解更"
 "多信息。"
-
-msgid ""
-"Watch file log. Log watch should be disabled when metadata_proxy_user/group "
-"has no read/write permissions on metadata proxy log file."
-msgstr ""
-"监控文件日志。当 metadata_proxy_user/group 对元数据代理日志文件不具备读/写许"
-"可权时，应当禁用日志监控。"
 
 msgid ""
 "When external_network_bridge is set, each L3 agent can be associated with no "
@@ -3252,10 +3087,6 @@ msgid "new subnet"
 msgstr "新子网"
 
 #, python-format
-msgid "physical_network '%s' unknown  for VLAN provider network"
-msgstr "对于 VLAN 提供程序网络，physical_network“%s”未知"
-
-#, python-format
 msgid "physical_network '%s' unknown for flat provider network"
 msgstr "平面供应商网络的物理网络 '%s'为未知状态"
 
@@ -3269,9 +3100,6 @@ msgstr "提供程序：已为%s 网络指定 physical_network"
 #, python-format
 msgid "rbac_db_model not found in %s"
 msgstr "在 %s 中找不到 rbac_db_model"
-
-msgid "record"
-msgstr "记录"
 
 msgid "respawn_interval must be >= 0 if provided."
 msgstr "respawn_interval 必须不小于 0（如果已提供此项）。"
@@ -3302,10 +3130,6 @@ msgstr "下一中继段未与路由器连接"
 
 msgid "the nexthop is used by router"
 msgstr "路由器已使用下一中继段"
-
-#, python-format
-msgid "unable to load %s"
-msgstr "无法装入 %s"
 
 msgid ""
 "uuid provided from the command line so external_process can track us via /"

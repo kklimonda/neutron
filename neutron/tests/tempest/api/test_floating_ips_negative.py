@@ -15,8 +15,8 @@
 #    under the License.
 
 from tempest.lib.common.utils import data_utils
+from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
-from tempest import test
 
 from neutron.tests.tempest.api import base
 from neutron.tests.tempest import config
@@ -26,8 +26,9 @@ CONF = config.CONF
 
 class FloatingIPNegativeTestJSON(base.BaseNetworkTest):
 
+    required_extensions = ['router']
+
     @classmethod
-    @test.requires_ext(extension="router", service="network")
     def resource_setup(cls):
         super(FloatingIPNegativeTestJSON, cls).resource_setup()
         cls.ext_net_id = CONF.network.public_network_id
@@ -38,8 +39,8 @@ class FloatingIPNegativeTestJSON(base.BaseNetworkTest):
         cls.create_router_interface(cls.router['id'], cls.subnet['id'])
         cls.port = cls.create_port(cls.network)
 
-    @test.attr(type='negative')
-    @test.idempotent_id('0b5b8797-6de7-4191-905c-a48b888eb429')
+    @decorators.attr(type='negative')
+    @decorators.idempotent_id('0b5b8797-6de7-4191-905c-a48b888eb429')
     def test_associate_floatingip_with_port_with_floatingip(self):
         net = self.create_network()
         subnet = self.create_subnet(net)

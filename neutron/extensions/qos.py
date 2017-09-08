@@ -21,6 +21,7 @@ from neutron_lib.api import converters
 from neutron_lib.api import extensions as api_extensions
 from neutron_lib.db import constants as db_const
 from neutron_lib.plugins import directory
+from neutron_lib.services import base as service_base
 import six
 
 from neutron.api import extensions
@@ -30,9 +31,11 @@ from neutron.common import constants as common_constants
 from neutron.objects.qos import rule as rule_object
 from neutron.plugins.common import constants
 from neutron.services.qos import qos_consts
-from neutron.services import service_base
 
+
+ALIAS = "qos"
 QOS_PREFIX = "/qos"
+COLLECTION_NAME = 'policies'
 
 # Attribute Map
 QOS_RULE_COMMON_FIELDS = {
@@ -45,19 +48,16 @@ QOS_RULE_COMMON_FIELDS = {
                   'is_visible': True},
 }
 
+RULE_TYPES = "rule_types"
+
 RESOURCE_ATTRIBUTE_MAP = {
-    'policies': {
+    COLLECTION_NAME: {
         'id': {'allow_post': False, 'allow_put': False,
                'validate': {'type:uuid': None},
                'is_visible': True, 'primary_key': True},
         'name': {'allow_post': True, 'allow_put': True,
                  'is_visible': True, 'default': '',
                  'validate': {'type:string': db_const.NAME_FIELD_SIZE}},
-        'description': {'allow_post': True, 'allow_put': True,
-                        'is_visible': True, 'default': '',
-                        'validate':
-                            {'type:string':
-                                db_const.LONG_DESCRIPTION_FIELD_SIZE}},
         'shared': {'allow_post': True, 'allow_put': True,
                    'is_visible': True, 'default': False,
                    'convert_to': converters.convert_to_boolean},
@@ -68,14 +68,16 @@ RESOURCE_ATTRIBUTE_MAP = {
                       'is_visible': True},
         'rules': {'allow_post': False, 'allow_put': False, 'is_visible': True},
     },
-    'rule_types': {
+    RULE_TYPES: {
         'type': {'allow_post': False, 'allow_put': False,
                  'is_visible': True}
     }
 }
 
+BANDWIDTH_LIMIT_RULES = "bandwidth_limit_rules"
+
 SUB_RESOURCE_ATTRIBUTE_MAP = {
-    'bandwidth_limit_rules': {
+    BANDWIDTH_LIMIT_RULES: {
         'parent': {'collection_name': 'policies',
                    'member_name': 'policy'},
         'parameters': dict(QOS_RULE_COMMON_FIELDS,
@@ -88,7 +90,7 @@ SUB_RESOURCE_ATTRIBUTE_MAP = {
                                   'allow_post': True, 'allow_put': True,
                                   'is_visible': True, 'default': 0,
                                   'validate': {'type:range': [0,
-                                  common_constants.DB_INTEGER_MAX_VALUE]}}})
+                                  common_constants.DB_INTEGER_MAX_VALUE]}}}),
     },
     'dscp_marking_rules': {
         'parent': {'collection_name': 'policies',
@@ -196,12 +198,15 @@ class Qos(api_extensions.ExtensionDescriptor):
 
     def update_attributes_map(self, attributes, extension_attrs_map=None):
         super(Qos, self).update_attributes_map(
-            attributes, extension_attrs_map=RESOURCE_ATTRIBUTE_MAP)
+            attributes,
+            extension_attrs_map=dict(list(RESOURCE_ATTRIBUTE_MAP.items()) +
+                                     list(SUB_RESOURCE_ATTRIBUTE_MAP.items())))
 
     def get_extended_resources(self, version):
         if version == "2.0":
             return dict(list(EXTENDED_ATTRIBUTES_2_0.items()) +
-                        list(RESOURCE_ATTRIBUTE_MAP.items()))
+                        list(RESOURCE_ATTRIBUTE_MAP.items()) +
+                        list(SUB_RESOURCE_ATTRIBUTE_MAP.items()))
         else:
             return {}
 
@@ -305,6 +310,10 @@ class QoSPluginBase(service_base.ServicePluginBase):
     @classmethod
     def get_plugin_type(cls):
         return constants.QOS
+
+    @abc.abstractmethod
+    def get_rule_type(self, context, rule_type_name, fields=None):
+        pass
 
     @abc.abstractmethod
     def get_rule_types(self, context, filters=None, fields=None, sorts=None,

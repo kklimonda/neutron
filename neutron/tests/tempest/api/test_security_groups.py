@@ -14,19 +14,16 @@
 #    under the License.
 
 from tempest.lib.common.utils import data_utils
-from tempest import test
+from tempest.lib import decorators
 
 from neutron.tests.tempest.api import base_security_groups as base
 
 
 class SecGroupTest(base.BaseSecGroupTest):
 
-    @classmethod
-    @test.requires_ext(extension="security-group", service="network")
-    def resource_setup(cls):
-        super(SecGroupTest, cls).resource_setup()
+    required_extensions = ['security-group']
 
-    @test.idempotent_id('bfd128e5-3c92-44b6-9d66-7fe29d22c802')
+    @decorators.idempotent_id('bfd128e5-3c92-44b6-9d66-7fe29d22c802')
     def test_create_list_update_show_delete_security_group(self):
         group_create_body, name = self._create_security_group()
 
@@ -54,7 +51,7 @@ class SecGroupTest(base.BaseSecGroupTest):
         self.assertEqual(show_body['security_group']['description'],
                          new_description)
 
-    @test.idempotent_id('7c0ecb10-b2db-11e6-9b14-000c29248b0d')
+    @decorators.idempotent_id('7c0ecb10-b2db-11e6-9b14-000c29248b0d')
     def test_create_bulk_sec_groups(self):
         # Creates 2 sec-groups in one request
         sec_nm = [data_utils.rand_name('secgroup'),

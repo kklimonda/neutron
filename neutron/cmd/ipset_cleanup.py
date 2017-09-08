@@ -16,7 +16,6 @@
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from neutron._i18n import _LE, _LI
 from neutron.agent.linux import utils
 from neutron.common import config
 from neutron.conf.agent import cmd as command
@@ -44,7 +43,7 @@ def remove_iptables_reference(ipset):
     if ipset in iptables_save:
         cmd = ['iptables'] if 'IPv4' in ipset else ['ip6tables']
         cmd += ['-w', '10']  # wait for xlock release
-        LOG.info(_LI("Removing iptables rule for IPset: %s"), ipset)
+        LOG.info("Removing iptables rule for IPset: %s", ipset)
         for rule in iptables_save.splitlines():
             if '--match-set %s ' % ipset in rule and rule.startswith('-A'):
                 # change to delete
@@ -53,8 +52,8 @@ def remove_iptables_reference(ipset):
                 try:
                     utils.execute(cmd + params, run_as_root=True)
                 except Exception:
-                    LOG.exception(_LE('Error, unable to remove iptables rule '
-                                      'for IPset: %s'), ipset)
+                    LOG.exception('Error, unable to remove iptables rule '
+                                  'for IPset: %s', ipset)
 
 
 def destroy_ipset(conf, ipset):
@@ -63,17 +62,17 @@ def destroy_ipset(conf, ipset):
     if conf.force:
         remove_iptables_reference(ipset)
 
-    LOG.info(_LI("Destroying IPset: %s"), ipset)
+    LOG.info("Destroying IPset: %s", ipset)
     cmd = ['ipset', 'destroy', ipset]
     try:
         utils.execute(cmd, run_as_root=True)
     except Exception:
-        LOG.exception(_LE('Error, unable to destroy IPset: %s'), ipset)
+        LOG.exception('Error, unable to destroy IPset: %s', ipset)
 
 
 def cleanup_ipsets(conf):
     # Identify ipsets for destruction.
-    LOG.info(_LI("Destroying IPsets with prefix: %s"), conf.prefix)
+    LOG.info("Destroying IPsets with prefix: %s", conf.prefix)
 
     cmd = ['ipset', '-L', '-n']
     ipsets = utils.execute(cmd, run_as_root=True)
@@ -81,7 +80,7 @@ def cleanup_ipsets(conf):
         if conf.allsets or ipset.startswith(conf.prefix):
             destroy_ipset(conf, ipset)
 
-    LOG.info(_LI("IPset cleanup completed successfully"))
+    LOG.info("IPset cleanup completed successfully")
 
 
 def main():

@@ -13,8 +13,17 @@
 # under the License.
 
 import mock
+
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.api.definitions import provider_net as providernet
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import exceptions as c_exc
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
 from neutron_lib import constants
+from neutron_lib import context
 from neutron_lib import exceptions as n_exc
+from neutron_lib.plugins import constants as plugin_constants
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_db import exception as db_exc
@@ -25,12 +34,7 @@ import testtools
 
 from neutron.agent.common import utils as agent_utils
 from neutron.api.rpc.handlers import l3_rpc
-from neutron.callbacks import events
-from neutron.callbacks import exceptions as c_exc
-from neutron.callbacks import registry
-from neutron.callbacks import resources
 from neutron.common import constants as n_const
-from neutron import context
 from neutron.db import agents_db
 from neutron.db import common_db_mixin
 from neutron.db import l3_agentschedulers_db
@@ -39,8 +43,6 @@ from neutron.db.models import l3ha as l3ha_model
 from neutron.extensions import external_net
 from neutron.extensions import l3
 from neutron.extensions import l3_ext_ha_mode
-from neutron.extensions import portbindings
-from neutron.extensions import providernet
 from neutron.scheduler import l3_agent_scheduler
 from neutron.services.revisions import revision_plugin
 from neutron.tests.common import helpers
@@ -68,7 +70,7 @@ class L3HATestFramework(testlib_api.SqlTestCase):
         cfg.CONF.set_override('allow_overlapping_ips', True)
 
         self.plugin = FakeL3PluginWithAgents()
-        directory.add_plugin(constants.L3, self.plugin)
+        directory.add_plugin(plugin_constants.L3, self.plugin)
         self.plugin.router_scheduler = l3_agent_scheduler.ChanceScheduler()
         self.agent1 = helpers.register_l3_agent()
         self.agent2 = helpers.register_l3_agent(
@@ -1042,7 +1044,7 @@ class L3HAModeDbTestCase(L3HATestFramework):
         for port in self._get_router_port_bindings(router['id']):
             self.assertEqual(self.agent2['host'], port[portbindings.HOST_ID])
 
-    def test_get_router_ids_updates_ha_network_port_status(self):
+    def test_update_all_ha_network_port_statuses(self):
         router = self._create_router(ha=True)
         callback = l3_rpc.L3RpcCallback()
         callback._l3plugin = self.plugin
@@ -1069,7 +1071,7 @@ class L3HAModeDbTestCase(L3HATestFramework):
                 ctx, port['id'], constants.PORT_STATUS_ACTIVE, host=host)
             port = self.core_plugin.get_port(ctx, port['id'])
             self.assertEqual(constants.PORT_STATUS_ACTIVE, port['status'])
-            callback.get_router_ids(ctx, host)
+            callback.update_all_ha_network_port_statuses(ctx, host)
             port = self.core_plugin.get_port(ctx, port['id'])
             self.assertEqual(constants.PORT_STATUS_DOWN, port['status'])
 

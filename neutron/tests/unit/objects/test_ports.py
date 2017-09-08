@@ -10,12 +10,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import mock
 from oslo_utils import uuidutils
 import testscenarios
 
 from neutron.objects import base as obj_base
 from neutron.objects import network
 from neutron.objects import ports
+from neutron.objects.qos import binding
 from neutron.objects.qos import policy
 from neutron.tests import tools
 from neutron.tests.unit.objects import test_base as obj_test_base
@@ -26,9 +28,8 @@ class BasePortBindingDbObjectTestCase(obj_test_base._BaseObjectTestCase,
                                       testlib_api.SqlTestCase):
     def setUp(self):
         super(BasePortBindingDbObjectTestCase, self).setUp()
-        self._create_test_network()
-        getter = lambda: self._create_port(network_id=self._network['id']).id
-        self.update_obj_fields({'port_id': getter})
+        self.update_obj_fields(
+            {'port_id': lambda: self._create_test_port_id()})
 
 
 class PortBindingIfaceObjTestCase(obj_test_base.BaseObjectIfaceTestCase):
@@ -153,12 +154,11 @@ class IPAllocationDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(IPAllocationDbObjectTestCase, self).setUp()
-        self._create_test_network()
-        self._create_test_subnet(self._network)
-        self._create_test_port(self._network)
-        self.update_obj_fields({'port_id': self._port.id,
-                                'network_id': self._network.id,
-                                'subnet_id': self._subnet.id})
+        network_id = self._create_test_network_id()
+        port_id = self._create_test_port_id(network_id=network_id)
+        self.update_obj_fields(
+            {'port_id': port_id, 'network_id': network_id,
+             'subnet_id': lambda: self._create_test_subnet_id(network_id)})
 
 
 class PortDNSIfaceObjTestCase(obj_test_base.BaseObjectIfaceTestCase):
@@ -173,9 +173,8 @@ class PortDNSDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(PortDNSDbObjectTestCase, self).setUp()
-        self._create_test_network()
-        getter = lambda: self._create_port(network_id=self._network['id']).id
-        self.update_obj_fields({'port_id': getter})
+        self.update_obj_fields(
+            {'port_id': lambda: self._create_test_port_id()})
 
 
 class PortBindingLevelIfaceObjTestCase(
@@ -219,30 +218,35 @@ class PortDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(PortDbObjectTestCase, self).setUp()
-        self._create_test_network()
-        self._create_test_subnet(self._network)
+        network_id = self._create_test_network_id()
+        subnet_id = self._create_test_subnet_id(network_id)
         self.update_obj_fields(
-            {'network_id': self._network.id,
-             'fixed_ips': {'subnet_id': self._subnet.id,
-                           'network_id': self._network['id']}})
+            {'network_id': network_id,
+             'fixed_ips': {'subnet_id': subnet_id, 'network_id': network_id}})
 
     def test_security_group_ids(self):
-        sg1 = self._create_test_security_group()
-        sg2 = self._create_test_security_group()
-        groups = {sg1.id, sg2.id}
+        sg1_id = self._create_test_security_group_id()
+        sg2_id = self._create_test_security_group_id()
+        groups = {sg1_id, sg2_id}
         obj = self._make_object(self.obj_fields[0])
         obj.security_group_ids = groups
         obj.create()
 
         obj = ports.Port.get_object(self.context, id=obj.id)
         self.assertEqual(groups, obj.security_group_ids)
+        self.assertEqual([obj],
+                         ports.Port.get_objects(
+                             self.context, security_group_ids=(sg1_id, )))
+        self.assertEqual([obj],
+                         ports.Port.get_objects(
+                             self.context, security_group_ids=(sg2_id, )))
 
-        sg3 = self._create_test_security_group()
-        obj.security_group_ids = {sg3.id}
+        sg3_id = self._create_test_security_group_id()
+        obj.security_group_ids = {sg3_id}
         obj.update()
 
         obj = ports.Port.get_object(self.context, id=obj.id)
-        self.assertEqual({sg3.id}, obj.security_group_ids)
+        self.assertEqual({sg3_id}, obj.security_group_ids)
 
         obj.security_group_ids = set()
         obj.update()
@@ -254,19 +258,20 @@ class PortDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
         obj = self._make_object(self.obj_fields[0])
         obj.create()
 
-        sg = self._create_test_security_group()
-        obj._attach_security_group(sg.id)
+        sg_id = self._create_test_security_group_id()
+        obj._attach_security_group(sg_id)
 
         obj = ports.Port.get_object(self.context, id=obj.id)
-        self.assertIn(sg.id, obj.security_group_ids)
+        self.assertIn(sg_id, obj.security_group_ids)
 
-        sg2 = self._create_test_security_group()
-        obj._attach_security_group(sg2.id)
+        sg2_id = self._create_test_security_group_id()
+        obj._attach_security_group(sg2_id)
 
         obj = ports.Port.get_object(self.context, id=obj.id)
-        self.assertIn(sg2.id, obj.security_group_ids)
+        self.assertIn(sg2_id, obj.security_group_ids)
 
-    def test_qos_policy_id(self):
+    @mock.patch.object(policy.QosPolicy, 'unset_default')
+    def test_qos_policy_id(self, *mocks):
         policy_obj = policy.QosPolicy(self.context)
         policy_obj.create()
 
@@ -292,7 +297,8 @@ class PortDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
         obj = ports.Port.get_object(self.context, id=obj.id)
         self.assertIsNone(obj.qos_policy_id)
 
-    def test__attach_qos_policy(self):
+    @mock.patch.object(policy.QosPolicy, 'unset_default')
+    def test__attach_qos_policy(self, *mocks):
         obj = self._make_object(self.obj_fields[0])
         obj.create()
 
@@ -302,6 +308,10 @@ class PortDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
         obj = ports.Port.get_object(self.context, id=obj.id)
         self.assertEqual(policy_obj.id, obj.qos_policy_id)
+        qos_binding_obj = binding.QosPolicyPortBinding.get_object(
+            self.context, port_id=obj.id)
+        self.assertEqual(qos_binding_obj.policy_id, obj.qos_policy_id)
+        old_policy_id = policy_obj.id
 
         policy_obj2 = policy.QosPolicy(self.context)
         policy_obj2.create()
@@ -309,7 +319,19 @@ class PortDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
         obj = ports.Port.get_object(self.context, id=obj.id)
         self.assertEqual(policy_obj2.id, obj.qos_policy_id)
+        qos_binding_obj2 = binding.QosPolicyPortBinding.get_object(
+            self.context, port_id=obj.id)
+        self.assertEqual(qos_binding_obj2.policy_id, obj.qos_policy_id)
+        qos_binding_obj = binding.QosPolicyPortBinding.get_objects(
+            self.context, policy_id=old_policy_id)
+        self.assertEqual(0, len(qos_binding_obj))
 
     def test_get_objects_queries_constant(self):
         self.skipTest(
             'Port object loads segment info without relationships')
+
+    def test_v1_1_to_v1_0_drops_data_plane_status(self):
+        port_new = self._create_test_port()
+        port_v1_0 = port_new.obj_to_primitive(target_version='1.0')
+        self.assertNotIn('data_plane_status',
+                         port_v1_0['versioned_object.data'])

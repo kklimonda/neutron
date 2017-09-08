@@ -26,7 +26,6 @@ from ryu.lib.packet import ether_types
 from ryu.lib.packet import icmpv6
 from ryu.lib.packet import in_proto
 
-from neutron._i18n import _LE
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers.openvswitch.agent.common import constants
 from neutron.plugins.ml2.drivers.openvswitch.agent.openflow.native \
@@ -41,7 +40,8 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
 
     def setup_default_table(self):
         self.setup_canary_table()
-        self.install_normal()
+        self.install_goto(dest_table_id=constants.TRANSIENT_TABLE)
+        self.install_normal(table_id=constants.TRANSIENT_TABLE, priority=3)
         self.install_drop(table_id=constants.ARP_SPOOF_TABLE)
 
     def setup_canary_table(self):
@@ -51,7 +51,7 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
         try:
             flows = self.dump_flows(constants.CANARY_TABLE)
         except RuntimeError:
-            LOG.exception(_LE("Failed to communicate with the switch"))
+            LOG.exception("Failed to communicate with the switch")
             return constants.OVS_DEAD
         return constants.OVS_NORMAL if flows else constants.OVS_RESTARTED
 
@@ -70,11 +70,16 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
         match = self._local_vlan_match(ofp, ofpp, port, vlan_vid)
         actions += [
             ofpp.OFPActionSetField(vlan_vid=lvid | ofp.OFPVID_PRESENT),
-            ofpp.OFPActionOutput(ofp.OFPP_NORMAL, 0),
         ]
-        self.install_apply_actions(priority=3,
-                                   match=match,
-                                   actions=actions)
+        instructions = [
+            ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions),
+            ofpp.OFPInstructionGotoTable(table_id=constants.TRANSIENT_TABLE),
+        ]
+        self.install_instructions(
+            instructions=instructions,
+            priority=3,
+            match=match,
+        )
 
     def reclaim_local_vlan(self, port, segmentation_id):
         (_dp, ofp, ofpp) = self._get_dp()
@@ -83,7 +88,7 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
         else:
             vlan_vid = segmentation_id | ofp.OFPVID_PRESENT
         match = self._local_vlan_match(ofp, ofpp, port, vlan_vid)
-        self.delete_flows(match=match)
+        self.uninstall_flows(match=match)
 
     @staticmethod
     def _dvr_to_src_mac_match(ofp, ofpp, vlan_tag, dst_mac):
@@ -104,11 +109,21 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
         match = self._dvr_to_src_mac_match(ofp, ofpp,
                                            vlan_tag=vlan_tag, dst_mac=dst_mac)
         actions = [
-            ofpp.OFPActionPopVlan(),
             ofpp.OFPActionSetField(eth_src=gateway_mac),
+        ]
+        instructions = [
+            ofpp.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions),
+            ofpp.OFPInstructionGotoTable(table_id=constants.TRANSIENT_TABLE),
+        ]
+        self.install_instructions(table_id=table_id,
+                                  priority=4,
+                                  match=match,
+                                  instructions=instructions)
+        actions = [
+            ofpp.OFPActionPopVlan(),
             ofpp.OFPActionOutput(dst_port, 0),
         ]
-        self.install_apply_actions(table_id=table_id,
+        self.install_apply_actions(table_id=constants.TRANSIENT_TABLE,
                                    priority=4,
                                    match=match,
                                    actions=actions)
@@ -118,7 +133,8 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
         (_dp, ofp, ofpp) = self._get_dp()
         match = self._dvr_to_src_mac_match(ofp, ofpp,
                                            vlan_tag=vlan_tag, dst_mac=dst_mac)
-        self.delete_flows(table_id=table_id, match=match)
+        for table in (table_id, constants.TRANSIENT_TABLE):
+            self.uninstall_flows(table_id=table, match=match)
 
     def add_dvr_mac_vlan(self, mac, port):
         self.install_goto(table_id=constants.LOCAL_SWITCHING,
@@ -129,8 +145,8 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
 
     def remove_dvr_mac_vlan(self, mac):
         # REVISIT(yamamoto): match in_port as well?
-        self.delete_flows(table_id=constants.LOCAL_SWITCHING,
-                          eth_src=mac)
+        self.uninstall_flows(table_id=constants.LOCAL_SWITCHING,
+                             eth_src=mac)
 
     def add_dvr_mac_tun(self, mac, port):
         self.install_goto(table_id=constants.LOCAL_SWITCHING,
@@ -140,8 +156,8 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
                           dest_table_id=constants.DVR_TO_SRC_MAC)
 
     def remove_dvr_mac_tun(self, mac, port):
-        self.delete_flows(table_id=constants.LOCAL_SWITCHING,
-                          in_port=port, eth_src=mac)
+        self.uninstall_flows(table_id=constants.LOCAL_SWITCHING,
+                             in_port=port, eth_src=mac)
 
     @staticmethod
     def _arp_reply_match(ofp, ofpp, port):
@@ -160,12 +176,13 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
         # that actually belong to the port.
         for ip in ip_addresses:
             masked_ip = self._cidr_to_ryu(ip)
-            self.install_normal(
+            self.install_goto(
                 table_id=constants.ARP_SPOOF_TABLE, priority=2,
                 eth_type=ether_types.ETH_TYPE_IPV6,
                 ip_proto=in_proto.IPPROTO_ICMPV6,
                 icmpv6_type=icmpv6.ND_NEIGHBOR_ADVERT,
-                ipv6_nd_target=masked_ip, in_port=port)
+                ipv6_nd_target=masked_ip, in_port=port,
+                dest_table_id=constants.TRANSIENT_TABLE)
 
         # Now that the rules are ready, direct icmpv6 neighbor advertisement
         # traffic from the port into the anti-spoof table.
@@ -179,14 +196,17 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
     def set_allowed_macs_for_port(self, port, mac_addresses=None,
                                   allow_all=False):
         if allow_all:
-            self.delete_flows(table_id=constants.LOCAL_SWITCHING, in_port=port)
-            self.delete_flows(table_id=constants.MAC_SPOOF_TABLE, in_port=port)
+            self.uninstall_flows(table_id=constants.LOCAL_SWITCHING,
+                                 in_port=port)
+            self.uninstall_flows(table_id=constants.MAC_SPOOF_TABLE,
+                                 in_port=port)
             return
         mac_addresses = mac_addresses or []
         for address in mac_addresses:
-            self.install_normal(
+            self.install_goto(
                 table_id=constants.MAC_SPOOF_TABLE, priority=2,
-                eth_src=address, in_port=port)
+                eth_src=address, in_port=port,
+                dest_table_id=constants.TRANSIENT_TABLE)
         # normalize so we can see if macs are the same
         mac_addresses = {netaddr.EUI(mac) for mac in mac_addresses}
         flows = self.dump_flows(constants.MAC_SPOOF_TABLE)
@@ -198,8 +218,8 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
                 continue
             flow_mac = matches['eth_src']
             if netaddr.EUI(flow_mac) not in mac_addresses:
-                self.delete_flows(table_id=constants.MAC_SPOOF_TABLE,
-                                  in_port=port, eth_src=flow_mac)
+                self.uninstall_flows(table_id=constants.MAC_SPOOF_TABLE,
+                                     in_port=port, eth_src=flow_mac)
         self.install_goto(table_id=constants.LOCAL_SWITCHING,
                           priority=9, in_port=port,
                           dest_table_id=constants.MAC_SPOOF_TABLE)
@@ -230,13 +250,13 @@ class OVSIntegrationBridge(ovs_bridge.OVSAgentBridge):
     def delete_arp_spoofing_protection(self, port):
         (_dp, ofp, ofpp) = self._get_dp()
         match = self._arp_reply_match(ofp, ofpp, port=port)
-        self.delete_flows(table_id=constants.LOCAL_SWITCHING,
-                          match=match)
+        self.uninstall_flows(table_id=constants.LOCAL_SWITCHING,
+                             match=match)
         match = self._icmpv6_reply_match(ofp, ofpp, port=port)
-        self.delete_flows(table_id=constants.LOCAL_SWITCHING,
-                          match=match)
+        self.uninstall_flows(table_id=constants.LOCAL_SWITCHING,
+                             match=match)
         self.delete_arp_spoofing_allow_rules(port)
 
     def delete_arp_spoofing_allow_rules(self, port):
-        self.delete_flows(table_id=constants.ARP_SPOOF_TABLE,
-                          in_port=port)
+        self.uninstall_flows(table_id=constants.ARP_SPOOF_TABLE,
+                             in_port=port)

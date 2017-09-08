@@ -13,7 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib import constants
+from neutron_lib.plugins import constants
 
 
 # Neutron well-known service type constants:
@@ -25,6 +25,7 @@ VPN = "VPN"
 METERING = "METERING"
 FLAVORS = "FLAVORS"
 QOS = "QOS"
+LOG_API = "LOGGING"
 
 # Maps extension alias to service type that
 # can be implemented by the core plugin.

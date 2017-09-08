@@ -15,9 +15,12 @@
 import functools
 
 from neutron_lib import constants
+from neutronclient.common import exceptions
 from oslo_utils import uuidutils
+import testscenarios
 
 from neutron.agent.linux import tc_lib
+from neutron.common import constants as common_constants
 from neutron.common import utils
 from neutron.services.qos import qos_consts
 from neutron.tests.common.agents import l2_extensions
@@ -46,6 +49,13 @@ class BaseQoSRuleTestCase(object):
     ovsdb_interface = None
     number_of_hosts = 1
 
+    @property
+    def reverse_direction(self):
+        if self.direction == common_constants.INGRESS_DIRECTION:
+            return common_constants.EGRESS_DIRECTION
+        elif self.direction == common_constants.EGRESS_DIRECTION:
+            return common_constants.INGRESS_DIRECTION
+
     def setUp(self):
         host_desc = [
             environment.HostDescription(
@@ -72,7 +82,7 @@ class BaseQoSRuleTestCase(object):
     def _create_qos_policy(self):
         return self.safe_client.create_qos_policy(
             self.tenant_id, 'fs_policy', 'Fullstack testing policy',
-            shared='False')
+            shared='False', is_default='False')
 
     def _prepare_vm_with_qos_policy(self, rule_add_functions):
         qos_policy = self._create_qos_policy()
@@ -101,14 +111,20 @@ class _TestBwLimitQoS(BaseQoSRuleTestCase):
 
     number_of_hosts = 1
 
-    def _wait_for_bw_rule_removed(self, vm):
-        # No values are provided when port doesn't have qos policy
-        self._wait_for_bw_rule_applied(vm, None, None)
+    @staticmethod
+    def _get_expected_egress_burst_value(limit):
+        return int(
+            limit * qos_consts.DEFAULT_BURST_RATE
+        )
 
-    def _add_bw_limit_rule(self, limit, burst, qos_policy):
+    def _wait_for_bw_rule_removed(self, vm, direction):
+        # No values are provided when port doesn't have qos policy
+        self._wait_for_bw_rule_applied(vm, None, None, direction)
+
+    def _add_bw_limit_rule(self, limit, burst, direction, qos_policy):
         qos_policy_id = qos_policy['id']
         rule = self.safe_client.create_bandwidth_limit_rule(
-            self.tenant_id, qos_policy_id, limit, burst)
+            self.tenant_id, qos_policy_id, limit, burst, direction)
         # Make it consistent with GET reply
         rule['type'] = qos_consts.RULE_TYPE_BANDWIDTH_LIMIT
         rule['qos_policy_id'] = qos_policy_id
@@ -119,54 +135,123 @@ class _TestBwLimitQoS(BaseQoSRuleTestCase):
 
         # Create port with qos policy attached
         vm, qos_policy = self._prepare_vm_with_qos_policy(
-            [functools.partial(self._add_bw_limit_rule,
-                               BANDWIDTH_LIMIT, BANDWIDTH_BURST)])
+            [functools.partial(
+                self._add_bw_limit_rule,
+                BANDWIDTH_LIMIT, BANDWIDTH_BURST, self.direction)])
         bw_rule = qos_policy['rules'][0]
 
-        self._wait_for_bw_rule_applied(vm, BANDWIDTH_LIMIT, BANDWIDTH_BURST)
+        self._wait_for_bw_rule_applied(
+            vm, BANDWIDTH_LIMIT, BANDWIDTH_BURST, self.direction)
         qos_policy_id = qos_policy['id']
 
         self.client.delete_bandwidth_limit_rule(bw_rule['id'], qos_policy_id)
-        self._wait_for_bw_rule_removed(vm)
+        self._wait_for_bw_rule_removed(vm, self.direction)
 
         # Create new rule with no given burst value, in such case ovs and lb
         # agent should apply burst value as
         # bandwidth_limit * qos_consts.DEFAULT_BURST_RATE
-        new_expected_burst = int(
-            new_limit * qos_consts.DEFAULT_BURST_RATE
-        )
+        new_expected_burst = self._get_expected_burst_value(new_limit,
+                                                            self.direction)
         new_rule = self.safe_client.create_bandwidth_limit_rule(
-            self.tenant_id, qos_policy_id, new_limit)
-        self._wait_for_bw_rule_applied(vm, new_limit, new_expected_burst)
+            self.tenant_id, qos_policy_id, new_limit, direction=self.direction)
+        self._wait_for_bw_rule_applied(
+            vm, new_limit, new_expected_burst, self.direction)
 
         # Update qos policy rule id
         self.client.update_bandwidth_limit_rule(
             new_rule['id'], qos_policy_id,
             body={'bandwidth_limit_rule': {'max_kbps': BANDWIDTH_LIMIT,
                                            'max_burst_kbps': BANDWIDTH_BURST}})
-        self._wait_for_bw_rule_applied(vm, BANDWIDTH_LIMIT, BANDWIDTH_BURST)
+        self._wait_for_bw_rule_applied(
+            vm, BANDWIDTH_LIMIT, BANDWIDTH_BURST, self.direction)
 
         # Remove qos policy from port
         self.client.update_port(
             vm.neutron_port['id'],
             body={'port': {'qos_policy_id': None}})
-        self._wait_for_bw_rule_removed(vm)
+        self._wait_for_bw_rule_removed(vm, self.direction)
+
+    def test_bw_limit_direction_change(self):
+        # Create port with qos policy attached, with rule self.direction
+        vm, qos_policy = self._prepare_vm_with_qos_policy(
+            [functools.partial(
+                self._add_bw_limit_rule,
+                BANDWIDTH_LIMIT, BANDWIDTH_BURST, self.direction)])
+        bw_rule = qos_policy['rules'][0]
+
+        self._wait_for_bw_rule_applied(
+            vm, BANDWIDTH_LIMIT, BANDWIDTH_BURST, self.direction)
+
+        # Update rule by changing direction to opposite then it was before
+        self.client.update_bandwidth_limit_rule(
+            bw_rule['id'], qos_policy['id'],
+            body={'bandwidth_limit_rule': {
+                'direction': self.reverse_direction}})
+        self._wait_for_bw_rule_removed(vm, self.direction)
+        self._wait_for_bw_rule_applied(
+            vm, BANDWIDTH_LIMIT, BANDWIDTH_BURST, self.reverse_direction)
 
 
 class TestBwLimitQoSOvs(_TestBwLimitQoS, base.BaseFullStackTestCase):
     l2_agent_type = constants.AGENT_TYPE_OVS
-    scenarios = fullstack_utils.get_ovs_interface_scenarios()
+    direction_scenarios = [
+        ('ingress', {'direction': common_constants.INGRESS_DIRECTION}),
+        ('egress', {'direction': common_constants.EGRESS_DIRECTION})
+    ]
+    scenarios = testscenarios.multiply_scenarios(
+        direction_scenarios, fullstack_utils.get_ovs_interface_scenarios())
 
-    def _wait_for_bw_rule_applied(self, vm, limit, burst):
-        utils.wait_until_true(
-            lambda: vm.bridge.get_egress_bw_limit_for_port(
-                vm.port.name) == (limit, burst))
+    @staticmethod
+    def _get_expected_burst_value(limit, direction):
+        # For egress bandwidth limit this value should be calculated as
+        # bandwidth_limit * qos_consts.DEFAULT_BURST_RATE
+        if direction == common_constants.EGRESS_DIRECTION:
+            return TestBwLimitQoSOvs._get_expected_egress_burst_value(limit)
+        else:
+            return 0
+
+    def _wait_for_bw_rule_applied(self, vm, limit, burst, direction):
+        if direction == common_constants.EGRESS_DIRECTION:
+            utils.wait_until_true(
+                lambda: vm.bridge.get_egress_bw_limit_for_port(
+                    vm.port.name) == (limit, burst))
+        elif direction == common_constants.INGRESS_DIRECTION:
+            utils.wait_until_true(
+                lambda: vm.bridge.get_ingress_bw_limit_for_port(
+                    vm.port.name) == (limit, burst))
 
 
 class TestBwLimitQoSLinuxbridge(_TestBwLimitQoS, base.BaseFullStackTestCase):
     l2_agent_type = constants.AGENT_TYPE_LINUXBRIDGE
+    scenarios = [
+        ('egress', {'direction': common_constants.EGRESS_DIRECTION}),
+        ('ingress', {'direction': common_constants.INGRESS_DIRECTION}),
+    ]
 
-    def _wait_for_bw_rule_applied(self, vm, limit, burst):
+    @staticmethod
+    def _get_expected_burst_value(limit, direction):
+        # For egress bandwidth limit this value should be calculated as
+        # bandwidth_limit * qos_consts.DEFAULT_BURST_RATE
+        if direction == common_constants.EGRESS_DIRECTION:
+            return TestBwLimitQoSLinuxbridge._get_expected_egress_burst_value(
+                limit)
+        else:
+            return TestBwLimitQoSLinuxbridge._get_expected_ingress_burst_value(
+                limit)
+
+    @staticmethod
+    def _get_expected_ingress_burst_value(limit):
+        # calculate expected burst in same way as it's done in tc_lib but
+        # burst value = 0 so it's always value calculated from kernel's hz
+        # value
+        # as in tc_lib.bits_to_kilobits result is rounded up that even
+        # 1 bit gives 1 kbit same should be added here to expected burst
+        # value
+        return int(
+            float(limit) /
+            float(linuxbridge_agent_config.DEFAULT_KERNEL_HZ_VALUE) + 1)
+
+    def _wait_for_bw_rule_applied(self, vm, limit, burst, direction):
         port_name = linuxbridge_agent.LinuxBridgeManager.get_tap_device_name(
             vm.neutron_port['id'])
         tc = tc_lib.TcCommand(
@@ -174,8 +259,12 @@ class TestBwLimitQoSLinuxbridge(_TestBwLimitQoS, base.BaseFullStackTestCase):
             linuxbridge_agent_config.DEFAULT_KERNEL_HZ_VALUE,
             namespace=vm.host.host_namespace
         )
-        utils.wait_until_true(
-            lambda: tc.get_filters_bw_limits() == (limit, burst))
+        if direction == common_constants.EGRESS_DIRECTION:
+            utils.wait_until_true(
+                lambda: tc.get_filters_bw_limits() == (limit, burst))
+        elif direction == common_constants.INGRESS_DIRECTION:
+            utils.wait_until_true(
+                lambda: tc.get_tbf_bw_limits() == (limit, burst))
 
 
 class _TestDscpMarkingQoS(BaseQoSRuleTestCase):
@@ -282,3 +371,60 @@ class TestQoSWithL2Population(base.BaseFullStackTestCase):
         rule_types = {t['type'] for t in res['rule_types']}
         expected_rules = set(ovs_drv.SUPPORTED_RULES)
         self.assertEqual(expected_rules, rule_types)
+
+
+class TestQoSPolicyIsDefault(base.BaseFullStackTestCase):
+
+    NAME = 'fs_policy'
+    DESCRIPTION = 'Fullstack testing policy'
+    SHARED = True
+
+    def setUp(self):
+        host_desc = []  # No need to register agents for this test case
+        env_desc = environment.EnvironmentDescription(qos=True)
+        env = environment.Environment(env_desc, host_desc)
+        super(TestQoSPolicyIsDefault, self).setUp(env)
+
+    def _create_qos_policy(self, project_id, is_default):
+        return self.safe_client.create_qos_policy(
+            project_id, self.NAME, self.DESCRIPTION, shared=self.SHARED,
+            is_default=is_default)
+
+    def _update_qos_policy(self, qos_policy_id, is_default):
+        return self.client.update_qos_policy(
+            qos_policy_id, body={'policy': {'is_default': is_default}})
+
+    def test_create_one_default_qos_policy_per_project(self):
+        project_ids = [uuidutils.generate_uuid(), uuidutils.generate_uuid()]
+        for project_id in project_ids:
+            qos_policy = self._create_qos_policy(project_id, True)
+            self.assertTrue(qos_policy['is_default'])
+            self.assertEqual(project_id, qos_policy['project_id'])
+            qos_policy = self._create_qos_policy(project_id, False)
+            self.assertFalse(qos_policy['is_default'])
+            self.assertEqual(project_id, qos_policy['project_id'])
+
+    def test_create_two_default_qos_policies_per_project(self):
+        project_id = uuidutils.generate_uuid()
+        qos_policy = self._create_qos_policy(project_id, True)
+        self.assertTrue(qos_policy['is_default'])
+        self.assertEqual(project_id, qos_policy['project_id'])
+        self.assertRaises(exceptions.Conflict,
+                          self._create_qos_policy, project_id, True)
+
+    def test_update_default_status(self):
+        project_ids = [uuidutils.generate_uuid(), uuidutils.generate_uuid()]
+        for project_id in project_ids:
+            qos_policy = self._create_qos_policy(project_id, True)
+            self.assertTrue(qos_policy['is_default'])
+            qos_policy = self._update_qos_policy(qos_policy['id'], False)
+            self.assertFalse(qos_policy['policy']['is_default'])
+
+    def test_update_default_status_conflict(self):
+        project_id = uuidutils.generate_uuid()
+        qos_policy_1 = self._create_qos_policy(project_id, True)
+        self.assertTrue(qos_policy_1['is_default'])
+        qos_policy_2 = self._create_qos_policy(project_id, False)
+        self.assertFalse(qos_policy_2['is_default'])
+        self.assertRaises(exceptions.Conflict,
+                          self._update_qos_policy, qos_policy_2['id'], True)
