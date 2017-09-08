@@ -2,6 +2,8 @@ neutron (2:11.0.1~dev26-0ubuntu1) UNRELEASED; urgency=medium
 
   * d/gbp.conf: Set debian-branch to stable/pike.
   * New upstream version.
+  * d/control: Add rename package to BDs as d/rules needs it and it
+    is no longer available by default in Artful.
 
  -- Corey Bryant <corey.bryant@canonical.com>  Fri, 08 Sep 2017 16:35:45 -0400
 
