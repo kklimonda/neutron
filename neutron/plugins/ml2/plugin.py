@@ -755,9 +755,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 vlt = vlantransparent.get_vlan_transparent(net_data)
                 net_db['vlan_transparent'] = vlt
                 result['vlan_transparent'] = vlt
-            mech_context = driver_context.NetworkContext(self, context,
-                                                         result)
-            self.mechanism_manager.create_network_precommit(mech_context)
 
             result[api.MTU] = self._get_network_mtu(result)
 
@@ -768,6 +765,10 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                                 net_data[az_ext.AZ_HINTS])
                 net_db[az_ext.AZ_HINTS] = az_hints
                 result[az_ext.AZ_HINTS] = az_hints
+
+            mech_context = driver_context.NetworkContext(self, context,
+                                                         result)
+            self.mechanism_manager.create_network_precommit(mech_context)
 
         self._apply_dict_extend_functions('networks', result, net_db)
         return result, mech_context
@@ -813,8 +814,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             self.extension_manager.process_update_network(context, net_data,
                                                           updated_network)
             self._process_l3_update(context, updated_network, net_data)
-            self.type_manager.extend_network_dict_provider(context,
-                                                           updated_network)
 
             # ToDO(QoS): This would change once EngineFacade moves out
             db_network = self._get_network(context, id)
@@ -823,6 +822,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             context.session.expire(db_network)
             updated_network = self._make_network_dict(
                 db_network, context=context)
+            self.type_manager.extend_network_dict_provider(
+                context, updated_network)
 
             # TODO(QoS): Move out to the extension framework somehow.
             need_network_update_notify = (
@@ -1378,8 +1379,11 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                     bound_mech_contexts.append(dist_mech_context)
             else:
                 self.mechanism_manager.update_port_precommit(mech_context)
-                self._setup_dhcp_agent_provisioning_component(
-                    context, updated_port)
+                if any(updated_port[k] != original_port[k]
+                       for k in ('fixed_ips', 'mac_address')):
+                    # only add block if fixed_ips or mac_address changed
+                    self._setup_dhcp_agent_provisioning_component(
+                        context, updated_port)
                 bound_mech_contexts.append(mech_context)
 
         # Notifications must be sent after the above transaction is complete

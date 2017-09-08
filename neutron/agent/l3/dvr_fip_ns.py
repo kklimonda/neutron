@@ -207,7 +207,8 @@ class FipNamespace(namespaces.Namespace):
     @namespaces.check_ns_existence
     def _delete(self):
         ip_wrapper = ip_lib.IPWrapper(namespace=self.name)
-        for d in ip_wrapper.get_devices(exclude_loopback=True):
+        for d in ip_wrapper.get_devices(exclude_loopback=True,
+                                        exclude_gre_devices=True):
             if d.name.startswith(FIP_2_ROUTER_DEV_PREFIX):
                 # internal link between IRs and FIP NS
                 ip_wrapper.del_veth(d.name)
@@ -293,10 +294,11 @@ class FipNamespace(namespaces.Namespace):
 
         # Now add the filter match rule for the table.
         ip_rule = ip_lib.IPRule(namespace=self.get_name())
-        ip_rule.rule.add(ip=str(fip_2_rtr.ip),
-                         iif=fip_2_rtr_name,
-                         table=rt_tbl_index,
-                         priority=rt_tbl_index)
+        ip_rule.rule.add(**{'ip': str(fip_2_rtr.ip),
+                            'iif': fip_2_rtr_name,
+                            'table': rt_tbl_index,
+                            'priority': rt_tbl_index,
+                            'from': '0.0.0.0/0'})
 
     def _update_gateway_port(self, agent_gateway_port, interface_name):
         if (self.agent_gateway_port and

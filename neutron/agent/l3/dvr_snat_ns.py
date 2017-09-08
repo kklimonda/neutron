@@ -33,6 +33,10 @@ class SnatNamespace(namespaces.Namespace):
         # This might be an HA router namespaces and it should not have
         # ip_nonlocal_bind enabled
         ip_lib.set_ip_nonlocal_bind_for_namespace(self.name)
+        # Set nf_conntrack_tcp_loose to 0 to ensure mid-stream
+        # TCP conversations aren't taken over by SNAT
+        cmd = ['net.netfilter.nf_conntrack_tcp_loose=0']
+        ip_lib.sysctl(cmd, namespace=self.name)
 
     @classmethod
     def get_snat_ns_name(cls, router_id):
@@ -41,7 +45,8 @@ class SnatNamespace(namespaces.Namespace):
     @namespaces.check_ns_existence
     def delete(self):
         ns_ip = ip_lib.IPWrapper(namespace=self.name)
-        for d in ns_ip.get_devices(exclude_loopback=True):
+        for d in ns_ip.get_devices(exclude_loopback=True,
+                                   exclude_gre_devices=True):
             if d.name.startswith(constants.SNAT_INT_DEV_PREFIX):
                 LOG.debug('Unplugging DVR device %s', d.name)
                 self.driver.unplug(d.name, namespace=self.name,

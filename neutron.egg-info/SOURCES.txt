@@ -1229,6 +1229,7 @@ neutron/tests/unit/agent/l3/__init__.py
 neutron/tests/unit/agent/l3/test_agent.py
 neutron/tests/unit/agent/l3/test_dvr_fip_ns.py
 neutron/tests/unit/agent/l3/test_dvr_local_router.py
+neutron/tests/unit/agent/l3/test_dvr_snat_ns.py
 neutron/tests/unit/agent/l3/test_fip_rule_priority_allocator.py
 neutron/tests/unit/agent/l3/test_ha_router.py
 neutron/tests/unit/agent/l3/test_item_allocator.py
@@ -1627,6 +1628,7 @@ releasenotes/notes/add-standard-attr-descriptions-1ba0d7a454c3fd8f.yaml
 releasenotes/notes/add-subnet-service-types-bc81f6df9834f96e.yaml
 releasenotes/notes/add-tags-to-core-resources-b05330a129900609.yaml
 releasenotes/notes/add-timestamp-fields-f9ab949fc88f05f6.yaml
+releasenotes/notes/advanced_image-8abff2ca91de7f6c.yaml
 releasenotes/notes/advertise_mtu_by_default-d8b0b056a74517b8.yaml
 releasenotes/notes/advertisement-intervals-for-radvd-configurable-6d85b5fdd97a2742.yaml
 releasenotes/notes/allow-non-admins-to-define-external-extra-routes-0d541fc356a5c546.yaml

@@ -1,10 +1,85 @@
 CHANGES
 =======
 
+* Make use of -w argument for iptables calls
+* Imported Translations from Zanata
+* DHCP provisioning block only on port addr update
+* Match load_rc_for_rally logic to load_rc_hook
+* Make HA deletion attempt on RouterNotFound race
+* Prioritize tox environment executables for fullstack/functional tests
+* Linuxbridge agent: detect existing IP on bridge
+* Stop logging versions on every agent update
+* Warn the admin of a potential OVS firewall_driver misconfiguration
+* Enable QoS scenario tests
+* Enforce ethertype with IPv6 integer protocols
+* Fix test_keepalived_ipv6_support for Keepalived v1.2.20
+* tests: don't set description in test_blank_update_clears_association
+* Don't raise exception if TC device doesn't exist
+
+10.0.3
+------
+
+* Reduce rally sub-port count
+* Prevent regression of IP loss on MAC update
+* Stop loading OVOServerRpcInterface in ML2 testcase
+* objects: exclude revision_number from updatable fields
+* [Tempest] Running Trunk test with advanced image only
+* Don't log about retrying failed devices if empty
+* Do not respond to ARP on IPv6-only interfaces
+* Log reserved cookies in cleanup_flows method
+* DVR: Fix neutron metering agent to notify hosts hosting DVR
+* Tempest: Adopt keystone api v3 for tests
+* ovs-agent: Clear in_port=ofport flow earlier
+* Use _is_dns_integration_supported for _delete_floatingip
+* Use subqueryload in l2pop DB for binding ports
+* Honor the common session options for the placement API
+* Fix: set IPv6 forwarding when there's an IPv6 gw
+* Disable RA and IPv6 forwarding on backup HA routers
+* Add provider info to network for update
+* Fix bug when checking duplicated subnets for router interface
+* Always call create_rtr_2_fip_link
+* tempest: Make _create_router_with_client obey enable_snat=False
+* Pass MTU and AZ into network_create_precommit
+* Clean MissingAuthPlugin from unit tests
+* Neutron server was not compatible with member actions
+* Reduce rpc calls in SR-IOV agent
+* Fix tempest router migration test when HA enabled, v2
+* Stop arping when interface gets deleted
+* Don't add duplicate metadata rules after router update
+* Disable QoS scenario tests differently
+* Make QoS policy object compatible with versions 1.2 and higher
+* Checks if net_dns is None and returns so that we don't attempt to load None objects
+* DVR: properly track SNAT traffic
+* Macvtap: Check for no original port in is_live_migration
+* Drop IPv6 Router Advertisements in OVS firewall
+* Fix tempest test failing with segments extension
+* tempest: Obey identity_feature_enabled.api_v2_admin in a few tests
+* Update minimum tox version to 2.3.2
+* teach logger mech driver vlan transparency
+* Retry ebtables lock acquisition failures
+* [Pecan] Fix custom tenant_id project_id matching
+* Ignore gre devices in namespaces when cleaning up devices
+* Verify metering label exists before applying rule
+* Add missing unit test for segment db
+* Update pylint disable list to pass pylint 1.7.1 checks
+* test_dhcp: Use a safer host name
+* neutron-rpc-server fails with no plugins loaded
+* Mask password when logging request body
+* Set HA network port to DOWN when l3 agent starts
+* Use e.exc_type instead of calling str on exception
+* Don't iterate updated_rule_sg_ids or updated_sg_members
+* l3_ha_mode: call bulk _populate_mtu_and_subnets_for_ports
+* Add libssl packages to bindep
+* Utils: make delete_port_on_error more informative
+* api: work around Routes cutting off suffix from resource id
+* Update the host_id for network:router_gateway interfaces
+
 10.0.2
 ------
 
 * Fixed docs job failure
+* ovs: bubble up failures into main thread in native ofctl mode
+* Add IPv6 default route to DHCP namespace
 * Fix security group rules created for dhcpv6
 * Allow port security updates even without security-groups enabled
 * Send both gratuitous ARP REQUESTs and REPLYs

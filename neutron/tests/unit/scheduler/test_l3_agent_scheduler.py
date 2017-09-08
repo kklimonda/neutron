@@ -778,6 +778,12 @@ class L3SchedulerTestCaseMixin(test_l3.L3NatTestCaseMixin,
 class L3AgentChanceSchedulerTestCase(L3SchedulerTestCaseMixin,
                                      test_db_base_plugin_v2.
                                      NeutronDbPluginV2TestCase):
+    def setUp(self):
+        super(L3AgentChanceSchedulerTestCase, self).setUp()
+        # Removes MissingAuthPlugin exception from logs
+        self.patch_notifier = mock.patch(
+            'neutron.notifiers.batch_notifier.BatchNotifier._notify')
+        self.patch_notifier.start()
 
     def test_random_scheduling(self):
         random_patch = mock.patch('random.choice')
@@ -1495,10 +1501,13 @@ class L3HATestCaseMixin(testlib_api.SqlTestCase,
         with mock.patch.object(self.plugin.router_scheduler, 'bind_router'):
             with mock.patch.object(
                     self.plugin, 'add_ha_port',
-                    side_effect=l3.RouterNotFound(router_id='foo_router')):
+                    side_effect=l3.RouterNotFound(router_id='foo_router')),\
+                    mock.patch.object(
+                        self.plugin, 'safe_delete_ha_network') as sd_ha_net:
                 self.plugin.router_scheduler.create_ha_port_and_bind(
                     self.plugin, self.adminContext,
                     router['id'], router['tenant_id'], agent)
+                self.assertTrue(sd_ha_net.called)
 
     def test_create_ha_port_and_bind_bind_router_returns_None(self):
         router = self._create_ha_router(tenant_id='foo_tenant')
@@ -2009,6 +2018,10 @@ class L3AgentAZLeastRoutersSchedulerTestCase(L3HATestCaseMixin):
         # Mock scheduling so that the test can control it explicitly
         mock.patch.object(l3_hamode_db.L3_HA_NAT_db_mixin,
                           '_notify_router_updated').start()
+        # Removes MissingAuthPlugin exception from logs
+        self.patch_notifier = mock.patch(
+            'neutron.notifiers.batch_notifier.BatchNotifier._notify')
+        self.patch_notifier.start()
 
     def _register_l3_agents(self):
         self.agent1 = helpers.register_l3_agent(host='az1-host1', az='az1')

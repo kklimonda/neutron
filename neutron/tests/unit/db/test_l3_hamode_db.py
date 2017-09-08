@@ -92,6 +92,7 @@ class L3HATestFramework(testlib_api.SqlTestCase):
             router['ha'] = ha
         if distributed is not None:
             router['distributed'] = distributed
+
         return self.plugin.create_router(ctx, {'router': router})
 
     def _migrate_router(self, router_id, ha):
@@ -1005,26 +1006,72 @@ class L3HAModeDbTestCase(L3HATestFramework):
             self.admin_ctx,
             filters=device_filter)[0]
 
+    def _get_router_port_bindings(self, router_id):
+        device_filter = {'device_id': [router_id],
+                         'device_owner':
+                         [constants.DEVICE_OWNER_HA_REPLICATED_INT,
+                          constants.DEVICE_OWNER_ROUTER_SNAT,
+                          constants.DEVICE_OWNER_ROUTER_GW]}
+        return self.core_plugin.get_ports(
+            self.admin_ctx,
+            filters=device_filter)
+
     def test_update_router_port_bindings_updates_host(self):
+        ext_net = self._create_network(self.core_plugin, self.admin_ctx,
+                                       external=True)
         network_id = self._create_network(self.core_plugin, self.admin_ctx)
         subnet = self._create_subnet(self.core_plugin, self.admin_ctx,
                                      network_id)
         interface_info = {'subnet_id': subnet['id']}
 
         router = self._create_router()
+        self.plugin._update_router_gw_info(self.admin_ctx, router['id'],
+                                           {'network_id': ext_net})
         self.plugin.add_router_interface(self.admin_ctx,
                                          router['id'],
                                          interface_info)
         self.plugin._update_router_port_bindings(
             self.admin_ctx, {router['id']: 'active'}, self.agent1['host'])
 
-        port = self._get_first_interface(router['id'])
-        self.assertEqual(self.agent1['host'], port[portbindings.HOST_ID])
+        for port in self._get_router_port_bindings(router['id']):
+            self.assertEqual(self.agent1['host'], port[portbindings.HOST_ID])
 
         self.plugin._update_router_port_bindings(
             self.admin_ctx, {router['id']: 'active'}, self.agent2['host'])
-        port = self._get_first_interface(router['id'])
-        self.assertEqual(self.agent2['host'], port[portbindings.HOST_ID])
+
+        for port in self._get_router_port_bindings(router['id']):
+            self.assertEqual(self.agent2['host'], port[portbindings.HOST_ID])
+
+    def test_get_router_ids_updates_ha_network_port_status(self):
+        router = self._create_router(ha=True)
+        callback = l3_rpc.L3RpcCallback()
+        callback._l3plugin = self.plugin
+        host = self.agent1['host']
+        ctx = self.admin_ctx
+        bindings = self.plugin.get_ha_router_port_bindings(
+            ctx, [router['id']])
+        binding = [binding for binding in bindings
+            if binding.l3_agent_id == self.agent1['id']][0]
+        port = self.core_plugin.get_port(ctx, binding.port_id)
+
+        # As network segments are not available, mock bind_port
+        # to avoid binding failures
+        def bind_port(context):
+            binding = context._binding
+            binding.vif_type = portbindings.VIF_TYPE_OVS
+        with mock.patch.object(self.core_plugin.mechanism_manager,
+                               'bind_port', side_effect=bind_port):
+            callback._ensure_host_set_on_port(
+                ctx, host, port, router_id=router['id'])
+            # Port status will be DOWN by default as we are not having
+            # l2 agent in test, so update it to ACTIVE.
+            self.core_plugin.update_port_status(
+                ctx, port['id'], constants.PORT_STATUS_ACTIVE, host=host)
+            port = self.core_plugin.get_port(ctx, port['id'])
+            self.assertEqual(constants.PORT_STATUS_ACTIVE, port['status'])
+            callback.get_router_ids(ctx, host)
+            port = self.core_plugin.get_port(ctx, port['id'])
+            self.assertEqual(constants.PORT_STATUS_DOWN, port['status'])
 
     def test_ensure_host_set_on_ports_dvr_ha_binds_to_active(self):
         agent3 = helpers.register_l3_agent('host_3',

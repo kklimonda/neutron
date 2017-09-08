@@ -90,8 +90,18 @@ class Namespace(object):
         self.use_ipv6 = use_ipv6
 
     def create(self):
+        # See networking (netdev) tree, file
+        # Documentation/networking/ip-sysctl.txt for an explanation of
+        # these sysctl values.
         ip_wrapper = self.ip_wrapper_root.ensure_namespace(self.name)
         cmd = ['sysctl', '-w', 'net.ipv4.ip_forward=1']
+        ip_wrapper.netns.execute(cmd)
+        # 1. Reply only if the target IP address is local address configured
+        #    on the incoming interface; and
+        # 2. Always use the best local address
+        cmd = ['sysctl', '-w', 'net.ipv4.conf.all.arp_ignore=1']
+        ip_wrapper.netns.execute(cmd)
+        cmd = ['sysctl', '-w', 'net.ipv4.conf.all.arp_announce=2']
         ip_wrapper.netns.execute(cmd)
         if self.use_ipv6:
             cmd = ['sysctl', '-w', 'net.ipv6.conf.all.forwarding=1']
@@ -123,7 +133,8 @@ class RouterNamespace(Namespace):
     @check_ns_existence
     def delete(self):
         ns_ip = ip_lib.IPWrapper(namespace=self.name)
-        for d in ns_ip.get_devices(exclude_loopback=True):
+        for d in ns_ip.get_devices(exclude_loopback=True,
+                                   exclude_gre_devices=True):
             if d.name.startswith(INTERNAL_DEV_PREFIX):
                 # device is on default bridge
                 self.driver.unplug(d.name, namespace=self.name,

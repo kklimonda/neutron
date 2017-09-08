@@ -131,6 +131,9 @@ class Ml2PluginV2TestCase(test_plugin.NeutronDbPluginV2TestCase):
         self.port_create_status = 'DOWN'
 
     def setUp(self):
+        self.ovo_push_interface_p = mock.patch(
+            'neutron.plugins.ml2.ovo_rpc.OVOServerRpcInterface')
+        self.ovo_push_interface_p.start()
         # Enable the test mechanism driver to ensure that
         # we can successfully call through to all mechanism
         # driver apis.
@@ -768,16 +771,26 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                 with self.port(subnet=subnet):
                     self.assertFalse(ap.called)
 
-    def test_dhcp_provisioning_blocks_inserted_on_update(self):
+    def _test_dhcp_provisioning_blocks_inserted_on_update(self, update_dict,
+                                                          expected_block):
         ctx = context.get_admin_context()
         plugin = directory.get_plugin()
         self._add_fake_dhcp_agent()
         with self.port() as port:
             with mock.patch.object(provisioning_blocks,
                                    'add_provisioning_component') as ap:
-                port['port']['binding:host_id'] = 'newhost'
+                port['port'].update(update_dict)
                 plugin.update_port(ctx, port['port']['id'], port)
-                self.assertTrue(ap.called)
+                self.assertEqual(expected_block, ap.called)
+
+    def test_dhcp_provisioning_blocks_not_inserted_on_no_addr_change(self):
+        update = {'binding:host_id': 'newhost'}
+        self._test_dhcp_provisioning_blocks_inserted_on_update(update, False)
+
+    def test_dhcp_provisioning_blocks_inserted_on_addr_change(self):
+        update = {'binding:host_id': 'newhost',
+                  'mac_address': '11:22:33:44:55:66'}
+        self._test_dhcp_provisioning_blocks_inserted_on_update(update, True)
 
     def test_dhcp_provisioning_blocks_removed_without_dhcp_agents(self):
         with mock.patch.object(provisioning_blocks,
@@ -2647,6 +2660,28 @@ class TestML2Segments(Ml2PluginV2TestCase):
 
             self.assertRaises(
                 exc.VlanIdInUse, self._reserve_segment, network, 10)
+
+    def test_create_network_mtu_on_precommit(self):
+        with mock.patch.object(mech_test.TestMechanismDriver,
+                        'create_network_precommit') as bmp:
+            with mock.patch.object(
+                self.driver, '_get_network_mtu') as mtu:
+                mtu.return_value = 1100
+                with self.network() as network:
+                    self.assertIn('mtu', network['network'])
+            all_args = bmp.call_args_list
+            mech_context = all_args[0][0][0]
+            self.assertEqual(1100, mech_context.__dict__['_network']['mtu'])
+
+    def test_provider_info_update_network(self):
+        with self.network() as network:
+            network_id = network['network']['id']
+            plugin = directory.get_plugin()
+            updated_network = plugin.update_network(
+                self.context, network_id, {'network': {'name': 'test-net'}})
+            self.assertIn('provider:network_type', updated_network)
+            self.assertIn('provider:physical_network', updated_network)
+            self.assertIn('provider:segmentation_id', updated_network)
 
     def test_reserve_segment_update_network_mtu(self):
         with self.network() as network:

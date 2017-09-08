@@ -827,6 +827,9 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 other_config['tag'] = str(lvm.vlan)
                 self.int_br.set_db_attribute(
                     "Port", port.port_name, "other_config", other_config)
+                # Uninitialized port has tag set to []
+                if cur_info['tag']:
+                    self.int_br.delete_flows(in_port=port.ofport)
 
     def _bind_devices(self, need_binding_ports):
         devices_up = []
@@ -851,9 +854,6 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                 LOG.debug("Port %s was deleted concurrently, skipping it",
                           port.port_name)
                 continue
-            # Uninitialized port has tag set to []
-            if cur_tag and cur_tag != lvm.vlan:
-                self.int_br.delete_flows(in_port=port.ofport)
             if self.prevent_arp_spoofing:
                 self.setup_arp_spoofing_protection(self.int_br,
                                                    port, port_detail)
@@ -1239,7 +1239,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         port_info['removed'] &= port_info['current']
         # retry failed devices
         port_info['added'] |= failed_devices['added']
-        LOG.debug("retrying failed devices %s", failed_devices['added'])
+        if failed_devices['added']:
+            LOG.debug("retrying failed devices %s", failed_devices['added'])
         port_info['removed'] |= failed_devices['removed']
         # Update current ports
         port_info['current'] |= port_info['added']
