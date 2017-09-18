@@ -76,6 +76,7 @@ Build-Depends-Indep: crudini,
                      python-weakrefmethod,
                      python-webob (>= 1.7.1),
                      python-webtest (>= 2.0),
+                     rename,
 XS-Python-Version: >= 2.6
 Standards-Version: 3.9.6
 Vcs-Browser: https://git.launchpad.net/~ubuntu-server-dev/ubuntu/+source/neutron
