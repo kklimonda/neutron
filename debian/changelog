@@ -1,11 +1,12 @@
-neutron (2:10.0.3~dev26-0ubuntu1) UNRELEASED; urgency=medium
+neutron (2:10.0.3-0ubuntu1) UNRELEASED; urgency=medium
 
   * New upstream version.
   * d/p/Update-the-host_id-for-network-router_gateway-interf.patch: Dropped.
     Fixed upstream.
   * d/p/flake8-legacy.patch: Rebased.
+  * New stable point release for OpenStack Ocata (LP: #1718730).
 
- -- Corey Bryant <corey.bryant@canonical.com>  Fri, 08 Sep 2017 16:20:50 -0400
+ -- Corey Bryant <corey.bryant@canonical.com>  Thu, 21 Sep 2017 13:39:50 -0400
 
 neutron (2:10.0.2-0ubuntu1.1) zesty; urgency=medium
 
