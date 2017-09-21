@@ -44,12 +44,7 @@ function load_conf_hook {
 # Tweak gate configuration for our rally scenarios
 function load_rc_for_rally {
     for file in $(ls $RALLY_EXTRA_DIR/*.setup); do
-        tmpfile=$(tempfile)
-        config=$(cat $file)
-        echo "[[local|localrc]]" > $tmpfile
-        $DSCONF setlc_raw $tmpfile "$config"
-        $DSCONF merge_lc $LOCAL_CONF $tmpfile
-        rm -f $tmpfile
+        $DSCONF merge_lc $LOCAL_CONF $file
     done
 }
 
@@ -98,6 +93,8 @@ case $VENV in
     if [[ "$VENV" =~ "dsvm-scenario" ]]; then
         load_conf_hook iptables_verify
         load_rc_hook ubuntu_image
+        # bug/1662109
+        export DEVSTACK_GATE_TEMPEST_REGEX="^(?!.*(?:neutron\.tests\.tempest\.scenario\.test_qos.*))^neutron\.tests\.tempest\.scenario\."
     fi
     if [[ "$VENV" =~ "pecan" ]]; then
         load_conf_hook pecan

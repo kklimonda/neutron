@@ -1,21 +1,6 @@
 CHANGES
 =======
 
-* Make use of -w argument for iptables calls
-* Imported Translations from Zanata
-* DHCP provisioning block only on port addr update
-* Match load_rc_for_rally logic to load_rc_hook
-* Make HA deletion attempt on RouterNotFound race
-* Prioritize tox environment executables for fullstack/functional tests
-* Linuxbridge agent: detect existing IP on bridge
-* Stop logging versions on every agent update
-* Warn the admin of a potential OVS firewall_driver misconfiguration
-* Enable QoS scenario tests
-* Enforce ethertype with IPv6 integer protocols
-* Fix test_keepalived_ipv6_support for Keepalived v1.2.20
-* tests: don't set description in test_blank_update_clears_association
-* Don't raise exception if TC device doesn't exist
-
 10.0.3
 ------
 
