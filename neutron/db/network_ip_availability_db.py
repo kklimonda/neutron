@@ -17,7 +17,6 @@ import netaddr
 import six
 from sqlalchemy import func
 
-from neutron.db import api as db_api
 import neutron.db.models_v2 as mod
 
 NETWORK_ID = 'network_id'
@@ -85,7 +84,6 @@ class IpAvailabilityMixin(object):
         return net_ip_availabilities
 
     @classmethod
-    @db_api.context_manager.reader
     def _build_network_used_ip_query(cls, context, filters):
         # Generate a query to gather network/subnet/used_ips.
         # Ensure query is tolerant of missing child table data (outerjoins)
@@ -102,7 +100,6 @@ class IpAvailabilityMixin(object):
         return cls._adjust_query_for_filters(query, filters)
 
     @classmethod
-    @db_api.context_manager.reader
     def _build_total_ips_query(cls, context, filters):
         query = context.session.query()
         query = query.add_columns(*cls.total_ips_columns)

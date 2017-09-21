@@ -15,50 +15,23 @@
 
 import functools
 
+import netaddr
 from neutron_lib.db import model_base
 from neutron_lib import exceptions
 from oslo_config import cfg
 import oslo_i18n
 from oslo_log import log as logging
+from oslo_policy import policy as oslo_policy
 from oslo_serialization import jsonutils
 from six.moves.urllib import parse
 from webob import exc
 
-from neutron._i18n import _
-from neutron.api import extensions
+from neutron._i18n import _, _LW
 from neutron.common import constants
 from neutron import wsgi
 
 
 LOG = logging.getLogger(__name__)
-
-
-def ensure_if_match_supported():
-    """Raises exception if 'if-match' revision matching unsupported."""
-    if 'revision-if-match' in (extensions.PluginAwareExtensionManager.
-                               get_instance().extensions):
-        return
-    msg = _("This server does not support constraining operations based on "
-            "revision numbers")
-    raise exceptions.BadRequest(resource='if-match', msg=msg)
-
-
-def check_request_for_revision_constraint(request):
-    """Parses, verifies, and returns a constraint from a request."""
-    revision_number = None
-    for e in getattr(request.if_match, 'etags', []):
-        if e.startswith('revision_number='):
-            if revision_number is not None:
-                msg = _("Multiple revision_number etags are not supported.")
-                raise exceptions.BadRequest(resource='if-match', msg=msg)
-            ensure_if_match_supported()
-            try:
-                revision_number = int(e.split('revision_number=')[1])
-            except ValueError:
-                msg = _("Revision number etag must be in the format of "
-                        "revision_number=<int>")
-                raise exceptions.BadRequest(resource='if-match', msg=msg)
-    return revision_number
 
 
 def get_filters(request, attr_info, skips=None):
@@ -99,7 +72,7 @@ def get_previous_link(request, items, id_key):
         marker = items[0][id_key]
         params['marker'] = marker
     params['page_reverse'] = True
-    return "%s?%s" % (prepare_url(request.path_url), parse.urlencode(params))
+    return "%s?%s" % (request.path_url, parse.urlencode(params))
 
 
 def get_next_link(request, items, id_key):
@@ -109,20 +82,7 @@ def get_next_link(request, items, id_key):
         marker = items[-1][id_key]
         params['marker'] = marker
     params.pop('page_reverse', None)
-    return "%s?%s" % (prepare_url(request.path_url), parse.urlencode(params))
-
-
-def prepare_url(orig_url):
-    """Takes a link and swaps in network_link_prefix if set."""
-    prefix = cfg.CONF.network_link_prefix
-    # Copied directly from nova/api/openstack/common.py
-    if not prefix:
-        return orig_url
-    url_parts = list(parse.urlsplit(orig_url))
-    prefix_parts = list(parse.urlsplit(prefix))
-    url_parts[0:2] = prefix_parts[0:2]
-    url_parts[2] = prefix_parts[2] + url_parts[2]
-    return parse.urlunsplit(url_parts).rstrip('/')
+    return "%s?%s" % (request.path_url, parse.urlencode(params))
 
 
 def get_limit_and_marker(request):
@@ -153,8 +113,8 @@ def _get_pagination_max_limit():
             if max_limit == 0:
                 raise ValueError()
         except ValueError:
-            LOG.warning("Invalid value for pagination_max_limit: %s. It "
-                        "should be an integer greater to 0",
+            LOG.warning(_LW("Invalid value for pagination_max_limit: %s. It "
+                            "should be an integer greater to 0"),
                         cfg.CONF.pagination_max_limit)
     return max_limit
 
@@ -427,8 +387,8 @@ def convert_exception_to_http_exc(e, faults, language):
         e.body = body
         e.content_type = kwargs['content_type']
         return e
-    faults_tuple = tuple(faults.keys()) + (exceptions.NeutronException,)
-    if isinstance(e, faults_tuple):
+    if isinstance(e, (exceptions.NeutronException, netaddr.AddrFormatError,
+                      oslo_policy.PolicyNotAuthorized)):
         for fault in faults:
             if isinstance(e, fault):
                 mapped_exc = faults[fault]

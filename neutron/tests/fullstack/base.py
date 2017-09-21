@@ -26,7 +26,6 @@ from neutron.tests.unit import testlib_api
 # This is the directory from which infra fetches log files for fullstack tests
 DEFAULT_LOG_DIR = os.path.join(helpers.get_test_log_path(),
                                'dsvm-fullstack-logs')
-ROOTDIR = os.path.dirname(__file__)
 
 
 class BaseFullStackTestCase(testlib_api.MySQLTestCaseMixin,
@@ -57,10 +56,6 @@ class BaseFullStackTestCase(testlib_api.MySQLTestCaseMixin,
         # since the latter starts services that may rely on generated port
         # numbers
         tools.reset_random_seed()
-
-        # configure test runner to use rootwrap
-        self.setup_rootwrap()
-
         self.environment = environment
         self.environment.test_name = self.get_name()
         self.useFixture(self.environment)

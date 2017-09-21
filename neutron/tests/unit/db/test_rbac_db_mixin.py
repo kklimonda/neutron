@@ -15,10 +15,11 @@
 
 
 import mock
-from neutron_lib.callbacks import events
 from neutron_lib import constants
-from neutron_lib import context
+import six
 
+from neutron.callbacks import events
+from neutron import context
 from neutron.db.db_base_plugin_v2 import NeutronDbPluginV2 as db_plugin_v2
 from neutron.extensions import rbac as ext_rbac
 from neutron.tests.unit.db import test_db_base_plugin_v2 as test_plugin
@@ -67,7 +68,7 @@ class NetworkRbacTestcase(test_plugin.NeutronDbPluginV2TestCase):
                                                       update_policy)
 
             policy['rbac_policy']['target_tenant'] = new_target
-            for k, v in policy['rbac_policy'].items():
+            for k, v in six.iteritems(policy['rbac_policy']):
                 self.assertEqual(netrbac2[k], v)
 
     def test_delete_networkrbac_in_use_fail(self):

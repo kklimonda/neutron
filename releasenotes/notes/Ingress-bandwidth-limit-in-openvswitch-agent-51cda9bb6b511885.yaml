@@ -1,3 +1,0 @@
----
-features:
-  - The openvswitch L2 agent now supports bi-directional bandwidth limiting.

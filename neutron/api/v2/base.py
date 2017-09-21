@@ -17,18 +17,20 @@ import collections
 import copy
 
 import netaddr
-from neutron_lib.api import attributes
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import registry
 from neutron_lib import exceptions
 from oslo_log import log as logging
 from oslo_policy import policy as oslo_policy
 from oslo_utils import excutils
+from oslo_utils import strutils
+import six
 import webob.exc
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE, _LI
 from neutron.api import api_common
+from neutron.api.v2 import attributes
 from neutron.api.v2 import resource as wsgi_resource
+from neutron.callbacks import events
+from neutron.callbacks import registry
 from neutron.common import constants as n_const
 from neutron.common import exceptions as n_exc
 from neutron.common import rpc as n_rpc
@@ -125,8 +127,8 @@ class Controller(object):
                     _("Native pagination depend on native sorting")
                 )
             if not self._allow_sorting:
-                LOG.info("Allow sorting is enabled because native "
-                         "pagination requires native sorting")
+                LOG.info(_LI("Allow sorting is enabled because native "
+                             "pagination requires native sorting"))
                 self._allow_sorting = True
         self.parent = parent
         if parent:
@@ -144,7 +146,7 @@ class Controller(object):
                                                          self._resource)
 
     def _get_primary_key(self, default_primary_key='id'):
-        for key, value in self._attr_info.items():
+        for key, value in six.iteritems(self._attr_info):
             if value.get('primary_key', False):
                 return key
         return default_primary_key
@@ -214,7 +216,7 @@ class Controller(object):
     def _filter_attributes(self, data, fields_to_strip=None):
         if not fields_to_strip:
             return data
-        return dict(item for item in data.items()
+        return dict(item for item in six.iteritems(data)
                     if (item[0] not in fields_to_strip))
 
     def _do_field_list(self, original_fields):
@@ -419,8 +421,8 @@ class Controller(object):
                     except Exception:
                         # broad catch as our only purpose is to log the
                         # exception
-                        LOG.exception("Unable to undo add for "
-                                      "%(resource)s %(id)s",
+                        LOG.exception(_LE("Unable to undo add for "
+                                          "%(resource)s %(id)s"),
                                       {'resource': self._resource,
                                        'id': obj['id']})
                 # TODO(salvatore-orlando): The object being processed when the
@@ -485,7 +487,7 @@ class Controller(object):
         def notify(create_result):
             # Ensure usage trackers for all resources affected by this API
             # operation are marked as dirty
-            with db_api.context_manager.writer.using(request.context):
+            with request.context.session.begin():
                 # Commit the reservation(s)
                 for reservation in reservations:
                     quota.QUOTAS.commit_reservation(
@@ -574,13 +576,7 @@ class Controller(object):
                            pluralized=self._collection)
         except oslo_policy.PolicyNotAuthorized:
             # To avoid giving away information, pretend that it
-            # doesn't exist if policy does not authorize SHOW
-            with excutils.save_and_reraise_exception() as ctxt:
-                if not policy.check(request.context,
-                                    self._plugin_handlers[self.SHOW],
-                                    obj,
-                                    pluralized=self._collection):
-                    ctxt.reraise = False
+            # doesn't exist
             msg = _('The resource could not be found.')
             raise webob.exc.HTTPNotFound(msg)
 
@@ -624,7 +620,7 @@ class Controller(object):
         # Load object to check authz
         # but pass only attributes in the original body and required
         # by the policy engine to the policy 'brain'
-        field_list = [name for (name, value) in self._attr_info.items()
+        field_list = [name for (name, value) in six.iteritems(self._attr_info)
                       if (value.get('required_by_policy') or
                           value.get('primary_key') or
                           'default' not in value)]
@@ -645,13 +641,13 @@ class Controller(object):
                            orig_obj,
                            pluralized=self._collection)
         except oslo_policy.PolicyNotAuthorized:
-            # To avoid giving away information, pretend that it
-            # doesn't exist if policy does not authorize SHOW
             with excutils.save_and_reraise_exception() as ctxt:
-                if not policy.check(request.context,
-                                    self._plugin_handlers[self.SHOW],
-                                    orig_obj,
-                                    pluralized=self._collection):
+                # If a tenant is modifying its own object, it's safe to return
+                # a 403. Otherwise, pretend that it doesn't exist to avoid
+                # giving away information.
+                orig_obj_tenant_id = orig_obj.get("tenant_id")
+                if (request.context.tenant_id != orig_obj_tenant_id or
+                    orig_obj_tenant_id is None):
                     ctxt.reraise = False
             msg = _('The resource could not be found.')
             raise webob.exc.HTTPNotFound(msg)
@@ -692,7 +688,8 @@ class Controller(object):
         if not body:
             raise webob.exc.HTTPBadRequest(_("Resource body required"))
 
-        LOG.debug("Request body: %(body)s", {'body': body})
+        LOG.debug("Request body: %(body)s",
+                  {'body': strutils.mask_password(body)})
         try:
             if collection in body:
                 if not allow_bulk:
@@ -715,21 +712,19 @@ class Controller(object):
             msg = _("Unable to find '%s' in request body") % resource
             raise webob.exc.HTTPBadRequest(msg)
 
-        attr_ops = attributes.AttributeInfo(attr_info)
-        attr_ops.populate_project_id(context, res_dict, is_create)
-        attributes.populate_project_info(attr_info)
-        attr_ops.verify_attributes(res_dict)
+        attributes.populate_tenant_id(context, res_dict, attr_info, is_create)
+        attributes.verify_attributes(res_dict, attr_info)
 
         if is_create:  # POST
-            attr_ops.fill_post_defaults(
-                res_dict, exc_cls=webob.exc.HTTPBadRequest)
+            attributes.fill_default_value(attr_info, res_dict,
+                                          webob.exc.HTTPBadRequest)
         else:  # PUT
-            for attr, attr_vals in attr_info.items():
+            for attr, attr_vals in six.iteritems(attr_info):
                 if attr in res_dict and not attr_vals['allow_put']:
                     msg = _("Cannot update read-only attribute %s") % attr
                     raise webob.exc.HTTPBadRequest(msg)
 
-        attr_ops.convert_values(res_dict, exc_cls=webob.exc.HTTPBadRequest)
+        attributes.convert_value(attr_info, res_dict, webob.exc.HTTPBadRequest)
         return body
 
     def _validate_network_tenant_ownership(self, request, resource_item):

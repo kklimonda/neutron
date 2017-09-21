@@ -13,8 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import copy
-
 from neutron.agent.common import ovs_lib
 
 
@@ -49,9 +47,3 @@ class OVSBridgeCookieMixin(object):
         if self._default_cookie in self._reserved_cookies:
             self._reserved_cookies.remove(self._default_cookie)
         super(OVSBridgeCookieMixin, self).set_agent_uuid_stamp(val)
-
-    def clone(self):
-        '''Used by OVSCookieBridge, can be overridden by subclasses if a
-        behavior different from copy.copy is needed.
-        '''
-        return copy.copy(self)

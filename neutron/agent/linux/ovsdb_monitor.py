@@ -15,6 +15,7 @@
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 
+from neutron._i18n import _LE
 from neutron.agent.linux import async_process
 from neutron.agent.ovsdb import api as ovsdb
 from neutron.agent.ovsdb.native import helpers
@@ -80,7 +81,7 @@ class SimpleInterfaceMonitor(OvsdbMonitor):
         temporary if respawn_interval is set.
         """
         if not self.is_active():
-            LOG.error("Interface monitor is not active")
+            LOG.error(_LE("Interface monitor is not active"))
         else:
             self.process_events()
         return bool(self.new_events['added'] or self.new_events['removed'])

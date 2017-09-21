@@ -27,9 +27,8 @@ class FakeRouter(object):
 class TestPrefixDelegation(tests_base.DietTestCase):
     def test_remove_router(self):
         l3_agent = mock.Mock()
-        router_id = 1
-        l3_agent.pd.routers = {router_id:
-                               pd.get_router_entry(None, True)}
+        router_id = '1'
+        l3_agent.pd.routers = {router_id: pd.get_router_entry(None)}
         pd.remove_router(None, None, l3_agent, router=FakeRouter(router_id))
         self.assertTrue(l3_agent.pd.delete_router_pd.called)
         self.assertEqual({}, l3_agent.pd.routers)
@@ -93,23 +92,3 @@ class TestPrefixDelegation(tests_base.DietTestCase):
         with mock.patch.object(pd.LOG, 'exception') as log:
             pd.update_router(None, None, l3_agent, router=router)
             self.assertTrue(log.called)
-
-    def test_remove_stale_ri_ifname(self):
-        pd_info_1 = mock.Mock()
-        pd_info_1.ri_ifname = 'STALE'
-        pd_info_2 = mock.Mock()
-        pd_info_2.ri_ifname = 'NOT_STALE'
-        router = {
-            'subnets': {
-                'FAKE_SUBNET_ID1': pd_info_1,
-                'FAKE_SUBNET_ID2': pd_info_2}}
-
-        class FakePD(pd.PrefixDelegation):
-            def __init__(self, router):
-                self.routers = {'FAKE_ROUTER_ID': router}
-
-        fake_pd = FakePD(router)
-        fake_pd._delete_pd = mock.Mock()
-        fake_pd.remove_stale_ri_ifname('FAKE_ROUTER_ID', 'STALE')
-        fake_pd._delete_pd.assert_called_with(router, pd_info_1)
-        self.assertEqual(len(router['subnets'].keys()), 1)

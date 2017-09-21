@@ -27,5 +27,6 @@ class ExtraDhcpOptDbObjectTestCase(obj_test_base.BaseDbObjectTestCase,
 
     def setUp(self):
         super(ExtraDhcpOptDbObjectTestCase, self).setUp()
-        self.update_obj_fields(
-            {'port_id': lambda: self._create_test_port_id()})
+        self._create_test_network()
+        self._create_test_port(self._network)
+        self.update_obj_fields({'port_id': self._port['id']})

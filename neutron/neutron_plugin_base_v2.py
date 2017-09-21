@@ -22,12 +22,13 @@ methods that needs to be implemented by a v2 Neutron Plug-in.
 
 import abc
 
-from neutron_lib.services import base as base_services
 import six
+
+from neutron import worker as neutron_worker
 
 
 @six.add_metaclass(abc.ABCMeta)
-class NeutronPluginBaseV2(base_services.WorkerBase):
+class NeutronPluginBaseV2(neutron_worker.WorkerSupportServiceMixin):
 
     @abc.abstractmethod
     def create_subnet(self, context, subnet):

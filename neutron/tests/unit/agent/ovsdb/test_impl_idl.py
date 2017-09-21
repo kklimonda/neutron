@@ -15,8 +15,7 @@
 import mock
 import testtools
 
-from ovsdbapp import exceptions
-
+from neutron.agent.ovsdb import api
 from neutron.agent.ovsdb import impl_idl
 from neutron.tests import base
 
@@ -26,7 +25,7 @@ class TransactionTestCase(base.BaseTestCase):
         transaction = impl_idl.NeutronOVSDBTransaction(mock.sentinel,
                                                        mock.Mock(), 1)
         with self.assert_max_execution_time(10):
-            with testtools.ExpectedException(exceptions.TimeoutException):
+            with testtools.ExpectedException(api.TimeoutException):
                 transaction.commit()
 
     def test_post_commit_does_not_raise_exception(self):

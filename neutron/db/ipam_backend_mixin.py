@@ -18,7 +18,6 @@ import copy
 import itertools
 
 import netaddr
-from neutron_lib.api.definitions import portbindings
 from neutron_lib.api import validators
 from neutron_lib import constants as const
 from neutron_lib import exceptions as exc
@@ -28,23 +27,21 @@ from oslo_log import log as logging
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import exc as orm_exc
 
-from neutron._i18n import _
+from neutron._i18n import _, _LI
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
 from neutron.common import utils as common_utils
-from neutron.db import _model_query as model_query
 from neutron.db import _utils as db_utils
-from neutron.db import api as db_api
 from neutron.db import db_base_plugin_common
 from neutron.db.models import segment as segment_model
 from neutron.db.models import subnet_service_type as sst_model
 from neutron.db import models_v2
 from neutron.extensions import ip_allocation as ipa
+from neutron.extensions import portbindings
 from neutron.extensions import segment
 from neutron.ipam import exceptions as ipam_exceptions
 from neutron.ipam import utils as ipam_utils
-from neutron.objects import network as network_obj
 from neutron.objects import subnet as subnet_obj
 from neutron.services.segments import exceptions as segment_exc
 
@@ -72,8 +69,8 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                 ip_range_pools.append(netaddr.IPRange(ip_pool['start'],
                                                       ip_pool['end']))
             except netaddr.AddrFormatError:
-                LOG.info("Found invalid IP address in pool: "
-                         "%(start)s - %(end)s:",
+                LOG.info(_LI("Found invalid IP address in pool: "
+                             "%(start)s - %(end)s:"),
                          {'start': ip_pool['start'],
                           'end': ip_pool['end']})
                 raise n_exc.InvalidAllocationPool(pool=ip_pool)
@@ -165,16 +162,17 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         del s["dns_nameservers"]
         return new_dns_addr_list
 
-    @db_api.context_manager.writer
     def _update_subnet_allocation_pools(self, context, subnet_id, s):
-        subnet_obj.IPAllocationPool.delete_objects(context,
-                                                   subnet_id=subnet_id)
+        context.session.query(models_v2.IPAllocationPool).filter_by(
+            subnet_id=subnet_id).delete()
         pools = [(netaddr.IPAddress(p.first, p.version).format(),
                   netaddr.IPAddress(p.last, p.version).format())
                  for p in s['allocation_pools']]
-        for p in pools:
-            subnet_obj.IPAllocationPool(context, start=p[0], end=p[1],
-                                        subnet_id=subnet_id).create()
+        new_pools = [models_v2.IPAllocationPool(first_ip=p[0],
+                                                last_ip=p[1],
+                                                subnet_id=subnet_id)
+                     for p in pools]
+        context.session.add_all(new_pools)
 
         # Gather new pools for result
         result_pools = [{'start': p[0], 'end': p[1]} for p in pools]
@@ -241,14 +239,14 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
             if ((netaddr.IPSet([subnet.cidr]) & new_subnet_ipset) and
                 subnet.cidr != constants.PROVISIONAL_IPV6_PD_PREFIX):
                 # don't give out details of the overlapping subnet
-                err_msg = ("Requested subnet with cidr: %(cidr)s for "
-                           "network: %(network_id)s overlaps with another "
-                           "subnet" %
+                err_msg = (_("Requested subnet with cidr: %(cidr)s for "
+                             "network: %(network_id)s overlaps with another "
+                             "subnet") %
                            {'cidr': new_subnet_cidr,
                             'network_id': network.id})
-                LOG.info("Validation for CIDR: %(new_cidr)s failed - "
-                         "overlaps with subnet %(subnet_id)s "
-                         "(CIDR: %(cidr)s)",
+                LOG.info(_LI("Validation for CIDR: %(new_cidr)s failed - "
+                             "overlaps with subnet %(subnet_id)s "
+                             "(CIDR: %(cidr)s)"),
                          {'new_cidr': new_subnet_cidr,
                           'subnet_id': subnet.id,
                           'cidr': subnet.cidr})
@@ -284,12 +282,12 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
             end_ip = netaddr.IPAddress(ip_pool.last, ip_pool.version)
             if (start_ip.version != subnet.version or
                     end_ip.version != subnet.version):
-                LOG.info("Specified IP addresses do not match "
-                         "the subnet IP version")
+                LOG.info(_LI("Specified IP addresses do not match "
+                             "the subnet IP version"))
                 raise n_exc.InvalidAllocationPool(pool=ip_pool)
             if start_ip < subnet_first_ip or end_ip > subnet_last_ip:
-                LOG.info("Found pool larger than subnet "
-                         "CIDR:%(start)s - %(end)s",
+                LOG.info(_LI("Found pool larger than subnet "
+                             "CIDR:%(start)s - %(end)s"),
                          {'start': start_ip, 'end': end_ip})
                 raise n_exc.OutOfBoundsAllocationPool(
                     pool=ip_pool,
@@ -309,13 +307,21 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                 if ip_sets[l_cursor] & ip_sets[r_cursor]:
                     l_range = ip_ranges[l_cursor]
                     r_range = ip_ranges[r_cursor]
-                    LOG.info("Found overlapping ranges: %(l_range)s and "
-                             "%(r_range)s",
+                    LOG.info(_LI("Found overlapping ranges: %(l_range)s and "
+                                 "%(r_range)s"),
                              {'l_range': l_range, 'r_range': r_range})
                     raise n_exc.OverlappingAllocationPools(
                         pool_1=l_range,
                         pool_2=r_range,
                         subnet_cidr=subnet_cidr)
+
+    def _validate_max_ips_per_port(self, fixed_ip_list, device_owner):
+        if common_utils.is_port_trusted({'device_owner': device_owner}):
+            return
+
+        if len(fixed_ip_list) > cfg.CONF.max_fixed_ips_per_port:
+            msg = _('Exceeded maximum amount of fixed ips per port')
+            raise exc.InvalidInput(error_message=msg)
 
     def _validate_segment(self, context, network_id, segment_id):
         query = context.session.query(models_v2.Subnet.segment_id)
@@ -326,8 +332,10 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                 network_id=network_id)
 
         if segment_id:
-            segment = network_obj.NetworkSegment.get_object(context,
-                                                            id=segment_id)
+            query = context.session.query(segment_model.NetworkSegment)
+            query = query.filter(
+                segment_model.NetworkSegment.id == segment_id)
+            segment = query.one()
             if segment.network_id != network_id:
                 raise segment_exc.NetworkIdsDontMatch(
                     subnet_network=network_id,
@@ -413,6 +421,8 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
                                 if ip.get('delete_subnet'))
         ips = [ip for ip in new_ips
                if ip.get('subnet_id') not in delete_subnet_ids]
+        # the new_ips contain all of the fixed_ips that are to be updated
+        self._validate_max_ips_per_port(ips, device_owner)
 
         add_ips, prev_ips, remove_candidates = [], [], []
 
@@ -580,7 +590,7 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         return fixed_ip_list
 
     def _query_subnets_on_network(self, context, network_id):
-        query = model_query.get_collection_query(context, models_v2.Subnet)
+        query = self._get_collection_query(context, models_v2.Subnet)
         return query.filter(models_v2.Subnet.network_id == network_id)
 
     def _query_filter_service_subnets(self, query, service_type):
@@ -646,15 +656,14 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         # implementations.
         return host and validators.is_attr_set(host)
 
-    def _ipam_get_subnets(self, context, network_id, host, service_type=None,
-                          fixed_configured=False):
+    def _ipam_get_subnets(self, context, network_id, host, service_type=None):
         """Return eligible subnets
 
         If no eligible subnets are found, determine why and potentially raise
         an appropriate error.
         """
-        subnets = self._find_candidate_subnets(context, network_id, host,
-                                               service_type, fixed_configured)
+        subnets = self._find_candidate_subnets(
+            context, network_id, host, service_type)
         if subnets:
             subnet_dicts = [self._make_subnet_dict(subnet, context=context)
                             for subnet in subnets]
@@ -687,20 +696,13 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
 
         raise ipam_exceptions.IpAddressGenerationFailureNoMatchingSubnet()
 
-    def _find_candidate_subnets(self, context, network_id, host, service_type,
-                                fixed_configured):
+    def _find_candidate_subnets(self, context, network_id, host, service_type):
         """Find canditate subnets for the network, host, and service_type"""
         query = self._query_subnets_on_network(context, network_id)
         query = self._query_filter_service_subnets(query, service_type)
 
         # Select candidate subnets and return them
         if not self.is_host_set(host):
-            if fixed_configured:
-                # If fixed_ips in request and host is not known all subnets on
-                # the network are candidates. Host/Segment will be validated
-                # on port update with binding:host_id set. Allocation _cannot_
-                # be deferred as requested fixed_ips would then be lost.
-                return query.all()
             # If the host isn't known, we can't allocate on a routed network.
             # So, exclude any subnets attached to segments.
             return self._query_exclude_subnets_on_segments(query).all()
@@ -780,5 +782,4 @@ class IpamBackendMixin(db_base_plugin_common.DbBasePluginCommon):
         context.session.expire(old_port_db, ['fixed_ips'])
         ips = self.allocate_ips_for_port_and_store(
             context, {'port': port_copy}, port_copy['id'])
-        getattr(old_port_db, 'fixed_ips')  # refresh relationship before return
         return self.Changes(add=ips, original=[], remove=[])

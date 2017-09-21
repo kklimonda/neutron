@@ -12,21 +12,25 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api.definitions import network as net_def
 from neutron_lib import constants
 from oslo_utils import uuidutils
 
 from neutron._i18n import _
-from neutron.db import _resource_extend as resource_extend
+from neutron.api.v2 import attributes as attr
+from neutron.common import _deprecate
 from neutron.db import _utils as db_utils
 from neutron.db import api as db_api
+from neutron.db import db_base_plugin_v2
+from neutron.db.models import address_scope as address_scope_model
 from neutron.extensions import address_scope as ext_address_scope
 from neutron.objects import address_scope as obj_addr_scope
 from neutron.objects import base as base_obj
 from neutron.objects import subnetpool as subnetpool_obj
 
 
-@resource_extend.has_resource_extenders
+_deprecate._moved_global('AddressScope', new_module=address_scope_model)
+
+
 class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
     """Mixin class to add address scope to db_base_plugin_v2."""
 
@@ -118,9 +122,7 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
             address_scope = self._get_address_scope(context, id)
             address_scope.delete()
 
-    @staticmethod
-    @resource_extend.extends([net_def.COLLECTION_NAME])
-    def _extend_network_dict_address_scope(network_res, network_db):
+    def _extend_network_dict_address_scope(self, network_res, network_db):
         network_res[ext_address_scope.IPV4_ADDRESS_SCOPE] = None
         network_res[ext_address_scope.IPV6_ADDRESS_SCOPE] = None
         subnetpools = {subnet.subnetpool for subnet in network_db.subnets
@@ -135,3 +137,9 @@ class AddressScopeDbMixin(ext_address_scope.AddressScopePluginBase):
             if subnetpool['ip_version'] == constants.IP_VERSION_6:
                 network_res[ext_address_scope.IPV6_ADDRESS_SCOPE] = as_id
         return network_res
+
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+        attr.NETWORKS, ['_extend_network_dict_address_scope'])
+
+
+_deprecate._MovedGlobals()

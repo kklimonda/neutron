@@ -15,9 +15,6 @@
 
 import mock
 
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources
 from oslo_config import cfg
 
 from neutron import service
@@ -58,15 +55,3 @@ class TestRunWsgiApp(base.BaseTestCase):
 
     def test_api_workers_defined(self):
         self._test_api_workers(42, 42)
-
-    def test_start_all_workers(self):
-        cfg.CONF.set_override('api_workers', 0)
-        mock.patch.object(service, '_get_rpc_workers').start()
-        mock.patch.object(service, '_get_plugins_workers').start()
-        mock.patch.object(service, '_start_workers').start()
-
-        callback = mock.Mock()
-        registry.subscribe(callback, resources.PROCESS, events.AFTER_SPAWN)
-        service.start_all_workers()
-        callback.assert_called_once_with(
-            resources.PROCESS, events.AFTER_SPAWN, mock.ANY)

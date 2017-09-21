@@ -17,9 +17,6 @@ import functools
 import signal
 
 import eventlet
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources
 from neutron_lib import constants as n_const
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -27,7 +24,10 @@ from oslo_utils import netutils
 import six
 from stevedore import driver
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
 from neutron.common import constants as l3_constants
 from neutron.common import utils
 
@@ -65,9 +65,6 @@ class PrefixDelegation(object):
                            events.AFTER_DELETE)
         self._get_sync_data()
 
-    def _is_pd_master_router(self, router):
-        return router['master']
-
     @utils.synchronized("l3-agent-pd")
     def enable_subnet(self, router_id, subnet_id, prefix, ri_ifname, mac):
         router = self.routers.get(router_id)
@@ -83,12 +80,10 @@ class PrefixDelegation(object):
         if pd_info.sync:
             pd_info.mac = mac
             pd_info.old_prefix = prefix
-        elif self._is_pd_master_router(router):
+        else:
             self._add_lla(router, pd_info.get_bind_lla_with_mask())
 
     def _delete_pd(self, router, pd_info):
-        if not self._is_pd_master_router(router):
-            return
         self._delete_lla(router, pd_info.get_bind_lla_with_mask())
         if pd_info.client_started:
             pd_info.driver.disable(self.pmon, router['ns_name'])
@@ -103,11 +98,10 @@ class PrefixDelegation(object):
         if not pd_info:
             return
         self._delete_pd(router, pd_info)
-        if self._is_pd_master_router(router):
-            prefix_update[subnet_id] = l3_constants.PROVISIONAL_IPV6_PD_PREFIX
-            LOG.debug("Update server with prefixes: %s", prefix_update)
-            self.notifier(self.context, prefix_update)
+        prefix_update[subnet_id] = l3_constants.PROVISIONAL_IPV6_PD_PREFIX
         del router['subnets'][subnet_id]
+        LOG.debug("Update server with prefixes: %s", prefix_update)
+        self.notifier(self.context, prefix_update)
 
     @utils.synchronized("l3-agent-pd")
     def update_subnet(self, router_id, subnet_id, prefix):
@@ -117,19 +111,16 @@ class PrefixDelegation(object):
             if pd_info and pd_info.old_prefix != prefix:
                 old_prefix = pd_info.old_prefix
                 pd_info.old_prefix = prefix
-                pd_info.prefix = prefix
                 return old_prefix
 
     @utils.synchronized("l3-agent-pd")
     def add_gw_interface(self, router_id, gw_ifname):
         router = self.routers.get(router_id)
+        prefix_update = {}
         if not router:
             return
         router['gw_interface'] = gw_ifname
-        if not self._is_pd_master_router(router):
-            return
-        prefix_update = {}
-        for pd_info in six.itervalues(router['subnets']):
+        for subnet_id, pd_info in six.iteritems(router['subnets']):
             # gateway is added after internal router ports.
             # If a PD is being synced, and if the prefix is available,
             # send update if prefix out of sync; If not available,
@@ -150,10 +141,8 @@ class PrefixDelegation(object):
             self.notifier(self.context, prefix_update)
 
     def delete_router_pd(self, router):
-        if not self._is_pd_master_router(router):
-            return
         prefix_update = {}
-        for subnet_id, pd_info in router['subnets'].items():
+        for subnet_id, pd_info in six.iteritems(router['subnets']):
             self._delete_lla(router, pd_info.get_bind_lla_with_mask())
             if pd_info.client_started:
                 pd_info.driver.disable(self.pmon, router['ns_name'])
@@ -177,7 +166,7 @@ class PrefixDelegation(object):
         preserve_ips = []
         router = self.routers.get(router_id)
         if router is not None:
-            for pd_info in six.itervalues(router['subnets']):
+            for subnet_id, pd_info in router['subnets'].items():
                 preserve_ips.append(pd_info.get_bind_lla_with_mask())
         return preserve_ips
 
@@ -191,14 +180,10 @@ class PrefixDelegation(object):
     def remove_stale_ri_ifname(self, router_id, stale_ifname):
         router = self.routers.get(router_id)
         if router is not None:
-            subnet_to_delete = None
-            for subnet_id, pd_info in six.iteritems(router['subnets']):
+            for subnet_id, pd_info in router['subnets'].items():
                 if pd_info.ri_ifname == stale_ifname:
                     self._delete_pd(router, pd_info)
-                    subnet_to_delete = subnet_id
-                    break
-            if subnet_to_delete:
-                del router['subnets'][subnet_to_delete]
+                    del router['subnets'][subnet_id]
 
     @staticmethod
     def _get_lla(mac):
@@ -269,37 +254,16 @@ class PrefixDelegation(object):
         return False
 
     @utils.synchronized("l3-agent-pd")
-    def process_ha_state(self, router_id, master):
-        router = self.routers.get(router_id)
-        if router is None or router['master'] == master:
-            return
-
-        router['master'] = master
-        if master:
-            for pd_info in six.itervalues(router['subnets']):
-                bind_lla_with_mask = pd_info.get_bind_lla_with_mask()
-                self._add_lla(router, bind_lla_with_mask)
-        else:
-            for pd_info in six.itervalues(router['subnets']):
-                self._delete_lla(router, pd_info.get_bind_lla_with_mask())
-                if pd_info.client_started:
-                    pd_info.driver.disable(self.pmon,
-                                           router['ns_name'],
-                                           switch_over=True)
-                    pd_info.client_started = False
-
-    @utils.synchronized("l3-agent-pd")
     def process_prefix_update(self):
         LOG.debug("Processing IPv6 PD Prefix Update")
 
         prefix_update = {}
-        for router_id, router in self.routers.items():
-            if not (self._is_pd_master_router(router) and
-                    router['gw_interface']):
+        for router_id, router in six.iteritems(self.routers):
+            if not router['gw_interface']:
                 continue
 
             llas = None
-            for subnet_id, pd_info in router['subnets'].items():
+            for subnet_id, pd_info in six.iteritems(router['subnets']):
                 if pd_info.client_started:
                     prefix = pd_info.driver.get_prefix()
                     if prefix != pd_info.prefix:
@@ -315,15 +279,9 @@ class PrefixDelegation(object):
                         if not pd_info.driver:
                             pd_info.driver = self.pd_dhcp_driver(
                                 router_id, subnet_id, pd_info.ri_ifname)
-                        prefix = None
-                        if (pd_info.prefix !=
-                                l3_constants.PROVISIONAL_IPV6_PD_PREFIX):
-                            prefix = pd_info.prefix
-
                         pd_info.driver.enable(self.pmon, router['ns_name'],
                                               router['gw_interface'],
-                                              pd_info.bind_lla,
-                                              prefix)
+                                              pd_info.bind_lla)
                         pd_info.client_started = True
 
         if prefix_update:
@@ -347,8 +305,7 @@ class PrefixDelegation(object):
         for pd_info in sync_data:
             router_id = pd_info.router_id
             if not self.routers.get(router_id):
-                self.routers[router_id] = {'master': True,
-                                           'gw_interface': None,
+                self.routers[router_id] = {'gw_interface': None,
                                            'ns_name': None,
                                            'subnets': {}}
             new_pd_info = PDInfo(pd_info=pd_info)
@@ -365,9 +322,8 @@ def remove_router(resource, event, l3_agent, **kwargs):
     del l3_agent.pd.routers[router_id]
 
 
-def get_router_entry(ns_name, master):
-    return {'master': master,
-            'gw_interface': None,
+def get_router_entry(ns_name):
+    return {'gw_interface': None,
             'ns_name': ns_name,
             'subnets': {}}
 
@@ -377,14 +333,12 @@ def add_router(resource, event, l3_agent, **kwargs):
     added_router = kwargs['router']
     router = l3_agent.pd.routers.get(added_router.router_id)
     gw_ns_name = added_router.get_gw_ns_name()
-    master = added_router.is_router_master()
     if not router:
         l3_agent.pd.routers[added_router.router_id] = (
-            get_router_entry(gw_ns_name, master))
+            get_router_entry(gw_ns_name))
     else:
         # This will happen during l3 agent restart
         router['ns_name'] = gw_ns_name
-        router['master'] = master
 
 
 @utils.synchronized("l3-agent-pd")
@@ -392,8 +346,8 @@ def update_router(resource, event, l3_agent, **kwargs):
     updated_router = kwargs['router']
     router = l3_agent.pd.routers.get(updated_router.router_id)
     if not router:
-        LOG.exception("Router to be updated is not in internal routers "
-                      "list: %s", updated_router.router_id)
+        LOG.exception(_LE("Router to be updated is not in internal routers "
+                          "list: %s"), updated_router.router_id)
     else:
         router['ns_name'] = updated_router.get_gw_ns_name()
 

@@ -14,14 +14,14 @@
 # limitations under the License.
 
 import mock
-from neutron_lib.callbacks import events
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources
 from neutron_lib import constants as n_const
 from neutron_lib import exceptions as n_exc
 from neutron_lib.plugins import directory
 import testtools
 
+from neutron.callbacks import events
+from neutron.callbacks import registry
+from neutron.callbacks import resources
 from neutron.db import l3_db
 from neutron.db.models import l3 as l3_models
 from neutron.extensions import l3
@@ -199,14 +199,16 @@ class TestL3_NAT_dbonly_mixin(base.BaseTestCase):
         with testtools.ExpectedException(n_exc.ServicePortInUse):
             self.db.prevent_l3_port_deletion(mock.Mock(), None)
 
-    @mock.patch.object(directory, 'get_plugin')
-    def test_subscribe_address_scope_of_subnetpool(self, gp):
-        l3_db.L3RpcNotifierMixin()
+    @mock.patch.object(l3_db, '_notify_subnetpool_address_scope_update')
+    def test_subscribe_address_scope_of_subnetpool(self, notify):
+        l3_db.L3RpcNotifierMixin._subscribe_callbacks()
         registry.notify(resources.SUBNETPOOL_ADDRESS_SCOPE,
-                        events.AFTER_UPDATE, mock.ANY,
-                        context=mock.MagicMock(),
+                        events.AFTER_UPDATE, mock.ANY, context=mock.ANY,
                         subnetpool_id='fake_id')
-        self.assertTrue(gp.return_value.notify_routers_updated.called)
+        notify.assert_called_once_with(resources.SUBNETPOOL_ADDRESS_SCOPE,
+                                       events.AFTER_UPDATE, mock.ANY,
+                                       context=mock.ANY,
+                                       subnetpool_id='fake_id')
 
     def test__check_and_get_fip_assoc_with_extra_association_no_change(self):
         fip = {'extra_key': 'value'}
@@ -286,11 +288,3 @@ class L3_NAT_db_mixin(base.BaseTestCase):
                                 {'subnet_id': 'subnet-id',
                                  'ip_address': 'ip'}]}
         self._test_create_router(ext_gateway_info)
-
-    def test_add_router_interface_no_interface_info(self):
-        router_db = l3_models.Router(id='123')
-        with mock.patch.object(l3_db.L3_NAT_dbonly_mixin, '_get_router',
-                               return_value=router_db):
-            self.assertRaises(
-                n_exc.BadRequest,
-                self.db.add_router_interface, mock.Mock(), router_db.id)

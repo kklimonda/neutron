@@ -13,41 +13,39 @@
 import collections
 import copy
 import itertools
+import os.path
 import random
 
 import mock
 import netaddr
-from neutron_lib import context
 from neutron_lib import exceptions as n_exc
 from neutron_lib.utils import helpers
 from oslo_db import exception as obj_exc
 from oslo_db.sqlalchemy import utils as db_utils
 from oslo_utils import uuidutils
 from oslo_versionedobjects import base as obj_base
-from oslo_versionedobjects import exception
 from oslo_versionedobjects import fields as obj_fields
 from oslo_versionedobjects import fixture
 import testtools
 
 from neutron.common import constants
-from neutron.db import _model_query as model_query
+from neutron.common import utils
+from neutron import context
+from neutron.db import db_base_plugin_v2
+from neutron.db.models import external_net as ext_net_model
 from neutron.db.models import l3 as l3_model
 from neutron.db import standard_attr
 from neutron import objects
-from neutron.objects import agent
 from neutron.objects import base
 from neutron.objects import common_types
 from neutron.objects.db import api as obj_db_api
 from neutron.objects import exceptions as o_exc
 from neutron.objects import flavor
-from neutron.objects.logapi import event_types
 from neutron.objects import network as net_obj
 from neutron.objects import ports
-from neutron.objects.qos import policy as qos_policy
 from neutron.objects import rbac_db
 from neutron.objects import securitygroup
 from neutron.objects import subnet
-from neutron.objects import utils as obj_utils
 from neutron.tests import base as test_base
 from neutron.tests import tools
 from neutron.tests.unit.db import test_db_base_plugin_v2
@@ -376,19 +374,6 @@ class FakeNeutronObjectDictOfMiscValues(base.NeutronDbObject):
     }
 
 
-@obj_base.VersionedObjectRegistry.register_if(False)
-class FakeNeutronObjectListOfDictOfMiscValues(base.NeutronDbObject):
-    # Version 1.0: Initial version
-    VERSION = '1.0'
-
-    db_model = FakeModel
-
-    fields = {
-        'id': common_types.UUIDField(),
-        'list_of_dicts_field': common_types.ListOfDictOfMiscValuesField(),
-    }
-
-
 def get_random_dscp_mark():
     return random.choice(constants.VALID_DSCP_MARKS)
 
@@ -432,10 +417,6 @@ def get_random_dict():
     }
 
 
-def get_random_dicts_list():
-    return [get_random_dict() for _ in range(5)]
-
-
 def get_set_of_random_uuids():
     return {
         uuidutils.generate_uuid()
@@ -446,11 +427,9 @@ def get_set_of_random_uuids():
 # NOTE: The keys in this dictionary have alphabetic order.
 FIELD_TYPE_VALUE_GENERATOR_MAP = {
     common_types.DictOfMiscValuesField: get_random_dict,
-    common_types.ListOfDictOfMiscValuesField: get_random_dicts_list,
     common_types.DomainNameField: get_random_domain_name,
     common_types.DscpMarkField: get_random_dscp_mark,
     common_types.EtherTypeEnumField: tools.get_random_ether_type,
-    common_types.FloatingIPStatusEnumField: tools.get_random_floatingip_status,
     common_types.FlowDirectionEnumField: tools.get_random_flow_direction,
     common_types.IpamAllocationStatusEnumField: tools.get_random_ipam_status,
     common_types.IPNetworkField: tools.get_random_ip_network,
@@ -467,7 +446,6 @@ FIELD_TYPE_VALUE_GENERATOR_MAP = {
     common_types.SetOfUUIDsField: get_set_of_random_uuids,
     common_types.UUIDField: uuidutils.generate_uuid,
     common_types.VlanIdRangeField: tools.get_random_vlan,
-    event_types.SecurityEventField: tools.get_random_security_event,
     obj_fields.BooleanField: tools.get_random_boolean,
     obj_fields.DateTimeField: tools.get_random_datetime,
     obj_fields.DictOfStringsField: get_random_dict_of_strings,
@@ -517,10 +495,9 @@ class _BaseObjectTestCase(object):
         # neutron.objects.db.api from core plugin instance
         self.setup_coreplugin(self.CORE_PLUGIN)
         # make sure all objects are loaded and registered in the registry
-        objects.register_objects()
+        utils.import_modules_recursively(os.path.dirname(objects.__file__))
         self.context = context.get_admin_context()
         self._unique_tracker = collections.defaultdict(set)
-        self.locked_obj_fields = collections.defaultdict(set)
         self.db_objs = [
             self._test_class.db_model(**self.get_random_db_fields())
             for _ in range(3)
@@ -552,10 +529,6 @@ class _BaseObjectTestCase(object):
             self._test_class.db_model: self.db_objs,
             ObjectFieldsModel: [ObjectFieldsModel(**synthetic_obj_fields)]}
 
-    def _get_random_update_fields(self):
-        return self.get_updatable_fields(
-            self.get_random_object_fields(self._test_class))
-
     def get_random_object_fields(self, obj_cls=None):
         obj_cls = obj_cls or self._test_class
         fields = {}
@@ -564,9 +537,6 @@ class _BaseObjectTestCase(object):
             if field not in obj_cls.synthetic_fields:
                 generator = FIELD_TYPE_VALUE_GENERATOR_MAP[type(field_obj)]
                 fields[field] = get_value(generator, ip_version)
-        for k, v in self.locked_obj_fields.items():
-            if k in fields:
-                fields[k] = v
         for keys in obj_cls.unique_keys:
             keytup = tuple(keys)
             unique_values = tuple(fields[k] for k in keytup)
@@ -616,7 +586,6 @@ class _BaseObjectTestCase(object):
                     obj[k] = val
             if k in self.valid_field_filter:
                 self.valid_field_filter[k] = val
-            self.locked_obj_fields[k] = v() if callable(v) else v
 
     @classmethod
     def generate_object_keys(cls, obj_cls, field_names=None):
@@ -682,15 +651,12 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
             mock.patch.object(
                 rbac_db.RbacNeutronDbObjectMixin,
                 'is_shared_with_tenant', return_value=False).start()
-            mock.patch.object(
-                rbac_db.RbacNeutronDbObjectMixin,
-                'get_shared_with_tenant').start()
 
     def fake_get_object(self, context, model, **kwargs):
-        objs = self.model_map[model]
-        if not objs:
+        objects = self.model_map[model]
+        if not objects:
             return None
-        return [obj for obj in objs if obj['id'] == kwargs['id']][0]
+        return [obj for obj in objects if obj['id'] == kwargs['id']][0]
 
     def fake_get_objects(self, context, model, **kwargs):
         return self.model_map[model]
@@ -840,82 +806,6 @@ class BaseObjectIfaceTestCase(_BaseObjectTestCase, test_base.BaseTestCase):
             self.assertItemsEqual(
                 [get_obj_persistent_fields(obj) for obj in self.objs],
                 [get_obj_persistent_fields(obj) for obj in objs])
-
-    @mock.patch.object(obj_db_api, 'update_object', return_value={})
-    @mock.patch.object(obj_db_api, 'update_objects', return_value=0)
-    def test_update_objects_valid_fields(self, *mocks):
-        '''Test that a valid filter does not raise an error.'''
-        self._test_class.update_objects(
-            self.context, {},
-            **self.valid_field_filter)
-
-    def test_update_objects_invalid_fields(self):
-        with mock.patch.object(obj_db_api, 'update_objects'):
-            self.assertRaises(n_exc.InvalidInput,
-                              self._test_class.update_objects,
-                              self.context, {}, fake_field='xxx')
-
-    @mock.patch.object(obj_db_api, 'update_objects')
-    @mock.patch.object(obj_db_api, 'update_object', return_value={})
-    def test_update_objects_without_validate_filters(self, *mocks):
-            self._test_class.update_objects(
-                self.context, {'unknown_filter': 'new_value'},
-                validate_filters=False, unknown_filter='value')
-
-    def _prep_string_field(self):
-        self.filter_string_field = None
-        # find the first string field to use as string matching filter
-        for field in self.obj_fields[0]:
-            if isinstance(field, obj_fields.StringField):
-                self.filter_string_field = field
-                break
-
-        if self.filter_string_field is None:
-            self.skipTest('There is no string field in this object')
-
-    def test_get_objects_with_string_matching_filters_contains(self):
-        self._prep_string_field()
-
-        filter_dict_contains = {
-            self.filter_string_field: obj_utils.StringContains(
-                "random_thing")}
-
-        with mock.patch.object(
-                obj_db_api, 'get_objects',
-                side_effect=self.fake_get_objects):
-            res = self._test_class.get_objects(self.context,
-                                               **filter_dict_contains)
-            self.assertEqual([], res)
-
-    def test_get_objects_with_string_matching_filters_starts(self):
-        self._prep_string_field()
-
-        filter_dict_starts = {
-            self.filter_string_field: obj_utils.StringStarts(
-                "random_thing")
-        }
-
-        with mock.patch.object(
-                obj_db_api, 'get_objects',
-                side_effect=self.fake_get_objects):
-            res = self._test_class.get_objects(self.context,
-                                               **filter_dict_starts)
-            self.assertEqual([], res)
-
-    def test_get_objects_with_string_matching_filters_ends(self):
-        self._prep_string_field()
-
-        filter_dict_ends = {
-            self.filter_string_field: obj_utils.StringEnds(
-                "random_thing")
-        }
-
-        with mock.patch.object(
-                obj_db_api, 'get_objects',
-                side_effect=self.fake_get_objects):
-            res = self._test_class.get_objects(self.context,
-                                               **filter_dict_ends)
-            self.assertEqual([], res)
 
     def test_delete_objects(self):
         '''Test that delete_objects calls to underlying db_api.'''
@@ -1285,10 +1175,6 @@ class BaseObjectIfaceWithProjectIdTestCase(BaseObjectIfaceTestCase):
         self.assertEqual(set(['field2']), obj.obj_what_changed())
         self.assertEqual(tenant_id, obj.project_id)
 
-    def test_tenant_id_filter_added_when_project_id_present(self):
-        self._test_class.get_objects(
-            self.context, tenant_id=self.obj_fields[0]['project_id'])
-
 
 class BaseDbObjectMultipleForeignKeysTestCase(_BaseObjectTestCase,
                                               test_base.BaseTestCase):
@@ -1357,32 +1243,11 @@ class BaseObjectIfaceDictMiscValuesTestCase(_BaseObjectTestCase,
         self.assertEqual(misc_list, obj.dict_field['misc_list'])
 
 
-class BaseObjectIfaceListDictMiscValuesTestCase(_BaseObjectTestCase,
-                                                test_base.BaseTestCase):
-
-    _test_class = FakeNeutronObjectListOfDictOfMiscValues
-
-    def test_list_of_dict_of_misc_values(self):
-        obj_id = uuidutils.generate_uuid()
-        float_value = 1.23
-        misc_list = [True, float_value]
-        obj_dict = {
-            'bool': True,
-            'float': float_value,
-            'misc_list': misc_list
-        }
-        obj = self._test_class(
-            self.context, id=obj_id, list_of_dicts_field=[obj_dict])
-        self.assertEqual(1, len(obj.list_of_dicts_field))
-        self.assertTrue(obj.list_of_dicts_field[0]['bool'])
-        self.assertEqual(float_value, obj.list_of_dicts_field[0]['float'])
-        self.assertEqual(misc_list, obj.list_of_dicts_field[0]['misc_list'])
-
-
 class BaseDbObjectTestCase(_BaseObjectTestCase,
                            test_db_base_plugin_v2.DbOperationBoundMixin):
     def setUp(self):
         super(BaseDbObjectTestCase, self).setUp()
+        self.useFixture(tools.CommonDbMixinHooksFixture())
         synthetic_fields = self._get_object_synthetic_fields(self._test_class)
         for synth_field in synthetic_fields:
             objclass = self._get_ovo_object_class(self._test_class,
@@ -1399,43 +1264,46 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
                         objclass.db_model(**objclass_fields)
                     ]
 
-    def _create_test_network(self, name='test-network1', network_id=None):
-        network_id = (uuidutils.generate_uuid() if network_id is None
-                      else network_id)
-        _network = net_obj.Network(self.context, name=name, id=network_id)
+    def _create_test_network(self):
+        self._network = net_obj.Network(self.context,
+                                       name='test-network1')
+        self._network.create()
+
+    def _create_network(self):
+        name = "test-network-%s" % helpers.get_random_string(4)
+        _network = net_obj.Network(self.context,
+                                   name=name)
         _network.create()
         return _network
 
-    def _create_test_network_id(self):
-        return self._create_test_network(
-            "test-network-%s" % helpers.get_random_string(4)).id
+    def _create_external_network(self):
+        test_network = self._create_network()
+        # TODO(manjeets) replace this with ext_net ovo
+        # once it is implemented
+        return obj_db_api.create_object(
+            self.context,
+            ext_net_model.ExternalNetwork,
+            {'network_id': test_network['id']})
 
-    def _create_external_network_id(self):
-        test_network_id = self._create_test_network_id()
-        ext_net = net_obj.ExternalNetwork(self.context,
-            network_id=test_network_id)
-        ext_net.create()
-        return ext_net.network_id
-
-    def _create_test_fip_id(self):
+    def _create_test_fip(self):
         fake_fip = '172.23.3.0'
-        ext_net_id = self._create_external_network_id()
+        ext_net = self._create_external_network()
+        test_port = self._create_port(
+            network_id=ext_net['network_id'])
         # TODO(manjeets) replace this with fip ovo
         # once it is implemented
         return obj_db_api.create_object(
-            self.context, l3_model.FloatingIP,
+            self.context,
+            l3_model.FloatingIP,
             {'floating_ip_address': fake_fip,
-             'floating_network_id': ext_net_id,
-             'floating_port_id': self._create_test_port_id(
-                 network_id=ext_net_id)}).id
+             'floating_network_id': ext_net['network_id'],
+             'floating_port_id': test_port['id']})
 
-    def _create_test_subnet_id(self, network_id=None):
-        if not network_id:
-            network_id = self._create_test_network_id()
+    def _create_test_subnet(self, network):
         test_subnet = {
             'project_id': uuidutils.generate_uuid(),
             'name': 'test-subnet1',
-            'network_id': network_id,
+            'network_id': network['id'],
             'ip_version': 4,
             'cidr': netaddr.IPNetwork('10.0.0.0/24'),
             'gateway_ip': '10.0.0.1',
@@ -1443,17 +1311,10 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
             'ipv6_ra_mode': None,
             'ipv6_address_mode': None
         }
-        subnet_obj = subnet.Subnet(self.context, **test_subnet)
-        subnet_obj.create()
-        return subnet_obj.id
+        self._subnet = subnet.Subnet(self.context, **test_subnet)
+        self._subnet.create()
 
-    def _create_test_port_id(self, **port_attrs):
-        return self._create_test_port(**port_attrs)['id']
-
-    def _create_test_port(self, **port_attrs):
-        if 'network_id' not in port_attrs:
-            port_attrs['network_id'] = self._create_test_network_id()
-
+    def _create_port(self, **port_attrs):
         if not hasattr(self, '_mac_address_generator'):
             self._mac_address_generator = (
                 netaddr.EUI(":".join(["%02x" % i] * 6))
@@ -1480,61 +1341,41 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
         port.create()
         return port
 
-    def _create_test_segment_id(self, network_id=None):
-        attr = self.get_random_object_fields(net_obj.NetworkSegment)
-        attr['network_id'] = network_id or self._create_test_network_id()
-        segment = net_obj.NetworkSegment(self.context, **attr)
-        segment.create()
-        return segment.id
+    def _create_test_segment(self, network):
+        self._segment = net_obj.NetworkSegment(self.context,
+            network_id=network['id'],
+            network_type='vxlan')
+        self._segment.create()
 
-    def _create_test_router_id(self):
+    def _create_test_router(self):
         attrs = {
             'name': 'test_router',
         }
         # TODO(sindhu): Replace with the router object once its ready
-        router = obj_db_api.create_object(
-            self.context, l3_model.Router, attrs)
-        return router['id']
+        self._router = obj_db_api.create_object(self.context,
+                                                l3_model.Router,
+                                                attrs)
 
-    def _create_test_security_group_id(self):
+    def _create_test_security_group(self):
         sg_fields = self.get_random_object_fields(securitygroup.SecurityGroup)
-        _securitygroup = securitygroup.SecurityGroup(
-            self.context, **sg_fields)
-        _securitygroup.create()
-        return _securitygroup.id
+        self._securitygroup = securitygroup.SecurityGroup(self.context,
+                                                          **sg_fields)
+        self._securitygroup.create()
+        return self._securitygroup
 
-    def _create_test_agent_id(self):
-        attrs = self.get_random_object_fields(obj_cls=agent.Agent)
-        _agent = agent.Agent(self.context, **attrs)
-        _agent.create()
-        return _agent['id']
+    def _create_test_port(self, network):
+        self._port = self._create_port(network_id=network['id'])
 
-    def _create_test_standard_attribute_id(self):
+    def _create_test_standard_attribute(self):
         attrs = {
+            'id': tools.get_random_integer(),
             'resource_type': helpers.get_random_string(4),
             'revision_number': tools.get_random_integer()
         }
-        return obj_db_api.create_object(
+        self._standard_attribute = obj_db_api.create_object(
             self.context,
-            standard_attr.StandardAttribute, attrs,
-            populate_id=False)['id']
-
-    def _create_test_flavor_id(self):
-        attrs = self.get_random_object_fields(obj_cls=flavor.Flavor)
-        flavor_obj = flavor.Flavor(self.context, **attrs)
-        flavor_obj.create()
-        return flavor_obj.id
-
-    def _create_test_service_profile_id(self):
-        attrs = self.get_random_object_fields(obj_cls=flavor.ServiceProfile)
-        service_profile_obj = flavor.ServiceProfile(self.context, **attrs)
-        service_profile_obj.create()
-        return service_profile_obj.id
-
-    def _create_test_qos_policy(self, **qos_policy_attrs):
-        _qos_policy = qos_policy.QosPolicy(self.context, **qos_policy_attrs)
-        _qos_policy.create()
-        return _qos_policy
+            standard_attr.StandardAttribute,
+            attrs)
 
     def test_get_standard_attr_id(self):
 
@@ -1556,19 +1397,23 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
         self.assertEqual(
             model.standard_attr_id, retrieved_obj.standard_attr_id)
 
+    def _create_test_flavor(self):
+        attrs = self.get_random_object_fields(obj_cls=flavor.Flavor)
+        self._flavor = flavor.Flavor(self.context, **attrs)
+        self._flavor.create()
+        return self._flavor
+
+    def _create_test_service_profile(self):
+        attrs = self.get_random_object_fields(obj_cls=flavor.ServiceProfile)
+        self._service_profile = flavor.ServiceProfile(self.context, **attrs)
+        self._service_profile.create()
+        return self._service_profile
+
     def _make_object(self, fields):
         fields = get_non_synthetic_fields(self._test_class, fields)
         return self._test_class(self.context,
                                 **remove_timestamps_from_fields(
                                     fields, self._test_class.fields))
-
-    def test_downgrade_to_1_0(self):
-        for obj in self.objs:
-            try:
-                obj.obj_to_primitive(target_version='1.0')
-            except exception.IncompatibleObjectVersion:
-                # the only exception we should allow is IncompatibleVersion
-                pass
 
     def test_get_object_create_update_delete(self):
         # Timestamps can't be initialized and multiple objects may use standard
@@ -1665,12 +1510,12 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
             return query
 
         self.obj_registry.register(self._test_class)
-        model_query.register_hook(
+        db_base_plugin_v2.NeutronDbPluginV2.register_model_query_hook(
             self._test_class.db_model,
             'foo_filter',
-            query_hook=None,
-            filter_hook=None,
-            result_filters=foo_filter)
+            None,
+            None,
+            foo_filter)
         base.register_filter_hook_on_model(self._test_class.db_model, 'foo')
 
         self._test_class.get_objects(self.context, foo=42)
@@ -1821,55 +1666,6 @@ class BaseDbObjectTestCase(_BaseObjectTestCase,
             self._make_object(fields).create()
         self.assertTrue(self._test_class.objects_exist(
             self.context, validate_filters=False, fake_filter='xxx'))
-
-    def test_update_objects(self):
-        fields_to_update = self.get_updatable_fields(
-            self.obj_fields[1])
-        if not fields_to_update:
-            self.skipTest('No updatable fields found in test '
-                          'class %r' % self._test_class)
-        for fields in self.obj_fields:
-            self._make_object(fields).create()
-
-        objs = self._test_class.get_objects(
-            self.context, **self.valid_field_filter)
-        for k, v in self.valid_field_filter.items():
-            self.assertEqual(v, objs[0][k])
-
-        count = self._test_class.update_objects(
-            self.context, {}, **self.valid_field_filter)
-
-        # we haven't updated anything, but got the number of matching records
-        self.assertEqual(len(objs), count)
-
-        # and the request hasn't changed the number of matching records
-        new_objs = self._test_class.get_objects(
-            self.context, **self.valid_field_filter)
-        self.assertEqual(len(objs), len(new_objs))
-
-        # now update an object with new values
-        new_values = self._get_random_update_fields()
-        keys = self.objs[0]._get_composite_keys()
-        count_updated = self._test_class.update_objects(
-            self.context, new_values, **keys)
-        self.assertEqual(1, count_updated)
-
-        new_filter = keys.copy()
-        new_filter.update(new_values)
-
-        # check that we can fetch using new values
-        new_objs = self._test_class.get_objects(
-            self.context, **new_filter)
-        self.assertEqual(1, len(new_objs))
-
-    def test_update_objects_nothing_to_update(self):
-        fields_to_update = self.get_updatable_fields(
-            self.obj_fields[1])
-        if not fields_to_update:
-            self.skipTest('No updatable fields found in test '
-                          'class %r' % self._test_class)
-        self.assertEqual(
-            0, self._test_class.update_objects(self.context, {}))
 
     def test_delete_objects(self):
         for fields in self.obj_fields:

@@ -31,10 +31,10 @@ class OVSPhysicalBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
     dvr_process_next_table_id = ovs_const.LOCAL_VLAN_TRANSLATION
 
     def setUp(self):
-        conn_patcher = mock.patch(
-            'neutron.agent.ovsdb.impl_idl._connection')
-        conn_patcher.start()
         super(OVSPhysicalBridgeTest, self).setUp()
+        conn_patcher = mock.patch(
+            'neutron.agent.ovsdb.native.connection.Connection.start')
+        conn_patcher.start()
         self.addCleanup(conn_patcher.stop)
         self.setup_bridge_mock('br-phys', self.br_phys_cls)
         self.stamp = self.br.default_cookie
@@ -115,7 +115,7 @@ class OVSPhysicalBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         self.br.reclaim_local_vlan(port=port, lvid=lvid)
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
-            call.uninstall_flows(
+            call.delete_flows(
                 match=ofpp.OFPMatch(
                     in_port=port,
                     vlan_vid=lvid | ofp.OFPVID_PRESENT)),
@@ -146,6 +146,6 @@ class OVSPhysicalBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase,
         self.br.remove_dvr_mac_vlan(mac=mac)
         (dp, ofp, ofpp) = self._get_dp()
         expected = [
-            call.uninstall_flows(eth_src=mac, table_id=3),
+            call.delete_flows(eth_src=mac, table_id=3),
         ]
         self.assertEqual(expected, self.mock.mock_calls)

@@ -16,6 +16,7 @@
 from oslo_log import log as logging
 from oslo_utils import excutils
 
+from neutron._i18n import _LE
 from neutron.agent.linux import async_process
 from neutron.agent.linux import ip_lib
 
@@ -40,7 +41,7 @@ class IPMonitorEvent(object):
             first_word = route[0]
         except IndexError:
             with excutils.save_and_reraise_exception():
-                LOG.error('Unable to parse route "%s"', line)
+                LOG.error(_LE('Unable to parse route "%s"'), line)
 
         added = (first_word != 'Deleted')
         if not added:
@@ -51,7 +52,7 @@ class IPMonitorEvent(object):
             cidr = route[3]
         except IndexError:
             with excutils.save_and_reraise_exception():
-                LOG.error('Unable to parse route "%s"', line)
+                LOG.error(_LE('Unable to parse route "%s"'), line)
 
         return cls(line, added, interface, cidr)
 

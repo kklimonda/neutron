@@ -15,10 +15,13 @@
 from oslo_config import cfg
 
 from neutron._i18n import _
-from neutron.db import _resource_extend as resource_extend
+from neutron.common import _deprecate
+from neutron.db import db_base_plugin_v2
 from neutron.db.models import l3_attrs
 from neutron.extensions import availability_zone as az
 from neutron.extensions import l3
+
+_deprecate._moved_global('RouterExtraAttributes', new_module=l3_attrs)
 
 
 def get_attr_info():
@@ -33,13 +36,10 @@ def get_attr_info():
             }
 
 
-@resource_extend.has_resource_extenders
 class ExtraAttributesMixin(object):
     """Mixin class to enable router's extra attributes."""
 
-    @staticmethod
-    @resource_extend.extends([l3.ROUTERS])
-    def _extend_extra_router_dict(router_res, router_db):
+    def _extend_extra_router_dict(self, router_res, router_db):
         extra_attrs = router_db['extra_attributes'] or {}
         for name, info in get_attr_info().items():
             from_db = info.get('transform_from_db', lambda x: x)
@@ -64,3 +64,9 @@ class ExtraAttributesMixin(object):
                 return
             raise RuntimeError(_("Tried to set a key '%s' that doesn't exist "
                                  "in the extra attributes table.") % key)
+
+    db_base_plugin_v2.NeutronDbPluginV2.register_dict_extend_funcs(
+        l3.ROUTERS, ['_extend_extra_router_dict'])
+
+
+_deprecate._MovedGlobals()

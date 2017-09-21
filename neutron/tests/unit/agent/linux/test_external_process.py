@@ -12,11 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import mock
 import os.path
 
-import mock
 from oslo_utils import fileutils
-import psutil
 
 from neutron.agent.linux import external_process as ep
 from neutron.tests import base
@@ -26,7 +25,6 @@ from neutron.tests import tools
 TEST_UUID = 'test-uuid'
 TEST_SERVICE = 'testsvc'
 TEST_PID = 1234
-TEST_CMDLINE = 'python foo --router_id=%s'
 
 
 class BaseTestProcessMonitor(base.BaseTestCase):
@@ -154,7 +152,7 @@ class TestProcessManager(base.BaseTestCase):
                     ip_lib.assert_has_calls([
                         mock.call.IPWrapper(namespace='ns'),
                         mock.call.IPWrapper().netns.execute(
-                            ['the', 'cmd'], addl_env=None, run_as_root=True)])
+                            ['the', 'cmd'], addl_env=None, run_as_root=False)])
 
     def test_enable_with_namespace_process_active(self):
         callback = mock.Mock()
@@ -208,7 +206,7 @@ class TestProcessManager(base.BaseTestCase):
                     manager.disable()
                     utils.assert_has_calls([
                         mock.call.execute(['kill', '-9', 4],
-                                          run_as_root=False)])
+                                          run_as_root=True)])
 
     def test_disable_namespace(self):
         with mock.patch.object(ep.ProcessManager, 'pid') as pid:
@@ -266,39 +264,32 @@ class TestProcessManager(base.BaseTestCase):
             self.assertIsNone(manager.pid)
 
     def test_active(self):
-        with mock.patch.object(ep.ProcessManager, 'cmdline') as cmdline:
-            cmdline.__get__ = mock.Mock(
-                return_value=TEST_CMDLINE % 'uuid')
+        mock_open = self.useFixture(
+            tools.OpenFixture('/proc/4/cmdline', 'python foo --router_id=uuid')
+        ).mock_open
+        with mock.patch.object(ep.ProcessManager, 'pid') as pid:
+            pid.__get__ = mock.Mock(return_value=4)
             manager = ep.ProcessManager(self.conf, 'uuid')
             self.assertTrue(manager.active)
 
+        mock_open.assert_called_once_with('/proc/4/cmdline', 'r')
+
     def test_active_none(self):
-        with mock.patch.object(ep.ProcessManager, 'cmdline') as cmdline:
-            cmdline.__get__ = mock.Mock(return_value=None)
+        dummy_cmd_line = 'python foo --router_id=uuid'
+        self.execute.return_value = dummy_cmd_line
+        with mock.patch.object(ep.ProcessManager, 'pid') as pid:
+            pid.__get__ = mock.Mock(return_value=None)
             manager = ep.ProcessManager(self.conf, 'uuid')
             self.assertFalse(manager.active)
 
     def test_active_cmd_mismatch(self):
-        with mock.patch.object(ep.ProcessManager, 'cmdline') as cmdline:
-            cmdline.__get__ = mock.Mock(
-                return_value=TEST_CMDLINE % 'anotherid')
+        mock_open = self.useFixture(
+            tools.OpenFixture('/proc/4/cmdline',
+                              'python foo --router_id=anotherid')
+        ).mock_open
+        with mock.patch.object(ep.ProcessManager, 'pid') as pid:
+            pid.__get__ = mock.Mock(return_value=4)
             manager = ep.ProcessManager(self.conf, 'uuid')
             self.assertFalse(manager.active)
 
-    def test_cmdline(self):
-        with mock.patch.object(psutil, 'Process') as proc:
-            proc().cmdline.return_value = (TEST_CMDLINE % 'uuid').split(' ')
-            with mock.patch.object(ep.ProcessManager, 'pid') as pid:
-                pid.__get__ = mock.Mock(return_value=4)
-                manager = ep.ProcessManager(self.conf, 'uuid')
-                self.assertEqual(TEST_CMDLINE % 'uuid', manager.cmdline)
-        proc().cmdline.assert_called_once_with()
-
-    def test_cmdline_none(self):
-        with mock.patch.object(psutil, 'Process') as proc:
-            proc.side_effect = psutil.NoSuchProcess(4)
-            with mock.patch.object(ep.ProcessManager, 'pid') as pid:
-                pid.__get__ = mock.Mock(return_value=4)
-                manager = ep.ProcessManager(self.conf, 'uuid')
-                self.assertIsNone(manager.cmdline)
-        proc.assert_called_once_with(4)
+        mock_open.assert_called_once_with('/proc/4/cmdline', 'r')

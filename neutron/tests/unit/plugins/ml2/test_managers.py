@@ -16,11 +16,11 @@
 
 import mock
 
-from neutron_lib.plugins.ml2 import api
 from oslo_db import exception as db_exc
 
 from neutron.plugins.ml2.common import exceptions as ml2_exc
 from neutron.plugins.ml2 import config
+from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2 import managers
 from neutron.tests import base
 from neutron.tests.unit.plugins.ml2.drivers import mechanism_test
@@ -41,29 +41,6 @@ class TestManagers(base.BaseTestCase):
         bindinglevel.segment_id = 'fake_seg_id1'
         self.assertTrue(manager._check_driver_to_bind(
             'fake_driver', segments_to_bind, binding_levels))
-
-    @mock.patch.object(managers.LOG, 'critical')
-    @mock.patch.object(managers.MechanismManager, '_driver_not_loaded')
-    def test__driver_not_found(self, mock_not_loaded, mock_log):
-        config.cfg.CONF.set_override('mechanism_drivers', ['invalidmech'],
-                                     group='ml2')
-        self.assertRaises(SystemExit, managers.MechanismManager)
-        mock_not_loaded.assert_not_called()
-        mock_log.assert_called_once_with("The following mechanism drivers "
-                                         "were not found: %s"
-                                         % set(['invalidmech']))
-
-    @mock.patch.object(managers.LOG, 'critical')
-    @mock.patch.object(managers.MechanismManager, '_driver_not_found')
-    def test__driver_not_loaded(self, mock_not_found, mock_log):
-        config.cfg.CONF.set_override('mechanism_drivers', ['faulty_agent'],
-                                     group='ml2')
-        self.assertRaises(SystemExit, managers.MechanismManager)
-        mock_log.assert_called_once_with(u"The '%(entrypoint)s' entrypoint "
-                                         "could not be loaded for the "
-                                         "following reason: '%(reason)s'.",
-                                         {'entrypoint': mock.ANY,
-                                          'reason': mock.ANY})
 
 
 class TestMechManager(base.BaseTestCase):

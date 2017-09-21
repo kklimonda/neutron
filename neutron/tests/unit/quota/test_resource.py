@@ -13,20 +13,17 @@
 #    under the License.
 
 import mock
-from neutron_lib import context
 from oslo_config import cfg
 from oslo_utils import uuidutils
 import testtools
 
+from neutron import context
 from neutron.db import api as db_api
 from neutron.db.quota import api as quota_api
 from neutron.quota import resource
 from neutron.tests import base
 from neutron.tests.unit import quota as test_quota
 from neutron.tests.unit import testlib_api
-
-
-DB_PLUGIN_KLASS = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
 
 
 meh_quota_flag = 'quota_meh'
@@ -60,7 +57,7 @@ class TestResource(base.DietTestCase):
             self.assertEqual(-1, res.default)
 
 
-class TestTrackedResource(testlib_api.SqlTestCase):
+class TestTrackedResource(testlib_api.SqlTestCaseLight):
 
     def _add_data(self, tenant_id=None):
         session = db_api.get_writer_session()
@@ -91,24 +88,30 @@ class TestTrackedResource(testlib_api.SqlTestCase):
                 session.add(item)
 
     def setUp(self):
-        super(TestTrackedResource, self).setUp()
-        self.setup_coreplugin(DB_PLUGIN_KLASS)
+        base.BaseTestCase.config_parse()
+        cfg.CONF.register_opts(meh_quota_opts, 'QUOTAS')
+        self.addCleanup(cfg.CONF.reset)
         self.resource = 'meh'
         self.other_resource = 'othermeh'
         self.tenant_id = 'meh'
         self.context = context.Context(
             user_id='', tenant_id=self.tenant_id, is_admin=False)
+        super(TestTrackedResource, self).setUp()
+
+    def _register_events(self, res):
+        res.register_events()
+        self.addCleanup(res.unregister_events)
 
     def _create_resource(self):
         res = resource.TrackedResource(
             self.resource, test_quota.MehModel, meh_quota_flag)
-        res.register_events()
+        self._register_events(res)
         return res
 
     def _create_other_resource(self):
         res = resource.TrackedResource(
             self.other_resource, test_quota.OtherMehModel, meh_quota_flag)
-        res.register_events()
+        self._register_events(res)
         return res
 
     def test_bulk_delete_protection(self):
@@ -129,25 +132,6 @@ class TestTrackedResource(testlib_api.SqlTestCase):
         # count() always resyncs with the db
         self.assertEqual(2, res.count(self.context, None, self.tenant_id))
 
-    def test_count_reserved(self):
-        res = self._create_resource()
-        quota_api.create_reservation(self.context, self.tenant_id,
-                                     {res.name: 1})
-        self.assertEqual(1, res.count_reserved(self.context, self.tenant_id))
-
-    def test_count_used_first_call_with_dirty_false(self):
-        quota_api.set_quota_usage(
-            self.context, self.resource, self.tenant_id, in_use=1)
-        res = self._create_resource()
-        self._add_data()
-        # explicitly set dirty flag to False
-        quota_api.set_all_quota_usage_dirty(
-            self.context, self.resource, dirty=False)
-        # Expect correct count_used to be returned
-        # anyway since the first call to
-        # count_used() always resyncs with the db
-        self.assertEqual(2, res.count_used(self.context, self.tenant_id))
-
     def _test_count(self):
         res = self._create_resource()
         quota_api.set_quota_usage(
@@ -167,18 +151,6 @@ class TestTrackedResource(testlib_api.SqlTestCase):
                                           None,
                                           self.tenant_id))
 
-    def test_count_used_with_dirty_false(self):
-        res = self._test_count()
-        res.count_used(self.context, self.tenant_id)
-        # At this stage count_used has been invoked,
-        # and the dirty flag should be false. Another invocation
-        # of count_used should not query the model class
-        set_quota = 'neutron.db.quota.api.set_quota_usage'
-        with mock.patch(set_quota) as mock_set_quota:
-            self.assertEqual(0, mock_set_quota.call_count)
-            self.assertEqual(2, res.count_used(self.context,
-                                               self.tenant_id))
-
     def test_count_with_dirty_true_resync(self):
         res = self._test_count()
         # Expect correct count to be returned, which also implies
@@ -187,14 +159,6 @@ class TestTrackedResource(testlib_api.SqlTestCase):
                                       None,
                                       self.tenant_id,
                                       resync_usage=True))
-
-    def test_count_used_with_dirty_true_resync(self):
-        res = self._test_count()
-        # Expect correct count_used to be returned, which also implies
-        # set_quota_usage has been invoked with the correct parameters
-        self.assertEqual(2, res.count_used(self.context,
-                                           self.tenant_id,
-                                           resync_usage=True))
 
     def test_count_with_dirty_true_resync_calls_set_quota_usage(self):
         res = self._test_count()
@@ -208,31 +172,12 @@ class TestTrackedResource(testlib_api.SqlTestCase):
             mock_set_quota_usage.assert_called_once_with(
                 self.context, self.resource, self.tenant_id, in_use=2)
 
-    def test_count_used_with_dirty_true_resync_calls_set_quota_usage(self):
-        res = self._test_count()
-        set_quota_usage = 'neutron.db.quota.api.set_quota_usage'
-        with mock.patch(set_quota_usage) as mock_set_quota_usage:
-            quota_api.set_quota_usage_dirty(self.context,
-                                            self.resource,
-                                            self.tenant_id)
-            res.count_used(self.context, self.tenant_id,
-                           resync_usage=True)
-            mock_set_quota_usage.assert_called_once_with(
-                self.context, self.resource, self.tenant_id, in_use=2)
-
     def test_count_with_dirty_true_no_usage_info(self):
         res = self._create_resource()
         self._add_data()
         # Invoke count without having usage info in DB - Expect correct
         # count to be returned
         self.assertEqual(2, res.count(self.context, None, self.tenant_id))
-
-    def test_count_used_with_dirty_true_no_usage_info(self):
-        res = self._create_resource()
-        self._add_data()
-        # Invoke count_used without having usage info in DB - Expect correct
-        # count_used to be returned
-        self.assertEqual(2, res.count_used(self.context, self.tenant_id))
 
     def test_count_with_dirty_true_no_usage_info_calls_set_quota_usage(self):
         res = self._create_resource()
@@ -243,19 +188,6 @@ class TestTrackedResource(testlib_api.SqlTestCase):
                                             self.resource,
                                             self.tenant_id)
             res.count(self.context, None, self.tenant_id, resync_usage=True)
-            mock_set_quota_usage.assert_called_once_with(
-                self.context, self.resource, self.tenant_id, in_use=2)
-
-    def test_count_used_with_dirty_true_no_usage_info_calls_set_quota_usage(
-                                                                     self):
-        res = self._create_resource()
-        self._add_data()
-        set_quota_usage = 'neutron.db.quota.api.set_quota_usage'
-        with mock.patch(set_quota_usage) as mock_set_quota_usage:
-            quota_api.set_quota_usage_dirty(self.context,
-                                            self.resource,
-                                            self.tenant_id)
-            res.count_used(self.context, self.tenant_id, resync_usage=True)
             mock_set_quota_usage.assert_called_once_with(
                 self.context, self.resource, self.tenant_id, in_use=2)
 

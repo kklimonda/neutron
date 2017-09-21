@@ -20,6 +20,7 @@ import functools
 from neutron_lib import constants
 import pecan
 from pecan import request
+import six
 
 from neutron.api import api_common
 from neutron.api.v2 import attributes as api_attributes
@@ -200,7 +201,7 @@ class NeutronPecanController(object):
     def _get_primary_key(self, default_primary_key='id'):
         if not self.resource_info:
             return default_primary_key
-        for key, value in self.resource_info.items():
+        for key, value in six.iteritems(self.resource_info):
             if value.get('primary_key', False):
                 return key
         return default_primary_key

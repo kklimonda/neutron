@@ -19,12 +19,12 @@ subnets.
 
 import sys
 
-from neutron_lib import context
-from neutron_lib.plugins import constants
+from neutron_lib import constants
 from neutron_lib.plugins import directory
 
 from neutron.common import config
 from neutron.common import rpc as n_rpc
+from neutron import context
 from neutron import manager
 
 

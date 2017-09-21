@@ -35,5 +35,3 @@ class AutoAllocatedTopology(base.NeutronDbObject):
         'network_id': common_types.UUIDField(),
         'router_id': common_types.UUIDField(nullable=True),
     }
-
-    fields_no_update = ['network_id', 'router_id']

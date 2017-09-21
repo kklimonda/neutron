@@ -16,7 +16,6 @@
 import abc
 
 from neutron_lib.api import extensions as api_extensions
-from neutron_lib.services import base
 from oslo_serialization import jsonutils
 import six
 
@@ -31,7 +30,7 @@ class FoxInSocksController(wsgi.Controller):
 
 
 @six.add_metaclass(abc.ABCMeta)
-class FoxInSocksPluginInterface(base.ServicePluginBase):
+class FoxInSocksPluginInterface(extensions.PluginInterface):
 
     @abc.abstractmethod
     def method_to_support_foxnsox_extension(self):

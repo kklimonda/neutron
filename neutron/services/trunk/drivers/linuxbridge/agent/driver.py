@@ -11,14 +11,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.callbacks import events as local_events
-from neutron_lib.callbacks import registry
-from neutron_lib.callbacks import resources as local_resources
 from oslo_log import log as logging
 import oslo_messaging
 
+from neutron._i18n import _LE
 from neutron.api.rpc.callbacks import events
 from neutron.api.rpc.handlers import resources_rpc
+from neutron.callbacks import events as local_events
+from neutron.callbacks import registry
+from neutron.callbacks import resources as local_resources
 from neutron.services.trunk import constants as t_const
 from neutron.services.trunk.drivers.linuxbridge.agent import trunk_plumber
 from neutron.services.trunk.rpc import agent as trunk_rpc
@@ -33,7 +34,6 @@ def init_handler(resource, event, trigger, agent=None):
         LinuxBridgeTrunkDriver()
 
 
-@registry.has_registry_receivers
 class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
     """Driver responsible for handling trunk/subport/port events.
 
@@ -45,6 +45,12 @@ class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
     def __init__(self, plumber=None, trunk_api=None):
         self._plumber = plumber or trunk_plumber.Plumber()
         self._tapi = trunk_api or _TrunkAPI(trunk_rpc.TrunkStub())
+        registry.subscribe(self.agent_port_change,
+                           local_resources.PORT_DEVICE,
+                           local_events.AFTER_UPDATE)
+        registry.subscribe(self.agent_port_delete,
+                           local_resources.PORT_DEVICE,
+                           local_events.AFTER_DELETE)
         super(LinuxBridgeTrunkDriver, self).__init__()
 
     def handle_trunks(self, context, resource_type, trunks, event_type):
@@ -73,8 +79,6 @@ class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
                 continue
             self.wire_trunk(context, trunk)
 
-    @registry.receives(local_resources.PORT_DEVICE,
-                       [local_events.AFTER_DELETE])
     def agent_port_delete(self, resource, event, trigger, context, port_id,
                           **kwargs):
         """Agent informed us a VIF was removed."""
@@ -84,8 +88,6 @@ class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
         # don't want to race with another agent that the trunk may have been
         # moved to.
 
-    @registry.receives(local_resources.PORT_DEVICE,
-                       [local_events.AFTER_UPDATE])
     def agent_port_change(self, resource, event, trigger, context,
                           device_details, **kwargs):
         """The agent hath informed us thusly of a port update or create."""
@@ -112,7 +114,8 @@ class LinuxBridgeTrunkDriver(trunk_rpc.TrunkSkeleton):
                 LOG.debug("Trunk %s removed during wiring", trunk.port_id)
                 return
             # something broke
-            LOG.exception("Failure setting up subports for %s", trunk.port_id)
+            LOG.exception(_LE("Failure setting up subports for %s"),
+                          trunk.port_id)
             self._tapi.set_trunk_status(context, trunk,
                                         t_const.DEGRADED_STATUS)
 

@@ -14,7 +14,10 @@
 
 from sqlalchemy.orm import aliased
 
+from neutron.common import _deprecate
 from neutron.db.models import tag as tag_model
+
+_deprecate._moved_global('Tag', new_module=tag_model)
 
 
 def _get_tag_list(tag_strings):
@@ -87,3 +90,6 @@ def apply_tag_filters(model, query, filters):
         query = query.filter(~model.standard_attr_id.in_(subq))
 
     return query
+
+
+_deprecate._MovedGlobals()

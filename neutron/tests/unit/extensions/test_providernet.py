@@ -14,9 +14,7 @@
 #    under the License.
 
 import mock
-from neutron_lib.api.definitions import provider_net
-from neutron_lib import context
-from neutron_lib.plugins import constants
+from neutron_lib import constants
 from neutron_lib.plugins import directory
 from oslo_config import cfg
 from oslo_utils import uuidutils
@@ -25,6 +23,7 @@ import webtest
 
 from neutron.api import extensions
 from neutron.api.v2 import router
+from neutron import context
 from neutron.extensions import providernet as pnet
 from neutron import quota
 from neutron.tests import tools
@@ -82,9 +81,9 @@ class ProvidernetExtensionTestCase(testlib_api.WebTestCase):
 
     def _prepare_net_data(self):
         return {'name': 'net1',
-                provider_net.NETWORK_TYPE: 'sometype',
-                provider_net.PHYSICAL_NETWORK: 'physnet',
-                provider_net.SEGMENTATION_ID: 666}
+                pnet.NETWORK_TYPE: 'sometype',
+                pnet.PHYSICAL_NETWORK: 'physnet',
+                pnet.SEGMENTATION_ID: 666}
 
     def _put_network_with_provider_attrs(self, ctx, expect_errors=False):
         data = self._prepare_net_data()
@@ -141,7 +140,7 @@ class ProvidernetExtensionTestCase(testlib_api.WebTestCase):
     def test_network_create_with_bad_provider_attrs_400(self):
         ctx = context.get_admin_context()
         ctx.tenant_id = 'an_admin'
-        bad_data = {provider_net.SEGMENTATION_ID: "abc"}
+        bad_data = {pnet.SEGMENTATION_ID: "abc"}
         res, _1 = self._post_network_with_bad_provider_attrs(ctx, bad_data,
                                                              True)
         self.assertEqual(web_exc.HTTPBadRequest.code, res.status_int)

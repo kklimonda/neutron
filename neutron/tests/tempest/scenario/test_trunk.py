@@ -14,26 +14,24 @@
 
 import netaddr
 from oslo_log import log as logging
+from tempest.common.utils.linux import remote_client
 from tempest.common import waiters
 from tempest.lib.common.utils import data_utils
-from tempest.lib import decorators
 from tempest import test
 import testtools
 
 from neutron.common import utils
-from neutron.tests.tempest.common import ssh
 from neutron.tests.tempest import config
 from neutron.tests.tempest.scenario import base
 from neutron.tests.tempest.scenario import constants
 
-LOG = logging.getLogger(__name__)
 CONF = config.CONF
+LOG = logging.getLogger(__name__)
 
 CONFIGURE_VLAN_INTERFACE_COMMANDS = (
-    'IFACE=$(PATH=$PATH:/usr/sbin ip l | grep "^[0-9]*: e" |'
-    'cut -d \: -f 2) && '
+    'IFACE=$(ip l | grep "^[0-9]*: e" | cut -d \: -f 2) && '
     'sudo su -c '
-    '"ip l a link $IFACE name $IFACE.%(tag)d type vlan id %(tag)d &&'
+    '"ip l a link $IFACE name $IFACE.%(tag)d type vlan id %(tag)d && '
     'ip l s up dev $IFACE.%(tag)d && '
     'dhclient $IFACE.%(tag)d"')
 
@@ -56,7 +54,7 @@ class TrunkTest(base.BaseTempestTestCase):
         router = cls.create_router_by_client()
         cls.create_router_interface(router['id'], cls.subnet['id'])
         cls.keypair = cls.create_keypair()
-        cls.secgroup = cls.os_primary.network_client.create_security_group(
+        cls.secgroup = cls.manager.network_client.create_security_group(
             name=data_utils.rand_name('secgroup-'))
         cls.security_groups.append(cls.secgroup['security_group'])
         cls.create_loginable_secgroup_rule(
@@ -87,7 +85,7 @@ class TrunkTest(base.BaseTempestTestCase):
     def _detach_and_delete_trunk(self, server, trunk):
         # we have to detach the interface from the server before
         # the trunk can be deleted.
-        self.os_primary.compute.InterfacesClient().delete_interface(
+        self.manager.compute.InterfacesClient().delete_interface(
             server['id'], trunk['port_id'])
 
         def is_port_detached():
@@ -125,10 +123,11 @@ class TrunkTest(base.BaseTempestTestCase):
         server, fip = self._create_server_with_fip(parent_port['id'])
         self.addCleanup(self._detach_and_delete_trunk, server, trunk)
 
-        server_ssh_client = ssh.Client(
+        server_ssh_client = remote_client.RemoteClient(
             fip['floating_ip_address'],
             CONF.validation.image_ssh_user,
-            pkey=self.keypair['private_key'])
+            pkey=self.keypair['private_key'],
+            server=server)
 
         return {
             'server': server,
@@ -138,14 +137,14 @@ class TrunkTest(base.BaseTempestTestCase):
         }
 
     def _wait_for_server(self, server):
-        waiters.wait_for_server_status(self.os_primary.servers_client,
+        waiters.wait_for_server_status(self.manager.servers_client,
                                        server['server']['id'],
                                        constants.SERVER_STATUS_ACTIVE)
         self.check_connectivity(server['fip']['floating_ip_address'],
                                 CONF.validation.image_ssh_user,
                                 self.keypair['private_key'])
 
-    @decorators.idempotent_id('bb13fe28-f152-4000-8131-37890a40c79e')
+    @test.idempotent_id('bb13fe28-f152-4000-8131-37890a40c79e')
     def test_trunk_subport_lifecycle(self):
         """Test trunk creation and subport transition to ACTIVE status.
 
@@ -225,14 +224,14 @@ class TrunkTest(base.BaseTempestTestCase):
     @testtools.skipUnless(
           CONF.neutron_plugin_options.image_is_advanced,
           "Advanced image is required to run this test.")
-    @decorators.idempotent_id('a8a02c9b-b453-49b5-89a2-cce7da66aafb')
+    @test.idempotent_id('a8a02c9b-b453-49b5-89a2-cce7da66aafb')
     def test_subport_connectivity(self):
         vlan_tag = 10
 
         vlan_network = self.create_network()
         new_subnet_cidr = get_next_subnet(
             config.safe_get_config_value('network', 'project_network_cidr'))
-        self.create_subnet(vlan_network, gateway=None, cidr=new_subnet_cidr)
+        self.create_subnet(vlan_network, cidr=new_subnet_cidr)
 
         servers = [
             self._create_server_with_port_and_subport(vlan_network, vlan_tag)
@@ -243,24 +242,7 @@ class TrunkTest(base.BaseTempestTestCase):
             # Configure VLAN interfaces on server
             command = CONFIGURE_VLAN_INTERFACE_COMMANDS % {'tag': vlan_tag}
             server['ssh_client'].exec_command(command)
-            out = server['ssh_client'].exec_command(
-                'PATH=$PATH:/usr/sbin;ip addr list')
-            LOG.debug("Interfaces on server %s: %s", server, out)
 
-        # Ping from server1 to server2 via VLAN interface should fail because
-        # we haven't allowed ICMP
-        self.check_remote_connectivity(
-            servers[0]['ssh_client'],
-            servers[1]['subport']['fixed_ips'][0]['ip_address'],
-            should_succeed=False
-        )
-        # allow intra-securitygroup traffic
-        self.client.create_security_group_rule(
-            security_group_id=self.secgroup['security_group']['id'],
-            direction='ingress', ethertype='IPv4', protocol='icmp',
-            remote_group_id=self.secgroup['security_group']['id'])
-        self.check_remote_connectivity(
-            servers[0]['ssh_client'],
-            servers[1]['subport']['fixed_ips'][0]['ip_address'],
-            should_succeed=True
-        )
+        # Ping from server1 to server2 via VLAN interface
+        servers[0]['ssh_client'].ping_host(
+            servers[1]['subport']['fixed_ips'][0]['ip_address'])

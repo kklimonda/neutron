@@ -13,7 +13,7 @@
 #    under the License.
 
 from tempest.lib.common.utils import data_utils
-from tempest.lib import decorators
+from tempest import test
 
 from neutron.tests.tempest.api import base
 from neutron.tests.tempest import exceptions
@@ -41,7 +41,10 @@ class L3AgentSchedulerTestJSON(base.BaseAdminNetworkTest):
     The l3_agent_scheduler extension is required for these tests.
     """
 
-    required_extensions = ['l3_agent_scheduler']
+    @classmethod
+    @test.requires_ext(extension="l3_agent_scheduler", service="network")
+    def skip_checks(cls):
+        super(L3AgentSchedulerTestJSON, cls).skip_checks()
 
     @classmethod
     def resource_setup(cls):
@@ -61,11 +64,11 @@ class L3AgentSchedulerTestJSON(base.BaseAdminNetworkTest):
             raise exceptions.InvalidConfiguration(msg)
         cls.router = cls.create_router(data_utils.rand_name('router'))
 
-    @decorators.idempotent_id('b7ce6e89-e837-4ded-9b78-9ed3c9c6a45a')
+    @test.idempotent_id('b7ce6e89-e837-4ded-9b78-9ed3c9c6a45a')
     def test_list_routers_on_l3_agent(self):
         self.admin_client.list_routers_on_l3_agent(self.agent['id'])
 
-    @decorators.idempotent_id('9464e5e7-8625-49c3-8fd1-89c52be59d66')
+    @test.idempotent_id('9464e5e7-8625-49c3-8fd1-89c52be59d66')
     def test_add_list_remove_router_on_l3_agent(self):
         l3_agent_ids = list()
         self.admin_client.add_router_to_l3_agent(

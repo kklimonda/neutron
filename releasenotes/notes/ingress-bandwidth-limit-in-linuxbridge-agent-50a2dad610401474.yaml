@@ -1,4 +1,0 @@
----
-features:
-  - Linuxbridge L2 agent supports ingress bandwidth limit.
-    The linuxbridge L2 agent now supports bi-directional bandwidth limiting.

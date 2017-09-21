@@ -34,8 +34,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         self.br.setup_default_table()
         expected = [
             call.add_flow(priority=0, table=23, actions='drop'),
-            call.add_flow(priority=0, table=0, actions='resubmit(,60)'),
-            call.add_flow(priority=3, table=60, actions='normal'),
+            call.add_flow(priority=0, table=0, actions='normal'),
             call.add_flow(priority=0, table=24, actions='drop'),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
@@ -49,7 +48,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         expected = [
             call.add_flow(priority=3, dl_vlan=segmentation_id,
                           in_port=port,
-                          actions='mod_vlan_vid:%s,resubmit(,60)' % lvid),
+                          actions='mod_vlan_vid:%s,normal' % lvid),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
 
@@ -62,7 +61,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         expected = [
             call.add_flow(priority=3, dl_vlan=0xffff,
                           in_port=port,
-                          actions='mod_vlan_vid:%s,resubmit(,60)' % lvid),
+                          actions='mod_vlan_vid:%s,normal' % lvid),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
 
@@ -98,12 +97,9 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         expected = [
             call.add_flow(priority=4, table=1, dl_dst=dst_mac,
                           dl_vlan=vlan_tag,
-                          actions='mod_dl_src:%(mac)s,resubmit(,60)' % {
+                          actions='strip_vlan,mod_dl_src:%(mac)s,'
+                          'output:%(port)s' % {
                               'mac': gateway_mac,
-                          }),
-            call.add_flow(priority=4, table=60, dl_dst=dst_mac,
-                          dl_vlan=vlan_tag,
-                          actions='strip_vlan,output:%(port)s' % {
                               'port': dst_port,
                           }),
         ]
@@ -118,7 +114,6 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
                                       dst_mac=dst_mac)
         expected = [
             call.delete_flows(table=1, dl_dst=dst_mac, dl_vlan=vlan_tag),
-            call.delete_flows(table=60, dl_dst=dst_mac, dl_vlan=vlan_tag),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
 
@@ -136,12 +131,9 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         expected = [
             call.add_flow(priority=4, table=2, dl_dst=dst_mac,
                           dl_vlan=vlan_tag,
-                          actions='mod_dl_src:%(mac)s,resubmit(,60)' % {
+                          actions='strip_vlan,mod_dl_src:%(mac)s,'
+                          'output:%(port)s' % {
                               'mac': gateway_mac,
-                          }),
-            call.add_flow(priority=4, table=60, dl_dst=dst_mac,
-                          dl_vlan=vlan_tag,
-                          actions='strip_vlan,output:%(port)s' % {
                               'port': dst_port,
                           }),
         ]
@@ -156,7 +148,6 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
                                       dst_mac=dst_mac)
         expected = [
             call.delete_flows(table=2, dl_dst=dst_mac, dl_vlan=vlan_tag),
-            call.delete_flows(table=60, dl_dst=dst_mac, dl_vlan=vlan_tag),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
 
@@ -174,7 +165,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         mac = '00:02:b3:13:fe:3d'
         self.br.remove_dvr_mac_vlan(mac=mac)
         expected = [
-            call.delete_flows(dl_src=mac, table=0),
+            call.delete_flows(eth_src=mac, table_id=0),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
 
@@ -193,7 +184,7 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         port = 8888
         self.br.remove_dvr_mac_tun(mac=mac, port=port)
         expected = [
-            call.delete_flows(dl_src=mac, table=0, in_port=port),
+            call.delete_flows(eth_src=mac, table_id=0, in_port=port),
         ]
         self.assertEqual(expected, self.mock.mock_calls)
 
@@ -202,14 +193,12 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         ip_addresses = ['2001:db8::1', 'fdf8:f53b:82e4::1/128']
         self.br.install_icmpv6_na_spoofing_protection(port, ip_addresses)
         expected = [
-            call.add_flow(dl_type=n_const.ETHERTYPE_IPV6,
-                          actions='resubmit(,60)',
+            call.add_flow(dl_type=n_const.ETHERTYPE_IPV6, actions='normal',
                           icmp_type=const.ICMPV6_TYPE_NA,
                           nw_proto=const.PROTO_NUM_IPV6_ICMP,
                           nd_target='2001:db8::1',
                           priority=2, table=24, in_port=8888),
-            call.add_flow(dl_type=n_const.ETHERTYPE_IPV6,
-                          actions='resubmit(,60)',
+            call.add_flow(dl_type=n_const.ETHERTYPE_IPV6, actions='normal',
                           icmp_type=const.ICMPV6_TYPE_NA,
                           nw_proto=const.PROTO_NUM_IPV6_ICMP,
                           nd_target='fdf8:f53b:82e4::1/128',
@@ -242,10 +231,10 @@ class OVSIntegrationBridgeTest(ovs_bridge_test_base.OVSBridgeTestBase):
         port = 8888
         self.br.delete_arp_spoofing_protection(port)
         expected = [
-            call.delete_flows(table=0, in_port=8888, proto='arp'),
-            call.delete_flows(table=0, in_port=8888,
+            call.delete_flows(table_id=0, in_port=8888, proto='arp'),
+            call.delete_flows(table_id=0, in_port=8888,
                               icmp_type=const.ICMPV6_TYPE_NA,
                               nw_proto=const.PROTO_NUM_IPV6_ICMP),
-            call.delete_flows(table=24, in_port=8888),
+            call.delete_flows(table_id=24, in_port=8888),
         ]
         self.assertEqual(expected, self.mock.mock_calls)

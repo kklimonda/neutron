@@ -17,7 +17,6 @@ import netaddr
 
 from tempest.lib.common.utils import data_utils
 from tempest.lib.common.utils import test_utils
-from tempest.lib import decorators
 from tempest.lib import exceptions as lib_exc
 from tempest import test
 
@@ -109,7 +108,7 @@ def calc_total_ips(prefix, ip_version):
 
 class NetworksIpAvailabilityIPv4Test(NetworksIpAvailabilityTest):
 
-    @decorators.idempotent_id('0f33cc8c-1bf6-47d1-9ce1-010618240599')
+    @test.idempotent_id('0f33cc8c-1bf6-47d1-9ce1-010618240599')
     def test_admin_network_availability_before_subnet(self):
         net_name = data_utils.rand_name('network-')
         network = self.create_network(network_name=net_name)
@@ -117,7 +116,7 @@ class NetworksIpAvailabilityIPv4Test(NetworksIpAvailabilityTest):
         net_availability = self.admin_client.list_network_ip_availabilities()
         self._assert_total_and_used_ips(0, 0, network, net_availability)
 
-    @decorators.idempotent_id('3aecd3b2-16ed-4b87-a54a-91d7b3c2986b')
+    @test.idempotent_id('3aecd3b2-16ed-4b87-a54a-91d7b3c2986b')
     def test_net_ip_availability_after_subnet_and_ports(self):
         net_name = data_utils.rand_name('network-')
         network = self.create_network(network_name=net_name)
@@ -136,7 +135,7 @@ class NetworksIpAvailabilityIPv4Test(NetworksIpAvailabilityTest):
             calc_total_ips(prefix, self._ip_version),
             network, net_availability)
 
-    @decorators.idempotent_id('9f11254d-757b-492e-b14b-f52144e4ee7b')
+    @test.idempotent_id('9f11254d-757b-492e-b14b-f52144e4ee7b')
     def test_net_ip_availability_after_port_delete(self):
         net_name = data_utils.rand_name('network-')
         network = self.create_network(network_name=net_name)

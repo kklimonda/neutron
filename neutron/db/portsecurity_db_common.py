@@ -12,9 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron_lib.api.definitions import port_security as psec
-
 from neutron.db import _utils as db_utils
+from neutron.extensions import portsecurity as psec
 from neutron.objects import network
 from neutron.objects.port.extensions import port_security as p_ps
 
@@ -22,8 +21,7 @@ from neutron.objects.port.extensions import port_security as p_ps
 class PortSecurityDbCommon(object):
     """Mixin class to add port security."""
 
-    @staticmethod
-    def _extend_port_security_dict(response_data, db_data):
+    def _extend_port_security_dict(self, response_data, db_data):
         if db_data.get('port_security') is None:
             response_data[psec.PORTSECURITY] = psec.DEFAULT_PORT_SECURITY
         else:

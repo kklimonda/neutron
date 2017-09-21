@@ -20,6 +20,7 @@
 
 from oslo_log import log
 
+from neutron._i18n import _LI
 from neutron import manager
 from neutron import service
 
@@ -27,13 +28,14 @@ LOG = log.getLogger(__name__)
 
 
 def eventlet_rpc_server():
-    LOG.info("Eventlet based AMQP RPC server starting...")
+    LOG.info(_LI("Eventlet based AMQP RPC server starting..."))
 
     try:
         manager.init()
-        rpc_workers_launcher = service.start_all_workers()
+        workers = service._get_rpc_workers() + service._get_plugins_workers()
+        rpc_workers_launcher = service._start_workers(workers)
     except NotImplementedError:
-        LOG.info("RPC was already started in parent process by "
-                 "plugin.")
+        LOG.info(_LI("RPC was already started in parent process by "
+                     "plugin."))
     else:
         rpc_workers_launcher.wait()

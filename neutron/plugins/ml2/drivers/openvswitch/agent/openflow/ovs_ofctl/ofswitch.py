@@ -18,6 +18,8 @@ import re
 
 from oslo_log import log as logging
 
+from neutron._i18n import _LW
+
 LOG = logging.getLogger(__name__)
 
 # Field name mappings (from Ryu to ovs-ofctl)
@@ -73,18 +75,14 @@ class OpenFlowSwitchMixin(object):
                       actions="drop",
                       **self._conv_args(kwargs))
 
-    def install_instructions(self, instructions,
-                             table_id=0, priority=0, **kwargs):
-        self.add_flow(table=table_id,
-                      priority=priority,
-                      actions=instructions,
-                      **self._conv_args(kwargs))
-
-    def uninstall_flows(self, **kwargs):
+    def delete_flows(self, **kwargs):
         # NOTE(yamamoto): super() points to ovs_lib.OVSBridge.
         # See ovs_bridge.py how this class is actually used.
-        super(OpenFlowSwitchMixin, self).delete_flows(
-              **self._conv_args(kwargs))
+        if kwargs:
+            super(OpenFlowSwitchMixin, self).delete_flows(
+                **self._conv_args(kwargs))
+        else:
+            super(OpenFlowSwitchMixin, self).remove_all_flows()
 
     def _filter_flows(self, flows):
         cookie_list = self.reserved_cookies
@@ -109,5 +107,5 @@ class OpenFlowSwitchMixin(object):
         for flow, cookie, table in self._filter_flows(flows):
             # deleting a stale flow should be rare.
             # it might deserve some attention
-            LOG.warning("Deleting flow %s", flow)
+            LOG.warning(_LW("Deleting flow %s"), flow)
             self.delete_flows(cookie=cookie + '/-1', table=table)

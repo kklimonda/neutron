@@ -63,19 +63,6 @@ class QosCoreResourceExtension(base.CoreResourceExtension):
             policy.attach_port(port['id'])
         port[qos_consts.QOS_POLICY_ID] = qos_policy_id
 
-    def _create_network_policy(self, context, network, network_changes):
-        qos_policy_id = network_changes.get(qos_consts.QOS_POLICY_ID)
-        if not qos_policy_id:
-            policy_obj = policy_object.QosPolicyDefault.get_object(
-                context, project_id=network['project_id'])
-            if policy_obj is not None:
-                qos_policy_id = policy_obj.qos_policy_id
-
-        if qos_policy_id is not None:
-            policy = self._get_policy_obj(context, qos_policy_id)
-            policy.attach_network(network['id'])
-        network[qos_consts.QOS_POLICY_ID] = qos_policy_id
-
     def _update_network_policy(self, context, network, network_changes):
         old_policy = policy_object.QosPolicy.get_network_policy(
             context.elevated(), network['id'])
@@ -93,13 +80,11 @@ class QosCoreResourceExtension(base.CoreResourceExtension):
         with db_api.autonested_transaction(context.session):
             return getattr(self, method_name)(context=context, **kwargs)
 
-    def process_fields(self, context, resource_type, event_type,
+    def process_fields(self, context, resource_type,
                        requested_resource, actual_resource):
         if (qos_consts.QOS_POLICY_ID in requested_resource and
-                self.plugin_loaded):
-            method_name = ('_%(event)s_%(resource)s_policy' %
-                           {'event': event_type, 'resource': resource_type})
-            self._exec(method_name, context,
+            self.plugin_loaded):
+            self._exec('_update_%s_policy' % resource_type, context,
                        {resource_type: actual_resource,
                         "%s_changes" % resource_type: requested_resource})
 

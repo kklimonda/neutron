@@ -24,7 +24,7 @@ from oslo_log import log as logging
 from oslo_log import versionutils
 import stevedore
 
-from neutron._i18n import _
+from neutron._i18n import _, _LW
 from neutron.conf.services import provider_configuration as prov_config
 from neutron.db import _utils as db_utils
 
@@ -120,9 +120,9 @@ class NeutronModule(object):
             if providers:
                 versionutils.report_deprecated_feature(
                     LOG,
-                    'Implicit loading of service providers from '
-                    'neutron_*.conf files is deprecated and will be '
-                    'removed in Ocata release.')
+                    _LW('Implicit loading of service providers from '
+                        'neutron_*.conf files is deprecated and will be '
+                        'removed in Ocata release.'))
 
         return providers
 
@@ -148,10 +148,10 @@ def get_provider_driver_class(driver, namespace=SERVICE_PROVIDERS):
         return driver
     new_driver = "%s.%s" % (driver_manager.__module__,
                             driver_manager.__name__)
-    LOG.warning(
+    LOG.warning(_LW(
         "The configured driver %(driver)s has been moved, automatically "
         "using %(new_driver)s instead. Please update your config files, "
-        "as this automatic fixup will be removed in a future release.",
+        "as this automatic fixup will be removed in a future release."),
         {'driver': driver, 'new_driver': new_driver})
     return new_driver
 
@@ -221,7 +221,7 @@ class ProviderConfiguration(object):
             self.add_provider(prov)
 
     def _ensure_driver_unique(self, driver):
-        for v in self.providers.values():
+        for k, v in self.providers.items():
             if v['driver'] == driver:
                 msg = (_("Driver %s is not unique across providers") %
                        driver)

@@ -17,12 +17,17 @@ from neutron_lib import exceptions as n_exc
 from oslo_config import cfg
 from oslo_log import log
 
+from neutron._i18n import _LE
+from neutron.common import _deprecate
 from neutron.conf.plugins.ml2.drivers import driver_type
-from neutron.objects.plugins.ml2 import vxlanallocation as vxlan_obj
+from neutron.db.models.plugins.ml2 import vxlanallocation as vxlan_model
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2.drivers import type_tunnel
 
 LOG = log.getLogger(__name__)
+
+_deprecate._moved_global('VxlanAllocation', new_module=vxlan_model)
+_deprecate._moved_global('VxlanEndpoints', new_module=vxlan_model)
 
 driver_type.register_ml2_drivers_vxlan_opts()
 
@@ -31,7 +36,7 @@ class VxlanTypeDriver(type_tunnel.EndpointTunnelTypeDriver):
 
     def __init__(self):
         super(VxlanTypeDriver, self).__init__(
-            vxlan_obj.VxlanAllocation, vxlan_obj.VxlanEndpoint)
+            vxlan_model.VxlanAllocation, vxlan_model.VxlanEndpoints)
 
     def get_type(self):
         return p_const.TYPE_VXLAN
@@ -40,8 +45,8 @@ class VxlanTypeDriver(type_tunnel.EndpointTunnelTypeDriver):
         try:
             self._initialize(cfg.CONF.ml2_type_vxlan.vni_ranges)
         except n_exc.NetworkTunnelRangeError:
-            LOG.exception("Failed to parse vni_ranges. "
-                          "Service terminated!")
+            LOG.exception(_LE("Failed to parse vni_ranges. "
+                              "Service terminated!"))
             raise SystemExit()
 
     def get_endpoints(self):
@@ -58,3 +63,5 @@ class VxlanTypeDriver(type_tunnel.EndpointTunnelTypeDriver):
     def get_mtu(self, physical_network=None):
         mtu = super(VxlanTypeDriver, self).get_mtu()
         return mtu - p_const.VXLAN_ENCAP_OVERHEAD if mtu else 0
+
+_deprecate._MovedGlobals()

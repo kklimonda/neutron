@@ -32,6 +32,7 @@ from oslo_config import cfg
 from oslo_utils import uuidutils
 import six
 
+from neutron.agent.common import config
 from neutron.agent.common import ovs_lib
 from neutron.agent.linux import bridge_lib
 from neutron.agent.linux import interface
@@ -39,7 +40,6 @@ from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_firewall
 from neutron.agent.linux import utils
 from neutron.common import utils as common_utils
-from neutron.conf.agent import common as config
 from neutron.db import db_base_plugin_common
 from neutron.plugins.ml2.drivers.linuxbridge.agent import \
     linuxbridge_neutron_agent as linuxbridge_agent
@@ -268,8 +268,6 @@ class RootHelperProcess(subprocess.Popen):
     def __init__(self, cmd, *args, **kwargs):
         for arg in ('stdin', 'stdout', 'stderr'):
             kwargs.setdefault(arg, subprocess.PIPE)
-        kwargs.setdefault('universal_newlines', True)
-
         self.namespace = kwargs.pop('namespace', None)
         self.cmd = cmd
         if self.namespace is not None:
@@ -378,7 +376,7 @@ class Pinger(object):
     def start(self):
         if self.proc and self.proc.is_running:
             raise RuntimeError("This pinger has already a running process")
-        ip_version = common_utils.get_ip_version(self.address)
+        ip_version = ip_lib.get_ip_version(self.address)
         ping_exec = 'ping' if ip_version == 4 else 'ping6'
         cmd = [ping_exec, self.address, '-W', str(self.timeout)]
         if self.count:
@@ -737,7 +735,6 @@ class OVSPortFixture(PortFixture):
                  hybrid_plug=False):
         super(OVSPortFixture, self).__init__(bridge, namespace, mac, port_id)
         self.hybrid_plug = hybrid_plug
-        self.vlan_tag = None
 
     def _create_bridge_fixture(self):
         return OVSBridgeFixture()
@@ -926,12 +923,12 @@ class VethBridge(object):
 
     def __init__(self, ports):
         self.ports = ports
-        self.unallocated_ports = list(self.ports)
+        self.unallocated_ports = set(self.ports)
 
     def allocate_port(self):
         try:
             return self.unallocated_ports.pop()
-        except IndexError:
+        except KeyError:
             tools.fail('All FakeBridge ports (%s) are already allocated.' %
                        len(self.ports))
 

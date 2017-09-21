@@ -32,9 +32,6 @@ from neutron.tests.unit.api.v2 import test_base
 from neutron.tests.unit import testlib_api
 
 
-CORE_PLUGIN = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
-
-
 class ExtensionTestCase(testlib_api.WebTestCase):
 
     def _setUpExtension(self, plugin, service_type,
@@ -58,8 +55,9 @@ class ExtensionTestCase(testlib_api.WebTestCase):
         # Create the default configurations
         self.config_parse()
 
-        core_plugin = CORE_PLUGIN if service_type else plugin
-        self.setup_coreplugin(core_plugin, load_plugins=False)
+        # just stubbing core plugin with plugin
+        self.setup_coreplugin(plugin, load_plugins=False)
+        cfg.CONF.set_override('core_plugin', plugin)
         if service_type:
             cfg.CONF.set_override('service_plugins', [plugin])
 

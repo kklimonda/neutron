@@ -14,11 +14,10 @@
 #    under the License.
 
 import mock
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants
 
+from neutron.extensions import portbindings
 from neutron.plugins.ml2 import driver_context
-from neutron.plugins.ml2 import models
 from neutron.tests import base
 
 
@@ -33,7 +32,7 @@ class TestPortContext(base.BaseTestCase):
         plugin = mock.Mock()
         plugin_context = mock.Mock()
         network = mock.MagicMock()
-        binding = models.PortBinding()
+        binding = mock.Mock()
 
         port = {'device_owner': constants.DEVICE_OWNER_DVR_INTERFACE}
         binding.host = 'foohost'
@@ -52,7 +51,7 @@ class TestPortContext(base.BaseTestCase):
         plugin = mock.Mock()
         plugin_context = mock.Mock()
         network = mock.MagicMock()
-        binding = models.PortBinding()
+        binding = mock.Mock()
 
         port = {'device_owner': constants.DEVICE_OWNER_COMPUTE_PREFIX,
                 portbindings.HOST_ID: 'host'}
@@ -72,7 +71,7 @@ class TestPortContext(base.BaseTestCase):
         plugin = mock.Mock()
         plugin_context = mock.Mock()
         network = mock.MagicMock()
-        binding = models.PortBinding()
+        binding = mock.Mock()
 
         port = {'device_owner': constants.DEVICE_OWNER_DVR_INTERFACE}
         binding.status = 'foostatus'
@@ -91,7 +90,7 @@ class TestPortContext(base.BaseTestCase):
         plugin = mock.Mock()
         plugin_context = mock.Mock()
         network = mock.MagicMock()
-        binding = models.PortBinding()
+        binding = mock.Mock()
 
         port = {'device_owner': constants.DEVICE_OWNER_COMPUTE_PREFIX,
                 'status': 'status'}

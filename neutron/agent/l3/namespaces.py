@@ -18,6 +18,7 @@ import functools
 from oslo_log import log as logging
 from oslo_utils import excutils
 
+from neutron._i18n import _LE, _LW
 from neutron.agent.linux import ip_lib
 
 LOG = logging.getLogger(__name__)
@@ -64,8 +65,8 @@ def check_ns_existence(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
         if not self.exists():
-            LOG.warning('Namespace %(name)s does not exist. Skipping '
-                        '%(func)s',
+            LOG.warning(_LW('Namespace %(name)s does not exist. Skipping '
+                            '%(func)s'),
                         {'name': self.name, 'func': f.__name__})
             return
         try:
@@ -110,7 +111,7 @@ class Namespace(object):
         try:
             self.ip_wrapper_root.netns.delete(self.name)
         except RuntimeError:
-            msg = 'Failed trying to delete namespace: %s'
+            msg = _LE('Failed trying to delete namespace: %s')
             LOG.exception(msg, self.name)
 
     def exists(self):
@@ -132,7 +133,8 @@ class RouterNamespace(Namespace):
     @check_ns_existence
     def delete(self):
         ns_ip = ip_lib.IPWrapper(namespace=self.name)
-        for d in ns_ip.get_devices():
+        for d in ns_ip.get_devices(exclude_loopback=True,
+                                   exclude_gre_devices=True):
             if d.name.startswith(INTERNAL_DEV_PREFIX):
                 # device is on default bridge
                 self.driver.unplug(d.name, namespace=self.name,

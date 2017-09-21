@@ -54,7 +54,7 @@ class InvalidSubnetRequest(exceptions.BadRequest):
                 "%(reason)s")
 
 
-class AllocationOnAutoAddressSubnet(exceptions.InvalidInput):
+class AllocationOnAutoAddressSubnet(exceptions.NeutronException):
     message = _("IPv6 address %(ip)s cannot be directly "
                 "assigned to a port on subnet %(subnet_id)s as the "
                 "subnet is configured for automatic addresses")

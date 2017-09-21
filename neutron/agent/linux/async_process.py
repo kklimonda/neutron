@@ -20,7 +20,7 @@ import eventlet.queue
 from neutron_lib.utils import helpers
 from oslo_log import log as logging
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
 from neutron.common import utils as common_utils
@@ -78,7 +78,6 @@ class AsyncProcess(object):
             raise ValueError(_('respawn_interval must be >= 0 if provided.'))
         self.respawn_interval = respawn_interval
         self._process = None
-        self._pid = None
         self._is_running = False
         self._kill_event = None
         self._reset_queues()
@@ -96,8 +95,8 @@ class AsyncProcess(object):
 
     def is_active(self):
         # If using sudo rootwrap as a root_helper, we have to wait until sudo
-        # spawns rootwrap and rootwrap spawns the process. self.pid will make
-        # sure to get the correct pid.
+        # spawns rootwrap and rootwrap spawns the process.
+
         return utils.pid_invoked_with_cmdline(
             self.pid, self.cmd_without_namespace)
 
@@ -138,7 +137,6 @@ class AsyncProcess(object):
     def _spawn(self):
         """Spawn a process and its watchers."""
         self._is_running = True
-        self._pid = None
         self._kill_event = eventlet.event.Event()
         self._process, cmd = utils.create_process(self._cmd,
                                                   run_as_root=self.run_as_root)
@@ -156,19 +154,16 @@ class AsyncProcess(object):
     @property
     def pid(self):
         if self._process:
-            if not self._pid:
-                self._pid = utils.get_root_helper_child_pid(
-                    self._process.pid,
-                    self.cmd_without_namespace,
-                    run_as_root=self.run_as_root)
-            return self._pid
+            return utils.get_root_helper_child_pid(
+                self._process.pid,
+                self.cmd_without_namespace,
+                run_as_root=self.run_as_root)
 
     def _kill(self, kill_signal):
         """Kill the process and the associated watcher greenthreads."""
         pid = self.pid
         if pid:
             self._is_running = False
-            self._pid = None
             self._kill_process(pid, kill_signal)
 
         # Halt the greenthreads if they weren't already.
@@ -182,7 +177,7 @@ class AsyncProcess(object):
             # root and need to be killed via the same helper.
             utils.kill_process(pid, kill_signal, self.run_as_root)
         except Exception:
-            LOG.exception('An error occurred while killing [%s].',
+            LOG.exception(_LE('An error occurred while killing [%s].'),
                           self.cmd)
             return False
 
@@ -211,8 +206,8 @@ class AsyncProcess(object):
                 if not output and output != "":
                     break
             except Exception:
-                LOG.exception('An error occurred while communicating '
-                              'with async process [%s].', self.cmd)
+                LOG.exception(_LE('An error occurred while communicating '
+                                  'with async process [%s].'), self.cmd)
                 break
             # Ensure that watching a process with lots of output does
             # not block execution of other greenthreads.
@@ -242,11 +237,11 @@ class AsyncProcess(object):
     def _read_stderr(self):
         data = self._read(self._process.stderr, self._stderr_lines)
         if self.log_output:
-            LOG.error('Error received from [%(cmd)s]: %(err)s',
+            LOG.error(_LE('Error received from [%(cmd)s]: %(err)s'),
                       {'cmd': self.cmd,
                        'err': data})
         if self.die_on_error:
-            LOG.error("Process [%(cmd)s] dies due to the error: %(err)s",
+            LOG.error(_LE("Process [%(cmd)s] dies due to the error: %(err)s"),
                       {'cmd': self.cmd,
                        'err': data})
             # the callback caller will use None to indicate the need to bail

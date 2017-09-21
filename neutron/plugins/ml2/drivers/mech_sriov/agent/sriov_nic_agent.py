@@ -20,9 +20,7 @@ import socket
 import sys
 import time
 
-from neutron_lib.api.definitions import portbindings
 from neutron_lib import constants as n_constants
-from neutron_lib import context
 from neutron_lib.utils import helpers
 from oslo_config import cfg
 from oslo_log import log as logging
@@ -31,7 +29,7 @@ from oslo_service import loopingcall
 from osprofiler import profiler
 import six
 
-from neutron._i18n import _
+from neutron._i18n import _, _LE, _LI, _LW
 from neutron.agent.l2 import l2_agent_extensions_manager as ext_manager
 from neutron.agent import rpc as agent_rpc
 from neutron.agent import securitygroups_rpc as agent_sg_rpc
@@ -40,6 +38,8 @@ from neutron.api.rpc.handlers import securitygroups_rpc as sg_rpc
 from neutron.common import config as common_config
 from neutron.common import profiler as setup_profiler
 from neutron.common import topics
+from neutron import context
+from neutron.extensions import portbindings
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common import config
 from neutron.plugins.ml2.drivers.mech_sriov.agent.common \
     import exceptions as exc
@@ -151,7 +151,7 @@ class SriovNicSwitchAgent(object):
 
     def _setup_rpc(self):
         self.agent_id = 'nic-switch-agent.%s' % socket.gethostname()
-        LOG.info("RPC agent_id: %s", self.agent_id)
+        LOG.info(_LI("RPC agent_id: %s"), self.agent_id)
 
         self.topic = topics.AGENT
         self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
@@ -183,7 +183,7 @@ class SriovNicSwitchAgent(object):
             self.agent_state.pop('resource_versions', None)
             self.agent_state.pop('start_flag', None)
         except Exception:
-            LOG.exception("Failed reporting state!")
+            LOG.exception(_LE("Failed reporting state!"))
 
     def _create_agent_extension_manager(self, connection):
         ext_manager.register_opts(self.conf)
@@ -241,22 +241,22 @@ class SriovNicSwitchAgent(object):
                 self.eswitch_mgr.set_device_spoofcheck(device, pci_slot,
                                                        spoofcheck)
             except Exception:
-                LOG.warning("Failed to set spoofcheck for device %s",
+                LOG.warning(_LW("Failed to set spoofcheck for device %s"),
                             device)
-            LOG.info("Device %(device)s spoofcheck %(spoofcheck)s",
+            LOG.info(_LI("Device %(device)s spoofcheck %(spoofcheck)s"),
                      {"device": device, "spoofcheck": spoofcheck})
 
             try:
                 self.eswitch_mgr.set_device_state(device, pci_slot,
                                                   admin_state_up)
             except exc.IpCommandOperationNotSupportedError:
-                LOG.warning("Device %s does not support state change",
+                LOG.warning(_LW("Device %s does not support state change"),
                             device)
             except exc.SriovNicError:
-                LOG.warning("Failed to set device %s state", device)
+                LOG.warning(_LW("Failed to set device %s state"), device)
                 return False
         else:
-            LOG.info("No device with MAC %s defined on agent.", device)
+            LOG.info(_LI("No device with MAC %s defined on agent."), device)
             return False
         return True
 
@@ -267,7 +267,7 @@ class SriovNicSwitchAgent(object):
             "device": mac_pci_slot})
 
     def _clean_network_ports(self, mac_pci_slot):
-        for netid, ports_list in self.network_ports.items():
+        for netid, ports_list in six.iteritems(self.network_ports):
             for port_data in ports_list:
                 if mac_pci_slot == port_data['device']:
                     ports_list.remove(port_data)
@@ -294,7 +294,7 @@ class SriovNicSwitchAgent(object):
             LOG.debug("Port with MAC address %s is added", device)
 
             if 'port_id' in device_details:
-                LOG.info("Port %(device)s updated. Details: %(details)s",
+                LOG.info(_LI("Port %(device)s updated. Details: %(details)s"),
                          {'device': device, 'details': device_details})
                 port_id = device_details['port_id']
                 profile = device_details['profile']
@@ -312,7 +312,7 @@ class SriovNicSwitchAgent(object):
                                            (device, profile.get('pci_slot')))
                 self.ext_manager.handle_port(self.context, device_details)
             else:
-                LOG.info("Device with MAC %s not defined on plugin",
+                LOG.info(_LI("Device with MAC %s not defined on plugin"),
                          device)
         self.plugin_rpc.update_device_list(self.context,
                                            devices_up,
@@ -325,8 +325,8 @@ class SriovNicSwitchAgent(object):
         resync = False
         for device in devices:
             mac, pci_slot = device
-            LOG.info("Removing device with MAC address %(mac)s and "
-                     "PCI slot %(pci_slot)s",
+            LOG.info(_LI("Removing device with MAC address %(mac)s and "
+                         "PCI slot %(pci_slot)s"),
                      {'mac': mac, 'pci_slot': pci_slot})
             try:
                 port_id = self._clean_network_ports(device)
@@ -336,8 +336,8 @@ class SriovNicSwitchAgent(object):
                             'profile': {'pci_slot': pci_slot}}
                     self.ext_manager.delete_port(self.context, port)
                 else:
-                    LOG.warning("port_id to device with MAC "
-                                "%s not found", mac)
+                    LOG.warning(_LW("port_id to device with MAC "
+                                    "%s not found"), mac)
                 dev_details = self.plugin_rpc.update_device_down(self.context,
                                                                  mac,
                                                                  self.agent_id,
@@ -350,8 +350,8 @@ class SriovNicSwitchAgent(object):
                 resync = True
                 continue
             if dev_details['exists']:
-                LOG.info("Port with MAC %(mac)s and PCI slot "
-                         "%(pci_slot)s updated.",
+                LOG.info(_LI("Port with MAC %(mac)s and PCI slot "
+                             "%(pci_slot)s updated."),
                          {'mac': mac, 'pci_slot': pci_slot})
             else:
                 LOG.debug("Device with MAC %(mac)s and PCI slot "
@@ -363,14 +363,14 @@ class SriovNicSwitchAgent(object):
         sync = True
         devices = set()
 
-        LOG.info("SRIOV NIC Agent RPC Daemon Started!")
+        LOG.info(_LI("SRIOV NIC Agent RPC Daemon Started!"))
 
         while True:
             start = time.time()
             LOG.debug("Agent rpc_loop - iteration:%d started",
                       self.iter_num)
             if sync:
-                LOG.info("Agent out of sync with plugin!")
+                LOG.info(_LI("Agent out of sync with plugin!"))
                 devices.clear()
                 sync = False
             device_info = {}
@@ -391,7 +391,7 @@ class SriovNicSwitchAgent(object):
                     sync = self.process_network_devices(device_info)
                     devices = device_info['current']
             except Exception:
-                LOG.exception("Error in agent loop. Devices info: %s",
+                LOG.exception(_LE("Error in agent loop. Devices info: %s"),
                               device_info)
                 sync = True
                 # Restore devices that were removed from this set earlier
@@ -452,11 +452,11 @@ def main():
         exclude_devices = config_parser.exclude_devices
 
     except ValueError:
-        LOG.exception("Failed on Agent configuration parse. "
-                      "Agent terminated!")
+        LOG.exception(_LE("Failed on Agent configuration parse. "
+                          "Agent terminated!"))
         raise SystemExit(1)
-    LOG.info("Physical Devices mappings: %s", device_mappings)
-    LOG.info("Exclude Devices: %s", exclude_devices)
+    LOG.info(_LI("Physical Devices mappings: %s"), device_mappings)
+    LOG.info(_LI("Exclude Devices: %s"), exclude_devices)
 
     polling_interval = cfg.CONF.AGENT.polling_interval
     try:
@@ -464,9 +464,9 @@ def main():
                                     exclude_devices,
                                     polling_interval)
     except exc.SriovNicError:
-        LOG.exception("Agent Initialization Failed")
+        LOG.exception(_LE("Agent Initialization Failed"))
         raise SystemExit(1)
     # Start everything.
     setup_profiler.setup("neutron-sriov-nic-agent", cfg.CONF.host)
-    LOG.info("Agent initialized successfully, now running... ")
+    LOG.info(_LI("Agent initialized successfully, now running... "))
     agent.daemon_loop()

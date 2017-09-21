@@ -14,7 +14,6 @@
 #    under the License.
 
 import datetime
-
 import mock
 from oslo_context import context as oslo_context
 

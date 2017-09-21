@@ -25,15 +25,6 @@ def add_standard_attributes(cls):
     # its own instance of list
     cls.fields = cls.fields.copy()
     cls.fields.update(STANDARD_ATTRIBUTES)
-    # those fields are updated by sqlalchemy itself
-    cls.fields_no_update += ('created_at', 'updated_at')
     # revision numbers are managed by service plugin and are bumped
     # automatically; consumers should not bump them explicitly
     cls.fields_no_update.append('revision_number')
-
-
-def add_tag_filter_names(cls):
-    cls.add_extra_filter_name("tags")
-    cls.add_extra_filter_name("not-tags")
-    cls.add_extra_filter_name("tags-any")
-    cls.add_extra_filter_name("not-tags-any")
